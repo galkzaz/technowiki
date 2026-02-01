@@ -1,0 +1,884 @@
+---
+id: process-development
+title: Process Development
+description: Operating Systems Process Development
+---
+
+## System calls
+This table shows the entire lifecycle of a UNIX process:
+* Creation → fork, vfork, clone
+* Program loading → exec*
+* Identity & permissions → getuid, setuid, groups
+* Scheduling & control → nice, sched_yield
+* Signals → kill
+* Termination & cleanup → exit, _exit, wait*
+
+| Call method | Description | Parameters | Return value |
+| --- | --- | --- | --- |
+| fork() | Create a new process by duplicating the calling process | _void_ | **pid_t** Child PID in parent, `0` in child, `-1` on error |
+| vfork() | Create a child process sharing address space until `exec()` or `exit()` | _void_ | **pid_t** Child PID in parent, `0` in child, `-1` on error |
+| clone() | Create a process or thread with fine-grained control over shared resources | `int (**fn)(void *)`, `void *child_stack`, `int flags`, `void *arg`, ... | *pid_t** PID of child on success, `-1` on error |
+| execve() | Replace current process image with a new program | `const char **pathname`, `char *const argv[]`, `char *const envp[]` | *int** Does not return on success, `-1` on error |
+| execv() | Execute a program with argument vector | `const char **path`, `char *const argv[]` | *int** Does not return on success, `-1` on error |
+| execvp() | Execute a program, searching `PATH` | `const char **file`, `char *const argv[]` | *int** Does not return on success, `-1` on error |
+| _exit() | Terminate process immediately (no stdio cleanup) | `int status` | _void_ Does not return |
+| exit() | Terminate process after flushing stdio buffers | `int status` | _void_ Does not return |
+| wait() | Wait for any child process to terminate | `int **wstatus` | *pid_t** PID of terminated child, `-1` on error |
+| waitpid() | Wait for a specific child process | `pid_t pid`, `int **wstatus`, `int options` | *pid_t** PID of child, `0` or `-1` depending on options |
+| waitid() | Wait for process state changes with detailed info | `idtype_t idtype`, `id_t id`, `siginfo_t **infop`, `int options` | *int** `0` on success, `-1` on error |
+| getpid() | Get calling process ID | _void_ | **pid_t** Caller PID |
+| getppid() | Get parent process ID | _void_ | **pid_t** Parent PID |
+| getuid() | Get real user ID of process | _void_ | **uid_t** Real UID |
+| geteuid() | Get effective user ID | _void_ | **uid_t** Effective UID |
+| getgid() | Get real group ID of process | _void_ | **gid_t** Real GID |
+| getegid() | Get effective group ID | _void_ | **gid_t** Effective GID |
+| setuid() | Set process user identity | `uid_t uid` | **int** `0` on success, `-1` on error |
+| setgid() | Set process group identity | `gid_t gid` | **int** `0` on success, `-1` on error |
+| setsid() | Create a new session and detach from terminal | _void_ | **pid_t** Session ID, `-1` on error |
+| getsid() | Get session ID of a process | `pid_t pid` | **pid_t** Session ID |
+| setpgid() | Set process group ID | `pid_t pid`, `pid_t pgid` | **int** `0` on success, `-1` on error |
+| getpgid() | Get process group ID | `pid_t pid` | **pid_t** Process group ID |
+| nice() | Change process scheduling priority | `int inc` | **int** New nice value, `-1` on error |
+| sched_yield() | Yield CPU voluntarily | _void_ | **int** `0` on success |
+| kill() | Send a signal to a process or group | `pid_t pid`, `int sig` | **int** `0` on success, `-1` on error |
+
+## System Call Details
+
+### fork()
+Fork is the only way to create a new process in
+POSIX. It creates an exact duplicate of the original process, including all the file descriptors, registers—everything. After the fork, the original process and the copy
+(the parent and child) go their separate ways. All the variables have identical val-
+ues at the time of the fork, but since the parent’s data are copied to create the child,
+subsequent changes in one of them do not affect the other one
+
+The parent and child are almost identical:
+
+| What is copied?	 | Meaning |
+| --- | --- |
+| Memory image	 | Same code + data |
+| Environment variables	 | PATH, HOME, etc. |
+| Open files	 | Same files, same positions |
+
+the memory
+of the child may be shared copy-on-write with the parent. This means that parent
+and child share a single physical copy of the memory until one of the two modifies
+a value at a location in memory—in which case the operating system makes a copy
+of the small chunk of memory containing that location. Doing so minimizes the
+amount of memory that needs to be copied a priori, as much can remain shared.
+Moreover, part of the memory, for instance, the program text does not change at, so
+it can always be shared between parent and child. The fork call returns a value,
+which is zero in the child and equal to the child’s PID (Process IDentifier) in the
+parent. Using the returned PID, the two processes can see which one is the parent
+process and which one is the child process. Moreover, part of the memory, for instance, the program text does not change at, so
+it can always be shared between parent and child.
+
+The fork call returns a value,
+which is zero in the child and equal to the child’s PID (Process IDentifier) in the
+parent. Using the returned PID, the two processes can see which one is the parent
+process and which one is the child process.
+
+In most cases, after a fork, the child will need to execute different code from
+the parent. Consider the case of the shell. It reads a command from the terminal,
+forks off a child process, waits for the child to execute the command, and then
+reads the next command when the child terminates. To wait for the child to finish,
+the parent executes a waitpid system call, which just waits until the child terminates
+(any child if more than one exists). Waitpid can wait for a specific child, or for any
+old child by setting the first parameter to &lt;1. When waitpid completes, the address
+pointed to by the second parameter, statloc, will be set to the child process’ exit
+status (normal or abnormal termination and exit value). Various options are also
+provided, specified by the third parameter. For example, returning immediately if
+no child has already exited.
+
+#### What it does
+Creates a new process by duplicating the calling process.
+The child initially shares memory pages via copy-on-write.
+
+Think of it like: Making a photocopy of a running program
+
+After fork() You have two processes, Parent (original), Child (copy)
+
+#### Why it matters
+This is the classic UNIX process creation primitive.
+Shells, servers, and supervisors rely on it.
+
+#### Syscall or libc wrapper?
+**glibc wrapper**  
+Implemented using the `clone()` syscall with fixed flags.
+
+#### Kernel source paths
+* Entry: `sys_clone`
+* Files:
+  * `kernel/fork.c`
+  * `include/linux/sched/task.h`
+
+#### glibc source paths
+* `posix/fork.c`
+* `sysdeps/unix/sysv/linux/fork.c`
+* `sysdeps/unix/sysv/linux/clone.S`
+
+#### Parameters
+_None_
+
+#### Return value
+* `> 0` → child PID (parent)
+* `0` → child process
+* `-1` → error (`errno` set)
+
+#### Example
+```c
+pid_t pid = fork();
+if (pid ==== 0)
+    execl("/bin/ls", "ls", NULL);
+wait(NULL);
+```
+
+#### step-by-step code walk-through of fork()
+1. User-space code (what you write)
+
+   ```c
+   #include <unistd.h>
+
+   int main(void) {
+       pid_t pid = fork();
+
+       if (pid .. 0) {
+           // Child
+       } else {
+           // Parent
+       }
+   }
+   ```
+
+   At this point:
+
+   * You are in ***user mode***
+   * `fork()` is just a ***function symbol***, not a syscall yet
+
+     The real work begins inside glibc.
+2. glibc: fork() wrapper
+
+   Key idea: `fork()` is ***NOT a real syscall****, glibc implements it using the **clone() syscall*** with special flags.
+
+   glibc source paths
+
+   * `posix/fork.c`
+   * `sysdeps/unix/sysv/linux/fork.c`
+   * `sysdeps/unix/sysv/linux/clone.S`
+3. glibc fork() (simplified)
+
+   ```c
+   pid_t
+   __libc_fork(void)
+   {
+       return _Fork();
+   }
+   ```
+
+   ```c
+   pid_t
+   _Fork(void)
+   {
+       return __clone(SIGCHLD, 0);
+   }
+   ```
+
+   Key points:
+
+   * glibc converts `fork()` → `clone()`
+   * `SIGCHLD` flag means:
+     * child sends SIGCHLD when it exits
+     * parent/child get ***separate address spaces***
+4. glibc: clone() syscall stub
+
+   Assembly transition to kernel, glibc now executes a ***syscall instruction***.
+
+   glibc source path
+
+   * `sysdeps/unix/sysv/linux/clone.S`
+
+     ```asm
+     mov    $__NR_clone, %rax
+     syscall
+     ```
+
+     At this moment:
+   * CPU switches from ***user mode → kernel mode***
+   * Control jumps into the Linux kernel syscall entry point
+5. Kernel entry point (architecture layer)
+
+   x86-64 example
+
+   Kernel source paths
+
+   * `arch/x86/entry/syscall_64.c`
+   * `arch/x86/entry/common.c`
+
+     ```c
+     SYSCALL_DEFINE0(clone)
+     {
+         return do_fork(...);
+     }
+     ```
+
+     What happens here:
+
+     * Registers are saved
+     * Syscall number is decoded
+     * Kernel dispatches to `sys_clone()`
+6. Kernel: sys_clone()
+
+   Kernel source path
+
+   * `kernel/fork.c`
+
+     ```c
+     SYSCALL_DEFINE5(clone, ...)
+     {
+         return do_fork(clone_flags, stack_start,
+                        ptid, ctid, tls);
+     }
+     ```
+
+     This is where ***process creation truly begins***.
+7. Kernel: do_fork()
+
+   Kernel source path
+
+   * `kernel/fork.c`
+
+     ```c
+     long do_fork(...)
+     {
+         struct task_struct *p;
+
+         p = copy_process(...);
+
+         wake_up_new_task(p);
+
+         return p->pid;
+     }
+     ```
+
+     This function:
+
+     1. Creates a new `task_struct`
+     2. Copies process state
+     3. Schedules the child
+     4. Returns PID to parent
+8. Kernel: copy_process()
+
+   Kernel source path
+
+   * `kernel/fork.c`
+
+     This is the ***heart of fork***.
+
+     Major steps inside `copy_process()`:
+
+     1. Allocate task_struct
+
+        ```c
+        p = dup_task_struct(current);
+        ```
+
+        Each process is represented by a `task_struct`.
+     2. Copy memory (COW)
+
+        ```c
+        copy_mm(p);
+        ```
+
+        * Parent and child share memory pages
+        * Pages are marked ***copy-on-write***
+        * Actual copying happens only on write
+     3. Copy file descriptors
+
+        ```c
+        copy_files(p);
+        ```
+
+        * Open files are shared
+        * Reference counts are increased
+     4. Copy signal handlers
+
+        ```c
+        copy_sighand(p);
+        ```
+9. Kernel: wake_up_new_task()
+
+   Kernel source path
+
+   * `kernel/sched/core.c`
+
+     ```c
+     wake_up_new_task(p);
+     ```
+
+     This:
+
+   * Marks child runnable
+   * Inserts it into the scheduler run queue
+
+     Now:
+
+   * Parent continues execution
+   * Child is eligible to run
+10. Return path: kernel → glibc → user space
+
+   Parent return
+
+   * `sys_clone()` returns ***child PID***
+   * glibc returns PID > 0
+
+     Child return
+
+   * Kernel sets return value to `0`
+   * Child resumes execution **after fork()**
+
+     This is how ***one call returns twice***.
+11. Final illusion: "two processes ran the same code"
+
+   What really happened:
+
+   | Layer | Reality |
+   |------|--------|
+   | User | `fork()` returned twice |
+   | glibc | Used `clone()` |
+   | Kernel | Duplicated `task_struct` |
+   | MMU | Enabled copy-on-write |
+   | Scheduler | Ran parent & child |
+12. Full call trace
+
+   ```text
+   user main()
+     ↓
+   fork()
+     ↓
+   glibc fork()            posix/fork.c
+     ↓
+   glibc clone()           clone.S
+     ↓
+   syscall instruction
+     ↓
+   sys_clone()             kernel/fork.c
+     ↓
+   do_fork()
+     ↓
+   copy_process()
+     ↓
+   wake_up_new_task()
+     ↓
+   return to user space
+   ```
+
+---
+
+### clone()
+
+#### What it does
+Creates a new process or thread with configurable resource sharing.
+
+#### Why it matters
+Threads, containers, and modern runtimes depend on it.
+
+#### Syscall or libc wrapper?
+**True syscall**
+
+#### Kernel source paths
+* Entry: `sys_clone`
+* Files:
+  * `kernel/fork.c`
+  * `kernel/sched/core.c`
+
+#### glibc source paths
+* `sysdeps/unix/sysv/linux/clone.S`
+* `sysdeps/unix/sysv/linux/clone-internal.c`
+
+#### Parameters
+* `flags` – resource sharing (VM, FS, files, signals)
+* `child_stack` – stack pointer
+* `ptid`, `ctid`, `tls` – thread bookkeeping
+
+#### Return value
+* child PID on success
+* `-1` on error
+
+#### Example
+```c
+clone(fn, stack, CLONE_VM | CLONE_FS | SIGCHLD, arg);
+```
+
+## Thread Management
+NPTL can refer to the
+Native POSIX Thread Library, the standard threading implementation for modern Linux, providing efficient, kernel-level threading (1:1 model) for parallel application
+**Thread Management & Control**
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_create** | Create a new thread | * `pthread_t *thread` * `const pthread_attr_t *attr` * `void *(*start_routine)(void *)` * `void *arg` | * `int` ** `0` → success ** Error number |
+| **pthread_exit** | Terminate calling thread | * `void *retval` | * `void` |
+| **pthread_join** | Wait for thread termination | * `pthread_t thread` * `void **retval` | * `int` |
+| **pthread_detach** | Detach thread | * `pthread_t thread` | * `int` |
+| **pthread_self** | Get calling thread ID | * (none) | * `pthread_t` |
+| **pthread_equal** | Compare thread IDs | * `pthread_t t1` * `pthread_t t2` | * `int` |
+| **pthread_cancel** | Request thread cancellation | * `pthread_t thread` | * `int` |
+| **pthread_setcancelstate** | Enable/disable cancellation | * `int state` * `int *oldstate` | * `int` |
+| **pthread_setcanceltype** | Set cancellation type | * `int type` * `int *oldtype` | * `int` |
+| **pthread_testcancel** | Cancellation point | * (none) | * `void` |
+| **pthread_kill** | Send signal to a thread | * `pthread_t thread` * `int sig` | * `int` |
+| **pthread_once** | One-time initialization | * `pthread_once_t *once_control` * `void (*init_routine)(void)` | * `int` |
+
+**Mutexes (Mutual Exclusion Locks)**
+
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_mutex_init** | Initialize mutex | * `pthread_mutex_t *mutex` * `const pthread_mutexattr_t *attr` | * `int` |
+| **pthread_mutex_destroy** | Destroy mutex | * `pthread_mutex_t *mutex` | * `int` |
+| **pthread_mutex_lock** | Lock mutex (blocking) | * `pthread_mutex_t *mutex` | * `int` |
+| **pthread_mutex_trylock** | Try locking mutex | * `pthread_mutex_t *mutex` | * `int` ** `EBUSY` if locked |
+| **pthread_mutex_unlock** | Unlock mutex | * `pthread_mutex_t *mutex` | * `int` |
+
+**Condition Variables**
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_cond_init** | Initialize condition variable | * `pthread_cond_t *cond` * `const pthread_condattr_t *attr` | * `int` |
+| **pthread_cond_destroy** | Destroy condition variable | * `pthread_cond_t *cond` | * `int` |
+| **pthread_cond_wait** | Wait for condition | * `pthread_cond_t *cond` * `pthread_mutex_t *mutex` | * `int` |
+| **pthread_cond_timedwait** | Timed wait for condition | * `pthread_cond_t *cond` * `pthread_mutex_t *mutex` * `const struct timespec *abstime` | * `int` ** `ETIMEDOUT` possible |
+| **pthread_cond_signal** | Wake one waiting thread | * `pthread_cond_t *cond` | * `int` |
+| **pthread_cond_broadcast** | Wake all waiting threads | * `pthread_cond_t *cond` | * `int` |
+**Thread-Local Storage (TLS)**
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_key_create** | Create TLS key | * `pthread_key_t *key` * `void (*destructor)(void *)` | * `int` |
+| **pthread_key_delete** | Delete TLS key | * `pthread_key_t key` | * `int` |
+| **pthread_setspecific** | Set TLS value | * `pthread_key_t key` * `const void *value` | * `int` |
+| **pthread_getspecific** | Get TLS value | * `pthread_key_t key` | * `void *` |
+
+### Thread functions
+
+#### pthread_create
+
+***What it does***
+
+* Spawns a new thread in the calling process.
+
+***Why it matters***
+
+* Fundamental API to start concurrent execution within a process.
+
+***Parameters***
+
+* ***thread***: out, pointer to store new thread ID.
+* ***attr***: in, pointer to thread attributes object; `NULL` for defaults.
+* ***start_routine***: in, function the thread will execute.
+* ***arg***: in, argument to pass to `start_routine`.
+
+***Return value***
+
+* `0` on success.
+* Error codes like `EINVAL`, `EAGAIN`, `EPERM`.
+
+***Implementation (glibc)***
+
+* [glibc pthread_create.c](https://codebrowser.dev/glibc/glibc/nptl/pthread_create.c.html)
+
+***Kernel / syscall mapping***
+
+* Uses `clone(2)` with `CLONE_VM | CLONE_THREAD | CLONE_SIGHAND | CLONE_FS | CLONE_FILES` flags.
+* See [clone(2) man page](https://man7.org/linux/man-pages/man2/clone.2.html)
+
+#### pthread_join
+
+***What it does***
+
+* Waits for a thread to terminate and retrieves its return value.
+
+***Parameters***
+
+* ***thread***: in, ID of the thread to wait for.
+* ***retval***: out, pointer to location for thread’s exit value; can be `NULL`.
+
+***Return value***
+
+* `0` on success.
+* Errors: `EINVAL` if thread not joinable, `ESRCH` if thread does not exist.
+
+***Implementation***
+- Uses futex wait/wake internally to block efficiently until thread exits.
+
+#### pthread_exit
+
+***What it does***
+
+* Terminates execution of the calling thread.
+
+***Parameters***
+
+* ***retval***: in, value returned to any joining thread.
+
+***Return value***
+
+* Does not return.
+
+***Implementation***
+- Teardown notifies waiters via futex wake on internal thread control block.
+
+#### pthread_detach
+
+***What it does***
+
+* Marks a thread as detached so its resources are automatically reclaimed.
+
+***Parameters***
+
+* ***thread***: in, ID of the thread to detach.
+
+***Return value***
+
+* `0` on success, `EINVAL` if invalid thread.
+
+#### pthread_self & pthread_equal
+
+***What they do***
+- `pthread_self()` returns calling thread’s ID.
+- `pthread_equal(t1,t2)` compares two thread IDs.
+
+***Return value***
+
+* `pthread_self()`: thread ID
+* `pthread_equal()`: nonzero if equal, 0 otherwise
+
+#### Mutex API
+
+##### pthread_mutex_init / destroy
+
+***What it does***
+
+* Initialize or destroy a mutex.
+
+***Parameters***
+
+* ***mutex***: pointer to mutex object
+* ***attr***: pointer to mutex attributes; can be NULL
+
+***Return value***
+
+* `0` on success, `EBUSY` or `EINVAL` on error
+
+***Implementation***
+- [glibc pthread_mutex_init.c](https://codebrowser.dev/glibc/glibc/nptl/pthread_mutex_init.c.html)
+- Uses `futex(2)` on contention.
+
+##### pthread_mutex_lock / trylock / unlock
+
+***What it does***
+
+* Locks or unlocks a mutex.
+
+***Return value***
+
+* `0` on success
+* Blocks until lock acquired for `lock()`, returns `EBUSY` for `trylock()` if unavailable
+
+***Kernel mapping***
+- Contended locks use `futex_wait` and `futex_wake`
+
+#### Condition Variables
+
+##### pthread_cond_init / destroy
+
+* Initializes or destroys a condition variable.
+
+##### pthread_cond_wait / timedwait / signal / broadcast
+
+***What it does***
+
+* Wait releases mutex and blocks until signaled.
+* Signal wakes one waiter; broadcast wakes all.
+
+***Kernel mapping***
+- Uses `futex(2)` internally for waiting and wake-up.
+
+***Implementation example***
+- [glibc pthread_cond_wait.c](https://codebrowser.dev/glibc/glibc/nptl/pthread_cond_wait.c.html)
+
+#### Read–Write Locks
+
+***Functions***
+- `pthread_rwlock_init`, `pthread_rwlock_destroy`
+- `pthread_rwlock_rdlock`, `pthread_rwlock_wrlock`
+- `pthread_rwlock_tryrdlock`, `pthread_rwlock_trywrlock`
+- `pthread_rwlock_unlock`
+
+***Kernel mapping***
+- Multiple counters and futexes used for reader/writer queues.
+
+#### Barriers
+
+***Functions***
+- `pthread_barrier_init`
+- `pthread_barrier_wait`
+- `pthread_barrier_destroy`
+
+***Use***
+- Synchronizes a group of threads to rendezvous before proceeding.
+
+#### Thread Attributes (pthread_attr_*)
+
+***Functions***
+- `pthread_attr_init`
+- `pthread_attr_destroy`
+- `pthread_attr_setdetachstate`
+- `pthread_attr_setschedpolicy`
+- `pthread_attr_setschedparam`
+
+#### Scheduling & CPU Affinity
+
+***Functions***
+- `pthread_setschedparam`, `pthread_getschedparam`
+- `pthread_setaffinity_np`, `pthread_getaffinity_np`
+
+***Kernel mapping***
+- `sched_setaffinity(2)`, `sched_setscheduler(2)`
+
+#### POSIX vs Linux NPTL Mapping
+
+|     |     |     |
+| --- | --- | --- |
+| POSIX API (pthread_*) | glibc NPTL Internals | Kernel Syscalls |
+| Thread creation | pthread_create → clone(2) | clone(2) with CLONE_THREAD, CLONE_VM, CLONE_FS, CLONE_FILES |
+| Mutexes & Conditional Waits | pthread_mutex_lock → futex(2) | futex(2) (FUTEX_WAIT, FUTEX_WAKE) |
+| Scheduling & Affinity | pthread_setschedparam | sched_setaffinity(2), sched_setscheduler(2) |
+
+#### References
+
+* [glibc pthread_create.c source](https://codebrowser.dev/glibc/glibc/nptl/pthread_create.c.html)
+* [glibc pthread_mutex_init.c source](https://codebrowser.dev/glibc/glibc/nptl/pthread_mutex_init.c.html)
+* [glibc pthread_cond_wait.c source](https://codebrowser.dev/glibc/glibc/nptl/pthread_cond_wait.c.html)
+* [linux kernel futex.c source](https://elixir.bootlin.com/linux/latest/source/kernel/futex.c)
+* [clone(2) man page](https://man7.org/linux/man-pages/man2/clone.2.html)
+* [pthread(7) man page](https://man7.org/linux/man-pages/man7/pthreads.7.html)
+
+### POSIX Pthread Attribute APIs
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_attr_init** | Initialize thread attribute object | * `pthread_attr_t *attr` | * `int` |
+| **pthread_attr_destroy** | Destroy thread attribute object | * `pthread_attr_t *attr` | * `int` |
+| **pthread_attr_setdetachstate** | Set detach state | * `pthread_attr_t **attr` * `int detachstate` *** `PTHREAD_CREATE_JOINABLE` ** `PTHREAD_CREATE_DETACHED` | * `int` |
+| **pthread_attr_getdetachstate** | Get detach state | * `const pthread_attr_t *attr` * `int *detachstate` | * `int` |
+| **pthread_attr_setstacksize** | Set thread stack size | * `pthread_attr_t *attr` * `size_t stacksize` | * `int` |
+| **pthread_attr_getstacksize** | Get thread stack size | * `const pthread_attr_t *attr` * `size_t *stacksize` | * `int` |
+| **pthread_attr_setguardsize** | Set guard size | * `pthread_attr_t *attr` * `size_t guardsize` | * `int` |
+| **pthread_attr_getguardsize** | Get guard size | * `const pthread_attr_t *attr` * `size_t *guardsize` | * `int` |
+| **pthread_attr_setinheritsched** | Set scheduling inheritance | * `pthread_attr_t **attr` * `int inheritsched` *** `PTHREAD_INHERIT_SCHED` ** `PTHREAD_EXPLICIT_SCHED` | * `int` |
+| **pthread_attr_getinheritsched** | Get scheduling inheritance | * `const pthread_attr_t *attr` * `int *inheritsched` | * `int` |
+| **pthread_attr_setschedpolicy** | Set scheduling policy | * `pthread_attr_t **attr` * `int policy` *** `SCHED_OTHER` *** `SCHED_FIFO` *** `SCHED_RR` | * `int` |
+| **pthread_attr_getschedpolicy** | Get scheduling policy | * `const pthread_attr_t *attr` * `int *policy` | * `int` |
+| **pthread_attr_setschedparam** | Set scheduling parameters | * `pthread_attr_t *attr` * `const struct sched_param *param` | * `int` |
+| **pthread_attr_getschedparam** | Get scheduling parameters | * `const pthread_attr_t *attr` * `struct sched_param *param` | * `int` |
+| **pthread_mutexattr_init** | Initialize mutex attribute object | * `pthread_mutexattr_t *attr` | * `int` |
+| **pthread_mutexattr_destroy** | Destroy mutex attribute object | * `pthread_mutexattr_t *attr` | * `int` |
+| **pthread_mutexattr_settype** | Set mutex type | * `pthread_mutexattr_t **attr` * `int type` *** `PTHREAD_MUTEX_NORMAL` *** `PTHREAD_MUTEX_RECURSIVE` *** `PTHREAD_MUTEX_ERRORCHECK` | * `int` |
+| **pthread_mutexattr_gettype** | Get mutex type | * `const pthread_mutexattr_t *attr` * `int *type` | * `int` |
+| **pthread_mutexattr_setprotocol** | Set mutex priority protocol | * `pthread_mutexattr_t **attr` * `int protocol` *** `PTHREAD_PRIO_NONE` *** `PTHREAD_PRIO_INHERIT` *** `PTHREAD_PRIO_PROTECT` | * `int` |
+| **pthread_mutexattr_getprotocol** | Get mutex priority protocol | * `const pthread_mutexattr_t *attr` * `int *protocol` | * `int` |
+| **pthread_condattr_init** | Initialize condition attribute object | * `pthread_condattr_t *attr` | * `int` |
+| **pthread_condattr_destroy** | Destroy condition attribute object | * `pthread_condattr_t *attr` | * `int` |
+| **pthread_condattr_setclock** | Set clock used by condition variable | * `pthread_condattr_t *attr` * `clockid_t clock_id` | * `int` |
+| **pthread_condattr_getclock** | Get clock used by condition variable | * `const pthread_condattr_t *attr` * `clockid_t *clock_id` | * `int` |
+| **pthread_rwlockattr_init** | Initialize rwlock attribute object | * `pthread_rwlockattr_t *attr` | * `int` |
+| **pthread_rwlockattr_destroy** | Destroy rwlock attribute object | * `pthread_rwlockattr_t *attr` | * `int` |
+| **pthread_barrierattr_init** | Initialize barrier attribute object | * `pthread_barrierattr_t *attr` | * `int` |
+| **pthread_barrierattr_destroy** | Destroy barrier attribute object | * `pthread_barrierattr_t *attr` | * `int` |
+
+### mapping of pthread attributes → actual kernel behavior
+#### POSIX Pthread Attributes → Linux Kernel Behavior (glibc / NPTL)
+
+This section maps ***each pthread attribute to its actual behavior on Linux****, clearly indicating what is **enforced by the kernel****, what is **partially honored****, and what is **ignored****, followed by **practical usage guidance***.
+
+##### Thread Attributes (`pthread_attr_*`)
+
+**Detach State**
+
+* ***Kernel behavior***
+* `PTHREAD_CREATE_JOINABLE`  
+  Thread exit status is retained until `pthread_join()` is called.
+* `PTHREAD_CREATE_DETACHED`  
+  Thread resources are released immediately on exit.
+* ***Linux implementation***
+* Managed entirely by glibc/NPTL; no kernel-level join object exists.
+* ***Usage***
+* Use detached threads for fire-and-forget workers.
+* Avoid detached threads when return values or synchronization are required.
+
+---
+
+**Stack Size (`pthread_attr_setstacksize`)**
+
+* ***Kernel mapping***
+* Stack allocated using `mmap()`
+* Marked as `VM_STACK`
+* Guard page enforced via `mprotect(PROT_NONE)`
+* ***Linux notes***
+* Minimum size enforced by glibc (typically ≥ 16 KB).
+* Large stacks consume virtual address space, not physical memory.
+* ***Usage***
+* Increase stack size for deep recursion or large local variables.
+* Avoid excessively large stacks.
+
+---
+
+**Guard Size (`pthread_attr_setguardsize`)**
+
+* ***Kernel behavior***
+* Guard pages cause `SIGSEGV` on stack overflow.
+* ***Linux notes***
+* Implemented via `mprotect()`
+* Fully enforced by the kernel.
+* ***Usage***
+* Always keep guard pages enabled.
+* Never disable in production.
+
+---
+
+**Scheduling Policy (`pthread_attr_setschedpolicy`)**
+
+* ***Kernel mapping***
+* `SCHED_OTHER` → CFS scheduler
+* `SCHED_FIFO`, `SCHED_RR` → Real-time scheduler
+* ***Linux restrictions***
+* Requires `CAP_SYS_NICE`
+* Non-privileged calls fail with `EPERM`
+* ***Usage***
+* Use only in real-time systems.
+* Avoid in general-purpose applications.
+
+---
+
+**Scheduling Parameters (`pthread_attr_setschedparam`)**
+
+* ***Kernel behavior***
+* `sched_priority` maps to `task_struct.prio`
+* ***Linux notes***
+* Ignored for `SCHED_OTHER`
+* Meaningful only for RT policies
+* ***Usage***
+* Only use together with real-time scheduling policies.
+
+---
+
+**Scheduling Inheritance (`pthread_attr_setinheritsched`)**
+
+* ***Linux behavior***
+* `PTHREAD_INHERIT_SCHED` inherits creator’s scheduler.
+* `PTHREAD_EXPLICIT_SCHED` uses explicitly set values.
+* ***Linux note***
+* Has no effect unless scheduling policy is explicitly changed.
+
+---
+
+#### Mutex Attributes (`pthread_mutexattr_*`)
+
+**Mutex Type (`pthread_mutexattr_settype`)**
+
+* ***Kernel mapping***
+* Implemented using futexes.
+* ***Types***
+* `PTHREAD_MUTEX_NORMAL` – fastest, minimal checks
+* `PTHREAD_MUTEX_ERRORCHECK` – detects deadlocks
+* `PTHREAD_MUTEX_RECURSIVE` – tracks owner and lock count
+* ***Usage***
+* Use NORMAL for performance.
+* Use ERRORCHECK for debugging.
+* Avoid RECURSIVE in hot paths.
+
+---
+
+**Priority Protocol (`pthread_mutexattr_setprotocol`)**
+
+* ***Kernel behavior***
+* `PTHREAD_PRIO_INHERIT` is implemented via `rt_mutex`.
+* `PTHREAD_PRIO_PROTECT` is mostly ignored.
+* Default is `PTHREAD_PRIO_NONE`.
+* ***Usage***
+* Use priority inheritance only in RT systems.
+* Avoid in non-RT code.
+
+---
+
+#### Condition Variable Attributes (`pthread_condattr_*`)
+
+**Clock Selection (`pthread_condattr_setclock`)**
+
+* ***Kernel mapping***
+* Timeout handled using high-resolution timers (`hrtimer`).
+* ***Clocks***
+* `CLOCK_REALTIME` – affected by system time changes.
+* `CLOCK_MONOTONIC` – stable, preferred.
+* ***Usage***
+* Always use `CLOCK_MONOTONIC` for timed waits.
+
+---
+
+#### RWLock Attributes (`pthread_rwlockattr_*`)
+
+* ***Linux behavior***
+* Mostly ignored.
+* RW locks are largely implemented in userspace with futex assistance.
+* ***Usage***
+* Do not rely on rwlock attributes.
+* Use defaults.
+
+---
+
+#### Barrier Attributes (`pthread_barrierattr_*`)
+
+* ***Linux behavior***
+* Fully ignored.
+* Barriers are purely userspace constructs.
+* ***Usage***
+* Attributes provide no benefit on Linux.
+
+---
+
+#### Summary: What Linux Actually Enforces
+
+* Fully enforced:
+  * Stack size and guard size
+  * Detach state
+  * Mutex type
+  * Mutex priority inheritance
+  * Condition variable clock
+* Partially enforced / privileged:
+  * Scheduling policy
+  * Scheduling priority
+* Ignored:
+  * RWLock attributes
+  * Barrier attributes
+
+| Attribute Category | Enforced | Partially | Ignored |
+| --- | --- | --- | --- |
+| Stack / Guard | ✅ | — | — |
+| Detach State | ✅ | — | — |
+| Scheduling Policy | ⚠ | — | — |
+| Scheduling Priority | ⚠ | — | — |
+| Mutex Type | ✅ | — | — |
+| Mutex Priority Inheritance | ✅ | — | — |
+| Condition Clock | ✅ | — | — |
+| RWLock Attributes | — | ⚠ | ✅ |
+| Barrier Attributes | — | — | ✅ |
+
+---
+
+#### Practical Guidance
+
+* ***Use attributes when***
+* Writing real-time or embedded systems
+* Debugging concurrency issues
+* Controlling memory layout precisely
+* ***Avoid attributes when***
+* Writing general-purpose Linux applications
+* Portability is a primary concern
+* Default behavior is sufficient
+* ***Rule of thumb***\
+If an attribute does not affect ***memory layout, scheduling, or futex behavior***, Linux likely ignores it.
