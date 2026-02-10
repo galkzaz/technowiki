@@ -263,7 +263,7 @@ Example x86-64 instruction
 CMP RAX, RBX
 ```
 * Compares two 64-bit values
-* Executes in 1–2 cycles
+* Executes in 1-2 cycles
 
 so its O(1)
 
@@ -428,7 +428,7 @@ Logarithmic algorithms are extremely efficient because they rapidly converge on 
 solution. These algorithms succeed because they reduce the size of the problem by
 about half each time. The Guessing algorithm reaches a solution after at most k = 1
 + ⌊log2 (n)⌋ iterations, and at the ith iteration (0 &lt; i ≤ k), the algorithm computes a
-guess that is known to be within ±ϵ = 2k–i – 1 from the actual hidden number. The
+guess that is known to be within ±ϵ = 2k-i - 1 from the actual hidden number. The
 quantity ϵ is considered the error, or uncertainty. After each iteration of the loop, ϵ
 is cut in half
 
@@ -518,7 +518,7 @@ If you guess randomly:
 
 You will almost certainly lose.
 
-Following Table shows a sample scenario for the range 1–8 that asks a series of questions, reducing the problem size by about half each time.
+Following Table shows a sample scenario for the range 1-8 that asks a series of questions, reducing the problem size by about half each time.
 
 | Number | First Round | Second Round | Third Round | Fourth Round |
 | --- | --- | --- | --- | --- |
@@ -589,9 +589,9 @@ The number of iterations grows logarithmically, not linearly.
 
 This is exactly the same efficiency idea as binary search.
 
-To find a root of f(x) = x*sin(x) – 5*x – cos(x), start with a = –1 and b = 1. As shown
+To find a root of f(x) = x*sin(x) - 5*x - cos(x), start with a = -1 and b = 1. As shown
 in Table, the algorithm converges on the solution of f(x) = 0, where x =
-–0.189302759 is a root of the function.
+-0.189302759 is a root of the function.
 | Iteration | a | b | c | f(a) | f(c) | Interval size | Error |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | -1.000000 | 1.000000 | 0.000000 | 5.301169 | -1.000000 | 2.000000 | 1.000000 |

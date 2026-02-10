@@ -1,0 +1,719 @@
+---
+id: process-ipc-busy-waiting
+title: Mutual Exclusion with Busy Waiting
+description: Mutual Exclusion with Busy Waiting
+---
+
+## Disabling Interrupts
+
+On a single-processor system, the simplest solution is to have each process dis-
+able all interrupts just after entering its critical region and re-enable them just
+before leaving it. With interrupts disabled, no clock interrupts can occur. The CPU is only switched from process to process as a result of clock interrupt or other
+interrupts, after all, and with interrupts turned off the CPU will not be switched to
+another process. Thus, once a process has disabled interrupts, it can examine and
+update the shared memory without fear that any other process will intervene and
+make a mess of things.
+
+**Issues:**
+
+* it is unwise to give user proc-
+esses the power to turn off interrupts. What if one of them did it, and never turned
+them on again? That could be the end of the system. 
+* if the system is
+a multiprocessor (with two or more CPUs), disabling interrupts affects only the
+CPU that executed the disable instruction. The other ones will continue running
+and can access the shared memory.
+* it is frequently convenient for the kernel itself to disable
+interrupts for a few instructions while it is updating variables or especially critical
+lists. If an interrupt occurs while the list of ready processes, for example, is in an
+inconsistent state, race conditions could occur. 
+
+The conclusion is: disabling inter-
+rupts is often a useful technique within the operating system itself but is not appro-
+priate as a general mutual exclusion mechanism for user processes. The kernel
+should not disable interrupts for more than a few instructions lest it miss interrupts.
+
+The possibility of achieving mutual exclusion by disabling interrupts—even
+within the kernel—is becoming less every day due to the increasing number of
+multicore chips even in low-end PCs. Two cores are already common, 4 are present
+in many machines, and 8, 16, or 32 are not far behind. In a multicore (i.e., multi-
+processor system), disabling the interrupts of one CPU does not prevent other
+CPUs from interfering with operations the first CPU is performing. Consequently,
+more sophisticated schemes are needed.
+
+## Lock Variables
+As a second attempt, let us look for a software solution. Consider having a sin-
+gle, shared (lock) variable, initially 0. When a process wants to enter its critical
+region, it first tests the lock. If the lock is 0, the process sets it to 1 and enters the
+critical region. If the lock is already 1, the process just waits until it becomes 0.
+Thus, a 0 means that no process is in its critical region, and a 1 means that some
+process is in its critical region.
+
+**Issues:**
+
+1. Unfortunately, this idea contains exactly the same fatal flaw that we saw in the
+spooler directory. Suppose that one process reads the lock and sees that it is 0.
+Before it can set the lock to 1, another process is scheduled, runs, and sets the lock
+to 1. When the first process runs again, it will also set the lock to 1, and two proc-
+esses will be in their critical regions at the same time.
+2. Now you might think that we could get around this problem by first reading
+out the lock value, then checking it again just before storing into it, but that really
+does not help. The race now occurs if the second process modifies the lock just
+after the first process has finished its second check.
+
+## Strict Alternation
+|     |     |
+| --- | --- |
+| ```while (TRUE)\{ | while (TRUE) \{``` |
+| ```while (turn != 0) \{ \} /* loop * | while (turn != 1) \{ \} /* loop */ ```|
+| ```critical region( );``` | ```critical region( );``` |
+| ```turn = 1;``` | ```turn = 0;``` |
+| ```noncritical region( );``` | ```noncritical region( );``` |
+| ```\}``` | ```\}``` |
+The integer variable turn, initially 0, keeps track of whose turn it is
+to enter the critical region and examine or update the shared memory.
+
+1. Initially process 0 inspects turn, finds it to be 0, and enters its critical region.
+2. Process 1 also
+finds it to be 0 and therefore sits in a tight loop continually testing turn to see when
+it becomes 1. Continuously testing a variable until some value appears is called
+busy waiting. It should usually be avoided, since it wastes CPU time. Only when
+there is a reasonable expectation that the wait will be short is busy waiting used. A
+lock that uses busy waiting is called a spin lock.
+3. When process 0 leaves the critical region, it sets turn to 1, to allow process 1 to
+enter its critical region. 
+4. Suppose that process 1 finishes its critical region quickly,
+so that both processes are in their noncritical regions, with turn set to 0. Now proc-
+ess 0 executes its whole loop quickly, exiting its critical region and setting turn to 1. At this point, turn is 1 and both processes are in their noncritical regions.
+
+**Issues:**
+
+1. process 0 finishes its noncritical region and goes back to the top of
+its loop. Unfortunately, it is not permitted to enter its critical region now, because
+turn is 1 and process 1 is busy with its noncritical region. It hangs in its while loop
+until process 1 sets turn to 0. Put differently, taking turns is not a good idea when
+one of the processes is much slower than the other
+2. This situation violates condition 3 set out above: process 0 is being blocked by
+a process not in its critical region. Going back to the spooler directory discussed
+above, if we now associate the critical region with reading and writing the spooler
+directory, process 0 would not be allowed to print another file because process 1
+was doing something else.
+3. this solution requires that the two processes strictly alternate in enter-
+ing their critical regions, for example, in spooling files. Neither one would be per-
+mitted to spool two in a row. While this algorithm does avoid all races, it is not
+really a serious candidate as a solution because it violates condition 3.
+
+## Peterson’s Solution
+
+Peterson’s Solution is a classic software-only algorithm that solves the critical-section problem for two processes (or threads). It is mainly used in Operating Systems theory to explain how mutual exclusion can be achieved without hardware support.
+
+**The Problem It Solves**
+
+* When two processes access shared data, we must ensure:
+* Mutual Exclusion - Only one process can be in the critical section at a time
+* Progress - If no one is in the critical section, one of the waiting processes must be allowed to enter
+* Bounded Waiting - No process waits forever
+
+Peterson’s solution satisfies all three.
+
+**Assumptions**
+
+Peterson’s solution assumes:
+
+* Only two processes: P0 and P1
+* Atomic read/write of shared variables
+* Sequential consistency (important!)
+* Processes run at arbitrary speeds
+
+Before using the shared variables (i.e., before entering its critical region), each
+process calls enter region with its own process number, 0 or 1, as parameter. This
+call will cause it to wait, if need be, until it is safe to enter. After it has finished
+with the shared variables, the process calls leave region to indicate that it is done
+and to allow the other process to enter, if it so desires.
+
+**How It Works (Intuition)**
+
+1. Case 1: Only One Process Wants to Enter
+   * interested[j] == false
+   * Loop condition fails → process enters immediately
+2. Case 2: Both Want to Enter at the Same Time
+   * Both set interested = true
+   * Both set turn
+   * Last write to turn decides
+   * One process waits, the other enters
+   * When the first exits, it sets interested = false
+   * Waiting process proceeds
+
+**Why It Works (Proof Sketch)**
+
+1. Mutual Exclusion
+   * Suppose both are in critical section
+   * Then interested[0] == true and interested[1] == true
+   * But turn can be only 0 or 1
+   * One process must be blocked → contradiction
+2. Progress
+   * If a process wants to enter and the other doesn’t, it enters immediately
+3. Bounded Waiting
+   * Once a process sets interested[i] = true, the other process can enter at most once before it
+
+**Timeline Example**
+|     |     |     |
+| --- | --- | --- |
+| Step	 | P0	 | P1 |
+| 1	 | interested[0]=true	 | interested[1]=true |
+| 2	 | turn=1	 | turn=0  |
+| 3	 | waits (turn=0)	 | enters CS |
+| 4	 | waiting	 | exits CS |
+| 5	 | enters CS	 | — |
+```c
+#define FALSE 0
+#define TRUE 1
+#define N 2 /* number of processes */
+int turn; /* whose turn is it? */
+int interested[N]; /* all values initially 0 (FALSE) */
+
+void enter region(int process); /* process is 0 or 1 */
+{
+	int other; /* number of the other process */
+	other = 1 - process; /* the opposite of process */
+	interested[process] = TRUE; /* show that you are interested */
+	turn = process; /* set flag */
+	while (turn == process && interested[other] == TRUE) /* null statement */ ;
+}
+
+void leave region(int process) /* process: who is leaving */
+{
+	interested[process] = FALSE; /* indicate departure from critical region */
+}
+```
+1. Initially neither process is in its critical
+region. 
+2. Now process 0 calls enter region. 
+   * It indicates its interest by setting its
+   array element and sets turn to 0. 
+   * Since process 1 is not interested, enter region
+   returns immediately. 
+   * If process 1 now makes a call to enter region, it will hang
+   there until interested[0] goes to FALSE, an event that happens only when process 0
+   calls leave region to exit the critical region.
+3. Now consider the case that both processes call enter region almost simultan-
+eously. 
+   * Both will store their process number in turn. Whichever store is done last
+   is the one that counts; the first one is overwritten and lost. 
+   * Suppose that process 1
+   stores last, so turn is 1. 
+   * When both processes come to the while statement, process
+   0 executes it zero times and enters its critical region. 
+   * Process 1 loops and does not
+   enter its critical region until process 0 exits its critical region.
+
+**Limitations (Very Important)**
+
+1. ❌ Only works for two processes
+2. ❌ Busy waiting (wastes CPU)
+3. ❌ Fails on modern CPUs due to:
+   * Compiler optimizations
+   * Out-of-order execution
+   * Weak memory models
+
+That’s why real OSes use hardware primitives like:
+
+* Test-and-Set
+* Compare-and-Swap
+* Mutexes, semaphores
+
+**Why It’s Still Important**
+
+Peterson’s solution is:
+
+* Correct, Elegant, Pure software
+* A foundation for understanding: Mutual exclusion, Lock algorithms, Memory consistency issues
+
+It’s mainly a teaching tool, not a production solution.
+
+**why it fails on modern multicore CPUs**
+
+## Test-and-Set(TSL Instruction)
+The Test-and-Set instruction is a hardware-supported atomic operation used to implement mutual exclusion in operating systems and multiprocessor systems. Unlike Peterson’s solution, it works correctly on modern multicore CPUs.
+
+**The Problem It Solves**
+
+We want to ensure that only one thread enters the critical section at a time, even when:
+
+* Multiple CPU cores are executing concurrently
+* Compilers and CPUs reorder instructions
+* Caches and store buffers exist
+
+Software-only solutions fail here, Hardware atomic instructions solve this.
+
+**How it Works**
+
+Atomic operation (indivisible)
+```
+TSL(lock):
+    old = lock
+    lock = 1
+    return old
+```
+Key property: The read (old = lock) and write (lock = 1) happen atomically — no other CPU can intervene.
+
+1. Shared Variable: A single boolean/integer variable lock (initially false or 0).
+2. Acquire Lock:
+   * A process calls TestAndSet(lock).
+   * The hardware atomically returns the current value of lock and sets lock to true (1).
+   * If the returned value was false (0), the process successfully acquired the lock and enters the critical section.
+   * If the returned value was true (1), the lock was already held, and the process must loop (spin) and try again.
+3. Release Lock: The process simply sets lock back to false (0) when done. 
+
+the solution depends on a little help from the hardware.
+Some computers, especially those designed with multiple processors in mind, have
+an instruction like
+```
+TSL RX,LOCK
+```
+This means: Atomically
+. Read the value at memory location LOCK
+. Store it into CPU REGISTER
+. Write 1 into memory location LOCK
+
+The atomicity applies to the MEMORY LOCATION LOCK, not the register.
+
+(Test and Set Lock) that works as follows. 
+
+1. It reads the contents of the memory
+word lock into register RX and then stores a nonzero value at the memory address lock. 
+   * The operations of reading the word and storing into it are guaranteed to be
+   indivisible—no other processor can access the memory word until the instruction is
+   finished. 
+   * The CPU executing the TSL instruction locks the memory bus to prohibit
+   other CPUs from accessing memory until it is done.
+   * It is important to note that locking the memory bus is very different from dis-
+   abling interrupts. Disabling interrupts then performing a read on a memory word
+   followed by a write does not prevent a second processor on the bus from accessing
+   the word between the read and the write. In fact, disabling interrupts on processor
+   1 has no effect at all on processor 2. The only way to keep processor 2 out of the
+   memory until processor 1 is finished is to lock the bus, which requires a special
+   hardware facility (basically, a bus line asserting that the bus is locked and not avail-
+   able to processors other than the one that locked it)
+2. To use the TSL instruction, we will use a shared variable, lock, to coordinate
+access to shared memory. When lock is 0, any process may set it to 1 using the TSL
+instruction and then read or write the shared memory. When it is done, the process
+sets lock back to 0 using an ordinary move instruction.
+3. How can this instruction be used to prevent two processes from simultaneously
+entering their critical regions? The solution is 
+```
++
+enter region:
+	TSL REGISTER,LOCK | copy lock to register and set lock to 1
+	CMP REGISTER,#0   | was lock zero?
+	JNE enter region  | if it was not zero, lock was set, so loop
+	RET               | return to caller; critical region entered
+leave region:
+	MOVE LOCK,#0      | store a 0 in lock
+	RET               | return to caller
+```
++
+** It shows a
+four-instruction subroutine in a fictitious (but typical) assembly language. 
+** The first
+instruction copies the old value of lock to the register and then sets lock to 1. 
+** Then
+the old value is compared with 0. If it is nonzero, the lock was already set, so the
+program just goes back to the beginning and tests it again. 
+** Sooner or later, it will
+become 0 (when the process currently in its critical region is done with its critical
+region), and the subroutine returns, with the lock set. 
+** Clearing the lock is very sim-
+ple. The program just stores a 0 in lock. No special synchronization instructions
+are needed.
+. One solution to the critical-region problem is now easy. 
+** Before entering its
+critical region, a process calls enter region, which does busy waiting until the lock
+is free; then it acquires the lock and returns. 
+** After leaving the critical region the
+process calls leave region, which stores a 0 in lock. 
+** As with all solutions based on critical regions, the processes must call enter region and leave region at the cor-
+rect times for the method to work. If one process cheats, the mutual exclusion will
+fail. In other words, critical regions work only if the processes cooperate.
+
+**Typical Spinlock Using Test-and-Set**
+In the C programming language, the implementation would be like:
+```c
+#define LOCKED 1
+
+int test_and_set(int* lock_ptr) {
+    int old_value;
+
+    // -- Start of atomic segment --
+    // This should be interpreted as pseudocode for illustrative purposes only.
+    // Traditional compilation of this code will not guarantee atomicity, the
+    // use of shared memory (i.e., non-cached values), protection from compiler
+    // optimizations, or other required properties.
+    old_value = *lock_ptr;
+    *lock_ptr = LOCKED;
+    // -- End of atomic segment --
+
+    return old_value;
+}
+```
+```c
+#define FREE 0
+#define BUSY 1
+
+int lock = FREE;
+
+void enter_critical_section() {
+    while (test_and_set(&lock) == BUSY)
+        ;   // spin (busy wait)
+}
+
+void leave_critical_section() {
+    lock = FREE;
+}
+```
+* First thread:
+  * Reads FREE
+  * Sets lock to BUSY
+  * Enters critical section
+* Others:
+  * Spin until lock is released
+
+An alternative instruction to TSL is XCHG, which exchanges the contents of two
+locations atomically, for example, a register and a memory word. it is essentially the same as the solution with
+TSL. All Intel x86 CPUs use XCHG instruction for low-level synchronization.
+```assembly
+enter region:
+  MOVE REGISTER,#1 | put a 1 in the register
+  XCHG REGISTER,LOCK | swap the contents of the register and lock variable
+  CMP REGISTER,#0 | was lock zero?
+  JNE enter region | if it was non zero, lock was set, so loop
+  RET | return to caller; critical region entered
+leave region:
+  MOVE LOCK,#0 | store a 0 in lock
+  RET
+```
+
+**Key Characteristics**
+
+* Mutual Exclusion: Guarantees only one process is in the critical section.
+* Hardware-Based(Hardware guarantees): Relies on atomic CPU instructions (like LOCK XCHG on x86) for speed and correctness.
+  * Is atomic at the hardware level
+  * Locks the memory bus or Uses cache coherence (MESI protocol)
+  * Includes implicit memory barriers
+  * So: No reordering across the instruction, All cores see the update consistently.
+* Busy-Waiting: Competitors constantly test the lock, consuming CPU cycles (spinning), which can be inefficient.
+* No Fairness: Doesn’t guarantee which waiting process gets the lock next (not FIFO).
+* Simplicity: Simple to implement with minimal storage (one variable). 
+
+**Timeline Example (Two CPUs)**
+|     |     |     |
+| --- | --- | --- |
+| Time	 | CPU 0	 | CPU 1 |
+| t1	 | TSL → returns 0 | — |
+| t2	 | enters CS	 | TSL → returns 1 |
+| t3	 | in CS	 | spins |
+| t4	 | sets lock=0	 | — |
+| t5	 | —	 | TSL → returns 0, enters CS |
+✔ Mutual exclusion preserved
+
+**Comparison with Peterson’s Solution**
+|     |     |     |
+| --- | --- | --- |
+| Feature	 | Peterson | Test-and-Set |
+| Hardware support	 | ❌	 | - |
+| Atomicity	 | ❌	 | - |
+| Works on multicore	 | ❌	 | - |
+| Busy waiting	 | ❌	 | - |
+| Two threads only	 | ✅	 | ❌ (many threads) |
+
+**Cons**
+
+* The Busy Waiting Problem
+  * Why spinning is bad
+    * Wastes CPU cycles
+    * Especially bad if critical section is long
+  * But sometimes useful
+    * Very short critical sections
+    * Kernel code
+    * When context switches are expensive
+* Starvation and Fairness
+  * No fairness guarantee:A thread may spin forever if others repeatedly acquire the lock.
+    * Improved locks:
+    * Test-and-Test-and-Set
+    * Ticket locks
+    * Queue locks (MCS)
+
+**Real CPU Instructions**
+|     |     |
+| --- | --- |
+| Architecture	 | Instruction |
+| x86	 | LOCK XCHG, LOCK BTS |
+| ARM	 | LDREX / STREX |
+| RISC-V	 | AMOSWAP |
+All implement atomic read-modify-write.
+
+**Modern Alternatives & Improvements**
+
+* Test-and-Test-and-Set (TTAS): Adds a preliminary check to avoid atomic operations if the lock is already held, reducing contention.
+* Spin-Waiting Optimizations: Using PAUSE instructions or sleeping for short, back-off periods to yield CPU time.
+* OS-Provided Locks: For high-level apps, using OS mutexes (like std::mutex) is usually better as they allow the OS scheduler to sleep threads, avoiding wasted CPU
+
+**How Linux Implements Spinlocks (Conceptually)**
+
+In Linux, a spinlock is essentially: An atomic (variable + hardware atomic instructions + memory) barriers. At the lowest level, it relies on atomic read-modify-write instructions provided by the CPU.
+
+Linux spinlocks on x86 are built around XCHG with a memory operand. xchg reg, [mem] is implicitly atomic on x86
+It behaves like LOCK XCHG, even without the lock prefix. This is guaranteed by the x86 architecture.
+
+Spinlock Structure: Conceptually (not exact kernel code):
+```c
+typedef struct {
+    volatile int lock;
+} spinlock_t;
+```
+1. lock == 0 → unlocked
+2. lock == 1 → locked
+
+On x86, Linux uses an instruction like:
+```
+lock xchg reg, [lock]
+```
+xchg: swap the contents of the register and lock variable
+
+This is equivalent to Test-and-Set. What xchg guarantees:
+
+* Atomic across all cores
+* Includes full memory barrier
+* Locks the cache line, not registers
+
+Spinlock Acquire (Kernel Logic)
+```c
+void spin_lock(spinlock_t *l) {
+    while (atomic_xchg(&l->lock, 1) == 1) {
+        while (l->lock == 1)
+            cpu_relax();   // reduce power & bus pressure
+    }
+}
+```
+
+```
+spin_lock:
+    movl    $1, %eax          \ Prepare BUSY value, eax = 1 (BUSY)
+1:  xchgl   %eax, (%rdi)      \ Atomic test-and-set,atomic exchange with lock->locked
+    testl   %eax, %eax        \ Was old value 0?,was the lock previously free?
+    je      3f                \ yes → acquired lock
+
+2:  pause                     \ Hint to CPU while spinning, reduce contention
+    movl    (%rdi), %eax      \ read lock value
+    testl   %eax, %eax
+    jne     2b                \ still locked → spin
+    jmp     1b                \ try again
+
+3:  ret
+```
+This is called Test-and-Test-and-Set:
+
+* First spin on reads (cheap)
+* Then try atomic exchange (expensive)
+
+Spinlock Release
+```c
+void spin_unlock(spinlock_t *l) {
+    atomic_store(&l->lock, 0);  // release with memory barrier
+}
+```
+```assembly
+spin_unlock:
+    movl    $0, (%rdi)        \ release lock
+    ret
+```
+Linux kernel spinlocks are not directly accessible from user programs. In user space, we use:
+
+* pthread_spinlock_t
+* Or C11 atomics
+
+**Example:Two Threads Accessing Same Memory (User Space)** 
+
+Example Using pthread_spinlock_t
+
+Shared Data
+```c
+#include <pthread.h>
+#include <stdio.h>
+
+int shared_counter = 0;
+pthread_spinlock_t lock;
+```
+Thread Function
+```c
+void* worker(void* arg) {
+    for (int i = 0; i < 1000000; i++) {
+        pthread_spin_lock(&lock);
+        shared_counter++;
+        pthread_spin_unlock(&lock);
+    }
+    return NULL;
+}
+```
+Main Program
+```c
+int main() {
+    pthread_t t1, t2;
+
+    pthread_spin_init(&lock, PTHREAD_PROCESS_PRIVATE);
+
+    pthread_create(&t1, NULL, worker, NULL);
+    pthread_create(&t2, NULL, worker, NULL);
+
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+
+    printf("Final counter value: %d\n", shared_counter);
+
+    pthread_spin_destroy(&lock);
+    return 0;
+}
+```
+What Happens at Runtime
+
+* Both threads run on one or more cores
+* Both try to increment shared_counter
+* Only one thread at a time enters the critical section
+* Spinlock prevents race conditions
+* Final output: Final counter value: 2000000
+
+## Busy locking limitations
+Spinlocks are not evil, but they must obey strict rules:
+Safe when:
+- Critical section is very short
+- Lock holder is currently running
+- Kernel context (no sleeping allowed)
+- SMP systems with low contention
+
+Dangerous when:
+- User-space
+- Priority scheduling
+- Preemptive systems
+- Long critical sections
+
+* Spinlock is not suitable for long-running critical sections
+* Spinlock can lead to high CPU usage and reduced performance
+* Spinlock can cause priority inversion
+
+Both Peterson’s solution and the solutions using TSL or XCHG are correct, but
+both have the defect of requiring busy waiting. In essence, what these solutions do
+is this: when a process wants to enter its critical region, it checks to see if the entry
+is allowed. If it is not, the process just sits in a tight loop burning the CPU while
+waiting until it is.
+
+In Peterson, TSL, and XCHG-based spinlocks, the logic is: "If I can’t enter the critical section, keep checking in a tight loop."
+That tight loop:
+- Executes instructions
+- Consumes CPU cycles
+- Does not block
+- Does not yield the CPU
+
+So the process stays in the RUNNING state.
+
+Not only does this approach waste CPU time, but it can also have unexpected effects. busy waiting is not just inefficient, but can be incorrect in the presence of priorities.
+
+Consider a computer with two processes:
+- H, with high priority,
+- and L, with low priority. 
+
+The scheduling rules are such that: H is run whenever it is in ready state. 
+
+At a certain moment, with L enters the critical section:
+- L acquires the lock
+- L is preempted or running
+- L is in the critical section
+    * Lock is held by L
+    * L must run again to release it
+- Suddenly, H becomes ready (e.g., I/O completes)
+    * Scheduler immediately switches to H
+    * Because H has higher priority
+- H tries to enter critical section
+    * Lock is busy
+    * H starts busy waiting:
+    ```
+      while (lock == BUSY);
+    ```
+- H is now: Running, Consuming CPU, Never blocking
+- Because: H is always ready, H has higher priority ➡️ L never gets scheduled
+- L never gets the chance to leave its critical region, so H loops forever, so this cause 
+    * L cannot run
+    * L cannot exit critical section
+    * Lock is never released
+    * H spins forever
+    
+    Even though:
+    * The critical section is short
+    * The system is not deadlocked logically
+
+This situation is sometimes referred to as a variant of the priority inversion problem.
+<!--Why This Is a Form of Priority Inversion-->
+in Classic priority inversion:
+- Low-priority process blocks a high-priority one
+- Medium-priority processes make it worse
+
+Here, the inversion is self-inflicted by busy waiting:
+- Low-priority L holds a resource
+- High-priority H prevents L from running
+- High-priority process is blocked by a lower-priority one
+
+But instead of sleeping, H is actively blocking progress.
+```
+Time
+│
+│  L runs
+│  ──────────────────────────────
+│  L acquires lock
+│  L enters critical section
+│
+│  I/O completes → H becomes READY
+│
+│  Scheduler preempts L
+│
+│  H runs
+│  ──────────────────────────────
+│  H tries to acquire lock
+│  lock is BUSY
+│
+│  H enters busy-wait loop
+│  while(lock == BUSY) { }
+│
+│  H keeps running (READY → RUNNING)
+│
+│  Scheduler decision point
+│  ──────────────────────────────
+│  H is READY and has higher priority than L
+│
+│  → Scheduler selects H again
+│
+│  H runs
+│  ──────────────────────────────
+│  Still spinning
+│
+│  (Repeat forever)
+│
+│  L never runs again
+│  L never releases lock
+│
+└── SYSTEM STUCK
+```
+as you can see The process that must run to make progress (L) is never scheduled. This is not a deadlock — it is a scheduling-induced livelock.
+
+Busy waiting wastes CPU time and can cause a form of priority inversion: if a high-priority process spins on a lock held by a low-priority process, the scheduler may never run the low-priority process, preventing it from releasing the lock and causing the high-priority process to wait forever.
+
+Busy waiting assumes the lock holder will run soon — priority scheduling breaks that assumption.
+
+**How Operating Systems Fix This**
+
+Use blocking primitives
+- Semaphores
+- Mutexes
+- Condition variables
+Priority inheritance
+- Temporarily boost L’s priority to H’s level
+- L runs, releases lock
+- Priority restored

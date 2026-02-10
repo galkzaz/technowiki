@@ -45,6 +45,10 @@ const config: Config = {
             ],
           ],
           rehypePlugins: [rehypeKatex],
+          admonitions: {
+            keywords: ["question"],
+            extendDefaults: true,
+          },
         },
         blog: false,
         theme: {
@@ -63,9 +67,13 @@ const config: Config = {
     [require.resolve("@easyops-cn/docusaurus-search-local"), { hashed: true }],
   ],
   themeConfig: {
-    colorMode: { defaultMode: "light" },
+    colorMode: {
+      defaultMode: "light",
+      disableSwitch: false,
+      respectPrefersColorScheme: true,
+    },
     prism: {
-          defaultLanguage: 'tsx',
+      defaultLanguage: "tsx",
     },
     docs: {
       sidebar: {
@@ -77,12 +85,13 @@ const config: Config = {
       maxHeadingLevel: 6,
     },
     navbar: {
-      title: 'TechnoWiki',
+      title: "TechnoWiki",
       logo: {
         src: "img/logo.svg",
         alt: "",
       },
-      style: "dark",
+      //style: "primary",
+      hideOnScroll: true,
       items: [
         {
           label: "Computer Science",
@@ -141,7 +150,7 @@ const config: Config = {
             },
             {
               label: "Programming Languages",
-              to: "/software-systems/programming-languages/c-lang",
+              to: "/software-systems/programming-languages/c-lang/Introduction",
             },
             {
               label: "Operating Systems",
@@ -153,9 +162,12 @@ const config: Config = {
               label: "Distributed Systems",
               to: "/software-systems/distributed-systems",
             },
+            {
+              label: "Parallel Computing",
+              to: "/software-systems/parallel-computing/parallel-computing",
+            },
           ],
         },
-
         {
           label: "Embedded Systems",
           position: "right",

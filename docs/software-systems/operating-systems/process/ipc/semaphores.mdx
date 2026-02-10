@@ -1,0 +1,740 @@
+---
+id: process-ipc-semaphores
+title: Semaphores
+description: Semaphores
+---
+## Dijkstra’s semaphore proposal
+By the mid-1960s, people had already discovered:
+- Busy waiting (Peterson, TSL, XCHG) → wastes CPU, priority inversion
+- sleep / wakeup → lost wakeups
+- Wakeup bits → do not scale (finite memory)
+
+E. W. Dijkstra (1965) suggested using an
+integer variable to count the number of wakeups saved for future use. In his initial
+proposal, a new variable type, which he called a semaphore, was introduced. A semaphore could have the value 0, indicating that no wakeups were saved, or some
+positive value if one or more wakeups were pending.
+
+Dijkstra proposed having two operations on semaphores, now usually called
+down and up (generalizations of sleep and wakeup, respectively).
+
+In Dijkstra’s original paper, he used the names P and V instead of
+down and up, respectively. Since these have no mnemonic significance to people
+who do not speak Dutch and only marginal significance to those people who do—
+Proberen (try) and Verhogen (raise, make higher)—we will use the terms down and
+up instead.
+
+A **semaphore** is an integer variable shared between processes, with two atomic operations:
+- P (from proberen — “to test”)
+- V (from verhogen — “to increment”)
+
+No other operations are allowed. Formally:
+```
+Semaphore S is an integer ≥ 0
+```
+You are not allowed to read or write it directly.
+
+1. The down operation on a semaphore: 
+    - checks to see if the value is greater than 0. 
+    - If so, it decrements the value (i.e., uses up one stored wakeup) and just continues. 
+        ```
+        P(S):
+            while S == 0:
+                sleep
+            S = S - 1
+        ```
+    - If the value is 0, the process is put to sleep without completing the down for the moment. 
+    - Checking the value, changing it, and possibly going to sleep, are all done as a single, indivisible atomic action(The test, decrement, and sleep are atomic.). 
+1. The up operation 
+    - increments the value of the semaphore addressed. 
+    - If one (or more) processes were sleeping on that semaphore, unable to complete an earlier down operation, one of them is chosen by the system (e.g., at random) and is allowed to complete its down. 
+        ```
+        V(S):
+            S = S + 1
+            if some process is sleeping on S:
+                wake one of them
+        ```
+    - After an up on a semaphore with processes sleeping on it, the semaphore will still have the value of 0. However, there will be one fewer process sleeping on it. 
+    - The operation of incrementing the semaphore and waking up one process is also indivisible. No process ever blocks doing an up, just as no process ever blocks doing a wakeup in the earlier model.
+
+It is guaranteed that once a semaphore operation has
+started, no other process can access the semaphore until the operation has completed or blocked. This atomicity is absolutely essential to solving synchronization
+problems and avoiding race conditions. Atomic actions, in which a group of related
+operations are either all performed without interruption or not performed at all, are
+extremely important in many other areas of computer science as well.
+
+Dijkstra’s insight: Synchronization is counting, not signaling. Instead of remembering that something happened, we must remember how many times it happened.
+
+Dijkstra’s semaphore is an integer synchronization primitive accessed only through atomic P and V operations; by counting events rather than signaling them, it avoids busy waiting and lost wakeups and enables correct solutions to mutual exclusion and resource allocation problems.
+
+Dijkstra was strict:
+- No reading the value
+- No setting the value
+- No conditional checks
+- Only P and V
+
+Why? Because:
+-  Any extra access breaks atomicity
+-  Leads straight back to lost wakeups
+
+This discipline is what makes semaphores correct.
+
+<!--Why semaphores work (the key guarantees)-->
+Dijkstra proved that semaphores guarantee:
+- No lost wakeups
+    * Every V increments the count
+    * Wakeups are never forgotten
+- No busy waiting
+    * Processes block when S == 0
+- Mutual exclusion
+    * Binary semaphore (S = 1)
+- Resource counting
+    * Counting semaphore (S = N)
+- Progress
+    * If a process can proceed, it eventually will
+
+This is not accidental — it’s by construction.
+
+**What makes Dijkstra’s proposal revolutionary**
+
+Before semaphores:
+-  Ad-hoc fixes
+-  Special cases
+-  Subtle race bugs
+-  Informal reasoning
+
+After semaphores:
+-  One abstraction
+-  Simple rules
+-  Formal proofs
+-  Composable solutions
+
+**Relation to modern OS primitives**
+| Concept          | Descendant              |
+| ---------------- | ----------------------- |
+| Semaphore        | POSIX `sem_t`           |
+| P / V            | `sem_wait` / `sem_post` |
+| Atomic sleep     | Linux wait queues       |
+| Counter          | futex value             |
+| Proof-based sync | monitors, CVs           |
+Linux internally:
+-  Uses spinlocks + wait queues
+-  Exposes futex-based semaphores to user space
+
+## Binary vs counting semaphores
+**Binary semaphore (mutex)**
+```
+sem mutex = 1;
+
+P(mutex);   // enter critical section
+critical();
+V(mutex);   // exit
+```
+Guarantees:
+-  Only one process inside
+
+**Counting semaphore (resource pool)**
+```
+sem empty = N;
+sem full  = 0;
+```
+Tracks:
+-  Number of empty slots
+-  Number of full slots
+This is exactly what wakeup bits failed to do.
+
+## Solving the Producer-Consumer Problem Using Semaphores
+Semaphores solve the lost-wakeup problem To make
+them work correctly, it is essential that they be implemented in an indivisible way.
+
+The normal way is to implement up and down as system calls, with the operating
+system briefly disabling all interrupts while it is testing the semaphore, updating it,
+and putting the process to sleep, if necessary. As all of these actions take only a
+few instructions, no harm is done in disabling interrupts. 
+
+If multiple CPUs are being used:
+- each semaphore should be protected by a lock variable, with the ``TSL`` or
+``XCHG`` instructions used to make sure that only one CPU at a time examines the
+semaphore.
+- Be sure you understand that using TSL or XCHG to prevent several CPUs from
+accessing the semaphore at the same time is quite different from the producer or
+consumer busy waiting for the other to empty or fill the buffer. The semaphore
+operation will take only a few nanoseconds, whereas the producer or consumer
+might take arbitrarily long.
+
+Producer:
+```
+P(empty);
+P(mutex);
+insert_item();
+V(mutex);
+V(full);
+```
+Consumer:
+```
+P(full);
+P(mutex);
+remove_item();
+V(mutex);
+V(empty);
+```
+Why this is perfect:
+- No lost wakeups
+- No deadlock
+- No starvation (with fair scheduling)
+- Scales to m producers / n consumers
+
+This solution uses three semaphores: 
+1. one called **full** for counting the number of
+slots that are full, 
+2. one called **empty** for counting the number of slots that are empty,
+3. and one called **mutex** to make sure the producer and consumer do not access the
+buffer at the same time. 
+
+```
+mutex  → protects buffer
+empty  → counts empty slots
+full   → counts filled slots
+```
+Full is initially 0, empty is initially equal to the number of
+slots in the buffer, and mutex is initially 1.
+
+Semaphores that are initialized to 1 and
+used by two or more processes to ensure that only one of them can enter its critical
+region at the same time are called **binary semaphores**. If each process does a
+down just before entering its critical region and an up just after leaving it, mutual
+exclusion is guaranteed.
+
+<Tabs>
+<TabItem value="producer-consumer1" label="The producer-consumer problem using semaphores">
+
+```c title="The producer-consumer problem using semaphores"
+#define N 100 / * number of slots in the buffer * /
+typedef int semaphore; / * semaphores are a special kind of int * /
+
+semaphore mutex = 1; / * controls access to critical region * /
+semaphore empty = N; / * counts empty buffer slots * /
+semaphore full = 0; / * counts full buffer slots * /
+
+void producer(void)
+{
+    int item;
+    while (TRUE) { / * TRUE is the constant 1 * /
+        item = produce_item( ); /* generate something to put in buffer * /
+        down(&empty); / * decrement empty count * /
+        down(&mutex); / * enter critical region * /
+        insert_item(item); / * put new item in buffer * /
+        up(&mutex); /* leave critical region * /
+        up(&full); /* increment count of full slots * /
+    }
+}
+void consumer(void)
+{
+    int item;
+    while (TRUE) { / * infinite loop * /
+        down(&full); / * decrement full count * /
+        down(&mutex); / * enter critical region * /
+        item = remove_item( ); /* take item from buffer * /
+        up(&mutex); /* leave critical region * /
+        up(&empty); /* increment count of empty slots * /
+        consume_item(item); / * do something with the item * /
+    }
+}
+```
+
+
+</TabItem>
+<TabItem value="Another Implementaion" label="Another Implementaion">
+
+```c
+#define N 10
+
+int buffer[N];
+int count = 0;
+
+int mutex = 1;
+
+// Producer (naive)
+void producer(void)
+{
+    while (1) {
+        item x = produce();
+
+        while (mutex == 0) ;   // enter critical section
+        mutex = 0;
+
+        if (count == N) {
+            mutex = 1;
+            sleep(&count);     // sleep if buffer full
+        }
+
+        buffer[count++] = x;
+
+        mutex = 1;
+        wakeup(&count);        // wake consumer
+    }
+}
+
+// Consumer (naive)
+void consumer(void)
+{
+    while (1) {
+        while (mutex == 0) ;
+        mutex = 0;
+
+        if (count == 0) {
+            mutex = 1;
+            sleep(&count);     // sleep if buffer empty
+        }
+
+        item x = buffer[--count];
+
+        mutex = 1;
+        wakeup(&count);        // wake producer
+
+        consume(x);
+    }
+}
+```
+
+</TabItem>
+</Tabs>
+
+```c title="Complete semaphore-based solution"
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdio.h>
+#include <unistd.h>
+
+#define N 2
+
+int buffer[N];
+int in = 0, out = 0;
+
+sem_t mutex;
+sem_t empty;
+sem_t full;
+
+// Producer
+void* producer(void* arg)
+{
+    int id = *(int*)arg;
+
+    sleep(1);
+    printf("Producer %d: producing item\n", id);
+
+    sem_wait(&empty);    // wait for empty slot
+    sem_wait(&mutex);    // enter critical section
+
+    buffer[in] = id;
+    in = (in + 1) % N;
+
+    printf("Producer %d: inserted item\n", id);
+
+    sem_post(&mutex);    // exit critical section
+    sem_post(&full);     // signal item available
+
+    return NULL;
+}
+
+// Consumer
+void* consumer(void* arg)
+{
+    int item;
+
+    for (int i = 0; i < 2; i++) {
+        sem_wait(&full);     // wait for item
+        sem_wait(&mutex);    // enter critical section
+
+        item = buffer[out];
+        out = (out + 1) % N;
+
+        printf("Consumer: consumed item %d\n", item);
+
+        sem_post(&mutex);    // exit critical section
+        sem_post(&empty);    // signal empty slot
+    }
+
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t p1, p2, c;
+    int id1 = 1, id2 = 2;
+
+    sem_init(&mutex, 0, 1);
+    sem_init(&empty, 0, N);
+    sem_init(&full, 0, 0);
+
+    pthread_create(&c, NULL, consumer, NULL);
+    pthread_create(&p1, NULL, producer, &id1);
+    pthread_create(&p2, NULL, producer, &id2);
+
+    pthread_join(p1, NULL);
+    pthread_join(p2, NULL);
+    pthread_join(c, NULL);
+
+    sem_destroy(&mutex);
+    sem_destroy(&empty);
+    sem_destroy(&full);
+
+    return 0;
+}
+
+```
+**Why semaphores fix everything**
+| Problem             | wakeup_waiting | semaphore   |
+| ------------------- | -------------- | ----------- |
+| Lost wakeups        | ❌              | ✅           |
+| Multiple producers  | ❌              | ✅           |
+| Counting events     | ❌ (1 bit)      | ✅ (integer) |
+| Atomic sleep        | ❌              | ✅           |
+| Progress guaranteed | ❌              | ✅           |
+
+## The Readers and Writers Problem Using Semaphores
+## Implementaions of Semaphores in linux
+Linux POSIX semaphores (sem_t) are not implemented entirely in the kernel — rather:
+ - The glibc (C library) provides the sem_init, sem_wait, sem_post, etc. API.
+ - These calls operate mostly in user space using atomic operations.
+ - Only when contention occurs do they make a futex system call into the kernel. 
+In other words:
+Linux semaphores are built on top of futexes, using the futex interface to block and wake threads efficiently. 
+
+📦 2) What is a Futex?
+A futex (“fast userspace mutex”) is a kernel system call that programs use to build synchronization primitives such as:
+ - Semaphores
+ - Mutexes
+ - Condition variables
+ - Read-write locks
+A futex is simply:
+A four-byte integer in shared memory that both user space and the kernel understand. 
+Futex operations
+The futex syscall generally takes three key parameters:
+futex(uaddr, FUTEX_WAIT, val, timeout);
+futex(uaddr, FUTEX_WAKE, nr_wake);
+Where:
+ - uaddr = address of the futex word in user memory
+ - FUTEX_WAIT = “block if value equals expected”
+ - FUTEX_WAKE = “wake up N waiters” 
+Key design point
+ - Uncontended fast path: all work happens in user space with atomics (no syscall).
+ - Contended path: the thread issues FUTEX_WAIT → enters kernel wait queue.
+ - Waker threads issue FUTEX_WAKE → kernel wakes N threads. 
+This hybrid design avoids expensive syscalls in the common uncontended case.
+
+🛠️ 3) The futex() System Call Implementation Path
+User-space perspective
+The first thing semaphores do is manipulate a counter:
+```
+if (atomic_decrement_if_positive(&sem->value)) {
+    // success without kernel
+} else {
+    futex(uaddr, FUTEX_WAIT, expected_value, NULL);
+}
+```
+If the counter is zero, the thread issues a FUTEX_WAIT syscall. 
+Kernel inspection of futex
+When the kernel receives a futex() syscall (e.g., FUTEX_WAIT or FUTEX_WAKE), it enters code in the futex subsystem:
+📌 Entry is typically in:
+ - kernel/futex/core.c
+ - kernel/futex/waitwake.c
+Links to actual source on GitHub:
+🔗 futex core: https://github.com/torvalds/linux/blob/master/kernel/futex/core.c 
+🔗 wait & wake code: https://github.com/torvalds/linux/blob/master/kernel/futex/waitwake.c 
+Rough outline of the kernel path
+```
+int sys_futex(u32 __user *uaddr, int futex_op, u32 val, ...) {
+    if (op == FUTEX_WAIT) {
+        hash_bucket = hash_futex(uaddr);     // pick a hash bucket
+        spin_lock(&hash_bucket->lock);
+
+        if (get_user(uval, uaddr) != expected)
+            return -EAGAIN;                  // value changed → user should retry
+
+        queue_me_on_waitqueue(&queue, hash_bucket);
+        spin_unlock(&hash_bucket->lock);
+
+        schedule();                          // block this thread
+        return 0;
+    }
+
+    if (op == FUTEX_WAKE) {
+        hash_bucket = hash_futex(uaddr);
+        spin_lock(&hash_bucket->lock);
+
+        wake_up_n_waiters(hash_bucket, nr_wake);
+
+        spin_unlock(&hash_bucket->lock);
+        return nr_wake;
+    }
+    // other futex ops exist...
+}
+```
+This is a simplification but captures the main idea:
+    1. The kernel hashes the futex word’s address to find a wait queue.
+    2. On FUTEX_WAIT, the kernel safely checks the value and enqueues the thread if needed.
+    3. On FUTEX_WAKE, it wakes up waiters.
+All of this happens inside the kernel. 
+
+🧱 4) Simplified Semaphore Code Using Futex (Conceptually)
+Here’s a conceptual pseudosource for how semaphores are implemented in user space using futex:
+```
+void sem_wait(sem_t *sem) {
+    // atomic_decr_if_pos returns true if sem->value > 0 and decrements
+    if (atomic_decr_if_pos(&sem->value))
+        return;
+
+    // else block
+    futex(&sem->value, FUTEX_WAIT, sem->value, NULL);
+}
+
+void sem_post(sem_t *sem) {
+    atomic_fetch_add(&sem->value, 1);
+    futex(&sem->value, FUTEX_WAKE, 1);
+}
+```
+This pseudosource:
+✔ Decrements the semaphore if possible without kernel
+✔ Calls futex(FUTEX_WAIT) only when the down operation cannot proceed
+✔ Calls futex(FUTEX_WAKE) to wake one waiting thread when posting
+This structure is effectively what glibc does on top of the futex syscall. 
+
+🧠 5) How Linux Semaphores Work in Practice
+POSIX semaphores (sem_t)
+ - Implemented in glibc using futexes for blocking. 
+Kernel internals
+ - The kernel futex implementation tracks:
+        ◦ A hash table of futex wait queues keyed by the address of the futex word in user space. 
+        ◦ Wait queues where threads block.
+        ◦ Wake-ups performed by futex syscalls.
+Library layering
+In glibc:
+ - sem_waitcommon.c contains the core logic that handles:
+        ◦ Decrementing the value
+        ◦ Managing possible blocked threads
+        ◦ Issuing futex calls only when necessary 
+
+🧾 6) Source Code References (exact)
+Here are the relevant kernel source files you can browse:
+📌 Futex hash + core logic
+→ https://github.com/torvalds/linux/blob/master/kernel/futex/core.c 
+📌 Wait and wake logic
+→ https://github.com/torvalds/linux/blob/master/kernel/futex/waitwake.c 
+📌 Futex syscall definitions
+→ https://github.com/torvalds/linux/blob/master/kernel/syscalls/futex.c
+(not shown above but part of the same module)
+
+🧩 Summary — How Linux Implements Semaphores
+🔹 User space
+ - POSIX semaphore APIs (sem_wait/sem_post) are implemented in glibc. 
+ - They use atomic user-space operations to avoid syscalls when uncontended.
+ - When contention is needed, they invoke futex syscalls.
+🔹 Kernel space
+ - Futex syscalls enter the Linux futex implementation.
+ - The kernel manages wait queues keyed by futex addresses. 
+ - The core futex functions handle blocking (FUTEX_WAIT) and waking (FUTEX_WAKE) threads. 
+🔹 Why this works
+ - Fast path avoids kernel involvement when possible.
+ - Sleep/wake blocking is handled by the kernel efficiently.
+ - Higher-level constructs (mutexes, semaphores, cond vars) are built on top of futexes. 
+
+If you’d like, I can also show an actual C implementation of semaphores using futex directly (no pthreads), with working example code that blocks/wakes using futex syscalls.
+
+Below is a minimal, working semaphore implementation built directly on Linux futexes, with no pthread mutexes, no condition variables, no glibc semaphores. This is as close as you can get in user space to how Linux actually does it.
+We’ll go in this order:
+    1. Design (what we’re building)
+    2. Exact futex wrappers
+    3. Semaphore implementation (P / V)
+    4. Example: 2 threads competing for a critical section
+    5. Exact futex syscall path mapping
+
+1️⃣ Design: futex-based semaphore
+We implement Dijkstra’s semaphore:
+S >= 0
+P(S): wait / down
+V(S): signal / up
+Key idea (Linux-style):
+ - The semaphore value is an atomic integer
+ - Fast path:
+        ◦ Try to decrement atomically
+        ◦ If success → stay in user space
+ - Slow path:
+        ◦ If value < 0 → sleep using futex(FUTEX_WAIT)
+ - Wakeup:
+        ◦ Increment value
+        ◦ Call futex(FUTEX_WAKE) to wake one waiter
+
+2️⃣ Futex syscall wrapper (raw Linux)
+```c
+#define _GNU_SOURCE
+#include <linux/futex.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <stdint.h>
+
+static int futex_wait(int *addr, int val)
+{
+    return syscall(SYS_futex, addr, FUTEX_WAIT, val, NULL, NULL, 0);
+}
+
+static int futex_wake(int *addr, int n)
+{
+    return syscall(SYS_futex, addr, FUTEX_WAKE, n, NULL, NULL, 0);
+}
+```
+This maps directly to:
+sys_futex()
+ └── futex_wait()
+ └── futex_wake()
+in the kernel.
+
+3️⃣ Semaphore implementation (core logic)
+```c
+Semaphore structure
+typedef struct {
+    int value;
+} sem_t;
+```
+Initialize semaphore
+```c
+void sem_init(sem_t *s, int initial)
+{
+    s->value = initial;
+}
+```
+P operation (sem_wait)
+```c
+void sem_wait(sem_t *s)
+{
+    int old;
+
+    while (1) {
+        old = __atomic_load_n(&s->value, __ATOMIC_RELAXED);
+
+        if (old > 0) {
+            if (__atomic_compare_exchange_n(
+                    &s->value, &old, old - 1,
+                    0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+                return;  // fast path success
+        } else {
+            // Sleep while value == 0
+            futex_wait(&s->value, 0);
+        }
+    }
+}
+```
+✔ atomic decrement
+✔ no busy waiting
+✔ blocks correctly
+
+V operation (sem_post)
+```c
+void sem_post(sem_t *s)
+{
+    int old = __atomic_fetch_add(&s->value, 1, __ATOMIC_RELEASE);
+
+    if (old == 0) {
+        // Someone might be waiting
+        futex_wake(&s->value, 1);
+    }
+}
+```
+✔ increments count
+✔ wakes exactly one waiter
+
+4️⃣ Full working example (2 threads, same memory)
+```c
+Complete program
+#include <stdio.h>
+#include <pthread.h>
+#include <unistd.h>
+
+/* ---- include semaphore code from above ---- */
+
+sem_t sem;
+
+void* worker(void* arg)
+{
+    int id = *(int*)arg;
+
+    printf("Thread %d: waiting\n", id);
+    sem_wait(&sem);
+
+    printf("Thread %d: ENTER critical section\n", id);
+    sleep(1);
+    printf("Thread %d: LEAVE critical section\n", id);
+
+    sem_post(&sem);
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t t1, t2;
+    int id1 = 1, id2 = 2;
+
+    sem_init(&sem, 1);  // binary semaphore (mutex)
+
+    pthread_create(&t1, NULL, worker, &id1);
+    pthread_create(&t2, NULL, worker, &id2);
+
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+
+    return 0;
+}
+```
+Expected output
+Thread 1: waiting
+Thread 1: ENTER critical section
+Thread 2: waiting
+Thread 1: LEAVE critical section
+Thread 2: ENTER critical section
+Thread 2: LEAVE critical section
+✔ Mutual exclusion
+✔ No busy waiting
+✔ Correct blocking
+
+5️⃣ Exact Linux futex path (kernel mapping)
+When sem_wait() blocks:
+user space
+ └── syscall(SYS_futex)
+     └── sys_futex()
+         └── futex_wait()
+             └── futex_wait_queue_me()
+                 └── schedule()
+Kernel source:
+ - kernel/futex/core.c
+ - kernel/futex/waitwake.c
+When sem_post() wakes:
+user space
+ └── syscall(SYS_futex)
+     └── sys_futex()
+         └── futex_wake()
+             └── wake_up_q()
+This is exactly what glibc semaphores do — just with more edge-case handling.
+
+6️⃣ Why this is Dijkstra’s semaphore, literally
+Dijkstra concept	Linux futex version
+Integer S	int value
+P(S)	atomic dec + futex_wait
+V(S)	atomic inc + futex_wake
+Atomicity	CPU atomics + kernel
+No lost wakeups	futex value check
+No busy waiting	schedule()
+This is not an analogy — it is a direct implementation.
+
+🔑 Final insight (the big one)
+Linux futexes are not locks — they are a mechanism to build Dijkstra’s semaphore correctly with minimal kernel involvement.
+Everything you’ve studied:
+ - wakeup bits ❌
+ - sleep/wakeup ❌
+ - busy waiting ❌
+…all collapse into this one clean design.
+
+If you want next, I can:
+ - Extend this to counting semaphores
+ - Add timeout support
+ - Show why spurious wakeups are safe
+ - Compare this with condition variables
+ - Walk through the exact kernel code line-by-line

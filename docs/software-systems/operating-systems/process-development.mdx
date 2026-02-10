@@ -1,8 +1,57 @@
 ---
 id: process-development
-title: Process Development
+title: Process
 description: Operating Systems Process Development
 ---
+## Process layout
+
+## Process memory layout
+```
+linux/
+├── include/
+│   ├── linux/
+│   │   ├── sched.h           ← task_struct
+│   │   ├── mm_types.h        ← mm_struct + vm_area_struct
+│   │   └── ...
+│   └── ...
+├── mm/                       ← memory management implementation code
+│   ├── mmap.c                ← mmap/munmap syscalls
+│   ├── mmu_context.c         ← page table switching
+│   └── ...
+├── arch/...
+```
+The mm/ directory is where most of the MM subsystem implementation lives.
+### mm_struct
+
+Definition of the main memory descriptor (process address space) in the Linux kernel source.
+
+This is the memory descriptor that defines a process’s virtual address space — it holds pointers to the page tables, the list of VMAs, and fields tracking start/end of text, data, heap, stack, etc.
+
+https://github.com/torvalds/linux/blob/master/include/linux/mm_types.h#L1075
+
+### task_struct
+This shows the task structure that contains a pointer to the mm_struct.
+
+Every thread/task in Linux references its address space via:
+```c
+struct task_struct {
+    //...
+    struct mm_struct *mm;       /* memory descriptor */
+    struct mm_struct *active_mm;/* used during context switch */
+}
+```
+
+This is how the scheduler and memory subsystem tie a running task to the memory layout it sees. 
+
+https://github.com/torvalds/linux/blob/master/include/linux/sched.h#L819
+### vm_area_struct
+Represents individual mapped regions (code, stack, heap, files) within a process’s address space. and is connected from mm_struct.
+
+VMAs are the elements linked from mm_struct->mmap to define each memory region.
+
+https://github.com/torvalds/linux/blob/master/include/linux/mm_types.h#L904
+
+## Process Life Cycle
 
 ## System calls
 This table shows the entire lifecycle of a UNIX process:
@@ -395,9 +444,9 @@ Threads, containers, and modern runtimes depend on it.
 * `sysdeps/unix/sysv/linux/clone-internal.c`
 
 #### Parameters
-* `flags` – resource sharing (VM, FS, files, signals)
-* `child_stack` – stack pointer
-* `ptid`, `ctid`, `tls` – thread bookkeeping
+* `flags` - resource sharing (VM, FS, files, signals)
+* `child_stack` - stack pointer
+* `ptid`, `ctid`, `tls` - thread bookkeeping
 
 #### Return value
 * child PID on success
@@ -602,7 +651,7 @@ Native POSIX Thread Library, the standard threading implementation for modern Li
 ***Implementation example***
 - [glibc pthread_cond_wait.c](https://codebrowser.dev/glibc/glibc/nptl/pthread_cond_wait.c.html)
 
-#### Read–Write Locks
+#### Read-Write Locks
 
 ***Functions***
 - `pthread_rwlock_init`, `pthread_rwlock_destroy`
@@ -784,9 +833,9 @@ This section maps ***each pthread attribute to its actual behavior on Linux****,
 * ***Kernel mapping***
 * Implemented using futexes.
 * ***Types***
-* `PTHREAD_MUTEX_NORMAL` – fastest, minimal checks
-* `PTHREAD_MUTEX_ERRORCHECK` – detects deadlocks
-* `PTHREAD_MUTEX_RECURSIVE` – tracks owner and lock count
+* `PTHREAD_MUTEX_NORMAL` - fastest, minimal checks
+* `PTHREAD_MUTEX_ERRORCHECK` - detects deadlocks
+* `PTHREAD_MUTEX_RECURSIVE` - tracks owner and lock count
 * ***Usage***
 * Use NORMAL for performance.
 * Use ERRORCHECK for debugging.
@@ -813,8 +862,8 @@ This section maps ***each pthread attribute to its actual behavior on Linux****,
 * ***Kernel mapping***
 * Timeout handled using high-resolution timers (`hrtimer`).
 * ***Clocks***
-* `CLOCK_REALTIME` – affected by system time changes.
-* `CLOCK_MONOTONIC` – stable, preferred.
+* `CLOCK_REALTIME` - affected by system time changes.
+* `CLOCK_MONOTONIC` - stable, preferred.
 * ***Usage***
 * Always use `CLOCK_MONOTONIC` for timed waits.
 

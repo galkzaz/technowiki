@@ -1,5 +1,5 @@
 ---
-id: c-lang
+id: Introduction
 title: Introduction
 description: C Programming Language 
 ---
@@ -81,7 +81,7 @@ libuv powers Node.js internally
 **📂 Database Management**
 
 * SQLite: The most used database engine in the world. It’s a serverless, file-based SQL database that is incredibly fast and reliable.
-* ODBC (unixODBC) – Generic SQL access
+* ODBC (unixODBC) - Generic SQL access
 * libpq: The official C client library for PostgreSQL.
 * MySQL Connector/C: The official driver for connecting to MySQL or MariaDB servers.
 * hiredis: A minimalistic C client library for the Redis database (perfect for high-speed caching).

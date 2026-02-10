@@ -126,8 +126,8 @@ Due to rounding and representation error, direct equality comparisons between fl
 
 Example: consider a practical example: three
 points p0 = (a, b), p1 = (c, d), and p2 = (e, f) in the Cartesian plane define an ordered
-pair of line segments (p0, p1) and (p1, p2). The value of the expression (c – a)*(f – b)
-– (d – b)*(e – a) can determine whether these two line segments are collinear (i.e.,
+pair of line segments (p0, p1) and (p1, p2). The value of the expression (c - a)*(f - b)
+- (d - b)*(e - a) can determine whether these two line segments are collinear (i.e.,
 on the same line). If the value is:
 
 * 0 then the segments are collinear
@@ -145,7 +145,7 @@ ing three points using the values of a to f in table
 | d = 165 | 165.0 | 165.0 |
 | e = 19 | 19.0 | 19.0 |
 | f = 95 | 95.0 | 95.0 |
-| (c – a)**(f – b – (d – b)**(e – a) | 4.8828125 E–4 | −4.547473508864641 E – 13 |
+| (c - a)**(f - b - (d - b)**(e - a) | 4.8828125 E-4 | −4.547473508864641 E - 13 |
 the three points p0, p1, and p2 are collinear on the line
 y = 5*x. When computing the floating-point computation test for collinearity, how‐
 ever, the errors inherent in floating-point arithmetic affect the result of the compu‐
@@ -222,7 +222,7 @@ Floating-point types have fixed precision regardless of magnitude.
 Examples:
 
 * Single precision (float) provides approximately 7 decimal digits.
-* Double precision (double) provides approximately 15–16 decimal digits.
+* Double precision (double) provides approximately 15-16 decimal digits.
 
 Adding a small value to a large value may have no effect:
 

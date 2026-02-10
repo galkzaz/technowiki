@@ -1,0 +1,387 @@
+---
+id: DataTypes
+title: Variables and DataTypes
+description: C Variables and DataTypes
+---
+Most programs need to perform a series of calculations before producing output, and thus need a way to store data temporarily during program execution. In C, as in most programming languages, these storage locations are called variables.
+## Identifiers
+As we’re writing a program, we’ll have to choose names for variables, functions,
+macros, and other entities. These names are called identifiers. 
+
+In C, an identifier
+may contain letters, digits, and underscores, but must begin with a letter or underscore. (In C99, identifiers may contain certain “universal character names” as well.).
+
+Here are some examples of legal identifiers:
+```
+times10 get_next_char _done
+```
+The following are not legal identifiers:
+```
+10times get-next-char
+```
+1. The symbol 10times begins with a digit, not a letter or underscore. 
+2. 2. get-next-char contains minus signs, not underscores.
+
+C is case-sensitive: it distinguishes between upper-case and lower-case letters
+in identifiers. For example, the following identifiers are all different:
+```
+job joB jOb jOB Job JoB JOb JOB
+```
+These eight identifiers could all be used simultaneously, each for a completely different purpose.
+
+Since case matters in C, many programmers follow the convention of using
+only lower-case letters in identifiers (other than macros), with underscores inserted
+when necessary for legibility:
+```
+symbol_table current_page name_and_address
+```
+C places no limit on the maximum length of an identifier, so you can use long, descriptive names. A name such as current_page is a lot easier to understand than a name like cp.
+
+### Keywords(Reserved Identifiers and Naming Restrictions in C)
+The following keywords have special significance to C compilers and therefore can’t be used as identifiers. Use of reserved identifiers in user programs results in undefined behavior, diagnostic errors, or linkage conflicts.
+```
+auto break case char const continue default do double else enum extern float for goto if  int long register return short signed sizeof static struct switch typedef union unsigned void volatile while
+```
+Five keywords were added in C99.
+```
+inline restrict _Bool _Complex _Imaginary
+```
+Because of C’s case-sensitivity, keywords must appear in programs exactly as shown in above, with all letters in lower case.
+
+Names of functions in the standard library (such as printf) contain only lower-case letters also. 
+
+Violations may cause:
+- Compilation failures
+- Linker symbol conflicts
+- Silent ABI mismatches
+- Undefined behavior
+- Non-portable code
+
+These failures may appear only:
+- On different compilers
+- With optimization enabled
+- After library upgrades
+
+#### Compiler-Reserved Keywords and Extensions
+The C standard defines a fixed set of keywords (int, return, struct, etc.).
+But many compilers add extensions treat some identifiers as if they were keywords.
+
+A C implementation may define additional keywords and treat certain identifiers as language extensions. Programs that declare or define identifiers matching these names have implementation-defined or undefined behavior.
+
+These identifiers are not portable.
+
+User programs shall not declare identifiers that are compiler extensions unless explicitly targeting that compiler and guarded by feature macros.
+ 
+| Identifier      | GCC       | Clang     | MSVC      | Meaning            |
+| --------------- | --------- | --------- | --------- | ------------------ |
+| `asm`           | ✔ keyword | ✔ keyword | ❌         | Inline assembly    |
+| `__asm__`       | ✔ keyword | ✔ keyword | ❌         | Inline assembly    |
+| `typeof`        | ✔ keyword | ✔ keyword | ❌         | Type inference     |
+| `__typeof__`    | ✔ keyword | ✔ keyword | ❌         | Type inference     |
+| `__inline__`    | ✔ keyword | ✔ keyword | ❌         | Inline function    |
+| `__declspec`    | ❌         | ❌         | ✔ keyword | Storage attributes |
+| `__forceinline` | ❌         | ❌         | ✔ keyword | Force inlining     |
+- ✔ = Treated as keyword
+- ❌ = Treated as identifier or rejected
+
+```
+int asm = 5;
+```
+| Compiler | Result              |
+| -------- | ------------------- |
+| GCC      | ❌ Compilation error |
+| Clang    | ❌ Compilation error |
+| MSVC     | ❌ Invalid syntax    |
+
+What happens if you use them?
+- Some compilers reject them outright
+- Others accept them but change their meaning
+- Code becomes non-portable
+```c
+int asm = 5;   // GCC will likely reject this
+int __asm__ = 5; // GCC will likely reject this
+int typeof = 5; // GCC will likely reject this
+int __typeof__ = 5; // GCC will likely reject this
+int __inline__ = 5; // GCC will likely reject this
+int __restrict__ = 5; // GCC will likely reject this
+int __attribute__ = 5; // GCC will likely reject this
+int __declspec__ = 5; // GCC will likely reject this
+```
+Even if it compiles today, it may fail on another compiler or with different flags.
+
+
+#### Standard Library Reserved Identifiers
+All identifiers declared by the C standard library are reserved for use by the implementation.
+
+User-defined identifiers shall not match any name defined or reserved by the C standard library.
+
+Anything defined by the C standard library is off-limits for your own use. That includes:
+- **Function names**: printf, malloc, strlen
+- **Types**: FILE, size_t, va_list
+- **Macros**: NULL, EOF, EXIT_SUCCESS
+- **Global objects**
+- **internal helper names**
+
+**Reserved Identifier Categories**
+| Category  | Examples                             |
+| --------- | ------------------------------------ |
+| Functions | `printf`, `malloc`, `free`, `strlen` |
+| Types     | `FILE`, `size_t`, `ptrdiff_t`        |
+| Macros    | `NULL`, `EOF`, `EXIT_SUCCESS`        |
+| Globals   | `stdin`, `stdout`, `stderr`          |
+
+Why this matters:
+- You may get linker errors
+- Or worse: silent conflicts with the real library
+```c
+int printf(const char *s) {   // Very bad idea
+    return 0;
+}
+```
+This can override or collide with the real printf, leading to undefined behavior.
+| Compiler | Result                                            |
+| -------- | ------------------------------------------------- |
+| GCC      | ⚠ Compiles, linker conflict or undefined behavior |
+| Clang    | ⚠ Same                                            |
+| MSVC     | ⚠ Same                                            |
+Behavior: Undefined. The implementation may call the user-defined printf or the library version unpredictably.
+
+#### Identifiers starting with underscore are restricted
+This is the most subtle rule — and the most violated.
+
+User programs should avoid all leading underscores, regardless of scope.
+
+Compilers and libraries need:
+- Private helper names
+- Macros and built-ins
+- ABI-level symbols
+
+The underscore rules guarantee they can add things without breaking user code. If user code could freely use:
+```c
+__builtin_memcpy
+```
+…everything would collapse 
+
+**Fully reserved (never use):**
+- Anything starting with two underscores: ```__foo```
+- Anything starting with underscore + uppercase letter: ```_Foo```
+
+These are reserved everywhere, for the compiler and standard library.
+
+**Conditionally reserved:**
+- Identifiers starting with a single underscore: ```_foo```
+
+These are reserved at file scope (global scope).
+```c
+int _count;     // ❌ reserved at global scope
+void f(void) {
+    int _temp;  // ✅ allowed (block scope)
+}
+```
+| Identifier | Global Scope | Local Scope |
+| ---------- | ------------ | ----------- |
+| `__foo`    | ❌ forbidden  | ❌ forbidden |
+| `_Foo`     | ❌ forbidden  | ❌ forbidden |
+| `_foo`     | ❌ forbidden  | ✔ allowed   |
+| `foo_`     | ✔ allowed    | ✔ allowed   |
+
+**Summary Table**
+| Pattern        | Scope       | Status         |
+| -------------- | ----------- | -------------- |
+| `__identifier` | All scopes  | Fully reserved |
+| `_Identifier`  | All scopes  | Fully reserved |
+| `_identifier`  | File scope  | Reserved       |
+| `_identifier`  | Block scope | Allowed        |
+
+| Identifier | Global Scope | Local Scope |
+| ---------- | ------------ | ----------- |
+| `__foo`    | ❌ forbidden  | ❌ forbidden |
+| `_Foo`     | ❌ forbidden  | ❌ forbidden |
+| `_foo`     | ❌ forbidden  | ✔ allowed   |
+| `foo_`     | ✔ allowed    | ✔ allowed   |
+
+In practice: don’t use leading underscores at all unless you’re writing system-level code.
+### conventions of naming
+Safe naming rules (the “don’t think, just do this” version), If you follow these, you’ll never have a problem:
+
+Use:
+```
+my_buffer
+file_count
+parse_token
+vector_push
+```
+Avoid:
+```
+asm
+printf
+FILE
+__thing
+_Temp
+_global
+```
+Best practice:
+- Use a project prefix:
+  ```
+      itam_asset_create()
+      clang_tokenize()
+  ```
+
+### conventions of naming in widely libraries
+## Data Types
+
+Every variable must have a type, which specifies what kind of data it will hold.
+
+Choosing the proper type is critical, since the type affects how the variable
+is stored and what operations can be performed on the variable.
+
+The type of a
+numeric variable determines the largest and smallest numbers that the variable can
+store; it also determines whether or not digits are allowed after the decimal point.
+
+### int
+
+A variable of type int (short for integer) can store a whole number such as 0,
+1, 392, or –2553.
+
+The range of possible values is limited, though. The largest int
+value is typically 2,147,483,647 but can be as small as 32,767.
+
+### float
+
+A variable of type float (short for floating-point) can store much larger
+numbers than an int variable.
+
+Furthermore, a float variable can store numbers
+with digits after the decimal point, like 379.125.
+
+float variables have drawbacks,
+however.
+
+- Arithmetic on float numbers may be slower than arithmetic on int
+  numbers.
+- Most significantly, the value of a float variable is often just an approximation of the number that was stored in it. If we store 0.1 in a float variable, we
+  may later find that the variable has a value such as 0.09999999999999987, thanks
+  to rounding error.
+
+## Variables
+
+### Declaration
+
+Variables must be declared—described for the benefit of the compiler—before they can be used.
+
+To declare a variable, we first specify the type of the variable, then its name. (Variable names are chosen by the programmer, subject to the rules
+described in bellow) For example, we might declare variables height and
+profit as follows:
+
+```c
+int height;
+float profit;
+```
+
+1. The first declaration states that height is a variable of type int, meaning that
+   height can store an integer value.
+1. The second declaration says that profit is a
+   variable of type float.
+
+If several variables have the same type, their declarations can be combined:
+```c
+int height, length, width, volume;
+float profit, loss;
+```
+Notice that each complete declaration ends with a semicolon.
+
+When main contains declarations, these must precede statements:
+```
+int main(void)
+{
+declarations
+statements
+}
+```
+this is true of functions in general, as well as blocks (statements that contain embedded declarations). 
+
+As a matter of style, it’s a good idea to leave a blank line between the declarations and the statements
+
+In C99, declarations don’t have to come before statements. For example,
+main might contain a declaration, then a statement, and then another declaration.
+it’s common in C++ and Java programs not to
+declare variables until they’re first needed, so this practice can be expected to
+become popular in C99 programs as well.
+
+### Assignment
+
+A variable can be given a value by means of **assignment**. For example, the statements
+```c
+height = 8;
+length = 12;
+width = 10;
+```
+assign values to height, length, and width. The numbers 8, 12, and 10 are said to be **constants**.
+
+Before a variable can be assigned a value—or used in any other way, for that matter—it must first be declared. Thus, we could write
+```c
+int height;
+height = 8;
+```
+but not
+```
+height = 8; /*** WRONG ***/
+int height;
+```
+
+A constant assigned to a float variable usually contains a decimal point. For
+example, if profit is a float variable, we might write
+```c
+int profit = 2150.48;
+```
+It’s best to append the letter f (for “float”) to a constant that contains a decimal
+point if the number is assigned to a float variable:
+```c
+int profit = 2150.48f;
+```
+Failing to include the f may cause a warning from the compiler.
+
+An int variable is normally assigned a value of type int, and a float vari-
+able is normally assigned a value of type float. Mixing types (such as assigning
+an int value to a float variable or assigning a float value to an int variable)
+is possible but not always safe
+
+Once a variable has been assigned a value, it can be used to help compute the
+value of another variable:
+```c
+int height = 8;
+int length = 12;
+int width = 10;
+int volume = height * length * width; /* volume is now 960 */
+```
+In C, * represents the multiplication operator, so this statement multiplies the values stored in height, length, and width, then assigns the result to the variable volume. 
+
+In general, the right side of an assignment can be a formula (or expression, in C terminology) involving constants, variables, and operators.
+
+### Initialization
+Some variables are automatically set to zero when a program begins to execute, but most are not. 
+
+A variable that doesn’t have a default value and hasn’t yet been assigned a value by the program is said to be **uninitialized**.
+
+Attempting to access the value of an uninitialized variable (for example, by displaying the variable using printf or using it in an expression) may yield an
+unpredictable result such as 2568, –30891, or some equally strange number. With some compilers, worse behavior—even a program crash—may occur.
+
+We can always give a variable an initial value by using assignment, of course. But there’s an easier way: put the initial value of the variable in its declaration. 
+
+For example, we can declare the height variable and initialize it in one step:
+```c
+int height = 8;
+```
+In C, the value 8 is said to be an **initializer**.
+
+Any number of variables can be initialized in the same declaration:
+```c
+int height = 8, length = 12, width = 10;
+```
+each variable requires its own initializer. 
+
+In the following example, the initializer 10 is good only for the variable width, not for height or length (which remain uninitialized):
+```c
+int height, length, width = 10;
+```

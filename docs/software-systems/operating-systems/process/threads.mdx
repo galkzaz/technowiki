@@ -1,0 +1,3229 @@
+---
+id: process-threads
+title: Threads
+description: Threads
+---
+
+In traditional operating systems, each process has an address space and a single
+thread of control. In fact, that is almost the definition of a process. Nevertheless, in
+many situations, it is useful to have multiple threads of control in the same address
+space running in quasi-parallel, as though they were (almost) separate processes
+(except for the shared address space).
+
+In modern UNIX implementations, each process can have multiple threads of execution. 
+
+The main reason for having threads is that in many
+applications, multiple activities are going on at once. Some of these may block
+from time to time. By decomposing such an application into multiple sequential
+threads that run in quasi-parallel, the programming model becomes simpler. Only now with threads we add a new ele-
+ment: the ability for the parallel entities to share an address space and all of its data
+among themselves. This ability is essential for certain applications, which is why
+having multiple processes (with their separate address spaces) will not work
+
+A second argument for having threads is that since they are lighter weight than
+processes, they are easier (i.e., faster) to create and destroy. In many systems,
+creating a thread goes 10-100 times faster than creating a process. When the num-
+ber of threads needed changes dynamically and rapidly, this property is useful to
+have.
+
+A third reason for having threads is also a performance argument. Threads
+yield no performance gain when all of them are CPU bound, but when there is sub-
+stantial computing and also substantial I/O, having threads allows these activities
+to overlap, thus speeding up the application.
+
+## Classical Thread Model
+The process model is based on two
+independent concepts: resource grouping and execution. Sometimes it is useful to
+separate them; this is where threads come in.
+
+One way of looking at a process is that it is a convenient way to group together
+related resources. A process has an address space that contains program text and
+data, as well as other resources. These resources may include open files, child
+processes, pending alarms, signal handlers, accounting information, and more. By
+putting them together in the form of a process, they can be managed more easily.
+
+So In the classical model, One process = one resource group + one execution. So If you want two things running at once, You create two processes Each process gets:
+
+* Its own memory
+* Its own files
+* Its own execution
+
+but This can be wasteful and slow: Duplicated memory,Expensive context switches, Hard to share data.
+
+A thread on the other hand is Execution only, It does not own resources, its
+
+* Share the same resource group
+* Have their own: Program counter, Registers, 
+
+Simple analogy
+
+* Process = an office
+* Threads = workers in that office
+* All workers: Share files, desks, printers (resources)
+* Each worker: Does their own task independently (execution)
+
+Example: Web server
+
+* Without threads:
+  * One process per request
+  * Each process:
+    * Loads its own copy of data
+    * Opens its own resources
+* With threads:
+  * One process:
+    * Owns memory, files, sockets
+  * Many threads:
+    * Handle requests in parallel
+    * Share cached data
+    * Run faster and cheaper
+
+The other concept a process has is a thread of execution, usually shortened to
+just thread. The thread has a program counter associated with it that keeps track
+of which instruction to execute next. It has registers, which hold its current work-
+ing variables. It also has a stack, which contains the thread’s execution history, one
+frame for each procedure called but not yet returned from. Although a thread must
+execute in some process, the thread and its process are different concepts and can
+be treated separately. Processes are used to group resources together; threads are
+the entities scheduled for execution on the CPU.
+
+What threads add to the process model is to allow multiple executions to take
+place in the same process environment (and address space), to a large degree inde-
+pendent of one another. Having multiple threads running in parallel in one process
+is analogous to having multiple processes running in parallel in one computer. In
+the former case, the threads share an address space and other resources. In the lat-
+ter case, processes share physical memory, disks, printers, and other resources.
+Because threads have some of the properties of processes, they are sometimes call-
+ed lightweight processes. The term multithreading is also used to describe the
+situation of allowing multiple threads in the same proces
+
+some CPUs have direct hardware support for multithreading and allow a thread
+switch to happen on a nanosecond time scale.
+
+When a multithreaded process is run on a single-CPU system, the threads take
+turns running. we saw how multiprogramming of processes works. By
+switching back and forth among multiple processes, the system gives the illusion
+of separate sequential processes running in parallel. Multithreading works the same
+way. The CPU switches rapidly back and forth among the threads, providing the
+illusion that the threads are running in parallel, albeit on a slower CPU. With three
+compute-bound threads in a process, the threads would appear to be running in par-
+allel, each one on a CPU with one-third the speed of the real CPU.
+
+The different threads in a process are not as independent as different processes.
+All threads have exactly the same address space, which means that they also share
+the same global variables. Since every thread can access every memory address
+within the process’ address space, one thread can read, write, or even wipe out an-
+other thread’s stack. There is no protection between threads because
++
+. it is impossible, and 
+. it should not be necessary.
+
+Unlike different processes, which may
+be from different users and which may be mutually hostile to one another, a proc-
+ess is always owned by a single user, who has presumably created multiple threads
+so that they can cooperate, not fight with each other. In addition to sharing an ad-
+dress space, all the threads can share the same set of open files, child processes,
+signals, alarms, and so forth
+| Per-process items | Per-thread items |
+| --- | --- |
+| Address space | Program counter |
+| Global variables | Registers |
+| Open files | Stack |
+| Child processes State |  |
+| Pending alarms |  |
+| Signals and signal handlers |  |
+| Accounting information |  |
+The first column lists some items shared by all threads in a process. The second one lists some items private to each thread.
+
+In above table The items in the first column are process properties, not thread properties. For
+example, if one thread opens a file, that file is visible to the other threads in the
+process and they can read and write it. This is logical, since the process is the unit
+of resource management, not the thread. If each thread had its own address space,
+open files, pending alarms, and so on, it would be a separate process. What we are trying to achieve with the thread concept is the ability for multiple threads of
+execution to share a set of resources so that they can work together closely to per-
+form some task.
+
+Like a traditional process (i.e., a process with only one thread), a thread can be
+in any one of several states: 
+
+* **running**:A running
+thread currently has the CPU and is active
+* **blocked**: In contrast, a blocked thread is waiting
+for some event to unblock it. For example, when a thread performs a system call to
+read from the keyboard, it is blocked until input is typed. A thread can block wait-
+ing for some external event to happen or for some other thread to unblock it.
+* **ready**: A
+ready thread is scheduled to run and will as soon as its turn comes up.
+* **terminated**
+
+The transitions between thread states are the same as those between process states
+
+Each thread has its own stack. Each thread’s stack contains one frame for each procedure called but
+not yet returned from. This frame contains the procedure’s local variables and the
+return address to use when the procedure call has finished. For example, if proce-
+dure X calls procedure Y and Y calls procedure Z, then while Z is executing, the
+frames for X, Y, and Z will all be on the stack. Each thread will generally call dif-
+ferent procedures and thus have a different execution history. This is why each
+thread needs its own stack.
+
+When multithreading is present, processes usually start with a single thread
+present. This thread has the ability to create new threads by calling a library proce-
+dure such as `thread_create`. A parameter to thread create specifies the name of a
+procedure for the new thread to run. It is not necessary (or even possible) to specify
+anything about the new thread’s address space, since it automatically runs in the
+address space of the creating thread. Sometimes threads are hierarchical, with a
+parent-child relationship, but often no such relationship exists, with all threads
+being equal. With or without a hierarchical relationship, the creating thread is
+usually returned a thread identifier that names the new thread.
+
+When a thread has finished its work, it can exit by calling a library procedure,
+say, `thread_exit`. It then vanishes and is no longer schedulable. In some thread systems, one thread can wait for a (specific) thread to exit by calling a procedure,
+for example, thread join. This procedure blocks the calling thread until a (specif-
+ic) thread has exited. In this regard, thread creation and termination is very much
+like process creation and termination, with approximately the same options as well.
+
+Another common thread call is `thread_yield`, which allows a thread to volun-
+tarily give up the CPU to let another thread run. Such a call is important because
+there is no clock interrupt to actually enforce multiprogramming as there is with
+processes. Thus, it is important for threads to be polite and voluntarily surrender
+the CPU from time to time to give other threads a chance to run. Other calls allow
+one thread to wait for another thread to finish some work, for a thread to announce
+that it has finished some work, and so on.
+
+so in the classical thread model:
+
+* Process: Resource container
+* Thread: Execution unit
+```
+Process
+ ├── Memory
+ ├── Open files
+ └── Threads
+      ├── Thread 1 (PC, registers, stack)
+      ├── Thread 2 (PC, registers, stack)
+      └── Thread 3 (PC, registers, stack)
+```
+
+## POSIX Threads
+To make it possible to write portable threaded programs, IEEE has defined a
+standard for threads in IEEE standard 1003.1c. The threads package it defines is
+called Pthreads. Most UNIX systems support it. The standard defines over 60
+function calls
+|     |     |
+| --- | --- |
+| Thread call | Description |
+| pthread create | Create a new thread |
+| pthread exit | Terminate the calling thread |
+| pthread join | Wait for a specific thread to exit |
+| pthread yield | Release the CPU to let another thread run |
+| pthread attr | init Create and initialize a thread’s attribute structure |
+| pthread attr | destroy Remove a thread’s attribute structure |
+In POSIX threads (Pthreads), every thread is like a small independent worker inside a program.
+
+Each thread has its own set of characteristics that the system keeps track of.
+
+All Pthreads threads have certain properties. Each one has an identifier, a set of
+registers (including the program counter), and a set of attributes, which are stored
+in an attribute structure. The attributes include the stack size, scheduling parame-
+ters, and other items needed to use the thread.
+
+* Thread identifier: Each thread gets a unique ID, which lets the system (and you, the programmer) distinguish it from other threads.
+
+  ```C
+  pthread_t thread1, thread2;
+  pthread_create(&thread1, NULL, worker, NULL);
+  pthread_create(&thread2, NULL, worker, NULL);
+  // thread1 and thread2 have unique identifiers
+  ```
+* Registers: A thread has its own CPU registers, which are like the “scratchpad” memory for the CPU.
+  * Program Counter: Program Counter (PC) is a special register that tells the CPU which instruction to execute next. 
+
+    This allows threads to run independently because each keeps track of where it is in its own code.
+* Thread attributes: Threads also have a set of attributes, which are stored in an attribute structure (pthread_attr_t in C).
+
+  These attributes control how the thread behaves. Common examples include:
+
+  * Stack size: How much memory the thread can use for its own function calls and local variables.
+  * Scheduling parameters: Determines how the OS schedules this thread relative to others (priority, policy, etc.).
+  * Detach state: Whether the thread can be joined later or cleans itself up automatically.
+
+    Example of setting attributes:
+
+    ```C
+    pthread_t thread;
+    pthread_attr_t attr;
+
+    // Initialize attribute structure
+    pthread_attr_init(&attr);
+
+    // Set stack size
+    pthread_attr_setstacksize(&attr, 1024 * 1024); // 1 MB stack
+
+    // Create a thread with these attributes
+    pthread_create(&thread, &attr, worker, NULL);
+
+    // Destroy attributes when done
+    pthread_attr_destroy(&attr);
+    ```
+
+Having separate registers and program counters lets multiple threads run simultaneously without interfering with each other.
+
+Attributes allow fine control over thread behavior, which is important for performance, memory usage, and responsiveness in your program.
+
+Think of a thread like a chef in a kitchen:
+
+* Identifier → Each chef has a name badge.
+* Registers + program counter → Each chef has their own recipe book and notes, so they know what step to cook next.
+* Attributes → Some chefs might have special tools, workstations, or priorities in the kitchen.
+
+A new thread is created using the pthread create call. The thread identifier of
+the newly created thread is returned as the function value. This call is intentionally
+very much like the fork system call (except with parameters), with the thread iden-
+tifier playing the role of the PID, mostly for identifying threads referenced in other
+calls. When a thread has finished the work it has been assigned, it can terminate by
+calling pthread exit. This call stops the thread and releases its stack.
+
+Threads sometimes need to wait for another thread to finish its work and exit
+before it can continue. In a multi-threaded program, some threads depend on the results of other threads before they can continue. Example: Imagine you’re building a sandwich: one person slices bread, another spreads butter. The second person must wait until the first is done.
+
+pthread_join is the “waiting mechanism”, In POSIX threads, the function pthread_join is used when one thread wants to wait for another thread to finish. This ensures that the program doesn’t continue with incomplete work.
+
+How pthread_join works? The thread that calls pthread_join is paused until the thread it’s waiting for terminates. You need to provide the thread identifier (pthread_t) of the thread to wait for. Optionally, you can get the return value of the finished thread.
+```C
+#include <pthread.h>
+#include <stdio.h>
+
+void* worker(void* arg) {
+    printf("Worker thread is working...\n");
+    return (void*)42;  // Thread returns a value
+}
+
+int main() {
+    pthread_t thread;
+    void* result;
+
+    // Create a thread
+    pthread_create(&thread, NULL, worker, NULL);
+
+    // Wait for the thread to finish
+    pthread_join(thread, &result);
+
+    printf("Thread finished with result: %ld\n", (long)result);
+    return 0;
+}
+```
+Step-by-step:
+
+* Main thread creates a worker thread.
+* Worker thread does some work.
+* Main thread calls pthread_join(thread, &result) → main thread pauses here.
+* When worker finishes, pthread_join returns, and main thread can continue.
+
+**Why this matters**
+
+* Synchronization: Ensures threads don’t proceed before necessary data is ready.
+* Resource cleanup: pthread_join also helps reclaim resources used by the finished thread.
+* Data safety: Prevents situations where one thread accesses incomplete results from another.
+
+**Analogy**
+
+Think of threads like students in a classroom:
+
+* Student A finishes a group project section.
+* Student B cannot start the next part until A is done. pthread_join is like the teacher saying: “Wait until Student A hands in their section before you continue.”
+
+Threads can voluntarily give up the CPU
+
+### yielding
+Sometimes a thread is not blocked (it could continue running), but it wants to let other threads run. This is called yielding. In POSIX threads, the function for this is pthread_yield (or sometimes sched_yield in Linux).
+
+Threads belong to the same process, and often they are cooperating. By yielding, a thread shows “I’ve done enough for now, other threads should have a chance to run.This can help improve fairness or avoid starvation of other threads.
+
+There is no such yield call for processes because processes are usually independent and competitive. A process could voluntarily call sleep() to pause briefly, but that’s not common.  However, since the threads of a process are
+working together and their code is invariably written by the same programmer,
+sometimes the programmer wants them to give each other another chance
+
+Yielding is like sharing the CPU politely so all threads get a chance to progress.
+```c
+#include <pthread.h>
+#include <sched.h>
+#include <stdio.h>
+
+void* worker(void* arg) {
+    for(int i = 0; i < 5; i++) {
+        printf("Thread %ld working iteration %d\n", (long)arg, i);
+        sched_yield(); // voluntarily give other threads a chance
+    }
+    return NULL;
+}
+
+int main() {
+    pthread_t t1, t2;
+
+    pthread_create(&t1, NULL, worker, (void*)1);
+    pthread_create(&t2, NULL, worker, (void*)2);
+
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+
+    return 0;
+}
+
+```
+* Both threads take turns printing numbers.
+* sched_yield() lets the other thread run, even if the CPU isn’t busy.
+* Without yield, one thread might hog the CPU and make the output less interleaved.
+
+Analogy
+
+Think of threads like students working on a group project:
+
+* Student A has been typing for a while.
+* Student A says: “I’ve done enough for now; let Student B type for a bit.” → That’s pthread_yield.
+* Processes are like different companies: they usually fight for all the resources and don’t cooperate in this way.
+
+## Implementing Threads
+there are three main threading models—user-space threads, kernel threads, and hybrid (or “combined”) models.
+|     |     |     |
+| --- | --- | --- |
+| Thread Model | Pros | Cons |
+| User-Space Threads | Very fast, flexible | Blocks entire process on I/O, no true parallelism |
+| Kernel Threads | True parallelism, kernel scheduling | Higher overhead for creation and switching |
+| Hybrid Threads | Combines user speed with kernel parallelism | Complex to implement, rare today |
+
+## Implementing Threads in User Space
+**How it works**
+
+* Threads are managed entirely in user space by a library(put the threads package entirely in user space).
+* The kernel sees one process; it doesn’t know about the individual threads( As far as the kernel is concerned, it is managing
+ordinary, single-threaded processe).
+* All of these implementations have the same general structure. The threads run on top of a run-time system, which is a collection of
+procedures that manage threads, such as pthread_create, pthread_exit, pthread_join, and pthread_yield, but usually there are more.
+
+  ![(a) A user-level threads package. (b) A threads package managed by the kernel.](/docs/assets/software-systems/operating-systems/linux/process/thread-user-level-thread-vs-kernel-level-thread.png)
+
+When threads are managed in user space, each process needs its own private
+thread table to keep track of the threads in that process. This table is analogous to
+the kernel’s process table, except that it keeps track only of the per-thread proper-
+ties, such as each thread’s program counter, stack pointer, registers, state, and so
+forth. The thread table is managed by the run-time system. When a thread is moved
+to the ready or blocked state, the information needed to restart it is stored in the
+thread table, exactly the same way as the kernel stores information about processes
+in the process table.
+
+**user-level thread context switching**
+
+When a thread does something that may cause it to become blocked locally, for
+example, waiting for another thread in its process to complete some work. The thread might block locally, but the kernel does not know because we are in a user-level threads package.
+
+1. **it calls a run-time system procedure**
+   * The thread calls a runtime library procedure (e.g., uthread_yield() in user-space thread libraries).
+   * The library is responsible for scheduling user threads.
+2. **Check Blocked State**
+   * This procedure checks to see if the thread must be put
+   into blocked state((e.g., waiting on a lock, a condition variable, or I/O)). 
+3. **Save Registers**
+   * If so, it stores the thread’s registers (i.e., its own,program counter, stack pointer, general-purpose registers) in the thread
+   table, 
+   * This is essentially the thread’s context.
+4. **Select Next Thread**
+   * it looks in the table for a ready thread to run.
+5. **Load Registers**
+   * it reloads the machine(the saved) registers with the new thread’s saved values from the thread table.
+6. **Switch Happens Instantly**
+   * As soon as the stack pointer and program
+   counter have been switched, the new thread comes to life again automatically(he new thread resumes execution automatically). 
+
+**Why This is Fast**
+
+If the machine happens to have an instruction to store all the registers and another
+one to load them all, the entire thread switch can be done in just a handful of
+instructions. Doing thread switching like this is at least an order of magnitude—
+maybe more—faster than trapping to the kernel and is a strong argument in favor
+of user-level threads packages. In contrast, kernel thread switching requires:
+
+* A trap to the kernel (syscall)
+* Kernel scheduler execution
+* Possibly updating TLBs, page tables, and other kernel structures
+
+and this is much slower.
+
+Also, when a thread is finished running for the moment, for example,
+when it calls thread yield, 
+
+* the code of thread yield saves the thread’s information
+in the thread table 
+* and then calls the thread scheduler to pick another thread to run.
+
+The procedure that saves the thread’s state and the scheduler are just local proce-
+dures, so invoking them is much more efficient than making a kernel call. There is
+no need for a trap, a context switch, flushing of caches, and so on. This makes
+thread scheduling very fast.
+
+Think of user-level threads as a mini-scheduler inside each process. The process itself decides which thread runs and when, instead of the kernel imposing a global schedule.
+
+**Pros**
+
+* a user-level threads package can be implemented on an operating system that does
+not support threads. All operating systems used to fall into this category, and even
+now some still do. With this approach, threads are implemented by a library.
+* Extremely fast thread creation, switching, and synchronization (no syscalls).
+* Fine-grained control by the programmer.
+* Custom Scheduling per Process
+  * They allow each process to have
+  its own customized scheduling algorithm.
+  * Example:
+    * A process might prioritize a garbage-collector thread differently from worker threads. 
+    * With kernel threads, the kernel scheduler may preempt the thread at inconvenient times. 
+  * Benefit: more predictable behavior for time-sensitive threads.
+* No Kernel Intervention
+  * Since the kernel sees the process as a single schedulable entity, thread switching does not require traps or syscalls.
+  * This avoids unnecessary preemption and gives the application full control over scheduling. for example,For some applications, 
+  those with a garbage-collector thread, not having to worry about a thread being
+  stopped at an inconvenient moment is a plus.
+* Better Scalability
+  * Kernel threads require kernel table entries and stacks for each thread.
+  * Limitation: creating thousands of kernel threads can consume significant kernel memory.
+  * User-level threads only need user-space data structures, so:
+    * Thousands or tens of thousands of threads are feasible.
+    * Memory overhead is much lower.
+* Predictable Performance
+  * User-level threads are not interrupted by the kernel scheduler, so latency-sensitive threads (e.g., in real-time applications) can run without unexpected delays.
+  * Ideal for applications with cooperatively scheduled workloads
+
+**Summary Table of Key Advantages**
+
+|     |     |
+| --- | --- |
+| Advantage | Explanation |
+| Custom Scheduling | Each process can implement its own thread scheduling algorithm |
+| Low Overhead | Context switching happens entirely in user space, avoiding syscalls |
+| Scalability | Thousands of threads possible without kernel resource exhaustion |
+| Predictable Execution | Threads are not preempted unexpectedly by kernel |
+
+**Cons**
+
+* **Blocking System Calls**
+  * Problem: User-level threads are invisible to the kernel. If a user-level thread calls a blocking system call (e.g., read(), recv(), or sleep()), the kernel blocks the entire process, not just the thread because the kernel schedules only the single process.
+  * Impact: All other threads in that process are halted even if they are runnable.
+  * Consequence: Limits usefulness for I/O-intensive applications unless you use non-blocking I/O or asynchronous I/O.
+  * Suppose that a thread reads from the keyboard before any keys have
+  been hit. Letting the thread actually make the system call is unacceptable, since
+  this will stop all the threads. One of the main goals of having threads in the first
+  place was to allow each thread to use blocking calls, but to prevent one blocked thread from affecting the others. With blocking system calls, it is hard to see how
+  this goal can be achieved readily.
+  * Changing system calls to always be nonblocking (e.g., return 0 bytes if no data,, a read on the
+  keyboard would just return 0 bytes if no characters were already buffered) is impractical, because: It requires modifying the operating system and Many existing programs expect the standard blocking behavior of syscalls. Besides, one argument
+  for user-level threads was precisely that they could run with existing operating systems. 
+  * Somewhat analogous to the problem of blocking system calls is the problem of
+  page faults.
+  computers can be set up in such a way that not all of the program is in main memo-
+  ry at once. If the program calls or jumps to an instruction that is not in memory, a
+  page fault occurs and the operating system will go and get the missing instruction
+  (and its neighbors) from disk. This is called a page fault. The process is blocked
+  while the necessary instruction is being located and read in. If a thread causes a
+  page fault, the kernel, unaware of even the existence of threads, naturally blocks
+  the entire process until the disk I/O is complete, even though other threads might
+  be runnable.
+    * Imagine a user-level thread system with:
+
+      Thread A: garbage collector
+
+      Thread B: network server
+
+      Thread C: computation
+
+      If Thread A touches a rarely used memory page:
+
+      Page fault occurs
+
+      Kernel blocks the process
+
+      Thread B and C stop running
+
+      Disk I/O completes
+
+      Entire process resumes
+
+      This defeats the whole purpose of fast user-level scheduling.
+* **No Preemption in User-Level Threads**
+  * Preemption: A scheduler interrupts a currently running process to give the CPU to another, higher-priority process, allowing multitasking.
+  * Another problem with user-level thread packages is that if a thread starts run-
+  ning, no other thread in that process will ever run unless the first thread voluntarily
+  gives up the CPU. Within a single process, there are no clock interrupts, making it
+  impossible to schedule processes in round-robin fashion (taking turns). Unless a
+  thread exits the run-time system of its own free will, the scheduler will never run.
+  * If one user-level thread runs forever, no other thread in the process will ever run. because:
+    * User-level threads run entirely in user space
+    * The kernel does not know they exist
+    * The kernel delivers timer interrupts to the process, not to the user-level scheduler
+    * Therefore: 
+      * No forced context switch between user threads
+      * Scheduling is cooperative, not preemptive 
+  * in the oppisite, What Normally Enables Round-Robin Scheduling for kernel threads:
+    * A hardware timer interrupt occurs
+    * Kernel regains control
+    * Kernel scheduler:
+    * Saves current thread state
+    * Picks another runnable thread
+    * Context switch happens automatically
+      * This mechanism does not exist inside a user-level thread package.
+  * Consequence: Scheduling is cooperative in user kernel thread
+    * User-level threads rely on voluntary yield:
+      * yield()
+      * Blocking on a lock
+      * Explicit calls into the runtime system
+    * If a thread:
+      * Runs a long computation
+      * Contains an infinite loop
+      * Never yields
+
+        All other threads starve forever
+  * Why This Is a Serious Problem
+    * No Fairness Guarantees
+      * One misbehaving thread can monopolize the CPU
+      * Bugs become catastrophic
+    * No Time Sharing
+      * Round-robin scheduling is impossible
+      * Priority enforcement is unreliable
+    * Hard to Debug
+      * Bugs appear as “system hangs”
+      * The kernel sees the process as runnable
+* **No True Parallelism on Multi-Core Systems**
+  * Problem: The kernel schedules processes, not individual user-level threads.
+  * Impact: Even with multiple cores, all threads of a process run on only one core at a time.
+  * Consequence: Cannot exploit multiple CPU cores for CPU-bound tasks without hybrid approaches.
+* **Complexity for Synchronization**
+  * Problem: Libraries must implement thread synchronization (mutexes, condition variables, etc.) entirely in user space.
+  * Impact: Must carefully manage thread states, ready queues, and blocking; potential for bugs.
+  * Consequence: More complex to implement correctly compared to kernel threads where the kernel handles blocking/wakeup safely.
+* **Signals and Interrupt Handling**
+  * Problem: Signals are delivered at the process level, not thread level.
+  * Impact: Only one thread may handle the signal; mapping signals to threads can be tricky.
+  * Consequence: Complicates implementation of signal handlers in multithreaded programs.
+* **Difficulty Integrating with Kernel Services**
+  * Problem: Many OS services assume a kernel thread per execution context.
+  * Impact: Features like CPU affinity, real-time scheduling, or priority inheritance are unavailable or hard to implement.
+  * Consequence: Cannot fully leverage kernel features without hybrid mapping.
+* **Debugging and Profiling Challenges**
+  * Problem: The kernel sees only one thread per process.
+  * Impact: Tools like top, perf, or strace cannot observe individual threads.
+  * Consequence: Harder to diagnose performance issues or deadlocks.
+* **User-level threads are worst exactly where threads are most useful.**
+  * Another, and really the most devastating, argument against user-level threads is
+  that programmers typically want threads precisely in applications where threads
+  block often, as, for example, in a multithreaded Web server. These threads are con-
+  stantly making system calls. Once a trap has occurred to the kernel to carry out the
+  system call, it is hardly any more work for the kernel to switch threads if the old
+  one has blocked, and having the kernel do this eliminates the need for constantly
+  making select system calls to see if read system calls are safe. For applications that
+  are CPU bound and rarely block, what is the point of having threads at all? No one
+  would seriously propose computing the first n prime numbers or playing chess
+  using threads because there is nothing to be gained by doing it that way.
+  * Programmers Use Threads in the First Place, forTypical thread-heavy applications: Multithreaded web servers, Network servers, Databases, File servers. All of this apps have Common characteristics: Many concurrent tasks, Tasks block frequently on:read(), write(), accept(), disk I/O, network I/O, so Threads exist to hide I/O latency.
+  * But What Happens with User-Level Threads in These Apps? Frequent system call, for Every I/O operation:
+
+    ```
+    user thread → system call → kernel
+    ```
+
+    If the call blocks: Kernel blocks the entire process, All user threads stop, User-level scheduler is powerless.
+  * To survive, user-level thread libraries must(Runtime must avoid blocking (the “select wrapper” hack)): Call select() / poll() / epoll() before every read(), Only perform the system call if it won’t block, Otherwise: Switch to another thread
+
+    This leads to: Extra system calls, Extra context switching, Complex wrapper code, Worse performance
+  * Kernel Is Already Involved Anyway,At that point: You’ve already paid the cost of: Mode switch, Kernel entry, But Switching kernel threads costs almost nothing extra.
+  * Kernel Threads Do the Right Thing Automatically, When a kernel thread blocks: Thread enters kernel, Kernel sees it will block,Kernel scheduler: Puts that thread to sleep, Runs another thread immediately, So No:select() wrappers, polling loops, user-space schedulers
+  * SO this Makes User-Level Threads Pointless for I/O Apps
+
+    |     |     |     |
+    | --- | --- | --- |
+    | Feature	 | User-Level Threads	 | Kernel Threads |
+    | Frequent I/O	 | ❌ bad	 | - ideal |
+    | Blocking handling	 | Complex	 | Automatic |
+    | Scheduler	User-space	 | Kernel | Performance	Worse	 |
+    | Better | Code complexity	High	 | Low |
+  * Also For applications that are CPU bound and rarely block(Prime number generation, Chess engines, Compression, Scientific computation),which is: has Minimal blocking, Long-running computations, what is the point of having threads at all?Threads don’t help because:
+    * Only one CPU core is used unless parallelized
+    * Context switching adds overhead
+    * No I/O latency to hide
+  * Threads Actually Make Sense in: Frequent blocking, I/O concurrency, Parallelism across CPUs, Responsiveness, All of these require kernel support. so CPU-bound programs don’t benefit from threads
+  * User-level threads lose their advantage as soon as system calls are frequent, and since threads are mainly useful for I/O-bound workloads, kernel-level threads are the superior design.
+
+**Summary Table**
+
+|     |     |
+| --- | --- |
+| Problem | Explanation / Impact |
+| Blocking System Calls | One thread blocks, all threads blocked |
+| No True Parallelism | Cannot use multiple cores simultaneously |
+| Complex Synchronization | All thread management must be in user-space |
+| Signals Handling | Signals delivered at process level, difficult to assign to threads |
+| Limited Kernel Features | Cannot leverage kernel scheduling, CPU affinity, or priorities fully |
+| Debugging / Profiling | Hard to observe individual threads from kernel tools |
+
+## Implementing Threads in Kernel Space(Kernel-Level Threads)
+In  Kernel Space threads no need for a run-time system or thread table in
+each process. Instead, the kernel has a thread table that keeps track of all the
+threads in the system. When a thread wants to create a new thread or destroy an
+existing thread, it makes a kernel call, which then does the creation or destruction
+by updating the kernel thread table.
+
+The kernel’s thread table holds each thread’s registers, state, and other infor-
+mation. The information is the same as with user-level threads, but now kept in the
+kernel instead of in user space (inside the run-time system). This information is a
+subset of the information that traditional kernels maintain about their single-
+threaded processes, that is, the process state. In addition, the kernel also maintains
+the traditional process table to keep track of processes.
+
+All calls that might block a thread are implemented as system calls, at consid-
+erably greater cost than a call to a run-time system procedure. When a thread
+blocks, the kernel may choose to run either another thread from the same process
+(if one is ready) or a thread from a different process. With user-level threads, the
+run-time system keeps running threads from its own process until the kernel takes
+the CPU away from it (or there are no ready threads left to run)
+
+Kernel threads do not require any new, nonblocking system calls. In addition,
+if one thread in a process causes a page fault, the kernel can easily check to see if
+the process has any other runnable threads, and if so, run one of them while wait-
+ing for the required page to be brought in from the disk.
+
+***How it works***
+
+* Kernel-space threads are known and managed directly by the operating system kernel.
+* Each thread has a kernel data structure (e.g., task_struct in Linux).
+* Threads in the same process:
+  * Share the same address space.
+  * Share open files, signal handlers, and other resources.
+  * Have separate stacks, registers, and scheduling states.
+* Thread creation:
+  * Created via kernel call (e.g., clone() in Linux).
+  * Kernel allocates:
+    * Kernel stack
+    * Thread control block
+    * Scheduling information
+* Blocking behavior:
+  * If one thread blocks (I/O, page fault), only that thread blocks.
+  * Other threads in the process continue running.
+* Scheduling:
+  * Threads are scheduled like processes.
+  * Kernel scheduler picks the next runnable thread from all system threads.
+
+***Context switching***
+
+* What is switched:
+  * CPU registers
+  * Program counter (instruction pointer)
+  * Stack pointer
+  * Processor flags
+  * CPU-specific state (FPU, SIMD registers)
+  * Scheduling metadata
+* Where it happens:
+  * Inside the kernel
+  * Triggered by:
+    * Blocking system calls
+    * Page faults
+    * Timer interrupts (preemption)
+    * Explicit yielding (sched_yield())
+* Cost:
+  * More expensive than user-level thread switching due to kernel mode execution and scheduler logic.
+  * Still cheaper than full process switching because address space is shared.
+
+***Pros***
+
+* True parallelism: Multiple threads can run on multiple CPU cores.
+* Correct handling of blocking: Blocking system calls only block the calling thread.
+* Preemptive scheduling: Kernel timer interrupts ensure fair CPU sharing; no thread can run forever.
+* Simpler programming model: No select() wrappers or async I/O hacks required; blocking calls behave naturally.
+* Better integration with OS: Kernel manages priorities, CPU affinity, real-time scheduling; signals and resource limits handled correctly.
+* Scales well for I/O-bound workloads: Ideal for servers, databases, and network applications.
+
+***Cons***
+
+* Higher overhead than user-level threads: Creation and context switches are more expensive; kernel structures consume memory.
+* Kernel resource consumption: Each thread requires kernel stack, scheduler entries, and accounting data; extreme thread counts can stress memory.
+* Less application-specific control: Scheduling policy is mostly kernel-defined; custom per-application schedulers are harder.
+* System call overhead: Thread operations often require kernel transitions.
+* Potential scalability limits: Extremely large thread counts may degrade performance; event-driven models can outperform threads at extreme scale.
+
+***Kernel Threads vs User Threads***
+|     |     |     |
+| --- | --- | --- |
+| Feature | Kernel Threads | User Threads |
+| Kernel aware | Yes | No |
+| Blocking behavior | Per-thread | Whole process blocks |
+| Scheduling | Kernel | User runtime |
+| Parallel execution | Yes | No (without kernel help) |
+| Context switch cost | Higher | Lower |
+| Practical usability | High | Limited |
+
+***Summary***
+
+* Kernel-space threads are the dominant threading model in modern OSes.
+* Provide safe blocking, true parallelism, and preemptive multitasking.
+* Added overhead is worth the trade-off for correctness, simplicity, and scalability.
+
+***One-sentence exam answer***
+
+* Kernel-space threads are managed by the OS kernel, allowing preemptive scheduling and per-thread blocking at the cost of higher creation and context-switch overhead.
+
+**Challanges**
+
+* **Kernel Threads and fork()**
+  * what happens to threads when a process forks?
+    * In a single-threaded process, fork():
+    * Duplicates the process
+    * Child process gets a copy of the parent’s address space
+    * One thread exists in child (the thread that called fork())
+  * In a multi-threaded process with kernel threads:
+    * Parent has multiple kernel threads
+    * When fork() is called:
+    * Only the calling thread is usually duplicated in the child
+    * Other threads do not exist in the child
+* In many cases, the best choice depends on what the process is planning to do next.
+  * only one thread?
+    * Simplicity:
+      * Child process has a clean start with a single thread.
+      * Prevents unexpected race conditions or resource conflicts.
+    * Compatibility with exec():
+      * If child is going to call exec() to start a new program:
+        * Only the calling thread matters
+        * Other threads would be irrelevant and waste resources
+  * reproducing all threads
+    * If the child process continues executing the same program:
+      * Some applications might need all threads duplicated
+      * For example, a server forking workers that continue the same workload
+    * However, duplicating all threads:
+      * Adds complexity
+      * Requires careful handling of:
+      * Thread stacks
+      * Mutexes/locks
+      * File descriptors in consistent state
+  * Kernel threads solve blocking and preemption problems, but they do not automatically solve process creation semantics.
+    * Forking a multi-threaded process is non-trivial, and OS defaults:
+      * Child starts with only one thread
+      * Parent threads are not copied
+    * Behavior can depend on:
+      * Intent of the child process (call exec() vs continue executing)
+      * Application requirements
+  * in Linux
+    * Linux (NPTL) behavior:
+      * fork() duplicates calling thread only
+      * File descriptors, memory mappings are copied
+      * Other threads do not continue in child
+    * POSIX recommends: After fork in a multithreaded process, only async-signal-safe functions should be called in the child before exec.
+
+## Implementing Threads in hybrid Space
+Various ways have been investigated to try to combine the advantages of user-
+level threads with kernel-level threads. One way is use kernel-level threads and
+then multiplex user-level threads onto some or all of them.
+When this approach is used, the programmer can determine how many kernel
+threads to use and how many user-level threads to multiplex on each one. This
+model gives the ultimate flexibility.
+
+With this approach, the kernel is aware of only the kernel-level threads and
+thus schedules those. Some of those threads may have multiple user-level threads
+multiplexed on top of them. These user-level threads are created, destroyed, and
+scheduled just like user-level threads in a process that runs on an operating system
+without multithreading capability. In this model, each kernel-level thread has some
+set of user-level threads that take turns using it.
+
+***Two-level scheduling overview (Hybrid M:N model)***
+```
++------------------------------------------------------+
+|                    User Space                        |
+|                                                      |
+|  User Thread U1   User Thread U2   User Thread U3    |
+|        |                 |                 |         |
+|        +--------+--------+--------+--------+         |
+|                 |                 |                  |
+|          User-Level Thread Scheduler (Runtime)       |
+|                 |                 |                  |
++-----------------+-----------------+------------------+
+                  |                 |
+                  v                 v
++-----------------+-----------------+------------------+
+|                    Kernel Space                      |
+|                                                      |
+|         Kernel Thread K1       Kernel Thread K2      |
+|                 |                     |              |
+|                 +----------+----------+              |
+|                            |                         |
+|                    Kernel Scheduler                  |
+|                            |                         |
+|                         CPU Core(s)                  |
++------------------------------------------------------+
+
+**User-level scheduling detail**
+
++---------------- Kernel Thread K1 ----------------+
+|                                                  |
+|   U1  --->  U2  --->  U3  --->  U1 (time slice)    |
+|                                                   |
+| * Context switches occur in user space           |
+| * No kernel involvement                          |
+| * Very fast                                      |
++---------------------------------------------------+
+
+**Kernel-level scheduling detail**
+
++------------------- CPU -------------------+
+|                                           |
+|   K1  <---->  K2  <---->  K3  (preempted)  |
+|                                           |
+| * Timer interrupts                       |
+| * Blocking system calls                  |
+| * Page faults                            |
++-------------------------------------------+
+
+**Blocking system call behavior**
+
+User Thread U2 makes read():
+
+U2
+ |
+ v
+K1  ---->  [ BLOCKED in kernel ]
+ |
+ |  (runtime schedules another user thread)
+ v
+K2  ---->  U3 continues execution
+
+Result:
+* Only K1 is blocked
+* Other kernel threads continue running
+* User threads are rescheduled on available kernel threads
+
+**Page fault behavior**
+
+User Thread U1
+ |
+ v
+K1  ---->  [ PAGE FAULT ]
+ |
+ |  (kernel suspends K1)
+ v
+K2  ---->  U2 runs
+
+Effect:
+* Fault affects only one kernel thread
+* Process does not stall
+* Runtime maintains forward progress
+
+**Signal delivery path**
+
+Signal
+  |
+  v
+Kernel chooses a kernel thread (K1 or K2)
+  |
+  v
+Runtime maps signal to:
+* A dedicated signal-handling user thread
+* Or the currently running user thread
+
+Risk:
+* Requires careful signal masking
+* Incorrect mapping causes race conditions
+
+**Comparison with pure models (visual intuition)**
+
+User-level only (1:1 illusion)
++-----------------------------+
+| U1 -> U2 -> U3 -> U4        |
+| One kernel thread           |
+| Blocking stops everything   |
++-----------------------------+
+
+Kernel-level only (1:1 model)
++-----------------------------+
+| U1 -> K1 -> CPU             |
+| U2 -> K2 -> CPU             |
+| Simple, predictable         |
++-----------------------------+
+
+Hybrid (M:N model)
++-----------------------------+
+| U1 U2 U3 U4                 |
+|  |  |  |                   |
+| K1     K2                   |
+|  |       |                 |
+| CPU     CPU                 |
++-----------------------------+
+
+**Key intuition**
+
+* Kernel schedules kernel threads.
+* Runtime schedules user threads.
+* Two schedulers cooperate but do not share intent.
+* Power comes from flexibility; danger comes from complexity.
+
+**What hybrid threads are**
+
+* Hybrid threading combines user-level threads and kernel-level threads.
+* M user-level threads are multiplexed onto N kernel threads (M ≥ N).
+* The kernel schedules kernel threads.
+* A user-space runtime schedules user threads on top of kernel threads.
+```
+
+***How it works***
+
+* The process creates:
+  * Multiple user-level threads managed by a runtime library
+  * A smaller number of kernel threads created via clone()
+* Each kernel thread acts as an execution vehicle for user threads.
+* The runtime decides:
+  * Which user thread runs
+  * On which kernel thread
+* Kernel sees only kernel threads; user threads are invisible to it.
+
+***Scheduling model***
+
+* Two-level scheduling:
+  * Kernel scheduler:
+    * Schedules kernel threads preemptively across CPUs
+  * User-level scheduler:
+    * Schedules user threads cooperatively or preemptively on kernel threads
+* User threads can run in parallel as long as enough kernel threads exist.
+
+***Context switching***
+
+* ***User-level context switch***
+  * Happens entirely in user space.
+  * Switches between user threads on the same kernel thread.
+  * Saves/restores registers and user stack pointer.
+  * Very fast.
+* ***Kernel-level context switch***
+  * Happens in kernel mode.
+  * Switches between kernel threads.
+  * Triggered by:
+    * Timer interrupts
+    * Blocking system calls
+    * Page faults
+* A scheduling event may involve:
+  * One user-level switch
+  * One kernel-level switch
+  * Or both
+
+***Blocking behavior***
+
+* Blocking system calls:
+  * Block only the kernel thread that made the call.
+  * Other kernel threads continue running.
+  * Runtime schedules other user threads on remaining kernel threads.
+* Page faults:
+  * Block only the affected kernel thread.
+  * Other user threads continue executing.
+* This avoids the “all threads stop” problem of pure user-level threads.
+
+***Memory management***
+
+* All threads share the same process address space.
+* User threads:
+  * Have stacks allocated in user-space memory.
+  * Managed by the runtime.
+* Kernel threads:
+  * Have kernel stacks.
+  * Managed by the kernel.
+* Runtime maintains mappings between:
+  * User thread stacks
+  * Kernel thread execution contexts
+
+***Synchronization***
+
+* Uncontended locks handled entirely in user space.
+* Contended locks use kernel assistance (e.g., futex).
+* Combines:
+  * Low overhead of user-level locks
+  * Correct blocking semantics of kernel-level locks
+
+***Signal handling***
+
+* Signals are delivered to kernel threads.
+* Runtime must map signal handling to user threads.
+* Often requires:
+  * Dedicated signal-handling kernel thread
+  * Careful signal masking
+* Signal handling is more complex than in pure kernel-thread models.
+
+***fork() semantics***
+
+* fork() duplicates only the calling kernel thread.
+* User-thread state is copied but inactive in the child.
+* Runtime must:
+  * Reinitialize scheduling structures
+  * Decide whether to recreate user threads
+* fork() followed by exec() is the safest pattern.
+
+***Pros***
+
+* Avoids process-wide blocking on I/O.
+* Allows many user threads with fewer kernel threads.
+* Faster user-level context switching when uncontended.
+* Better scalability than pure kernel threads in some workloads.
+* Combines flexibility of user-level threads with correctness of kernel threads.
+
+***Cons***
+
+* Very complex runtime implementation.
+* Two-level scheduling overhead.
+* Harder to debug due to M:N mapping.
+* Signal handling and fork() semantics are difficult.
+* Kernel and runtime scheduling decisions can conflict.
+
+***When hybrid threads make sense***
+
+* Applications with:
+  * Very large numbers of concurrent tasks
+  * Frequent blocking operations
+  * Limited kernel thread resources
+* Runtime-managed environments (e.g., language runtimes).
+
+***When hybrid threads are avoided***
+
+* General-purpose system programming.
+* Simpler server architectures.
+* Applications requiring predictable scheduling and debugging.
+
+***Real-world examples***
+
+* Solaris threads (classic M:N model).
+* Early Linux threading experiments.
+* Modern language runtimes:
+  * Go (goroutines)
+  * Erlang (lightweight processes)
+  * JVM virtual threads (conceptually similar, but evolved)
+
+***Summary***
+
+* Hybrid threads aim to get the best of user-level and kernel-level threading.
+* They solve blocking problems while keeping context switches fast.
+* The cost is complexity, especially for signals and fork().
+* Modern OSes prefer 1:1 kernel threads unless a language runtime manages the model carefully.
+
+***One-sentence exam answer***
+
+* Hybrid threads multiplex many user-level threads over fewer kernel threads, combining fast user-space scheduling with kernel-level blocking support at the cost of significant implementation complexity.
+
+## Comparision of User space and Kernel Space and Hybrid
+User-level threads are ideal for workloads where threads mostly cooperate in-process and rarely block on kernel resources.
+
+Kernel involvement is needed only for things like:
+
+I/O that cannot be handled in user-space
+
+True parallelism across cores
+
+Many modern threading libraries use a hybrid approach:
+
+Fast user-space context switching
+
+Falling back on kernel threads (clone + futex) when necessary
+
+***Thread Lifecycle: User-Level vs Kernel Threads vs Hybrid Threads (Side-by-Side Flow)***
+
+|  | User-Level Threads | Kernel Threads | Hybrid Threads (M:N) |
+| --- | --- | --- | --- |
+| ***Creation***  | * Allocated in user-space runtime library * Registers, stack, thread control block in process memory * No kernel involvement | * Kernel allocates task_struct and kernel stack * clone() syscall creates new thread * Thread visible to kernel scheduler | * Runtime library creates user-level threads (M) * Runtime maps threads onto N kernel threads via clone() * Kernel sees only N threads; runtime multiplexes M threads onto them |
+| ***Ready-to-Run***  | * Runtime adds thread to ***user-level run queue*** * Scheduler selects next runnable thread cooperatively * Other threads ***cannot run*** until current thread yields | * Kernel scheduler adds thread to run queue * Threads scheduled preemptively * Multiple threads can run on multiple cores | * User-level threads queued in runtime scheduler * Kernel threads scheduled preemptively * Runtime decides which user thread runs on which kernel thread |
+| ***Context Switching*** | * Happens entirely in user space * Saves CPU registers, stack pointer, program counter * Very fast * Only occurs when thread yields or blocks on user-level lock | * Happens in kernel mode * Saves CPU registers, program counter, kernel stack pointer * Preemptive: triggered by timer, syscall, or explicit yield | * Two levels: ** User-level switch: runtime switches threads on same kernel thread ** Kernel-level switch: one kernel thread to another * Fast for user-level switch, slower if kernel thread needs to switch |
+| ***Blocking / System Calls*** | * Blocking syscall blocks ***entire process*** * Wrappers or nonblocking I/O needed * Page faults block all threads | * Blocking syscall blocks only calling thread * Kernel scheduler runs other threads * Page faults block only the faulting thread | * Blocking syscall blocks ***only kernel thread*** * Runtime can schedule other user threads on ***different kernel threads*** * Page faults block only the kernel thread; other user threads continue |
+| ***Memory Management*** | * All threads share process address space * Stack and registers in user-space heap * Runtime tracks stacks | * All threads share process address space * Kernel allocates kernel stack and thread control block * Kernel handles memory protection | * User-level threads: stacks in user-space heap * Kernel threads: kernel stack per thread * Runtime manages mapping M:N and user stacks |
+| ***Synchronization*** | * Implemented entirely in user space (mutex, rwlock, barrier) * Busy-wait or cooperative blocking | * Kernel provides futex-based primitives * Mutex, condvars, rwlocks handled by kernel | * User-level synchronization for M threads * Kernel synchronization only when M threads block on N kernel threads * Uses combination of futex + runtime locks |
+| ***Termination / Cleanup*** | * Thread exits via runtime function * Runtime frees stack and control block * Kernel unaware | * Thread exits via syscall * Kernel frees kernel stack, task_struct, scheduler data * Other threads continue | * User thread exits: runtime schedules another user thread on same kernel thread * Kernel thread exits: kernel frees resources * Runtime cleans user-level resources |
+| ***fork() Behavior*** | * fork() duplicates the process once * Runtime thread tables copied blindly * Scheduler state may be inconsistent * Rarely used safely in practice | * Only the calling thread is duplicated * Other threads do not exist in child * Kernel copies address space and file descriptors | * Only kernel threads are visible to fork() * Child process contains: ** One kernel thread ** Runtime thread state copied but inactive * Runtime must reinitialize thread system |
+| ***fork() + exec()*** | * Possible but unsafe without runtime cooperation * Thread library state may be corrupted | * Intended use case * Child calls exec() immediately * POSIX-recommended pattern | * Safe and common * Runtime is replaced during exec() |
+| ***Continuing Execution After fork()*** | * Extremely difficult * Thread state consistency not guaranteed | * Possible but limited * Only one thread exists in child | * Complex * Runtime must reconstruct scheduling state * Often avoided in real systems |
+| ***Pros / Cons Summary*** | * Pros: Extremely fast, customizable scheduling, low kernel overhead * Cons: Blocking syscalls and page faults halt all threads, cooperative scheduling, complex runtime | * Pros: Preemptive, safe blocking, true parallelism, kernel scheduling, multi-core * Cons: Slower context switch, more memory overhead, kernel involvement required | * Pros: Combines user-level speed with kernel-level blocking handling * Can multiplex many threads over few kernel threads * Cons: More complex runtime * Context switching may involve two layers * Harder debugging due to M:N mapping |
+
+***visual ASCII timeline showing how threads run over time,***
+
+***Thread Execution Timeline: User-Level vs Kernel vs Hybrid Threads***
+
+```
+Time → 
+| User-Level Threads       | Kernel Threads             | Hybrid Threads (M:N)
+| T1 running               | K1 running                | U1 on K1 running
+| T1 runs long computation | K1 runs, K2 preempted     | U2 on K2 running
+| T1 calls blocking read → **ALL STOP** | K1 blocks on read → K2 runs | U1 blocks on I/O → U2 runs on K1, U3 runs on K2
+| No other thread runs     | Other threads continue    | Runtime schedules another U-thread on free kernel thread
+| T1 unblocks manually     | K1 unblocked, scheduled   | User thread resumes on its kernel thread
+| Context switch happens only if T1 yields | Preemptive context switch possible | Two-level context switch (user runtime + kernel scheduler)
+| T2 runs                  | K2 runs                   | U3 runs
+| T2 calls blocking read → **ALL STOP** | Blocking handled per-thread | Blocking only affects the kernel thread; runtime schedules other user threads
+| T3 runs                  | K1 runs                   | U4 runs on K1
+| ...                       | ...                        | ...
+| Threads exit and free stacks | Kernel frees task_struct | User threads freed by runtime; kernel threads freed by kernel
+
+
+**Legend:**
+
+* **T1, T2, T3** → user-level threads
+* **K1, K2** → kernel threads
+* **U1, U2, U3, U4** → user threads in hybrid model
+* **Bold “ALL STOP”** → entire process blocked
+* Horizontal flow → time progresses left to right
+* Context switches:
+  - User-level: runtime scheduler
+  - Kernel: preemptive timer interrupt or blocking syscall
+  - Hybrid: two-level switch (runtime + kernel)
+```
+From Diagram
+
+* User-Level Threads
+  * If a thread blocks (I/O or page fault), all threads stop.
+  * Context switches occur only when a thread yields voluntarily.
+* Kernel Threads
+  * Each thread can block independently.
+  * Preemptive timer ensures fair scheduling.
+  * Multiple threads can run in parallel on different cores.
+  * Hybrid Threads (M:N)
+  * Many user threads share a smaller number of kernel threads.
+  * Blocking a user thread only blocks its kernel thread.
+  * Runtime schedules other user threads on free kernel threads.
+  * Context switches can occur at both user and kernel levels.
+
+**CPU cores explicitly, with User-Level, Kernel, and Hybrid threads, including parallel execution, blocking, and context switching.**
+***Thread Execution Timeline on Multiple CPU Cores***
+
+```
+Time → 
+CPU Core 1                       | CPU Core 2
+---------------------------------|------------------
+**User-Level Threads**  
+T1 running                       | T2 waiting (cannot run, same process)
+T1 running                       | T2 waiting
+T1 blocks on read → **ALL STOP** | T2 stops too
+T1 resumes after yield           | T2 runs after T1 yields
+
+**Kernel Threads**  
+K1 running                       | K2 running
+K1 running                       | K2 running
+K1 blocks on read                | K2 continues running
+K1 unblocked                     | K2 continues running
+K1 runs again                    | K2 runs another thread
+
+**Hybrid Threads (M:N)**  
+U1 on K1 running                 | U2 on K2 running
+U3 on K1 running                 | U4 on K2 running
+U1 blocks on I/O                 | U2 continues running
+U3 scheduled on K1               | U4 continues on K2
+U1 resumes on K1                 | U2 continues running
+U5 scheduled on K1               | U6 scheduled on K2
+U3 yields                        | U4 yields
+U7 scheduled on K1               | U8 scheduled on K2
+```
+***Legend:***
+
+* ***T1, T2*** → User-level threads
+* ***K1, K2*** → Kernel threads
+* ***U1-U8*** → User threads in Hybrid model
+* ***Bold “ALL STOP”*** → entire process blocked in user-level threading
+* CPU Core columns show ***parallel execution***
+* Blocking behavior differs:
+  * User-level: blocks entire process
+  * Kernel: blocks only the calling thread
+  * Hybrid: blocks only the kernel thread; runtime schedules other user threads
+* Context switching:
+  * User-level: runtime scheduler (cooperative)
+  * Kernel: preemptive (timer interrupts or syscalls)
+  * Hybrid: two-level (user runtime + kernel scheduler)
+
+**Highlights of This Timeline**
+
+* User-Level Threads
+  * Only one thread can run per process, even on multiple cores.
+  * Blocking halts all threads, no parallelism.
+* Kernel Threads
+  * Each thread can run on a separate CPU core.
+  * Blocking does not stop other threads.
+  * Preemptive timer ensures fair time sharing.
+* Hybrid Threads (M:N)
+  * Multiple user threads can run on fewer kernel threads.
+  * Blocking a user thread blocks only its kernel thread.
+  * Runtime maps ready user threads onto free kernel threads.
+  * Explains two-level context switching visually.
+
+## Threads Challanges
+Threads introduce a number of serious compli-
+cations into the programming model. 
+
+* **Fork issues**, consider the effects of the
+UNIX fork system call. 
+  * If the parent process has multiple threads, should the child
+  also have them? If not, the process may not function properly, since all of them
+  may be essential. 
+
+    on a system such as Linux, a fork of a multithreaded proc-
+    ess will create only a single thread in the child. However, using Posix threads a
+    program can use the pthread atfork() call to register fork handlers (procedures that
+    are called when a fork occurs), so it can start additional threads and do whatever is needed to get going properly again.
+  * However, if the child process gets as many threads as the parent,
+  what happens if a thread in the parent was blocked on a read call, say, from the
+  keyboard? Are two threads now blocked on the keyboard, one in the parent and
+  one in the child? When a line is typed, do both threads get a copy of it? Only the
+  parent? Only the child? 
+  * The same problem exists with open network connections.
+* Another class of problems is related to the fact that threads share many data
+structures. 
+  * What happens if one thread closes a file while another one is still read-
+  ing from it? Suppose one thread notices that there is too little memory and starts
+  allocating more memory. Partway through, a thread switch occurs, and the new
+  thread also notices that there is too little memory and also starts allocating more
+  memory. Memory will probably be allocated twice. 
+* **Kernel Threads and Signals**
+  * Classical UNIX model
+    * Signals were designed for processes, not threads.
+    * A process originally had:
+      * One execution flow
+      * One signal handler context
+  * Threads break this assumption
+    * A multithreaded process has:
+      * Multiple execution flows
+      * Shared address space
+    * When a signal arrives: Which thread should handle it?
+  * This question has no universally “correct” answer.
+  * Possible Signal Handling Models
+    1. Any thread may handle the signal
+       * The operating system chooses one runnable thread to deliver the signal.
+       * This is how Linux behaves by default.
+       * Linux behavior
+         * A signal sent to a process may be delivered to:
+         * Any thread that does not block that signal
+         * The kernel selects a thread (implementation-dependent, not guaranteed order)
+       * Problem
+         * Non-deterministic behavior
+         * Hard to reason about correctness
+         * Different executions may choose different threads
+    2. Threads register interest in signals
+       * Each thread declares: “I want signal X”
+       * Kernel delivers signal only to interested threads
+       * Issue
+         * Adds complexity to kernel and threading model
+         * What if multiple threads want the same signal?
+         * OS must still choose one → ambiguity remains
+    3. Block signal in all threads except one (common practice)
+       * Linux / POSIX solution
+         * Use pthread_sigmask():
+         * Block signal in all threads
+         * Leave one “signal-handling thread” unblocked
+       * Result
+         * Signals always go to a known thread
+         * Behavior becomes deterministic
+       * This is the recommended design pattern
+  * ***Why Signals + Threads Are Dangerous***
+    * ***Asynchronous execution***
+      * Signal handlers interrupt execution at arbitrary points.
+      * A handler may run while:
+    * A lock is held
+    * A data structure is inconsistent
+    * ***Limited safe operations***
+      * In signal handlers, only async-signal-safe functions are allowed.
+      * Many common operations are unsafe:
+        * malloc()
+        * printf()
+        * Locking primitives
+    * ***Interaction with thread synchronization***
+      * A signal handler running in a thread that:
+        * Holds a mutex
+        * Attempts to lock the same mutex
+      * This can lead to deadlock.
+  * ***Why This Is a Thread-Induced Problem***
+    * ***In single-threaded processes***
+      * Signal delivery is simple.
+      * Only one execution context exists.
+    * ***In multithreaded processes***
+      * Signal delivery interacts with:
+        * Scheduling
+        * Locks
+        * Memory consistency
+      * The programmer must manually impose discipline.
+  * ***Practical Reality in Linux***
+    * Signals are still process-directed.
+    * Signals are delivered to threads based on:
+      * Signal masks
+      * Thread state
+    * The kernel does not know application intent.
+    * Therefore: Signal handling correctness is the programmer’s responsibility.
+
+**From AI**
+
+======
+=====
+ChatGPT::
+<details>
+<summary>Details</summary>
+
+* **ASCII diagram comparing process vs thread**
+```
+==========================
+SINGLE-THREADED PROCESS
+==========================
+
++--------------------------------------------------+
+|                    PROCESS                       |
+|--------------------------------------------------|
+|  Resources (owned by the process):               |
+|                                                  |
+|   • Virtual address space (code, heap, globals)  |
+|   • Open files                                   |
+|   • Sockets                                      |
+|   • Permissions / UID                            |
+|   • Working directory                            |
+|                                                  |
+|--------------------------------------------------|
+|  Execution (only one):                           |
+|                                                  |
+|   Thread                                          |
+|- Program Counter (PC)                        |
+|- CPU registers                               |
+|- Stack (function calls, locals)              |
+|                                                  |
++--------------------------------------------------+
+
+
+
+=====================================
+MULTI-THREADED PROCESS (CLASSICAL)
+=====================================
+
++--------------------------------------------------+
+|                    PROCESS                       |
+|--------------------------------------------------|
+|  Shared Resources (one copy):                    |
+|                                                  |
+|   • Virtual address space                        |
+|     - Code                                      |
+|     - Heap                                      |
+|     - Globals                                   |
+|   • Open files                                  |
+|   • Sockets                                     |
+|   • Permissions                                 |
+|                                                  |
+|--------------------------------------------------|
+|  Multiple Executions (threads):                  |
+|                                                  |
+|   +-------------------+   +-------------------+ |
+|   |     Thread 1      |   |     Thread 2      | |
+|   |-------------------|   |-------------------| |
+|   | PC                |   | PC                | |
+|   | Registers         |   | Registers         | |
+|   | Stack             |   | Stack             | |
+|   +-------------------+   +-------------------+ |
+|                                                  |
+|   +-------------------+                          |
+|   |     Thread 3      |                          |
+|   |-------------------|                          |
+|   | PC                |                          |
+|   | Registers         |                          |
+|   | Stack             |                          |
+|   +-------------------+                          |
+|                                                  |
++--------------------------------------------------+
+
+
+
+==========================
+MULTIPLE PROCESSES
+==========================
+
++----------------------+    +----------------------+
+|       PROCESS A      |    |       PROCESS B      |
+|----------------------|    |----------------------|
+|  Memory              |    |  Memory              |
+|  Open files          |    |  Open files          |
+|  Sockets             |    |  Sockets             |
+|----------------------|    |----------------------|
+|  Thread A1           |    |  Thread B1           |
+|   • PC               |    |   • PC               |
+|   • Registers        |    |   • Registers        |
+|   • Stack            |    |   • Stack            |
++----------------------+    +----------------------+
+```
++
+Key visual takeaways
++
+* Process = resource container
+* Thread = execution path
+* Threads:
+** Share memory and files
+** Have their own PC, registers, and stack
+* Processes:
+** Do not share memory by default
+** Communicate via IPC instead
++
+Mental shortcut
++
+```
+Process  = "What I own"
+Thread   = "What I am doing"
+```
+
+* **CPU + RAM interaction during scheduling**
+
+  1. Big picture: CPU ↔ RAM during execution
+```
+                 +=====================+
+                 |         CPU         |
+                 |---------------------|
+                 |  Registers          |
+                 |   • PC              |
+                 |   • SP              |
+                 |   • General regs    |
+                 |   • Flags           |
+                 +----------^----------+
+                            |
+                     context switch
+                            |
+                 +----------v----------+
+                 |         RAM         |
+                 |---------------------|
+                 |  Process resources  |
+                 |  +----------------+ |
+                 |  | Code           | |
+                 |  | Heap           | |
+                 |  | Globals        | |
+                 |  +----------------+ |
+                 |                    |
+                 |  Per-thread stacks |
+                 |  +--------------+  |
+                 |  | Stack T1     |  |
+                 |  | Stack T2     |  |
+                 |  +--------------+  |
+                 +--------------------+
+
+```
+* CPU: only holds one thread’s state at a time
+* RAM: holds everything persistent
+* Scheduling = saving CPU state → RAM, loading another thread’s state ← RAM
+
+  1. What exactly is saved during a context switch?
+
+     ```
+     CPU (running Thread A)
+     ---------------------
+      PC  ──┐
+      SP  ──┼── saved into RAM
+      R0..Rn┘
+      FLAGS
+
+     RAM
+     ------------------------------------
+      Thread A control block:
+    - saved PC
+    - saved registers
+    - saved SP
+     ```
+
+     Then:
+```
+RAM
+------------------------------------
+ Thread B control block:
+   • saved PC
+   • saved registers
+   • saved SP
+         │
+         ▼
+CPU loads Thread B state
+```
++
+. Thread scheduling (same process)
++
+Only execution state changes
+```
+Before switch:
+--------------
+CPU  → Thread 1
+RAM  → One address space
+
+After switch:
+-------------
+CPU  → Thread 2
+RAM  → SAME address space
+```
++
+ASCII view:
++
+```
+PROCESS (one address space in RAM)
++------------------------------------------------+
+| Code | Heap | Globals                           |
+|----------------------------------------------- |
+| Stack T1        Stack T2                        |
+|   ↑                ↑                           |
+| CPU using this    CPU will use this            |
+| stack now         stack after switch           |
++------------------------------------------------+
+```
++
+* Cost
+* Save/restore registers
+* Change stack pointer
+* No page table switch->Fast
++
+. Process scheduling (different processes)
++
+Execution + memory context changes
++
+```
+Before switch:
+--------------
+CPU → Process A, Thread A1
+MMU → Page Table A
+
+After switch:
+-------------
+CPU → Process B, Thread B1
+MMU → Page Table B
+```
++
+ASCII view:
+```
+RAM
++--------------------+    +--------------------+
+|     PROCESS A      |    |     PROCESS B      |
+|--------------------|    |--------------------|
+| Code               |    | Code               |
+| Heap               |    | Heap               |
+| Stack A1           |    | Stack B1           |
++--------------------+    +--------------------+
+
+CPU
++--------------------+
+| PC, regs, SP       |
++--------------------+
+
+MMU
++--------------------+
+| Page Table Pointer |
+|  (A → B switch)    |
++--------------------+
+```
+Cost
++
+* Save/restore registers
+* Switch page tables
+* Flush / reload TLB -> Slower than thread switch
++
+. Scheduler’s view (simplified)
+```
+RUN QUEUE (in RAM)
+----------------------------------
+| Thread A1 | Thread A2 | Thread B1 |
+----------------------------------
+        ^                     ^
+   same process          different process
+```
++
+Scheduler decision:
++
+* Pick next runnable thread
+* Save current CPU state
+* Load next CPU state
+* If process differs → switch memory context
++
+. Linux reality (ties to your earlier question)
++
+In Linux:
++
+* Both processes and threads are task_struct
+* Difference is What they share
+** Memory (mm_struct)
+** Files (files_struct)
+** Signals, etc.
++
+```
+task_struct
+  |
+  +-- registers (saved on switch)
+  +-- stack pointer
+  +-- mm_struct   (shared by threads)
+
+```
+So scheduling logic is mostly identical; the cost difference comes from Whether mm_struct changes or not
++
+. One-line intuition
++
+```
+Thread switch  = change "who runs"
+Process switch = change "who runs" + "what memory they see"
+```
+
+* **Mapping to task_struct, mm_struct, and thread_info**
+  1. High-level correspondence
+```
+CONCEPTUAL MODEL        LINUX STRUCTURE
+------------------------------------------------
+Process (resources)  →  mm_struct
+Thread (execution)   →  task_struct
+Per-CPU saved state  →  task_struct + kernel stack
+Low-level metadata   →  thread_info (arch-specific)
+```
+Linux does not have a separate “thread object”, A thread is a task_struct.
++
+. RAM layout during scheduling (Linux view)
+```
+RAM
+================================================================================
+
++-----------------------------+
+| task_struct (Thread A1)     |  ← schedulable entity
+|-----------------------------|
+| state                       |
+| pid / tid                   |
+| prio / policy               |
+| se (CFS entity)             |
+| mm  --------------------+--|----+
+| files                     |      |
+| fs                        |      |
+| signal                    |      |
+| thread                    |      | execution context
++-----------------------------+      |
+                                      |
++-----------------------------+      |
+| Kernel stack (Thread A1)    |      |
+|-----------------------------|      |
+| pt_regs (saved CPU regs)   |◄-----+
+| call frames                |
++-----------------------------+
+
++-----------------------------+
+| mm_struct (Process A)       |  ← resource container
+|-----------------------------|
+| pgd (page tables)           |
+| mmap (VMA list)             |
+| start_code / end_code       |
+| start_brk (heap)            |
+| arg/env                     |
+| mm_users                    |
++-----------------------------+
+```
++
+All threads in the same process point to the SAME mm_struct
++
+. task_struct: the thread + scheduler unit
++
+What it represents: Exactly one schedulable execution context
+```
+task_struct
+------------------------------------------------
+Scheduling:
+  state
+  prio
+  policy
+  cpu
+  se              (CFS scheduling entity)
+
+Identity:
+  pid   (thread ID)
+  tgid  (process ID)
+
+Resource links:
+  mm        → mm_struct (shared by threads)
+  active_mm
+  files
+  fs
+  signal
+
+Execution:
+  thread    (arch-specific CPU state)
+  stack     (kernel stack base)
+-----
+Mapping to the diagram
++
+```
+CPU registers  ←→ task_struct.thread
+Stack pointer ←→ kernel stack (task stack)
+PC             ←→ pt_regs on kernel stack
+```
++
+. mm_struct: the process resource 
++
+What it represents: Everything related to memory visibility
+```
+mm_struct
+------------------------------------------------
+pgd              → page tables (MMU root)
+mmap             → list of VMAs
+mmap_lock
+start_code
+end_code
+start_brk        → heap
+arg_start/env_start
+rss stats
+```
+Mapping to the diagram
+```
+"Process memory" in RAM
+   ├─ Code
+   ├─ Heap
+   ├─ Globals
+   └─ VMAs
+        ↑
+        mm_struct
+```
+Thread vs process switch
+```
+Thread switch:
+  next->mm == prev->mm
+  → NO page table switch
+
+Process switch:
+  next->mm != prev->mm
+  → load next->mm->pgd into CR3
+```
+. thread_info: lowest-level execution metadata
++
+What it is (modern Linux)
++
+* Arch-specific
+* Mostly merged into task_struct
+* Historically at bottom of kernel stack
+```
+thread_info
+-------------------------------------
+flags        (TIF_NEED_RESCHED, etc.)
+preempt_count
+cpu
+task → task_struct
+```
+Mapping
+```
+CPU interrupt / syscall entry
+        ↓
+thread_info flags
+        ↓
+scheduler decision
+```
+You can think of it as: “Minimal metadata the kernel needs immediately on entry”
++
+. Context switch: exact field mapping
++
+Step-by-step (timer interrupt)
++
+```
+1. CPU interrupt
+   → switch to kernel mode
+   → current kernel stack
+2. SAVE CPU STATE
+   → pt_regs pushed on kernel stack
+3. current = this_cpu_current_task
+4. pick next task_struct
+5. context_switch(prev, next)
+```
+What gets switched
+```
+SAVE (prev task_struct):
+  prev->thread.sp
+  prev->thread.ip
+  prev->thread.regs (arch-dependent)
+
+LOAD (next task_struct):
+  next->thread.sp
+  next->thread.ip
+  next->thread.regs
+```
+Memory context
+```
+if prev->mm != next->mm:
+    load next->mm->pgd into CR3
+```
+. Visual: thread vs process switch in Linux terms
+```
+THREAD SWITCH
+------------------------------------------------
+task_struct A1  → task_struct A2
+mm_struct A     → mm_struct A   (same)
+
+PROCESS SWITCH
+------------------------------------------------
+task_struct A1  → task_struct B1
+mm_struct A     → mm_struct B
+```
+. One-screen mental map
++
+```
+CPU
+ ├─ Registers
+ ├─ PC
+ └─ SP
+        ↓ save/restore
+Kernel Stack
+ └─ pt_regs
+        ↓ owned by
+task_struct  ←──── scheduler operates here
+        ↓
+mm_struct    ←──── defines memory view
+```
+. Key insight (this is exam-gold)
++
+* Linux schedules task_struct, not processes
+* A process is just a group of tasks sharing one mm_struct
+
+Compare threads vs processes in context switching cost::
+. What a context switch really costs
++
+A context switch cost comes from what must be saved and restored and what must be changed in the CPU/MMU.
++
+At minimum, every switch must:
++
+* Save CPU registers
+* Save stack pointer
+* Load another thread’s registers
+* Update scheduler metadata
++
+The extra cost depends on whether the memory context changes.
++
+. Thread vs Process switch (Linux)
+```
++----------------------+----------------------+----------------------+
+|                      | THREAD SWITCH       | PROCESS SWITCH      |
++----------------------+----------------------+----------------------+
+| Schedulable unit     | task_struct         | task_struct         |
+| CPU registers        | Save / Restore      | Save / Restore      |
+| Kernel stack         | Switch              | Switch              |
+| mm_struct            | SAME                | DIFFERENT           |
+| Page tables (CR3)    | NO CHANGE           | CHANGE              |
+| TLB                  | KEPT                | FLUSH / RELOAD      |
+| Cache locality       | Preserved           | Often lost          |
+| Syscall cost         | Low                 | Higher              |
+| Relative cost        | FAST                | SLOWER              |
++----------------------+----------------------+----------------------+
+```
+Key point: Linux does the same scheduling work — the difference is in MMU work.
++
+. CPU-level view
++
+Thread switch
+```
+CPU
+------------------------------------------------
+Save registers → Load registers
+SP → different kernel stack
+CR3 unchanged
+TLB unchanged
+---
+Minimal disruption.
++
+Process switch
+```
+CPU
+------------------------------------------------
+Save registers → Load registers
+SP → different kernel stack
+CR3 → load new page table root
+TLB → flushed or partially invalidated
+```
+Much heavier.
++
+. Why MMU work dominates cost
++
+Page table switch (CR3)
++
+* Changes entire virtual address space
+* Forces the CPU to:
+** Invalidate TLB entries
+** Reload translations from memory
+* Can cost hundreds to thousands of cycles
++
+Threads skip this completely.
++
+. Cache effects (often ignored, but huge)
++
+Thread switch
++
+* Same code
+* Same data
+* Same heap
++
+➡️ CPU caches stay warm
++
+Process switch
++
+* Different code
+* Different data
+* Different memory layout
++
+➡️ Cache misses increase
++
+This is why process switches feel slower even when raw instruction counts look similar.
++
+. Rough order-of-magnitude costs (typical x86-64)
++
+(Not exact — for intuition only)
++
+```
+Thread context switch   ≈ 100-300 cycles
+Process context switch  ≈ 1,000-5,000+ cycles
+```
+The gap widens under:
++
+* Heavy memory use
+* Large working sets
+* Frequent switches
++
+. Scheduler’s actual decision point
++
+Linux scheduler logic:
+```
+pick next task_struct
+
+if prev->mm == next->mm:
+    fast path (thread switch)
+else:
+    slow path (process switch)
+```
+So threads are cheaper by design, not by special scheduling rules.
++
+. Practical consequences
++
+Use threads when:
++
+* Tasks share data heavily
+* Low latency matters
+* High throughput is needed
++
+Examples:
++
+* Web servers
+* Databases
+* GUI applications
++
+Use processes when:
++
+* Isolation matters
+* Fault containment is required
+* Security boundaries are important
++
+Examples:
++
+Browsers (tab isolation)
+
+Microservices
+
+Sandboxing
+
+1. Exam-ready one-liner
+
+Thread switches change execution only; process switches change execution and memory.
+Memory changes dominate context-switch cost.
+
+* **ASCII reference sheet**
+```
+================================================================================
+LINUX PROCESS / THREAD / CPU / RAM / SCHEDULING — ASCII REFERENCE MODEL
+================================================================================
+
+
+[ CPU ]
+------------------------------------------------
+| PC | SP | FLAGS | RAX RBX RCX ... | CR3 |
+------------------------------------------------
+                 |
+                 | timer interrupt / syscall
+                 v
+
+
+[ KERNEL STACK  (per task) ]
+------------------------------------------------
+| pt_regs                                       |
+|   r15 r14 r13 r12 rbp rbx                     |
+|   r11 r10 r9  r8  rax rcx rdx rsi rdi         |
+|   orig_rax                                    |
+|   rip cs eflags rsp ss                       |
+------------------------------------------------
+| scheduler frames                              |
+------------------------------------------------
+| bottom of kernel stack                        |
+------------------------------------------------
+                 |
+                 v
+
+
+[ task_struct  (ONE PER THREAD) ]
+--------------------------------------------------------------------------------
+| state            (RUNNING / SLEEPING / ...)                                   |
+| pid   (TID)                                                                   |
+| tgid  (PID = process id)                                                      |
+| cpu                                                                             |
+| prio / policy                                                                 |
+| se                  (CFS scheduling entity)                                   |
+|                                                                               |
+| stack  ------------------------+                                              |
+| thread (arch context)           |                                             |
+|   sp                            | execution state                              |
+|   ip                            |                                             |
+|   saved regs                    |                                             |
+|                                                                               |
+| mm        --------------------+ |                                             |
+| active_mm                     | |                                             |
+| files                          | | resource links                              |
+| fs                             | |                                             |
+| signal                         | |                                             |
+--------------------------------------------------------------------------------
+                 |
+                 | mm pointer (shared by threads)
+                 v
+
+
+[ mm_struct  (ONE PER PROCESS) ]
+--------------------------------------------------------------------------------
+| pgd               (page table root → CR3)                                     |
+| mmap              (VMA linked list)                                            |
+| mmap_lock                                                                    |
+| start_code  end_code                                                          |
+| start_brk   brk                                                               |
+| arg_start  arg_end                                                            |
+| env_start  env_end                                                            |
+| mm_users                                                                      |
+--------------------------------------------------------------------------------
+                 |
+                 | defines virtual address space
+                 v
+
+
+[ USER VIRTUAL MEMORY (per mm_struct) ]
+--------------------------------------------------------------------------------
+| Code segment                                                                  |
+|-------------------------------------------------------------------------------|
+| Globals / BSS                                                                 |
+|-------------------------------------------------------------------------------|
+| Heap (brk / malloc)                                                           |
+|-------------------------------------------------------------------------------|
+| mmap regions                                                                  |
+|-------------------------------------------------------------------------------|
+| Stack (per thread, user mode)                                                 |
+--------------------------------------------------------------------------------
+
+
+[ thread_info  (arch / low-level) ]
+--------------------------------------------------------------------------------
+| flags           (TIF_NEED_RESCHED, etc.)                                       |
+| preempt_count                                                               |
+| cpu                                                                            |
+| task  → task_struct                                                           |
+--------------------------------------------------------------------------------
+
+
+[ RUN QUEUE (per CPU) ]
+--------------------------------------------------------------------------------
+| task_struct A1 | task_struct A2 | task_struct B1 | ...                         |
+--------------------------------------------------------------------------------
+      |                |                  |
+      | same mm        | same mm           | different mm
+      v                v                  v
+
+
+[ CONTEXT SWITCH LOGIC ]
+--------------------------------------------------------------------------------
+save prev->thread.sp / ip / regs
+load next->thread.sp / ip / regs
+
+if prev->mm != next->mm:
+    load next->mm->pgd into CR3
+    flush / update TLB
+--------------------------------------------------------------------------------
+
+
+[ THREAD SWITCH ]
+--------------------------------------------------------------------------------
+task_struct A1  → task_struct A2
+mm_struct A     → mm_struct A
+(no address space change)
+--------------------------------------------------------------------------------
+
+
+[ PROCESS SWITCH ]
+--------------------------------------------------------------------------------
+task_struct A1  → task_struct B1
+mm_struct A     → mm_struct B
+(CR3 switch + TLB effects)
+--------------------------------------------------------------------------------
+
+
+[ CORE IDENTITIES ]
+--------------------------------------------------------------------------------
+thread    = task_struct
+process  = set of task_struct sharing one mm_struct
+scheduler operates on task_struct
+memory view defined by mm_struct
+--------------------------------------------------------------------------------
+
+
+[ ONE-LINE TRUTH ]
+--------------------------------------------------------------------------------
+Process = resources
+Thread  = execution
+Linux schedules execution, not processes
+--------------------------------------------------------------------------------
+
+```
+</details>
+
+=====
+======
+=== Linux thread model
+
+**From AI**
+
+======
+=====
+ChatGPT::
++
+The key idea in one sentence
++
+Threads help programs run faster only when they can do computation and I/O at the same time.
++
+They do not help if everything is just heavy CPU work.
++
+First, a few simple definitions
+. CPU-bound work
++
+This means:
++
+The program spends most of its time calculating
++
+The CPU is busy all the time
++
+Examples:
++
+Encrypting a large file
++
+Compressing video
++
+Calculating primes
++
+Matrix multiplication
++
+Here, the CPU is the bottleneck.
++
+. I/O-bound work
++
+This means:
++
+The program spends a lot of time waiting
++
+Waiting for disk, network, keyboard, or screen
++
+Examples:
++
+Reading files from disk
++
+Downloading data from the network
++
+Waiting for user input
++
+Writing logs to disk
++
+Here, the program often sits idle, waiting for I/O to finish.
++
+. Threads
++
+Threads are like:
++
+Multiple workers inside the same program, sharing memory.
++
+Each thread can:
++
+Run on the CPU
++
+Or wait for I/O
++
+What the book is saying (in plain words)
++
+Threads do NOT make CPU-only programs faster.
++
+Why?
++
+If all threads want the CPU
++
+The CPU can only execute one thing at a time (per core)
++
+Threads just take turns → no real speedup
++
+Example 1: CPU-bound only (no benefit)
++
+Imagine:
++
+One program
++
+Doing heavy math
++
+No disk, no network
++
+Single-thread
+[CPU calculating] → done
++
+Multi-thread
+→ CPU switches between them
+→ Same total work
++
+- No speed improvement
+❌ Sometimes even slower (context switching overhead)
++
+Now the important part 👇
+When threads DO help: computation + I/O together
+Example 2: Computation + Disk I/O (big benefit)
++
+Suppose a program:
++
+Reads data from disk
++
+Processes it
++
+Writes results back to disk
++
+Single-threaded program
+Read from disk (CPU idle)  ← waiting
+Process data (CPU busy)
+Write to disk (CPU idle) ← waiting
++
+CPU timeline:
++
+IDLE → BUSY → IDLE → BUSY → IDLE
++
++
+🚫 CPU wasted a lot of time
++
+Multi-threaded program
++
+Thread A:
++
+Reading data from disk
++
+Thread B:
++
+Processing previously read data
++
+Thread C:
++
+Writing results to disk
++
+Now the timeline looks like:
++
+Thread A waiting for disk
+Thread B using CPU
+Thread C waiting for disk
++
++
+CPU timeline:
++
+BUSY → BUSY → BUSY
++
+- CPU is almost never idle
+- Disk and CPU work overlap
+- Program finishes faster
++
+Example 3: Web server (classic example)
++
+A web server:
++
+Receives requests
++
+Reads files
++
+Sends data over the network
++
+Without threads
+Handle request 1 → wait for disk
+Handle request 2 → wait for network
+CPU often idle
++
+With threads
+Thread 1: waiting for disk
+Thread 2: sending data over network
+Thread 3: preparing next response
++
++
+While one thread waits, another runs.
++
+🚀 Much better performance
++
+Why the book says “overlap”
++
+“Overlap” means:
++
+Doing useful work while something else is waiting
++
+Specifically:
++
+CPU work overlaps with I/O waiting
++
+Instead of: CPU waits → does nothing
++
+Key takeaway (memorize this)
++
+❌ Threads do not help when all work is CPU-bound
++
+- Threads help a lot when:
++
+There is both computation and I/O
++
+Threads allow CPU and I/O to overlap
++
+One-line mental model
++
+Threads are useful when your program spends time waiting.
+While one thread waits, another can work.
+=====
+
+* **Gemini**
+=====
+* **ChatGPT**
+
+  * **Concept**\
+  Concept
+  * **Concept**\
+  Concept
+
+=====
+======
+One way of envisaging threads is as a set of processes that share the same
+virtual memory, as well as a range of other attributes. Each thread is executing the
+same program code and shares the same data area and heap. However, each thread
+has it own stack containing local variables and function call linkage information.
+
+Threads can communicate with each other via the global variables that they
+share. The threading API provides condition variables and mutexes, which are primi-
+tives that enable the threads of a process to communicate and synchronize their
+actions, in particular, their use of shared variables. 
+
+Threads can also communicate
+with one another using the IPC and synchronization mechanisms 
+
+The primary advantages of using threads are that 
+
+* they make it easy to share
+data (via global variables) between cooperating threads and that some algorithms
+transpose more naturally to a multithreaded implementation than to a multiprocess
+implementation. 
+* Furthermore, a multithreaded application can transparently take
+advantage of the possibilities for parallel processing on multiprocessor hardware.
+
+## Making Single-Threaded Code Multithreaded
+
+### How single-threaded code becomes multithreaded
+***Core idea***
+
+* Start with a program that assumes a single flow of execution.
+* Introduce multiple concurrent flows that:
+  * Share the same address space
+  * Execute independently
+  * Interleave unpredictably
+
+***Step 1: Identify independent activities***
+
+* Look for work that:
+  * Can run concurrently
+  * Does not strictly depend on immediate results from other work
+* Examples:
+  * Web servers: accept connections, read requests, generate responses
+  * GUI applications: event handling, background computation
+  * System tools: I/O handling and computation
+* Risk:
+  * Apparent independence may hide implicit dependencies
+
+***Step 2: Share state between threads***
+
+* Single-threaded code often relies on:
+  * Global variables
+  * Static buffers
+  * Implicit execution order
+* In multithreaded code:
+  * These become shared memory
+* Problem:
+  * Concurrent access leads to races
+
+***Step 3: Introduce synchronization***
+
+* Shared state must be protected using:
+  * Mutexes
+  * Read-write locks
+  * Semaphores
+  * Atomic operations
+  * Condition variables
+* Consequence:
+  * Execution is no longer linear
+  * Progress depends on lock acquisition
+
+***Step 4: Decide execution structure***
+
+* Common models:
+  * Thread-per-task
+  * Thread pool
+  * Producer-consumer
+  * Pipeline
+* Design choice affects:
+  * Performance
+  * Memory usage
+  * Complexity
+  * Debuggability
+* Poor design example:
+  * Creating one thread per request causes excessive overhead
+
+***Step 5: Handle blocking operations***
+
+* Single-threaded assumption:
+  * Blocking is acceptable
+* Multithreaded reality:
+  * Blocking may stall other threads
+  * Locks held during blocking cause system-wide delays
+* Common mistake:
+  * Performing blocking I/O while holding a mutex
+
+***Step 6: Make termination and cleanup safe***
+
+* Threads may still:
+  * Hold locks
+  * Access freed memory
+  * Use closed file descriptors
+* Requires:
+  * Thread joining
+  * Cancellation handling
+  * Clear resource ownership rules
+   
+  ==== Fundamental problems introduced
+
+#### Problem of: Race conditions
+
+The code of a thread normally consists of multiple procedures, just
+like a process. These may have local variables, global variables, and parameters.
+Local variables and parameters do not cause any trouble, but variables that are glo-
+bal to a thread but not global to the entire program are a problem. These are vari-
+ables that are global in the sense that many procedures within the thread use them
+(as they might use any global variable), but other threads should logically leave
+them alone.
+
+As an example, consider the errno variable maintained by UNIX. When a
+process (or a thread) makes a system call that fails, the error code is put into errno.
+```
+        Thread 1                Thread 2
+           |                     
+		   |
+Time	Access (errno set)
+  |		   |
+  |		   |
+  V		   ------------------------
+								  |
+						Open (errno overwritten)
+								  |
+		   -----------------------|
+		   |
+		   |
+    Errno inspected
+```
+In Fig, thread 1 executes the system call access to find out if it has permis-
+sion to access a certain file. The operating system returns the answer in the global
+variable errno. After control has returned to thread 1, but before it has a chance to
+read errno, the scheduler decides that thread 1 has had enough CPU time for the
+moment and switches to thread 2. Thread 2 executes an open call that fails, which
+causes errno to be overwritten and thread 1’s access code to be lost forever. When
+thread 1 starts up later, it will read the wrong value and behave incorrectly
+
+Various solutions to this problem are possible. One is to prohibit global vari-
+ables altogether. However worthy this ideal may be, it conflicts with much existing software. Another is to assign each thread its own private global variables. In this way, each thread has its own private copy of errno and
+other global variables, so conflicts are avoided. In effect, this decision creates a
+new scoping level, variables visible to all the procedures of a thread (but not to
+other threads), in addition to the existing scoping levels of variables visible only to
+one procedure and variables visible everywhere in the program.
+
+Accessing the private global variables is a bit tricky, however, since most pro-
+gramming languages have a way of expressing local variables and global variables,
+but not intermediate forms. It is possible to allocate a chunk of memory for the glo-
+bals and pass it to each procedure in the thread as an extra parameter. While hardly
+an elegant solution, it works.
+Alternatively, new library procedures can be introduced to create, set, and read
+these threadwide global variables. The first call might look like this:
+create global("bufptr");
+It allocates storage for a pointer called bufptr on the heap or in a special storage
+area reserved for the calling thread. No matter where the storage is allocated, only
+the calling thread has access to the global variable. If another thread creates a glo-
+bal variable with the same name, it gets a different storage location that does not
+conflict with the existing one.
+Two calls are needed to access global variables: one for writing them and the
+other for reading them. For writing, something like
+set global("bufptr", &buf);
+will do. It stores the value of a pointer in the storage location previously created by
+the call to create global. To read a global variable, the call might look like
+bufptr = read global("bufptr");
+It returns the address stored in the global variable, so its data can be accessed.
+
+#### Problem with Leagacy library procedures
+The next problem in turning a single-threaded program into a multithreaded
+one is that many library procedures are not reentrant. That is, they were not
+designed to have a second call made to any given procedure while a previous call
+has not yet finished. For example, sending a message over the network may well be
+programmed to assemble the message in a fixed buffer within the library, then to
+trap to the kernel to send it. What happens if one thread has assembled its message
+in the buffer, then a clock interrupt forces a switch to a second thread that
+immediately overwrites the buffer with its own message?
+
+Similarly, memory-allocation procedures such as malloc in UNIX, maintain
+crucial tables about memory usage, for example, a linked list of available chunks
+of memory. While malloc is busy updating these lists, they may temporarily be in
+an inconsistent state, with pointers that point nowhere. If a thread switch happens
+to occur while the tables are inconsistent and a new call comes in from a different
+thread, an invalid pointer may be used, leading to a program crash.
+
+* Many standard library procedures were designed for single-threaded use
+* Not safe to have a second call to the same procedure while the first call is in progress
+* Examples:
+  * Network send routines using a fixed internal buffer
+  * Memory allocation routines like `malloc` and `free`
+
+***Example 1: Network message assembly***
+
+* Library internally uses a fixed buffer to assemble a message
+* Steps:
+  * Thread A assembles message in buffer
+  * Clock interrupt occurs → context switch
+  * Thread B assembles its message in the same buffer
+* Consequence:
+  * Thread A’s message is overwritten
+  * Corrupted or incorrect messages may be sent
+  * Leads to unpredictable behavior
+
+***Example 2: Memory allocation (`malloc`)***
+* `malloc` maintains internal tables of free memory chunks (e.g., linked lists)
+* While `malloc` is updating tables:
+** Tables may be temporarily inconsistent
+** Pointers may be invalid
+* If thread switch occurs during this period:
+** Another thread calling `malloc` may use invalid pointers
+** Program may crash or corrupt memory
+
+***Implications***
+* Non-reentrant libraries cannot safely be called concurrently from multiple threads
+* To fix:
+** Rewrite the library to be thread-safe
+** Add internal locking mechanisms
+** Ensure reentrancy
+* Challenges:
+** Nontrivial to rewrite
+** Subtle bugs are easily introduced
+
+***Key takeaway***
+* Moving from single-threaded to multithreaded code requires careful auditing of all library calls
+* Only reentrant or thread-safe functions are safe to use concurrently
+
+***One-sentence exam answer***
+* Many library procedures are non-reentrant, so concurrent calls from multiple threads may overwrite internal buffers or corrupt memory, requiring either thread-safe rewrites or proper synchronization.
+
+Fixing all these
+problems effectively means 
+
+* rewriting the entire library. Doing so is a nontrivial
+activity with a real possibility of introducing subtle errors.
+* A different solution is to provide each procedure with a wrapper that sets a bit
+to mark the library as being in use. Any attempt for another thread to use a library
+procedure while a previous call has not yet completed is blocked. Although this
+approach can be made to work, it greatly eliminates potential parallelism.
+  * Solution: Wrappers to serialize library calls
+    * Idea:
+      * Provide each non-reentrant procedure with a wrapper
+      * Wrapper sets a “busy” flag when the library is in use
+      * Any other thread attempting to call the same procedure is blocked
+    * Example concept
+
+      ```c
+      //Suppose `send_message()` is non-reentrant:
+      static int busy = 0;
+
+      void send_message_wrapper(const char *msg) {
+      	while (__sync_lock_test_and_set(&busy, 1)) {
+      		// busy-wait or sleep until previous call finishes
+      	}
+      	send_message(msg); // original library call
+      	__sync_lock_release(&busy);
+      }
+      ```
+* Behavior:
+  * Only one thread may enter send_message at a time
+  * Other threads wait for the procedure to become free
+* Pros
+  * Simple to implement
+  * Ensures library safety without rewriting entire library
+* Cons
+  * Eliminates potential parallelism
+  * Threads are blocked even if they don’t share data
+  * Can become a bottleneck in multithreaded programs
+  * Poor scalability for high-concurrency applications
+* Key insight
+  * Wrappers work as a stopgap measure, but they reduce concurrency
+  * Better long-term solution: use reentrant/thread-safe libraries or TLS
+* One-sentence exam answer
+
+Wrapping non-reentrant library calls with a busy flag ensures safety but serializes access, reducing parallelism and scalability.
+
+Here’s a reference table of common C library functions, showing reentrant/thread-safe vs non-reentrant
+| Function | Reentrant / Thread-safe | Notes / Comments |
+| --- | --- | --- |
+| `malloc`, `free` | - Thread-safe in modern glibc | Protected by internal locks; early UNIX versions were not thread-safe |
+| `strtok` | ❌ Non-reentrant | Uses static internal state; use `strtok_r` instead |
+| `asctime`, `ctime` | ❌ Non-reentrant | Use `asctime_r`, `ctime_r` instead |
+| `localtime`, `gmtime` | ❌ Non-reentrant | Use `localtime_r`, `gmtime_r` instead |
+| `rand` | ❌ Non-reentrant | Use `rand_r` instead (per-thread seed) |
+| `printf`, `fprintf` | - Generally thread-safe in glibc | Internal locks prevent corruption of FILE streams; buffers may still need care |
+| `perror` | - Thread-safe in modern glibc | Internally calls `write` and uses errno; safe if errno is thread-local |
+| `getenv`, `putenv` | ❌ Non-reentrant | Environment is global; concurrent access can cause races |
+| `signal` | ❌ Generally non-reentrant | Use `sigaction` with proper signal masks for multithreading |
+| `read`, `write`, `open`, `close` | - Thread-safe (system calls) | Kernel ensures concurrency safety |
+| `strerror` | ❌ Non-reentrant | Use `strerror_r` for thread-safe error messages |
+| `localtime_r`, `gmtime_r`, `asctime_r`, `ctime_r` | - Reentrant versions | Allocate thread-local structures instead of static ones |
+| `pthread_*` APIs | - Thread-safe by design | For example: `pthread_create`, `pthread_mutex_lock`, `pthread_join` are safe |
+
+#### Problem with thread-private global variables
+
+* Some variables are logically global to a single thread but not the entire program
+* Ordinary globals are shared across threads, causing conflicts
+* Examples: `errno`, temporary buffers, caches, or thread context data
+
+***Possible solutions***
+
+* ***Prohibit global variables entirely***
+  * Avoids conflicts completely
+  * Conflicts with much existing software
+  * Example:  Replace global buffer:
+  ```c
+  char buf[1024];
+  void thread_func() {
+  	char buf[1024]; // local to thread
+  }
+  ```
+* ***Assign each thread its own private global variables***
+  * Each thread gets a separate copy of variables like `errno`
+  * Creates a ***new scoping level***:
+  * Procedure-local variables
+  * Thread-global variables (shared within thread only)
+  * Program-global variables (shared across all threads)
+
+***Accessing thread-private globals***
+
+**Programming languages usually only provide:**
+
+* Local variables
+* Global variables
+* Intermediate form (thread-global) requires extra handling
+
+***Solution 1: Pass memory explicitly***
+
+* Allocate a chunk of memory for thread-private globals
+* Pass it as an extra parameter to every procedure
+* Example:
+```c
+typedef struct {
+	int bufsize;
+	char *buf;
+} thread_globals;
+
+void process(thread_globals *tg) {
+	tg->bufsize = 1024;
+	tg->buf = malloc(tg->bufsize);
+	// do work with tg->buf
+}
+
+void *thread_func(void *arg) {
+	thread_globals tg;
+	process(&tg);
+	free(tg.buf);
+	return NULL;
+}
+```
+* Pros:
+** Works without modifying language or compiler
+* Cons:
+** Tedious
+** Hard to maintain
+** Not elegant
+
+***Solution 2: Library-based thread globals***
+
+Introduce library routines to manage thread-global variables
+
+Examples of usage:
+```c
+create_global("bufptr");
+
+char *buf = malloc(1024);
+set_global("bufptr", buf);
+
+char *thread_buf = read_global("bufptr");
+strcpy(thread_buf, "Thread-specific data");
+```
+Notes:
+
+* Each thread gets its own storage for bufptr
+* Threads creating a variable with the same name get separate locations
+* Simplifies function calls because no extra parameter is needed
+* This is the approach used by glibc for errno and other thread-specific variables(Thread-local storage (TLS))
+  * errno and similar thread-local variables use POSIX Thread-Specific Data (TSD) via pthread_key_create and Thread-Local Storage (TLS).
+  * Modern glibc uses compiler-supported TLS (__thread / _Thread_local) for speed.
+
+    Example (glibc):
+
+    ```
+    __thread int errno;.
+    ```
+  * Behind the scenes:
+    * Each thread gets a pointer to a thread control block (TCB)
+    * TLS variables are offsets from the TCB
+    * Access does not require extra parameters, just a direct read/write
+* Linux kernel itself does not provide global variables per user thread, but allows kernel threads to maintain per-task data (in task_struct).
+  * The kernel creates per-thread (task_struct) memory for each kernel thread: Stack (kernel stack, user stack), Thread ID, CPU registers and scheduling info
+  * Variables like errno are not in the kernel, they live in user-space TLS managed by glibc.
+  * Kernel ensures:
+    * Thread safety for kernel data
+    * Separation between kernel thread stacks
+  * So kernel threads don’t need create_global() - that’s purely a user-space concern.
+
+Key insights
+
+* Each thread has isolated storage for its globals
+* Avoids conflicts without eliminating all global variables
+* Introduces an additional scoping level:
+  * Procedure-local
+  * Thread-global
+  * Program-global
+
+***Thread code structure***
+
+* A thread’s code typically consists of:
+  * Multiple procedures (functions)
+  * Just like a normal process
+* These procedures may use:
+  * Local variables
+  * Parameters
+  * Global variables
+
+***Local variables and parameters***
+
+* Local variables:
+  * Are stored on the thread’s stack
+  * Are private to each thread
+* Parameters:
+  * Are passed via the stack or registers
+  * Are also private to the executing thread
+* Result:
+  * No correctness problems arise from locals or parameters
+
+***Thread-private global variables (the core problem)***
+
+* Some variables are:
+  * Used by many procedures within one thread
+  * Logically global to that thread
+  * But should not be shared with other threads
+* These variables are:
+  * Not local variables
+  * Not global to the entire program
+  * Conceptually “global per thread”
+
+***Why this is a problem***
+
+* In traditional languages (C, C++):
+  * Global variables are shared by all threads
+* There is no built-in notion of:
+  * Variables that are global to a thread only
+* If implemented as normal globals:
+  * Other threads can accidentally read or modify them
+  * This leads to race conditions and corruption
+
+***Typical examples***
+
+* Per-thread state such as:
+  * Error codes
+  * Temporary buffers
+  * Caches
+  * Context or session data
+* Each thread needs its own copy:
+  * But procedures within the same thread must share it
+
+***Common solutions***
+
+* Thread-local storage (TLS):
+  * Each thread has its own instance of a variable
+  * Accessed using language or runtime support
+* Examples:
+  * C: __thread or _Thread_local
+  * POSIX: pthread_key_create(), pthread_setspecific()
+  * Compilers/runtime manage per-thread copies
+
+***Key insight***
+
+* The problem is not concurrency itself.
+* The problem is:
+  * Distinguishing between program-global state
+  * And thread-private shared state
+* Without explicit support:
+  * Programmers are forced into unsafe designs
+
+***One-sentence exam answer***
+
+* Variables that are logically global to a single thread but shared across its procedures cannot be expressed using ordinary globals, requiring thread-local storage to avoid unintended sharing between threads.
+* Occur when:
+  * Multiple threads access shared data
+  * At least one access is a write
+  * No proper synchronization exists
+* Effects:
+  * Incorrect results
+  * Rare and non-reproducible bugs
+
+***Deadlocks***
+
+* Occur when:
+  * Thread A holds lock X and waits for Y
+  * Thread B holds lock Y and waits for X
+* Common causes:
+  * Inconsistent lock ordering
+  * Blocking while holding locks
+  * Recursive locking errors
+
+***Starvation***
+
+* Some threads:
+  * Never acquire CPU time or locks
+* Causes:
+  * Priority inversion
+  * Unfair scheduling
+  * Lock contention
+
+***Memory visibility problems***
+
+* Single-threaded assumption:
+  * Writes are immediately visible
+* Multithreaded reality:
+  * CPU caches
+  * Instruction reordering
+  * Weak memory models
+* Without synchronization:
+  * Threads observe stale or inconsistent data
+
+***Loss of determinism***
+
+* Single-threaded programs:
+  * Same input produces same behavior
+* Multithreaded programs:
+  * Execution order depends on timing and scheduling
+* Result:
+  * Bugs become timing-dependent
+  * Testing cannot cover all interleavings
+
+***Error handling complexity***
+
+* Failure in one thread raises questions:
+  * Should the process exit?
+  * Should other threads stop?
+  * How are errors propagated?
+* No universal correct policy exists
+
+***Debugging difficulty***
+
+* Debugging changes execution timing
+* Logging alters thread interleavings
+* Bugs may disappear when observed
+* Common outcome:
+  * Works in debug, fails in release
+
+***Signals and asynchronous events***
+
+* Signals are:
+  * Process-directed
+  * Delivered to arbitrary threads
+* Signal handlers:
+  * Interrupt execution at unsafe points
+* Requires:
+  * Signal masking
+  * Dedicated signal-handling threads
+
+***Why this is fundamentally hard***
+
+* Humans reason sequentially
+* CPUs execute concurrently
+* OS schedulers are nondeterministic
+* Hardware reorders memory operations
+* Multithreading breaks:
+  * Linear time assumptions
+  * Single control-flow reasoning
+
+***Why modern systems avoid manual threading***
+
+* Alternatives include:
+  * Event-driven architectures
+  * Async/await models
+  * Message passing
+  * Actor systems
+  * Managed runtimes (Go, Erlang, JVM virtual threads)
+* Goal:
+  * Concurrency without shared mutable state
+
+***One-sentence exam answer***
+
+* Making single-threaded code multithreaded requires introducing shared state and synchronization, which destroys determinism and introduces races, deadlocks, memory visibility issues, and severe
+===== Signal Problems
+Next, consider signals. Some signals are logically thread specific; others are
+not. For example, if a thread calls alarm, it makes sense for the resulting signal to
+go to the thread that made the call. However, when threads are implemented entire-
+ly in user space, the kernel does not even know about threads and can hardly direct
+the signal to the right one. An additional complication occurs if a process may only
+have one alarm pending at a time and several threads call alarm independently.
+
+Other signals, such as keyboard interrupt, are not thread specific. Who should
+catch them? One designated thread? All the threads? Furthermore, what happens
+if one thread changes the signal handlers without telling other threads about it?
+And what happens if one thread wants to catch a particular signal (say, the user hit-
+ting CTRL-C), and another thread wants this signal to terminate the process? This
+situation can arise if one or more threads run standard library procedures and oth-
+ers are user-written. Clearly, these wishes are incompatible. In general, signals are
+difficult enough to manage even in a single-threaded environment. Going to a mul-
+tithreaded environment does not make them any easier to handle
+==== Examples
+**Read multiple files and count lines**
+
+```c
+#include <stdio.h>
+
+#define FILE_COUNT 3
+
+int count_lines(const char *filename) {
+    FILE *fp = fopen(filename, "r");
+    if (!fp) return 0;
+    int count = 0;
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), fp)) {
+        count++;
+    }
+    fclose(fp);
+    return count;
+}
+
+int main() {
+    const char *files[FILE_COUNT] = {"file1.txt", "file2.txt", "file3.txt"};
+    int total_lines = 0;
+
+    for (int i = 0; i < FILE_COUNT; i++) {
+        total_lines += count_lines(files[i]);
+    }
+
+    printf("Total lines: %d\n", total_lines);
+    return 0;
+}
+```
+Behavior
+
+* Processes files sequentially
+* Total runtime is sum of individual file processing times
+
+**Step 1: Identify independent work**
+
+* Counting lines in each file can run concurrently
+* Files are independent
+* Only shared state is total_lines
+
+**Step 2: Introduce multithreading**
+
+* Use pthreads
+* Each thread counts lines in one file
+* Protect total_lines using a mutex
+```c
+#include <stdio.h>
+#include <pthread.h>
+
+#define FILE_COUNT 3
+
+const char *files[FILE_COUNT] = {"file1.txt", "file2.txt", "file3.txt"};
+int total_lines = 0;
+pthread_mutex_t lock;
+
+void *count_file(void *arg) {
+    const char *filename = (const char *)arg;
+    FILE *fp = fopen(filename, "r");
+    if (!fp) return NULL;
+
+    int count = 0;
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), fp)) count++;
+
+    fclose(fp);
+
+    // Update shared state safely
+    pthread_mutex_lock(&lock);
+    total_lines += count;
+    pthread_mutex_unlock(&lock);
+
+    return NULL;
+}
+
+int main() {
+    pthread_t threads[FILE_COUNT];
+    pthread_mutex_init(&lock, NULL);
+
+    // Create threads
+    for (int i = 0; i < FILE_COUNT; i++) {
+        pthread_create(&threads[i], NULL, count_file, (void *)files[i]);
+    }
+
+    // Join threads
+    for (int i = 0; i < FILE_COUNT; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+    printf("Total lines: %d\n", total_lines);
+    pthread_mutex_destroy(&lock);
+    return 0;
+}
+```
+Step 3: Problems introduced
+* Race conditions
+  * Without mutex, threads could update total_lines concurrently → wrong result
+* Deadlocks
+  * Not in this simple example, but possible if multiple locks exist
+* Memory visibility
+  * Each thread may cache total_lines; mutex ensures proper ordering
+* Debugging complexity
+  * Bugs may appear intermittently depending on scheduler
+* Resource limits
+  * Creating too many threads for many files can overwhelm the system
+
+---
+
+***using thread-local storage (TLS)***
+
+Here’s a refactored multithreaded example using thread-local storage (TLS), which avoids the mutex and reduces contention.
+
+* In previous example, `total_lines` was shared
+* Requires a mutex for every update
+* Introduces overhead and potential contention
+* TLS can avoid this by keeping per-thread totals
+
+***Step 1: Use thread-local storage***
+
+* Each thread keeps its own `local_total`
+* No mutex needed
+* Final total is computed after all threads join
+
+Thread-local storage allows each thread to maintain its own independent data, eliminating mutex contention for per-thread variables while still supporting aggregation after threads complete.
+
+***Example using TLS in pthreads***
+```c
+#include &lt;stdio.h>
+#include &lt;pthread.h>
+
+#define FILE_COUNT 3
+
+const char *files[FILE_COUNT] = {"file1.txt", "file2.txt", "file3.txt"};
+
+__thread int local_total = 0;
+
+void *count_file(void *arg) {
+    const char *filename = (const char *)arg;
+    FILE *fp = fopen(filename, "r");
+    if (!fp) return NULL;
+
+    int count = 0;
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), fp)) count++;
+
+    fclose(fp);
+
+    // Store in thread-local variable
+    local_total = count;
+
+    return (void *)(long)local_total; // Return the per-thread count
+}
+
+int main() {
+    pthread_t threads[FILE_COUNT];
+    int total_lines = 0;
+
+    // Create threads
+    for (int i = 0; i < FILE_COUNT; i++) {
+        pthread_create(&threads[i], NULL, count_file, (void *)files[i]);
+    }
+
+    // Join threads and accumulate totals
+    for (int i = 0; i < FILE_COUNT; i++) {
+        void *retval;
+        pthread_join(threads[i], &retval);
+        total_lines += (int)(long)retval; // sum thread-local totals
+    }
+
+    printf("Total lines: %d\n", total_lines);
+    return 0;
+}
+```
+
+Benefits of TLS approach
+
+* No mutex needed → avoids locking overhead
+* Each thread has isolated storage → no race conditions
+* Simpler and safer for per-thread state
+
+Potential issues
+
+* TLS memory overhead per thread
+* Returning value from thread is still needed to combine results
+* Not all variables can be TLS if shared between threads
+* For very many threads, kernel TLS segment may become a bottleneck
+
+Key takeaways
+
+* TLS is ideal for per-thread private data
+* Shared aggregation still requires some merge step after thread completion
+* Improves performance and correctness in multithreaded refactor
+* Used extensively in **glibc (errno) and NPTL threads**
+
+Key lessons
+
+* Identify independent work carefully
+* Shared state must be protected
+* Use synchronization primitives (mutexes, semaphores)
+* Keep per-thread data local whenever possible
+* Minimize blocking and contention for better performance
+
+#### stack management
+In many systems, when a process’ stack overflows, the kernel just provides that process with
+more stack automatically. When a process has multiple threads, it must also have
+multiple stacks. If the kernel is not aware of all these stacks, it cannot grow them
+automatically upon stack fault. In fact, it may not even realize that a memory fault
+is related to the growth of some thread’s stack.
+
+* Single-threaded processes:
+  * Kernel can automatically grow the stack on overflow
+  * Memory faults are associated with the process stack
+* Multithreaded processes:
+  * Each thread has its own stack
+  * Kernel may not be aware of all thread stacks
+  * Stack overflows in a thread may not be automatically handled
+  * Memory faults may not be recognized as related to stack growth
+
+***Implications***
+
+* Each thread’s stack must be preallocated carefully
+* Threads cannot rely on automatic stack growth like single-threaded processes
+* Libraries (e.g., pthreads) usually require specifying stack size on thread creation
+* Incorrect stack size may lead to crashes or subtle memory corruption
+
+***Common solutions***
+
+* Specify explicit stack size using `pthread_attr_setstacksize()` when creating threads
+* Avoid deep recursion or large stack-allocated arrays in threads
+* Use thread-local heap allocation instead of large stack buffers for per-thread data
+
+***One-sentence exam answer***
+* In multithreaded programs, each thread needs its own stack, and the kernel cannot automatically grow these stacks, so careful stack size management is required to avoid overflows.
+
+### making code thread-safe
+Here’s a complete reference table of solutions for making code thread-safe, combining TLS, wrappers, mutexes, and reentrant library functions
+
+| Solution | How it works | Pros | Cons / Notes | Example |
+| --- | --- | --- | --- | --- |
+| Thread-Local Storage (TLS) | Each thread keeps its own copy of data using `__thread` or `pthread_key_create` | No mutex needed; avoids races; automatic per-thread isolation | TLS memory overhead per thread; must still combine results; limited size in some OSes | `__thread int local_total; // each thread has its own copy` |
+| Library-managed thread globals | Library routines create per-thread global variables: `create_global()`, `set_global()`, `read_global()` | Provides a per-thread global scope; avoids passing extra parameters | Extra library layer; requires runtime support; memory still per-thread | `create_global("bufptr"); set_global("bufptr", &buf); char *b = read_global("bufptr");` |
+| Wrappers / Busy flags | Wrap non-reentrant library calls with a busy flag; block other threads until call completes | Simple; avoids rewriting library; works with legacy code | Eliminates parallelism; threads blocked unnecessarily; high contention possible | ``` static int busy = 0; while (__sync_lock_test_and_set(&busy,1)) {} send_message(msg); __sync_lock_release(&busy); |
+| Mutex / Locks around shared resources | Protect shared variables/resources using pthread_mutex_lock / unlock | Works with any code; ensures correctness; widely understood | Can cause deadlocks; blocking reduces parallelism; performance overhead | ``` pthread_mutex_lock(&lock); total += local_count; pthread_mutex_unlock(&lock); |
+| Reentrant / thread-safe library functions | Use `_r` variants of non-reentrant functions (e.g., `strtok_r`, `malloc` in glibc) | Safe for multithreaded use; minimal extra work | Not all functions have reentrant versions; legacy code may need rewrite | `char *token = strtok_r(str, delim, &saveptr);` |
+| Pass memory explicitly | Allocate per-thread storage and pass it as a parameter to functions | Works without library changes; fully controllable | Tedious; modifies function signatures; not scalable | ``` typedef struct \{ int count; \} thread_data; void process(thread_data *td); thread_data td; process(&td); |
+***Highlights:***  
+* TLS and library-managed globals are ***modern, efficient solutions*** (used in glibc for `errno` and NPTL).  
+* Wrappers / busy flags are ***legacy-compatible but limit parallelism***.  
+* Mutexes provide ***general correctness but can hurt performance***.  
+* `_r` reentrant functions are the ***preferred approach*** when available.  
+* Passing memory explicitly is ***manual and tedious***, mostly educational or legacy.

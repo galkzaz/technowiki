@@ -1,0 +1,703 @@
+---
+id: process-ipc-sleep-wakeup
+title: Sleep and Wakeup
+description: Sleep and Wakeup
+---
+
+Now let us look at some interprocess communication primitives that block
+instead of wasting CPU time when they are not allowed to enter their critical
+regions. One of the simplest is the pair sleep and wakeup. Sleep is a system call
+that causes the caller to block, that is, be suspended until another process wakes it
+up. The wakeup call has one parameter, the process to be awakened. Alternatively,
+both sleep and wakeup each have one parameter, a memory address used to match
+up sleeps with wakeups.
+
+Busy-waiting primitives (Peterson, TAS, XCHG, spinlocks) do this: "If I can’t enter the critical section, keep checking until I can." That burns CPU.
+
+sleep / wakeup flip the model: "If I can’t enter, go to sleep and let someone wake me when it’s safe."
+So instead of looping, the process blocks and gives the CPU to someone else.
+
+in sleep / wakeup two equivalent formulations exist.
+1. Variant A: wake a specific process
+    ```
+    sleep();              // block myself
+    wakeup(process_id);   // wake that process
+    ```
+2. Variant B (more common): sleep on an address
+    ```
+    sleep(address);
+    wakeup(address);
+    ```
+    Here: address is not memory being accessed, it’s just a label (a rendezvous point), processes sleeping on the same address form a wait queue.
+
+**How sleep/wakeup solves busy waiting**
+
+Instead of this (spinlock):
+```
+while (lock == 1) ;   // burn CPU
+lock = 1;
+```
+We get:
+```
+while (lock == 1)
+    sleep(&lock);
+
+lock = 1;
+```
+And when the lock is released:
+```
+lock = 0;
+wakeup(&lock);
+```
+✔ CPU is free
+✔ Scheduler can run other processes
+✔ No priority inversion deadlock like before
+
+
+**Timeline diagram: busy waiting vs sleep/wakeup**
+```
+❌ Busy waiting (spinlock)
+Time →
+-------------------------------------------------
+L (low prio):  [ CS ]-----------------------------
+H (high prio):        [ spin ][ spin ][ spin ]...
+CPU owner:            H       H       H
+-------------------------------------------------
+```
+Result: DEADLOCK (L never runs again)
+
+- sleep / wakeup
+```
+Time →
+-------------------------------------------------
+L (low prio):  [ CS ]----[ unlock ][ run ]
+H (high prio):        [ sleep ]----[ CS ]
+CPU owner:            L            H
+-------------------------------------------------
+```
+Result: Progress guaranteed
+
+H blocks, L runs, releases lock, wakes H.
+
+<details>
+<summary>naive sleep/wakeup example</summary>
+
+Below is a complete, minimal, intentionally wrong C program that mimics sleep/wakeup using threads, and can deadlock due to a lost wakeup.
+
+⚠️ This code is NOT how you should synchronize threads.
+It is educational, to demonstrate the flaw Tanenbaum is warning about.
+
+**What this code tries to do**
+
+Two threads share a “lock”:
+- Thread A wants to enter a critical section
+- Thread B releases the lock and wakes A
+- Sleep/wakeup are implemented naively
+- There is no atomicity between checking the lock and sleeping
+
+Result: lost wakeup → deadlock
+
+**Naive sleep / wakeup implementation**
+
+We’ll fake:
+- sleep(addr) → pthread_cond_wait
+- wakeup(addr) → pthread_cond_signal
+
+❗ No mutex protection around the condition — this is the bug.
+
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <unistd.h>
+
+/* Shared "lock" */
+int lock = 1;  // 1 = locked, 0 = free
+
+/* Naive sleep/wakeup primitives */
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+/* ---------------- Thread A ---------------- */
+void* thread_A(void* arg)
+{
+    printf("A: Trying to enter critical section\n");
+
+    if (lock == 1) {
+        printf("A: Lock busy, going to sleep\n");
+
+        /* ---- RACE WINDOW HERE ---- */
+        // The pthread_cond_wait() function waits until a pthread_cond_broadcast() or a pthread_cond_signal() is received.
+        pthread_cond_wait(&cond, NULL);
+    }
+
+    lock = 1;
+    printf("A: Entered critical section\n");
+
+    return NULL;
+}
+
+/* ---------------- Thread B ---------------- */
+void* thread_B(void* arg)
+{
+    sleep(1);  // ensure ordering
+
+    printf("B: Leaving critical section\n");
+    lock = 0;
+
+    printf("B: Waking up sleepers\n");
+    pthread_cond_signal(&cond);
+
+    return NULL;
+}
+
+/* ---------------- Main ---------------- */
+int main(void)
+{
+    pthread_t a, b;
+
+    pthread_create(&a, NULL, thread_A, NULL);
+    pthread_create(&b, NULL, thread_B, NULL);
+
+    pthread_join(a, NULL);
+    pthread_join(b, NULL);
+
+    return 0;
+}
+```
+**Timeline showing the bug (lost wakeup)**
+```
+Time →
+-------------------------------------------------------
+Thread A: check lock == 1
+Thread B:                lock = 0
+Thread B:                wakeup(cond)
+Thread A: pthread_cond_wait()  ← sleeps FOREVER
+-------------------------------------------------------
+```
+
+**Why this deadlocks**
+- Wakeup happens before A actually sleeps
+- No one is waiting → signal is lost
+- A goes to sleep after the signal
+- Nobody will ever wake A again
+
+**Why this violates correctness**
+
+This implementation breaks two critical rules:
+1. ❌ Condition check and sleep are not atomic
+2. ❌ Wakeup has no memory (signals are not queued)
+
+</details>
+
+### The Producer-Consumer Problem
+As an example of how these primitives can be used, let us consider the producer-consumer problem (also known as the bounded-buffer problem). 
+- Two
+processes share a common, fixed-size buffer. 
+- One of them, the producer, puts information into the buffer, and the other one, the consumer, takes it out. (It is also pos-
+sible to generalize the problem to have m producers and n consumers, but we will
+consider only the case of one producer and one consumer because this assumption
+simplifies the solutions.), so we have:
+    * One producer
+    * One consumer
+    * A fixed-size buffer of size N
+    * Shared state:
+        * buffer[N]
+        * count = number of items currently in the buffer
+
+Trouble arises when the producer wants to put a new item in the buffer, but it is
+already full. The solution is for the producer to go to sleep, to be awakened when
+the consumer has removed one or more items. Similarly, if the consumer wants to
+remove an item from the buffer and sees that the buffer is empty, it goes to sleep
+until the producer puts something in the buffer and wakes it up. so we have this Rules:
+- Producer:
+        ◦ Must sleep if buffer is full
+        ◦ May insert only if count < N
+- Consumer:
+        ◦ Must sleep if buffer is empty
+        ◦ May remove only if count > 0
+- Critical requirement: Access to the buffer and count must be mutually exclusive.
+
+The producer–consumer problem demonstrates why blocking must be atomic with condition checking, something naive sleep/wakeup cannot guarantee.
+<Tabs>
+<TabItem value="producer-consumer1" label="The producer-consumer problem with a fatal race condition">
+
+```c title="The producer-consumer problem with a fatal race condition"
+#define N 100 /* number of slots in the buffer */
+int count = 0; /* number of items in the buffer */
+void producer(void)
+{
+    int item;
+    while (TRUE) { /* repeat forever */
+        item = produce_item( ); /* generate next item */
+        if (count == N) sleep( ); /* if buffer is full, go to sleep */
+        
+        insert_item(item); /* put item in buffer */
+        
+        count = count + 1; /* increment count of items in buffer */
+        if (count == 1) wakeup(consumer); /* was buffer empty? */
+    }
+}
+void consumer(void)
+{
+    int item;
+    while (TRUE) { /* repeat forever */
+        if (count == 0) sleep( ); /* if buffer is empty, got to sleep */
+        
+        item = remove_item( ); /* take item out of buffer */
+        
+        count = count < 1; /* decrement count of items in buffer */
+        if (count == N < 1) wakeup(producer); /* was buffer full? */
+        consume_item(item); /* print item */
+    }
+}
+```
+To express system calls such as sleep and wakeup in C, we will show them as
+calls to library routines. They are not part of the standard C library but presumably
+would be made available on any system that actually had these system calls. The
+procedures insert item and remove item, which are not shown, handle the book-
+keeping of putting items into the buffer and taking items out of the buffer.
+
+</TabItem>
+<TabItem value="Another Implementaion" label="Another Implementaion">
+
+```c
+#define N 10
+
+int buffer[N];
+int count = 0;
+
+int mutex = 1;
+
+// Producer (naive)
+void producer(void)
+{
+    while (1) {
+        item x = produce();
+
+        while (mutex == 0) ;   // enter critical section
+        mutex = 0;
+
+        if (count == N) {
+            mutex = 1;
+            sleep(&count);     // sleep if buffer full
+        }
+
+        buffer[count++] = x;
+
+        mutex = 1;
+        wakeup(&count);        // wake consumer
+    }
+}
+
+// Consumer (naive)
+void consumer(void)
+{
+    while (1) {
+        while (mutex == 0) ;
+        mutex = 0;
+
+        if (count == 0) {
+            mutex = 1;
+            sleep(&count);     // sleep if buffer empty
+        }
+
+        item x = buffer[--count];
+
+        mutex = 1;
+        wakeup(&count);        // wake producer
+
+        consume(x);
+    }
+}
+```
+
+</TabItem>
+</Tabs>
+
+This approach sounds simple enough, but it leads to the same kinds of race
+conditions we saw earlier with the spooler directory.There are two independent reasons to block:
+| Process  | Reason to sleep |
+| -------- | --------------- |
+| Producer | Buffer full     |
+| Consumer | Buffer empty    |
+So:
+- Mutual exclusion alone is not enough
+- We also need condition synchronization
+This is where naive sleep/wakeup gets people into trouble.
+
+The race condition can occur because access to count
+is unconstrained. As a consequence, the following situation could possibly occur.
+1. The buffer is empty and the consumer has just read count to see if it is 0. At that
+instant, the scheduler decides to stop running the consumer temporarily and start
+running the producer. The producer inserts an item in the buffer, increments count,
+and notices that it is now 1. Reasoning that count was just 0, and thus the consumer
+must be sleeping, the producer calls wakeup to wake the consumer up.
+2. Unfortunately, the consumer is not yet logically asleep, so the wakeup signal is
+lost. When the consumer next runs, it will test the value of count it previously read,
+find it to be 0, and go to sleep. Sooner or later the producer will fill up the buffer
+and also go to sleep. Both will sleep forever.
+``` Timeline (buffer empty case)
+Time →
+-------------------------------------------------------
+Consumer: if (count == 0)  // true
+Producer:                produce item
+Producer:                wakeup(&count)
+Consumer: sleep(&count)   // sleeps FOREVER
+-------------------------------------------------------
+```
+Lost wakeup
+- Producer wakes before consumer sleeps
+- Wakeup is lost
+- Consumer sleeps with no one left to wake it
+
+The essence of the problem here is that a wakeup sent to a process that is not (yet) sleeping is lost. If it were not lost, everything would work.
+
+<!--Why sleep/wakeup is fundamentally unsafe here-->
+The core problem: Checking a condition and going to sleep are not atomic. Sleep/wakeup has:
+- ❌ no memory
+- ❌ no queue
+- ❌ no atomicity guarantee
+
+This violates a fundamental rule of synchronization: If a condition can change, you must not miss the notification.
+
+A correct producer–consumer solution must ensure:
+1. Mutual exclusion
+    ◦ Only one process touches buffer and count
+2. No busy waiting
+    ◦ Processes block when they cannot proceed
+3. No lost wakeups
+    ◦ Sleep and condition checking are atomic
+4. Progress
+        ◦ Producer and consumer eventually run
+
+A quick fix is to
+modify the rules to add a **wakeup waiting bit** to the picture(The proposed quick fix adds memory to wakeup). 
+```
+int wakeup_waiting = 0;
+```
+When a wakeup is sent to a process that is still awake, this bit is set. Later, when the process tries to
+go to sleep, if the wakeup waiting bit is on, it will be turned off, but the process
+will stay awake. The wakeup waiting bit is a piggy bank for storing wakeup signals. The consumer clears the wakeup waiting bit in every iteration of the loop.
+- wakeup(P):
+    * If P is sleeping → wake it
+    * If P is awake → set P.wakeup_waiting = 1
+- sleep():
+    * If wakeup_waiting == 1
+        * Clear it
+        * Do not sleep
+    * Else
+        * Actually go to sleep
+
+This turns wakeup into a one-slot mailbox.
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <unistd.h>
+
+/* ---------------- Shared state ---------------- */
+
+int buffer = 0;              // 0 = empty, 1 = full
+int wakeup_waiting = 0;      // THE "PIGGY BANK"
+
+/* Used only to implement sleep/wakeup */
+pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t  cond = PTHREAD_COND_INITIALIZER;
+
+/* ---------------- Naive sleep ---------------- */
+void naive_sleep(void)
+{
+    pthread_mutex_lock(&mtx);
+
+    if (wakeup_waiting) {
+        /* Consume stored wakeup */
+        wakeup_waiting = 0;
+        pthread_mutex_unlock(&mtx);
+        return;
+    }
+
+    /* Actually sleep */
+    pthread_cond_wait(&cond, &mtx);
+    pthread_mutex_unlock(&mtx);
+}
+
+/* ---------------- Naive wakeup ---------------- */
+void naive_wakeup(void)
+{
+    pthread_mutex_lock(&mtx);
+
+    /* Store wakeup if nobody is sleeping */
+    wakeup_waiting = 1;
+    pthread_cond_signal(&cond);
+
+    pthread_mutex_unlock(&mtx);
+}
+
+/* ---------------- Producer ---------------- */
+void* producer(void* arg)
+{
+    sleep(1);  // let consumer start first
+
+    printf("Producer: producing item\n");
+    buffer = 1;
+
+    printf("Producer: sending wakeup\n");
+    naive_wakeup();
+
+    return NULL;
+}
+
+/* ---------------- Consumer ---------------- */
+void* consumer(void* arg)
+{
+    while (1) {
+        /* Clear wakeup bit at start of loop */
+        wakeup_waiting = 0;
+
+        if (buffer == 0) {
+            printf("Consumer: buffer empty, going to sleep\n");
+            naive_sleep();
+        }
+
+        if (buffer == 1) {
+            printf("Consumer: consuming item\n");
+            buffer = 0;
+            break;
+        }
+    }
+
+    return NULL;
+}
+
+/* ---------------- Main ---------------- */
+int main(void)
+{
+    pthread_t prod, cons;
+
+    pthread_create(&cons, NULL, consumer, NULL);
+    pthread_create(&prod, NULL, producer, NULL);
+
+    pthread_join(prod, NULL);
+    pthread_join(cons, NULL);
+
+    return 0;
+}
+```
+```
+Consumer: buffer empty, going to sleep
+Producer: producing item
+Producer: sending wakeup
+Consumer: consuming item
+```
+- The wakeup is not lost
+- Consumer does not deadlock
+- The “piggy bank” works — for now
+
+wakeup_waiting can store exactly ONE wakeup, hat is enough for: 1 producer, 1 consumer, 1 event.
+
+While the wakeup waiting bit saves the day in this simple example, it is easy to
+construct examples with three or more processes in which one wakeup waiting bit
+is insufficient(Because multiple wakeups can be distinct events, and one bit can only remember one). 
+```
+Producer 1 → wakeup_waiting = 1
+Producer 2 → wakeup_waiting already 1 → LOST
+Consumer   → clears bit, consumes once
+Consumer   → sleeps even though buffer not empty
+```
+We could make another patch and add a second wakeup waiting bit,
+or maybe 32 or 64 of them, but in principle the problem is still there because:
+- You do not know how many wakeups might occur
+- The correct number is unbounded
+- What you actually need is a counter, not bits
+
+Concrete failure with 3 processes
+```c
+int main(void)
+{
+    pthread_t p1, p2, c;
+    int id1 = 1, id2 = 2;
+
+    pthread_create(&c, NULL, consumer, NULL);
+    pthread_create(&p1, NULL, producer, &id1);
+    pthread_create(&p2, NULL, producer, &id2);
+
+    pthread_join(p1, NULL);
+    pthread_join(p2, NULL);
+    pthread_join(c, NULL);
+
+    return 0;
+}
+```
+Let’s name them:
+- P1, P2: producers
+- C: consumer
+
+Situation
+- Buffer has space for 2 items
+- C is slow
+- P1 and P2 both produce
+
+Timeline (failure)
+```
+P1: produces item, buffer_count = 1
+P1: wakeup(C) → wakeup_waiting = 1
+
+P2: produces item, buffer_count = 2
+P2: wakeup(C) → wakeup_waiting = 1   (second wakeup LOST), bit already 1 (event LOST)
+
+C: runs
+C: clears bit
+C: consumes ONE item
+C: buffer still has 1 item
+C: goes to sleep ❌
+```
+Deadlock again, Why?
+- Two wakeups occurred
+- Only one was remembered
+- The second wakeup was silently discarded
+
+This code demonstrates:
+- Lost wakeups can be patched
+- But counting events with a single bit is insufficient
+- Correct synchronization requires unbounded counting
+
+The wakeup waiting bit prevents a single lost wakeup but does not scale; synchronization requires counting occurrences, not remembering a single event.
+
+The wakeup waiting bit fixes lost wakeups only for trivial cases; correct synchronization requires remembering how many times an event occurred, not just whether it occurred.
+
+This leads directly to semaphores.
+```
+wakeup_waiting_bit  →  1-bit memory
+semaphore           →  integer memory
+```
+Instead of:  remembering whether a wakeup happened, We remember: how many wakeups happened.
+| Mechanism     | Stores wakeups | Capacity | Correct? |
+| ------------- | -------------- | -------- | -------- |
+| sleep/wakeup  | ❌ none         | 0        | ❌        |
+| wakeup bit    | - yes          | 1        | ❌        |
+| N wakeup bits | - yes          | N        | ❌        |
+| semaphore     | - yes          | ∞ (int)  | -        |
+This problem teaches three core OS principles:
+1. Ad-hoc patches don’t scale
+2. Binary state is insufficient for synchronization
+3. Correctness requires counting, not flags
+
+This is why:
+- Semaphores exist
+- Condition variables exist
+- Futexes exist
+- Linux does not expose raw sleep/wakeup
+
+**How real systems fix this**
+
+| Mechanism      | Fixes problem? | Why                      |
+| -------------- | -------------- | ------------------------ |
+| Sleep/Wakeup   | ❌ No           | Lost wakeups             |
+| Semaphores     | - Yes          | Counting + atomic        |
+| Monitors       | - Yes          | Structured blocking      |
+| Condition vars | - Yes          | Atomic wait              |
+| Futex (Linux)  | - Yes          | Kernel-assisted blocking |
+
+### Sleep/Wakeup Limitations
+Naive sleep/wakeup has a race condition.
+
+Buggy code
+```
+if (lock == 1)
+    sleep(&lock);
+lock = 1;
+```
+What can go wrong?
+
+Timeline:
+```
+H: checks lock == 1
+L: releases lock
+L: wakeup(&lock)   ← nobody sleeping yet!
+H: sleep(&lock)    ← sleeps forever 
+```
+This is the lost wakeup problem. Result: deadlock even though lock is free.
+
+### Why Linux does NOT expose raw sleep/wakeup
+Because of that race.
+Linux instead provides higher-level blocking primitives that atomically:
+1. Check condition
+2. Go to sleep
+3. Wake safely
+
+**Linux equivalents of sleep/wakeup**
+| Textbook           | Linux primitive   |
+| ------------------ | ----------------- |
+| sleep(addr)        | `wait_event()`    |
+| wakeup(addr)       | `wake_up()`       |
+| Blocking mutex     | `mutex_lock()`    |
+| Blocking semaphore | `down()` / `up()` |
+| Spin then sleep    | `futex()`         |
+
+Linux never allows this pattern:
+```
+if (!condition)
+    sleep();
+```
+Instead, Linux enforces:
+```
+while (!condition)
+    sleep_atomically();
+```
+And both: condition check and enqueue + sleep, are protected by a lock.
+
+**Exact Linux mechanism: wait queues**
+
+Linux uses wait queues internally. Conceptual structure
+```c
+struct wait_queue_head {
+    spinlock_t lock;
+    struct list_head task_list;
+};
+```
+Processes:
+- add themselves to the wait queue
+- change state to TASK_INTERRUPTIBLE or TASK_UNINTERRUPTIBLE
+- call schedule()
+
+**Linux-style sleep (simplified)**
+```c
+DEFINE_WAIT(wait);
+
+for (;;) {
+    prepare_to_wait(&queue, &wait, TASK_INTERRUPTIBLE);
+
+    if (lock_is_free())
+        break;
+
+    schedule();   // sleep here
+}
+
+finish_wait(&queue, &wait);
+```
+Key point:
+👉 Condition check + sleep are protected
+No lost wakeups.
+
+**Linux wakeup**
+```c
+wake_up(&queue);
+```
+Which internally:
+- sets sleeping tasks to TASK_RUNNING
+- places them on the run queue
+- scheduler decides when they run
+
+This is how it must be done (still simplified):
+```c
+pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+pthread_mutex_lock(&mtx);
+while (lock == 1)
+    pthread_cond_wait(&cond, &mtx);
+lock = 1;
+pthread_mutex_unlock(&mtx);
+```
+Linux equivalents:
+- pthread_mutex → spinlock / mutex
+- pthread_cond_wait → prepare_to_wait() + schedule()
+- pthread_cond_signal → wake_up()
