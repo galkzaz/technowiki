@@ -102,7 +102,7 @@ We use the following classifications, which are ordered by decreasing efficiency
 ![Big-O Complexity Chart](/docs/assets/software-systems/data-structures-and-algorithms/algorithms/Big-O-Complexity-Chart.png)
 
 ## Constant: O(1)
-In programming, we say an operation has constant behavior if the time it takes to finish doesn’t change, even if the input gets larger.
+In programming, we say an operation has constant behavior if the time it takes to finish doesn't change, even if the input gets larger.
 
 An operation is O(1) if its cost is bounded by a fixed constant, even if that constant is large—as long as it does not grow with the input size.
 
@@ -169,22 +169,22 @@ which is multiplicative in terms of k, using the notation O(1). This means:
 
 We only care whether time grows with input size n
 
-So, comparing two numbers—even very large ones like 1,024-bit numbers—is still considered "constant" as long as there is a limit (k) that we don’t cross.
+So, comparing two numbers—even very large ones like 1,024-bit numbers—is still considered 'constant' as long as there is a limit (k) that we don't cross.
 
-* **The Logic**: If your computer is designed to handle numbers up to 1,024 bits, it has the "machinery" ready to do that work. Whether you compare two 5-bit numbers or two 1,000-bit numbers, the computer uses that same "machinery" every time.
-* **The "Wait" Factor**: Even if comparing 1,024-bit numbers takes 10 times longer than 32-bit numbers, it’s still O(1) because that time stays the same every time you run the operation. It doesn’t grow as you add more data to your overall program.
+* **The Logic**: If your computer is designed to handle numbers up to 1,024 bits, it has the 'machinery' ready to do that work. Whether you compare two 5-bit numbers or two 1,000-bit numbers, the computer uses that same 'machinery' every time.
+* **The 'Wait' Factor**: Even if comparing 1,024-bit numbers takes 10 times longer than 32-bit numbers, it's still O(1) because that time stays the same every time you run the operation. It doesn't grow as you add more data to your overall program.
 
-while hardware makes a difference in actual speed (a supercomputer is faster than a calculator), in the world of Algorithms, we ignore those small hardware differences. If the work doesn’t increase when the input increases, we call it O(1).
+while hardware makes a difference in actual speed (a supercomputer is faster than a calculator), in the world of Algorithms, we ignore those small hardware differences. If the work doesn't increase when the input increases, we call it O(1).
 
-Example: If an operation always takes at most 500 steps, it’s still O(1).
+Example: If an operation always takes at most 500 steps, it's still O(1).
 
 Example: Compare a Constant operation vs. a Non-Constant operation:
 |     |     |     |
 | --- | --- | --- |
 | Scenario	 | Behavior	 | Why? |
-| **Checking the first letter of a word**	 | **Constant O(1)**	 | It doesn’t matter if the word has 3 letters or 3 million letters; you only ever look at the very first spot. |
+| **Checking the first letter of a word**	 | **Constant O(1)**	 | It doesn't matter if the word has 3 letters or 3 million letters; you only ever look at the very first spot. |
 | **Counting all letters in a word**	 | **Linear O(n)**	 | As the word gets longer, the work increases. A 10-letter word takes twice as long as a 5-letter word. |
-| **Comparing two 256-bit IDs**	 | **Constant O(1)**	 | Because 256 is a "fixed limit." The computer treats it as one "chunk" of work. |
+| **Comparing two 256-bit IDs**	 | **Constant O(1)**	 | Because 256 is a 'fixed limit.' The computer treats it as one 'chunk' of work. |
 
 **When Does Constant Time Not Apply?** it STOP being O(1) when
 
@@ -210,7 +210,7 @@ if a == b:
 
 **How this assumption breaks in cryptography**
 
-Cryptography intentionally violates the "fixed k" assumption.
+Cryptography intentionally violates the 'fixed k' assumption.
 
 Example: RSA key sizes
 
@@ -353,7 +353,7 @@ For integer operations: n = number of bits in the integer. This is crucial and o
 
 **Why this matters in algorithm analysis**
 
-Algorithm analysis asks: "What happens when the input gets bigger?", If an operation:
+Algorithm analysis asks: 'What happens when the input gets bigger?', If an operation:
 
 * Has a fixed upper bound
 * Does not depend on input size n
@@ -362,7 +362,7 @@ Then it does not affect scalability, and we safely call it O(1). This lets us fo
 
 **Real-world analogy**
 
-Think of it like flipping a light switch. It takes the same amount of effort to flip a switch in a tiny closet as it does in a massive ballroom. The "size" of the room doesn’t change the time it takes to do that specific task.
+Think of it like flipping a light switch. It takes the same amount of effort to flip a switch in a tiny closet as it does in a massive ballroom. The 'size' of the room doesn't change the time it takes to do that specific task.
 
 Comparing two IDs
 
@@ -376,14 +376,14 @@ Same idea.
 ## Logarithmic: O(log n)
 An algorithm is O(log n) when each step cuts down the remaining problem by a constant factor — often by half — rather than scanning everything.
 
-The binary logarithm log₂(n) appears because many common divide-and-conquer strategies "halve" the search space every step.
+The binary logarithm log₂(n) appears because many common divide-and-conquer strategies 'halve' the search space every step.
 
 For example:
 
 * Searching a sorted list of size n by halving the search range → ~log₂(n) steps
 * Traversing a balanced binary tree of n nodes → ~log₂(n) height
 
-As n grows, the number of steps grows very slowly — much slower than linear (O(n)). That’s why O(log n) is considered very efficient.
+As n grows, the number of steps grows very slowly — much slower than linear (O(n)). That's why O(log n) is considered very efficient.
 
 Suppose the secret number is between: 1 and n
 
@@ -398,7 +398,7 @@ Suppose the secret number is between: 1 and n
 4. After i guesses:
    * Remaining possibilities ≈ n / 2ⁱ
 
-That "divide by 2 each time" behavior is exactly what creates log₂(n).
+That 'divide by 2 each time' behavior is exactly what creates log₂(n).
 
 **number of iterations**
 
@@ -434,7 +434,7 @@ is cut in half
 
 Logarithmic algorithms (like binary search / guessing games) are fast because:
 
-* They don’t try everything
+* They don't try everything
 * Each step eliminates about half of the remaining possibilities
 * The uncertainty shrinks very quickly
 
@@ -449,24 +449,24 @@ This is why they are described as rapidly converging.
 
   Binary search → ~20 comparisons (O(log₂(1,000,000)))
 
-  That’s orders of magnitude faster as n grows.
+  That's orders of magnitude faster as n grows.
 * **Balanced trees help for dynamic data**
 
   When data is constantly inserted and deleted, balanced trees like red-black trees keep lookups punchy, while worst-case trees would degrade to O(n).
 
 ### Examples
-**Example**: A bartender offers the following $10,000 bet to any patron: "I will choose a secret
+**Example**: A bartender offers the following $10,000 bet to any patron: 'I will choose a secret
 number from 1 to 1,000,000 and you will have 20 chances to guess my number.
 After each guess, I will either tell you Too Low, Too High, or You Win. If you guess
 my number in 20 or fewer questions, I give you $10,000. If none of your 20 guesses
-is my secret number you must give me $10,000." Would you take this bet?
+is my secret number you must give me $10,000.' Would you take this bet?
 
 **Answer**
 
 The winning strategy is binary search. Instead of guessing randomly, you:
 
 * Guess the middle number
-* Use "Too Low" / "Too High" feedback
+* Use 'Too Low' / 'Too High' feedback
 * Eliminate half of the remaining possibilities each time
 
 In each round, depending upon the specific answers from the bartender, the size of
@@ -650,7 +650,7 @@ https://github.com/lattera/glibc/blob/master/stdlib/bsearch.c
 
 https://github.com/walac/glibc/blob/master/bits/stdlib-bsearch.h
 
-Here’s the typical binary search pattern that glibc follows in that inline header:
+Here's the typical binary search pattern that glibc follows in that inline header:
 ```c
 size_t lo = 0;
 size_t hi = nmemb;
@@ -686,7 +686,7 @@ Red-black trees are like binary search trees but keep themselves roughly balance
 
 for n nodes.
 
-Kernel code that uses rbtrees doesn’t usually call a general "search" API; instead it implements lookup by walking the tree manually (because function pointers would slow down hot paths).
+Kernel code that uses rbtrees doesn't usually call a general 'search' API; instead it implements lookup by walking the tree manually (because function pointers would slow down hot paths).
 
 Red-black trees show up in multiple kernel subsystems:
 
@@ -751,17 +751,17 @@ Sublinear time is achievable only if the algorithm:
 * Has strong structural assumptions about the input
 * Uses randomization with high expected success
 
-You can’t compute an exact answer that depends on all input items without seeing them all (that’s linear time or worse). But you can:
+You can't compute an exact answer that depends on all input items without seeing them all (that's linear time or worse). But you can:
 
 * Approximate answers
 * Test properties
 * Estimate statistics
-* This is the heart of "sublinear algorithms" in theoretical computer science.
+* This is the heart of 'sublinear algorithms' in theoretical computer science.
 
 ### Real Examples of Sublinear Behavior
 **Approximate Algorithms**
 
-In many big-data or streaming situations, you don’t need exact answers — just close enough. Sublinear methods often:
+In many big-data or streaming situations, you don't need exact answers — just close enough. Sublinear methods often:
 
 * Sample a subset of the input
 * Build a sketch (compact summary)
@@ -773,17 +773,17 @@ Example idea (theoretical): Estimate the number of distinct items in a huge data
 
 **Distributed Graph Algorithms**
 
-In distributed computing, clever algorithms can compute things like shortest paths in time sublinear in n under certain graph assumptions. These algorithms don’t traverse the entire input before producing answers — they only examine important parts.
+In distributed computing, clever algorithms can compute things like shortest paths in time sublinear in n under certain graph assumptions. These algorithms don't traverse the entire input before producing answers — they only examine important parts.
 
 For example, an algorithm that solves shortest paths in: O((nlog_n)^5/6) is sublinear for large n.
 
 **When It Arises**
 |     |     |     |
 | --- | --- | --- |
-| Domain	 | Sublinear Example	 | Why it’s sublinear |
+| Domain	 | Sublinear Example	 | Why it's sublinear |
 | Theory	 | Approximate property testing	 | Samples &lt; n |
 | Big data	 | Sketch/streaming algorithms	 | Only subset processed |
-| Distributed	 | Shortest path approximations	 | Doesn’t see all nodes |
+| Distributed	 | Shortest path approximations	 | Doesn't see all nodes |
 | Kernel	HTree directory index	 | Hash + multi-level | reduces work |
 | Data structure	 | Skip lists adaptive search	 | Popular entries get fast paths |
 
@@ -804,11 +804,11 @@ Linear algorithms typically occur when:
 This is often the best possible complexity for many problems.
 
 We can classify an algorithm as being linear with respect to its input size
-n. That is, there is some constant c > 0 such that t(n) ≤ c*n for "large enough" n, or
-more precisely, all n > n0. We don’t actually need to compute the actual value of c or
+n. That is, there is some constant c > 0 such that t(n) ≤ c*n for 'large enough' n, or
+more precisely, all n > n0. We don't actually need to compute the actual value of c or
 n0; we just know they exist and they can be computed
 
-* After the input is "big enough" (larger than some fixed size n₀),
+* After the input is 'big enough' (larger than some fixed size n₀),
 * The running time grows proportionally to the number of digits
 * The algorithm never takes more than a constant amount of work per digit
 
@@ -923,7 +923,7 @@ Clang::
 #include <sys/time.h>
 #include <stdio.h>
 
-#include "report.h"
+#include 'report.h'
 
 /** Time before process starts.   */
 static struct timeval before;
@@ -1144,7 +1144,7 @@ T(n) = n log n
 
 This behavior is asymptotically faster than quadratic algorithms yet slower than purely linear ones. Linearithmic complexity is commonly the best achievable bound for comparison-based problems.
 
-To explain how this behavior occurs in practice, let’s define t(n) to represent
+To explain how this behavior occurs in practice, let's define t(n) to represent
 the time an algorithm takes to solve an input problem instance of size n. Divide and
 Conquer is an efficient way to solve a problem in which a problem of size n is divi‐
 ded into (roughly equal) subproblems of size n/2, which are solved recursively. The
@@ -1504,10 +1504,10 @@ Quadratic algorithms are common for simple sorting, matrix operations, and pairw
 
 Quadratic complexity algorithms are not very performant for large input sizes. The work done increases following a quadratic proportion as we increase our input size.
 
-Let’s define t(n) to be
+Let's define t(n) to be
 the actual running time of the Quadratic algorithm on an input of size n. By
 this definition, there must be some constant c > 0 such that t(n) ≤ c*n2 for all n > n0.
-We don’t actually need to know the full details of the c and n0 values, just that they
+We don't actually need to know the full details of the c and n0 values, just that they
 exist.
 
 ### Examples
@@ -1533,7 +1533,7 @@ This results in a runtime complexity of O(mn), where m and n are the sizes of th
 ```
 +
 The amount of memory we use is dictated by the size of our result listed in our method.
- The bigger this list, the more memory we’re using.
+ The bigger this list, the more memory we're using.
 +
 The best case is when we use the least amount of memory. This is when the list is empty, that is, when we have no common elements between the two arrays. Thus, this method has a best case space complexity of O(1), when there is no intersection.
 +
@@ -1541,17 +1541,17 @@ The case is just the opposite, when we have all the elements in both arrays. Thi
 
 **Digit Multiplication**
 
-<Tabs groupId="code">
+<Tabs groupId='code'>
 
-<TabItem value="Clang" label="Clang">
+<TabItem value='Clang' label='Clang'>
 ```C
 ```
 </TabItem>
-<TabItem value="C++" label="C++">
+<TabItem value='C++' label='C++'>
 ```C++
 ```
 </TabItem>
-<TabItem value="Java" label="Java">
+<TabItem value='Java' label='Java'>
 ```Java
 package algs.chapter2.table4;
 
@@ -1843,18 +1843,18 @@ public class Main {
 	 */
 	public static void computeSwitch() {
 		// result[pos-off] += prod % 10;
-		System.out.println ("switch (prod) {");
+		System.out.println ('switch (prod) {');
 		for (int i = 0; i < 100; i++) {
-			System.out.print ("case " + i + ": ");
+			System.out.print ('case ' + i + ': ');
 			if (i%10 != 0) {
-				System.out.print ("result[iPos] += " + (i%10) + ";");
+				System.out.print ('result[iPos] += ' + (i%10) + ';');
 			}
 			if ((i / 10) != 0) {
-				System.out.print ("result[iPosSubOne] += " + (i/10) + ";");
+				System.out.print ('result[iPosSubOne] += ' + (i/10) + ';');
 			}
-			System.out.println ("break;");
+			System.out.println ('break;');
 		}
-		System.out.println ("};");
+		System.out.println ('};');
 
 		// middle one
 //		if (result[pos-off] > 9) {   // carry internally
@@ -1863,16 +1863,16 @@ public class Main {
 //				result[pos-off-1]++;
 //			} while (result[pos-off] > 9);
 //		}
-		System.out.println ("switch (result[iPos]) {");
+		System.out.println ('switch (result[iPos]) {');
 		for (int i = 0; i < 100; i++) {
 			int tens = 10*(i/10);
 			if (tens == 0) {
-				System.out.println ("case " + i + ": break; ");
+				System.out.println ('case ' + i + ': break; ');
 			} else {
-				System.out.println ("case " + i + ": result[iPosSubOne] += " + (i/10) + "; result[iPos] -= " + tens + "; break; ");
+				System.out.println ('case ' + i + ': result[iPosSubOne] += ' + (i/10) + '; result[iPos] -= ' + tens + '; break; ');
 			}
 		}
-		System.out.println ("};");
+		System.out.println ('};');
 
 
 
@@ -1898,7 +1898,7 @@ public class Main {
 		int NUM_TRIALS = 10000;
 		table = computeTable();
 
-		System.out.println("n\tbase\tmult\ttimes");
+		System.out.println('n\tbase\tmult\ttimes');
 		while (n < MAX_SIZE) {
 			// generate numbers and space for storage
 			int[] n1 = new int[n];
@@ -1968,7 +1968,7 @@ public class Main {
 			long baseLine = (baseE - baseS);
 
 			// n , baseLine, Mult*, Times*
-			System.out.println(n + "\t" + baseLine + "\t" + (multE - multS-baseLine) + "\t" + (timesE - timesS-baseLine));
+			System.out.println(n + '\t' + baseLine + '\t' + (multE - multS-baseLine) + '\t' + (timesE - timesS-baseLine));
 
 			// advance
 			n = n * 2;
@@ -1995,12 +1995,12 @@ public class Main {
 
 			for (int i = 0; i < result.length; i++) {
 				if (result[i] != result2[i]) {
-					System.out.println("Error when multiplying n1,n2");
-					System.out.println("n1:"); output (n1);
-					System.out.println("n2:"); output (n2);
+					System.out.println('Error when multiplying n1,n2');
+					System.out.println('n1:'); output (n1);
+					System.out.println('n2:'); output (n2);
 
-					System.out.print ("res :"); output (result);
-					System.out.print ("res2:"); output (result2);
+					System.out.print ('res :'); output (result);
+					System.out.print ('res2:'); output (result2);
 					System.exit(0);
 				}
 			}
@@ -2012,7 +2012,7 @@ public class Main {
 }
 ```
 </TabItem>
-<TabItem value="Python" label="Python">
+<TabItem value='Python' label='Python'>
 ```Python
 ```
 </TabItem>
@@ -2061,10 +2061,10 @@ int main() {
 
     bubble_sort(arr, n);
 
-    printf("Sorted array: ");
+    printf('Sorted array: ');
     for (int i = 0; i < n; i++)
-        printf("%d ", arr[i]);
-    printf("\n");
+        printf('%d ', arr[i]);
+    printf('\n');
 
     return 0;
 }
@@ -2095,8 +2095,8 @@ int main() {
 
     bubbleSort(arr);
 
-    cout << "Sorted array: ";
-    for (int num : arr) cout << num << " ";
+    cout << 'Sorted array: ';
+    for (int num : arr) cout << num << ' ';
     cout << endl;
 
     return 0;
@@ -2127,8 +2127,8 @@ public class BubbleSort {
         int[] arr = {5, 2, 9, 1, 5};
         bubbleSort(arr);
 
-        System.out.print("Sorted array: ");
-        for (int num : arr) System.out.print(num + " ");
+        System.out.print('Sorted array: ');
+        for (int num : arr) System.out.print(num + ' ');
         System.out.println();
     }
 }
@@ -2145,10 +2145,10 @@ def bubble_sort(arr):
                 arr[j], arr[j + 1] = arr[j + 1], arr[j]   Swap elements
 
 \ Testing the bubble sort
-if __name__ == "__main__":
+if __name__ == '__main__':
     arr = [5, 2, 9, 1, 5]
     bubble_sort(arr)
-    print("Sorted array:", arr)
+    print('Sorted array:', arr)
 
 ```
 =====
@@ -2172,10 +2172,10 @@ t(n) = O(2^n)
 
 This happens when the algorithm explores all possible subsets, combinations, or sequences of n elements. Exponential complexity grows extremely quickly and becomes infeasible for even moderately large n.
 
-Exponential time grows so much, we consider these algorithms "not
-runnable". They run for very few input types, and require huge
-amounts of computing power if inputs aren’t tiny. Optimizing ev-
-ery aspect of the code or using supercomputers doesn’t help. The
+Exponential time grows so much, we consider these algorithms 'not
+runnable'. They run for very few input types, and require huge
+amounts of computing power if inputs aren't tiny. Optimizing ev-
+ery aspect of the code or using supercomputers doesn't help. The
 crushing exponential always dominates growth and keeps these al-
 gorithms unviable.
 
@@ -2222,7 +2222,7 @@ Total calls = 2ⁿ → exponential time
 
 Consider a lock with three numeric dials in sequence, each of which contains the
 digits from 0 to 9. Each dial can be set independently to one of these 10 digits.
-Assume you have a found such a lock, but don’t have its combination; it is simply a
+Assume you have a found such a lock, but don't have its combination; it is simply a
 matter of some manual labor to try each of the 1,000 possible combinations, from
 000 to 999.
 
@@ -2337,12 +2337,12 @@ Clang::
 void subsets(int arr[], int n, int index, int chosen[]) {
     // Base case: all elements processed
     if (index == n) {
-        printf("{ ");
+        printf('{ ');
         for (int i = 0; i < n; i++) {
             if (chosen[i])
-                printf("%d ", arr[i]);
+                printf('%d ', arr[i]);
         }
-        printf("}\n");
+        printf('}\n');
         return;
     }
 
@@ -2381,9 +2381,9 @@ using namespace std;
 // Recursive subset generator
 void subsets(const vector<int>& arr, int index, vector<int>& current) {
     if (index == arr.size()) {
-        cout << "{ ";
-        for (int x : current) cout << x << " ";
-        cout << "}\n";
+        cout << '{ ';
+        for (int x : current) cout << x << ' ';
+        cout << '}\n';
         return;
     }
 
@@ -2452,7 +2452,7 @@ def subsets(arr, index, current):
 
 
 \ Testing
-if __name__ == "__main__":
+if __name__ == '__main__':
     arr = [1, 2, 3]
     subsets(arr, 0, [])
 
@@ -2462,7 +2462,7 @@ if __name__ == "__main__":
 
 ## factorial(!n) algorithm
 Some algorithms are even worse than exponential time algorithms.
-It’s the case of factorial time algorithms, whose time complexities
+It's the case of factorial time algorithms, whose time complexities
 are O(n!). Exponential and factorial time algorithms are horrible,
 but we need them for the hardest computational problems: the fa-
 mous NP-complete problems

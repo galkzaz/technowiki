@@ -23,42 +23,42 @@ for Standardization (ISO) as international standard ISO/IEC 9899:1990. it is usu
 3. Take advantage of existing code libraries.
 4. Libraries for common tasks, including user-interface development, graphics, communications, database management, and networking, are readily available. 
 5. Adopt a sensible set of coding conventions. A coding convention is a style
-rule that a programmer has decided to adopt even though it’s not enforced by
+rule that a programmer has decided to adopt even though it's not enforced by
 the language. Well-chosen conventions help make programs more uniform,
 easier to read, and easier to modify. Conventions are important when using
-any programming language, but especially so with C. As noted above, C’s
+any programming language, but especially so with C. As noted above, C's
 highly flexible nature makes it possible for programmers to write code that is
 all but unreadable.
 6. Avoid “tricks” and overly complex code. C encourages programming tricks.
 There are usually several ways to accomplish a given task in C; programmers
-are often tempted to choose the method that’s most concise. Don’t get carried
+are often tempted to choose the method that's most concise. Don't get carried
 away; the shortest solution is often the hardest to comprehend.
 7. Stick to the standard. Most C compilers provide language features and library
-functions that aren’t part of the C89 or C99 standards. For portability, it’s best
-to avoid using nonstandard features and libraries unless they’re absolutely
+functions that aren't part of the C89 or C99 standards. For portability, it's best
+to avoid using nonstandard features and libraries unless they're absolutely
 necessary.
 
 ## Top C libraries
 **🖥️ User Interface (UI)**
 
 * GTK (GIMP Toolkit): The most popular choice for Linux desktop apps (powers GNOME), used in GNOME, GIMP, Inkscape
-*  LVGL (Light and Versatile Graphics Library): The leading choice for embedded systems and microcontrollers. It’s highly optimized for low memory usage while providing beautiful widgets.
-* Nuklear: A tiny, single-header "immediate mode" UI library. It has zero dependencies and is perfect for overlaying UI on top of games or 3D tools.
+*  LVGL (Light and Versatile Graphics Library): The leading choice for embedded systems and microcontrollers. It's highly optimized for low memory usage while providing beautiful widgets.
+* Nuklear: A tiny, single-header 'immediate mode' UI library. It has zero dependencies and is perfect for overlaying UI on top of games or 3D tools.
 * IUP: A multi-platform toolkit that uses native widgets (it looks like a Windows app on Windows and a GTK app on Linux) instead of drawing its own.
 * FLTK: Lightweight, fast, minimal dependencies Good for tools and embedded desktops
-* Qt: A powerful cross-platform framework for building desktop and mobile applications. It’s widely used in commercial software like VLC and Krita.
-* wxWidgets: A cross-platform C++ library for creating graphical user interfaces. It’s widely used in commercial software like Audacity and Blender.
-* GTK+: A multi-platform toolkit for creating graphical user interfaces. It’s widely used in commercial software like GIMP and Inkscape.
-* **wxWidgets**: A cross-platform C++ library for creating graphical user interfaces. It’s widely used in commercial software like Audacity and Blender.
+* Qt: A powerful cross-platform framework for building desktop and mobile applications. It's widely used in commercial software like VLC and Krita.
+* wxWidgets: A cross-platform C++ library for creating graphical user interfaces. It's widely used in commercial software like Audacity and Blender.
+* GTK+: A multi-platform toolkit for creating graphical user interfaces. It's widely used in commercial software like GIMP and Inkscape.
+* **wxWidgets**: A cross-platform C++ library for creating graphical user interfaces. It's widely used in commercial software like Audacity and Blender.
 * SDL (with GUI libs): Not a widget toolkit, but great for custom UIs Often combined with Dear ImGui.
 * Dear ImGui (C-compatible core)Immediate-mode GUI, perfect for tools/debug UIs Popular in game engines and dev tools
 **🎨 Graphics & Multimedia**
 
-* SDL (Simple DirectMedia Layer): The industry standard. It provides low-level access to audio, keyboard, mouse, and graphics hardware via OpenGL/Vulkan. Most "indie" C games start here.
+* SDL (Simple DirectMedia Layer): The industry standard. It provides low-level access to audio, keyboard, mouse, and graphics hardware via OpenGL/Vulkan. Most 'indie' C games start here.
 * Raylib: Highly recommended for beginners. It is extremely simple to use and includes built-in functions for 3D, shaders, and audio without the boilerplate of SDL.
-* Cairo: A 2D graphics library used for high-quality vector drawing. It’s great for creating charts, PDFs, or custom software diagrams.
+* Cairo: A 2D graphics library used for high-quality vector drawing. It's great for creating charts, PDFs, or custom software diagrams.
 * OpenGL / Vulkan: These are the core APIs for 3D graphics. You'll usually use a loader like Glad or GLEW to access them in C.
-* GLFW: A lightweight library for creating windows, contexts, and surfaces for OpenGL, Vulkan, and other APIs. It’s great for game development and prototyping.
+* GLFW: A lightweight library for creating windows, contexts, and surfaces for OpenGL, Vulkan, and other APIs. It's great for game development and prototyping.
 * libpng / libjpeg / libwebp: Image format support
 * FFmpeg (libav): Audio/video decoding, encoding, streaming (industry standard)
 * OpenAL: 3D audio API
@@ -67,10 +67,10 @@ necessary.
 **🌐 Networking & Communications**
 
 * POSIX sockets (BSD sockets): The foundation of all networking in C
-* libcurl: The "Swiss Army knife" of network transfers. HTTP, HTTPS, FTP, SMTP, REST APIs
+* libcurl: The 'Swiss Army knife' of network transfers. HTTP, HTTPS, FTP, SMTP, REST APIs
 Simple, robust, and everywhere.
 * Mongoose: A very popular embedded web server. It can turn any C application into a web server with just a few lines of code.
-* ZeroMQ: A high-performance "intelligent" socket library. It handles the complexity of message queues, reconnection, and multi-node patterns.
+* ZeroMQ: A high-performance 'intelligent' socket library. It handles the complexity of message queues, reconnection, and multi-node patterns.
 * libwebsockets: The go-to library for modern, real-time web communication via WebSockets.
 * libevent / libev / libuv:Event-driven, async I/O, scalable servers
 libuv powers Node.js internally
@@ -80,7 +80,7 @@ libuv powers Node.js internally
 * libsodium: High-level, safe crypto API
 **📂 Database Management**
 
-* SQLite: The most used database engine in the world. It’s a serverless, file-based SQL database that is incredibly fast and reliable.
+* SQLite: The most used database engine in the world. It's a serverless, file-based SQL database that is incredibly fast and reliable.
 * ODBC (unixODBC) - Generic SQL access
 * libpq: The official C client library for PostgreSQL.
 * MySQL Connector/C: The official driver for connecting to MySQL or MariaDB servers.
@@ -92,12 +92,12 @@ libuv powers Node.js internally
 
 **🛠️ Others (Utilities & Data)**
 
-* GLib: Part of the GTK project, but can be used standalone. It provides "missing" C features like linked lists, hash tables, and string utilities.
+* GLib: Part of the GTK project, but can be used standalone. It provides 'missing' C features like linked lists, hash tables, and string utilities.
 * JSON-C / Jansson: Essential for parsing and generating JSON data.
 * uthash / utlist:  Header-only hash tables & lists
 * klib: Efficient containers (hash maps, vectors, strings)
 * Unity (Test): Not the game engine! This is a popular unit testing framework for C.
-* Pro Tip: If you want to avoid "dependency hell," look for "Header-only" libraries (like Nuklear or STB). You just include the .h file in your project, and you're good to go.
+* Pro Tip: If you want to avoid 'dependency hell,' look for 'Header-only' libraries (like Nuklear or STB). You just include the .h file in your project, and you're good to go.
 * libcurl: A versatile library for making HTTP requests.
 * libxml2: A library for parsing and creating XML documents.
 * libxslt: A library for transforming XML documents using XSLT.

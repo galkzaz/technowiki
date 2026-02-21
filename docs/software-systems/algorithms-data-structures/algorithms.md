@@ -24,7 +24,7 @@ An algorithm can be seen as a roadmap or a set of instructions to accomplish a w
 The common examples of algorithms include traffic lights
 regulating congestion on the streets, face recognition software on
 smartphones, recommendation technologies, and so on.
-It’s important for you to understand that an algorithm is just a small part
+It's important for you to understand that an algorithm is just a small part
 of an application used to solve a well-defined problem. Examples such
 as sorting a list of numbers, finding the shortest route, or word prediction
 are all correct. Big software applications, such as email clients or an
@@ -173,9 +173,9 @@ Under this scheme, if
 |a - b| &lt; ε, then we consider a and b to be equal
 
 Still, by this simple measure, even
-when a ≅ b and b ≅ c, it’s possibly not true that a ≅ c. This breaks the principle of
+when a ≅ b and b ≅ c, it's possibly not true that a ≅ c. This breaks the principle of
 transitivity in mathematics and makes it really challenging to write correct code.
-Additionally, this solution won’t solve the collinearity problem, which used the sign
+Additionally, this solution won't solve the collinearity problem, which used the sign
 of the value (0, positive, or negative) to make its decision.
 
 Implications:
@@ -245,7 +245,7 @@ Examples:
 
 Implications:
 
-* "Use integers for speed" is often a myth on modern CPUs.
+* 'Use integers for speed' is often a myth on modern CPUs.
 * Performance optimization must be guided by profiling, not folklore.
 * Numerical correctness should take precedence over outdated performance heuristics.
 
@@ -259,9 +259,9 @@ the input grows in size. For example, our card-sorting algorithm
 could take few operations to sort 26 cards, but four times more
 operations to sort 52 cards!
 To avoid bad surprises when our problem size grows, we find
-the algorithm’s time complexity.
+the algorithm's time complexity.
 
-Algorithmic complexity is a way to describe the efficiency of an algorithm as a relation of its input. It can be used to describe various properties of our code, such as runtime speed or memory requirements. It’s also a very important tool programmers should understand to write efficient software.
+Algorithmic complexity is a way to describe the efficiency of an algorithm as a relation of its input. It can be used to describe various properties of our code, such as runtime speed or memory requirements. It's also a very important tool programmers should understand to write efficient software.
 
 When calculating the space complexity, the memory consumed for the
 input arguments should be ignored. Only memory allocated inside the
@@ -269,7 +269,7 @@ algorithms should be considered.
 
 Time complexity is written T(n). It gives the number of oper-
 ations the algorithm performs when processing an input of size n.
-We also refer to an algorithm’s T(n) as its running cost. If our card-
+We also refer to an algorithm's T(n) as its running cost. If our card-
 sorting algorithm follows T(n) = n^2, we can predict how much
 longer it takes to sort a deck once we double its size: $T(2n)/T(n) = 4$
 
@@ -286,15 +286,15 @@ The measure for the working storage an algorithm needs is
 called space complexity. Space complexity analysis is similar to
 time complexity analysis. The difference is that we count computer
 memory, and not computing operations. We observe how space
-complexity evolves when the algorithm’s input size grows, just as
+complexity evolves when the algorithm's input size grows, just as
 we do for time complexity.
 
 many other algorithms need working storage that
-grows with input size. Sometimes, it’s impossible to meet an al-
-gorithm’s memory requirements. You won’t find an appropriate
+grows with input size. Sometimes, it's impossible to meet an al-
+gorithm's memory requirements. You won't find an appropriate
 sorting algorithm with O(n log n) time complexity and O(1) space
 complexity. Computer memory limitations sometimes force a trade-
-off. With low memory, you’ll probably need an algorithm with slow
+off. With low memory, you'll probably need an algorithm with slow
 O(n2) time complexity because it has O(1) space complexity.
 
 ### Examples
@@ -313,7 +313,7 @@ SelectionSort(A, n):
                 minIndex ← j
         swap A[i] and A[minIndex]
 ```
-Let’s see what happens with a list of n items, assuming the worst
+Let's see what happens with a list of n items, assuming the worst
 case.
 
 1. The outer loop runs n − 1 times and does two operations
@@ -321,7 +321,7 @@ per run (one assignment and one swap) totaling 2n − 2 operations.
 2. The inner loop first runs n − 1 times, then n − 2 times, n − 3 times,
 and so on.
 
-   $"# of inner loop runs" = (n − 1) + (n − 2) + .... + 2+1=sum_(i=)^(n-1) i=((n-1)(n))/2=(n^2-n)/2$
+   $'# of inner loop runs' = (n − 1) + (n − 2) + .... + 2+1=sum_(i=)^(n-1) i=((n-1)(n))/2=(n^2-n)/2$
 3. In the case, the if condition is always met.
    * This means the
    inner loop does one comparison and one assignment (n2 − n)/2
@@ -356,7 +356,7 @@ million items than to sort one million items.
 
 Selection Sort just needs working stor-
 age for a fixed set of variables. The number of variables does not
-depend on the input size. Therefore, we say Selection Sort’s space
+depend on the input size. Therefore, we say Selection Sort's space
 complexity is O(1): no matter what the input size, it requires the
 same amount of computer memory for working storage.
 
@@ -414,12 +414,12 @@ Comparison with Other Sorts
 | Quick Sort	 | O(n²)	 | O(log n) |
 
 ## Big O Notation
-here’s a special notation to refer to classes of growth: the Big-O
+here's a special notation to refer to classes of growth: the Big-O
 notation. A function with a fastest-growing term of 2n or weaker is
 O(2n); one with a quadratic or weaker growth is O(n2); growing
 linearly or less, O(n), and so on. The notation is used for expressing
-the dominant term of algorithms’ cost functions in the case—
-that’s the standard way of expressing time complexity.
+the dominant term of algorithms' cost functions in the case—
+that's the standard way of expressing time complexity.
 
 There are two simple rules to follow when we want to express an algorithm using the big O notation.
 
@@ -469,7 +469,7 @@ Example
   * n = 20
   * nearly sorted data
 
-Insertion Sort is faster, despite "worse" Big-O. Big-O tells you what can happen, not what usually happens.
+Insertion Sort is faster, despite 'worse' Big-O. Big-O tells you what can happen, not what usually happens.
 
 Big-O tells you what could happen in the case;
 real systems care about what usually happens and adjust accordingly
@@ -501,7 +501,7 @@ of the problem instance is not the determining factor in whether the algorithm c
 be implemented efficiently(Algorithm analysis should minimize dependence on input encoding details.).
 
 Your representation of a problem instance should
-depend just on the type and variety of operations that need to be performed(Performance comparisons should focus on the algorithm’s logic, not on clever or awkward representations.).
+depend just on the type and variety of operations that need to be performed(Performance comparisons should focus on the algorithm's logic, not on clever or awkward representations.).
 
 Designing efficient algorithms often starts by selecting the proper data structures in
 which to represent the problem.
@@ -513,14 +513,14 @@ Choose representations based on:
 
 ### Rate of Growth of Functions
 Say the input size of an algorithm is very large, and we increase it
-even more. To predict how the execution time will grow, we don’t
+even more. To predict how the execution time will grow, we don't
 need to know all terms of T(n). We can approximate T(n) by its
 fastest-growing term, called the dominant term.
 
 We describe the behavior of an algorithm by representing the rate of growth of its
 execution time as a function of the size of the input problem instance.
 
-The rate of growth describes how an algorithm’s Running time, or Resource usage increases as the input size grows. It is usually expressed using asymptotic notation (e.g., O(n), O(n log n), O(n²)).
+The rate of growth describes how an algorithm's Running time, or Resource usage increases as the input size grows. It is usually expressed using asymptotic notation (e.g., O(n), O(n log n), O(n²)).
 
 With O(n2)
 algorithms, 10× the input size resulted in 100× the running cost.
@@ -529,20 +529,20 @@ Using a O(n log n) algorithm, 10× the input size results in only
 
 When n is a million, n2 is a trillion, whereas n log n is just a few
 million. Years running a quadratic algorithm on a large input could
-be equivalent to minutes if a O(n log n) algorithm was used. That’s
+be equivalent to minutes if a O(n log n) algorithm was used. That's
 why you need time complexity analysis when you design systems
 that handle very large inputs.
 
 When using the abstraction of the rate of growth to choose between algorithms,
 remember that:
 
-* **Constants matter**: That’s why we use supercomputers and upgrade our computers on a regular
+* **Constants matter**: That's why we use supercomputers and upgrade our computers on a regular
 basis.
 * **Size of n is not always large**: for example the rate of growth of the execution time of Quick‐
 sort is less than the rate of growth of the execution time of Insertion Sort. Yet
 Insertion Sort outperforms Quicksort for small arrays on the same platform
 
-An algorithm’s rate of growth determines how it will perform on increasingly larger
+An algorithm's rate of growth determines how it will perform on increasingly larger
 problem instances.
 
 For small inputs, different algorithms may perform similarly. For large inputs Algorithms with slower growth rates scale better. Algorithms with faster growth rates become impractical, even if they are fast for small inputs.
@@ -571,7 +571,7 @@ An inefficient algorithm wastes work faster than hardware can compensate.
 | Merge Sort	 | ~ n log₂ n |
 | Quick Sort (avg)	 | ~ n log₂ n |
 | Heap Sort	 | ~ n log₂ n |
-Let’s take n = 1,000,000 (one million items).
+Let's take n = 1,000,000 (one million items).
 
 Quadratic algorithm (Θ(n²)): n² = (10⁶)² = 10¹² operations
 
@@ -611,7 +611,7 @@ Algorithms with quadratic, cubic, or exponential growth quickly become impractic
 
 An algorithm is said to be scalable if T(n) grows slowly enough that the runtime remains practical as n increases.
 
-"Reasonable" depends on hardware limits and acceptable runtime.
+'Reasonable' depends on hardware limits and acceptable runtime.
 |     |     |     |
 | --- | --- | --- |
 | Time Complexity | Behavior as n grows | Practicality for large n |
@@ -642,9 +642,9 @@ Examples
 * Exponential (O(2^n), O(n!)) → practical only for tiny inputs (n &lt; 50 in many cases)
 
 #### Effect of Scaling Input Size on Algorithmic Running Time
-The scaling of runtime is dominated by the algorithm’s asymptotic growth rate rather than the absolute input size. Linear or log-linear algorithms remain manageable under moderate scaling, whereas quadratic, cubic, or exponential algorithms become prohibitively expensive. Consequently, algorithmic efficiency is typically more significant than hardware improvements.
+The scaling of runtime is dominated by the algorithm's asymptotic growth rate rather than the absolute input size. Linear or log-linear algorithms remain manageable under moderate scaling, whereas quadratic, cubic, or exponential algorithms become prohibitively expensive. Consequently, algorithmic efficiency is typically more significant than hardware improvements.
 
-Let an algorithm have an input of size n, with running time T(n). Suppose the input size is multiplied by a constant factor k>1, resulting in a new input size k⋅n. The impact on running time depends fundamentally on the algorithm’s asymptotic growth rate or time complexity.
+Let an algorithm have an input of size n, with running time T(n). Suppose the input size is multiplied by a constant factor k>1, resulting in a new input size k⋅n. The impact on running time depends fundamentally on the algorithm's asymptotic growth rate or time complexity.
 
 1. Constant-Time Algorithms (
 O(1)
@@ -799,22 +799,22 @@ $(T(10n))/(T(n)) ≈ (10n)^2/(n^2) = 100$
 
 It will take you approximately 100 × (2 hours) = 200 hours!
 
-What if we had used a different sorting method? For example, there’s
-one called "Bubble Sort" whose time complexity is T(n) = 0.5n2\
+What if we had used a different sorting method? For example, there's
+one called 'Bubble Sort' whose time complexity is T(n) = 0.5n2\
 0.5n. The fastest-growing term then gives T(n) ≈ 0.5n2, hence:
 
 $(T(10n))/(T(n)) ≈ ( 0.5 × (10n)^2)/(0.5 × n^2) = 100$
 
 The 0.5 coefficient cancels itself out! The idea that n2 − n − 2
-and 0.5n2 + 0.5n both grow like n2 isn’t easy to get.
+and 0.5n2 + 0.5n both grow like n2 isn't easy to get.
 
 Using Merge Sort(Θ(n log n)) =10 × log₂(10) ≈ 10 × 3.3 ≈ 33
 
 It will take you approximately 33 × (2 hours) = 66 hours!
 
 ### Analysis in the Best, Average, and Cases
-Isn’t it faster to sort a pile of cards that’s almost sorted already?
-Input size isn’t the only characteristic that impacts the number of
+Isn't it faster to sort a pile of cards that's almost sorted already?
+Input size isn't the only characteristic that impacts the number of
 operations required by an algorithm. When an algorithm can have
 different values of T(n) for the same value of n, we resort to cases:
 
@@ -840,7 +840,7 @@ By knowing the performance of an algorithm under each of these cases, you can
 judge whether an algorithm is appropriate to use in your specific situation.
 
 no single optimal algorithm
-exists. There is no one algorithm that is always the best for every situation. An algorithm can be: Very fast in some cases,Slow or wasteful in others ,So "best" depends on what kind of problem you actually have.
+exists. There is no one algorithm that is always the best for every situation. An algorithm can be: Very fast in some cases,Slow or wasteful in others ,So 'best' depends on what kind of problem you actually have.
 
 for example in Sorting algorithms:
 
@@ -864,7 +864,7 @@ Choosing an algorithm depends on:
     * Minimal memory usage → in-place algorithm (Quick Sort)
     * Very small inputs → simple algorithm (Insertion Sort)
     * Same task (sorting), different needs → different algorithm choice.
-* **the underlying probability distribution of the instances likely to be treated**:This refers to what inputs usually look like, not worst-case fantasy inputs. In plain words: "What kind of data do you expect most of the time?"
+* **the underlying probability distribution of the instances likely to be treated**:This refers to what inputs usually look like, not worst-case fantasy inputs. In plain words: 'What kind of data do you expect most of the time?'
   * Examples
     * Example 1: Sorted or almost sorted data
       * User keeps adding items to a list
@@ -908,7 +908,7 @@ Choosing an algorithm is like choosing a vehicle:
 * Truck → best for heavy loads
 * Sports car → fast but risky in bad conditions
 
-There is no "best vehicle", only the right one for the situation
+There is no 'best vehicle', only the right one for the situation
 
 The following table provides Algorithms vs data distributions comparison table.
 
@@ -933,7 +933,7 @@ This table shows why data shape matters as much as Big-O.
 ### Worst Case
 CASE: when the input requires the maximum num-
 ber of operations for any input of that size. In many sorting
-algorithms, that’s when the input was given in reverse order
+algorithms, that's when the input was given in reverse order
 
 For any particular value of n, the work done by an algorithm or program may vary
 dramatically over all the instances of size n(For a fixed input size n, not all inputs are equally hard. Some inputs make an algorithm fast Some make it slow,so Same input size ≠ same running time). For a given program and a given value
@@ -960,7 +960,7 @@ We are interested in the worst-case behavior of an algorithm because
 * it often is the easiest case to analyze.
   * case often has clear patterns
 * Best and average cases may depend on probability assumptions
-* case avoids guessing how "likely" inputs are
+* case avoids guessing how 'likely' inputs are
 * Safety guarantee:
   * It also explains how slow the program could be in any situation. No matter what happens, the algorithm will never be slower than this
   * This is crucial for: Operating systems, Real-time systems, Databases, Security-critical code
@@ -1003,18 +1003,18 @@ mance because
 * Impossible to test all cases
 
 Instead, an adversary crafts a worst-case problem instance given the
-description of the algorithm("adversary" idea).
+description of the algorithm('adversary' idea).
 
 So, Instead of testing all inputs, we imagine an adversary(Adversary thinking helps identify worst-case inputs):
 
 * The adversary knows the algorithm
 * It deliberately constructs the possible input
 
-This helps us reason: "If someone wanted to make this algorithm as slow as possible, what would they give it?" For Example: For quicksort with bad pivot choice → adversary gives already sorted input
+This helps us reason: 'If someone wanted to make this algorithm as slow as possible, what would they give it?' For Example: For quicksort with bad pivot choice → adversary gives already sorted input
 
 **Step-by-Step Adversary Example**
 
-We’ll use Quicksort (bad pivot choice) because it’s the classic adversary example.
+We'll use Quicksort (bad pivot choice) because it's the classic adversary example.
 
 Algorithm (simplified quicksort), Assume this version of quicksort: Always chooses the first element as the pivot
 ```
@@ -1031,7 +1031,7 @@ The adversary knows:
 
 * How the algorithm works
 * That the pivot is always the first element
-* The adversary’s goal: Make quicksort as slow as possible
+* The adversary's goal: Make quicksort as slow as possible
 
 Step 2: What input should the adversary choose?
 
@@ -1065,7 +1065,7 @@ Worst-case time complexity of this quicksort = O(n²)
 
 Conclustion
 
-Even though quicksort is usually fast, the adversary shows: "There exists an input of size n that makes it this slow."
+Even though quicksort is usually fast, the adversary shows: 'There exists an input of size n that makes it this slow.'
 
 ### Key takeaways (in one place)
 
@@ -1102,7 +1102,7 @@ This is possible, but extremely unlikely. If we design for this:
 * The system becomes very expensive
 * Most capacity is never used
 
-so Instead of asking: "What is the absolute that could happen?". Average case asks: "What usually happens, considering how likely each situation is?" This matches real-world behavior much better.
+so Instead of asking: 'What is the absolute that could happen?'. Average case asks: 'What usually happens, considering how likely each situation is?' This matches real-world behavior much better.
 |     |     |     |
 | --- | --- | --- |
 | Concept	 | Telephone system	 | Algorithm |
@@ -1122,7 +1122,7 @@ For inputs of size n:
 * Each input sᵢ has a probability $Pr{sᵢ}$
 * Rules:
   * 0 ≤ $Pr{sᵢ}$ ≤ 1
-  * All probabilities add up to 1, $∑si∈SnPr{si}=1$, This just means: "One of these inputs must occur."
+  * All probabilities add up to 1, $∑si∈SnPr{si}=1$, This just means: 'One of these inputs must occur.'
 
 If t() measures the work done by an algorithm on each instance(Each input:Takes some time → $t(sᵢ)$, Occurs with some probability → $Pr{sᵢ}$), then the average case work done by an algorithm on Sn is(Multiply how long an input takes by how likely it is, then add everything up.):
 
@@ -1131,13 +1131,13 @@ $$Tac(n) = ∑si ∈ Snt si Pr si$$
 Denoting this average-case work on Sn by $Tac(n)$, then the rate of growth of $Tac(n)$ defines the average-case
 complexity of the algorithm.
 
-**Why unlikely cases don’t matter much**
+**Why unlikely cases don't matter much**
 
 the actual work done on instance si, $t(si)$, is weighted with the probability
 that $si$ will actually be presented as input. If $Pr{si} = 0$, then the actual value of $t(si)$
 does not impact the expected work done by the program.
 
-So, If An input is very slow ,but $Pr{sᵢ} = 0$ (or extremely small),Then Its contribution to average time is zero (or negligible),So Rare worst-case inputs don’t dominate average performance.
+So, If An input is very slow ,but $Pr{sᵢ} = 0$ (or extremely small),Then Its contribution to average time is zero (or negligible),So Rare worst-case inputs don't dominate average performance.
 
 #### Examples
 
@@ -1146,7 +1146,7 @@ BEST CASE: when the input requires the minimum number of
 operations for any input of that size. In sorting, it happens
 when the input is already sorted.
 
-For a fixed input size n, Best-case execution time = the smallest amount of work the algorithm can possibly do on any input of size n. It answers: "If everything goes perfectly, how fast could this algorithm be?"
+For a fixed input size n, Best-case execution time = the smallest amount of work the algorithm can possibly do on any input of size n. It answers: 'If everything goes perfectly, how fast could this algorithm be?'
 
 Knowing the best case for an algorithm is useful even though the situation rarely
 occurs in practice:
@@ -1160,7 +1160,7 @@ Best case does not guarantee real-world speed. But it tells you what the algorit
 
 For example, the best case for Sequential Search is when it
 searches for a desired value, v, which ends up being the first element in the list.
-Consider a slightly different approach, which we’ll call Counting Search, that
+Consider a slightly different approach, which we'll call Counting Search, that
 counts the number of times that v appears in a list. If the computed count is zero,
 then the item was not found, so it returns false; otherwise, it returns true. Note
 that Counting Search always searches through the entire list; therefore, even
@@ -1240,7 +1240,7 @@ So A good algorithm should benefit from favorable situations. Counting Search:
 * Average case considers how likely inputs are
 * Uses a probability distribution over inputs
 * Computes expected running time
-* Rare cases don’t dominate the average
+* Rare cases don't dominate the average
 * Final complexity still focuses on growth rate
 * Example: Sequential search → average O(n)
 
@@ -1249,23 +1249,23 @@ These are mathematical notations used to describe how the running time of an alg
 
 1. **O(f(n))** → Upper bound
    * Describes the worst-case scenario.
-   * "The algorithm will take no more than roughly f(n) steps for large n."
+   * 'The algorithm will take no more than roughly f(n) steps for large n.'
 2. **Ω(f(n))** → Lower bound
    * Describes the best-case scenario.
-   * "The algorithm will take at least roughly f(n) steps for large n."
+   * 'The algorithm will take at least roughly f(n) steps for large n.'
 3. **Θ(f(n))** → Tight bound
    * Both the lower and upper bounds are proportional to f(n).
-   * "The algorithm’s running time grows roughly like f(n), both in the best and cases."
+   * 'The algorithm's running time grows roughly like f(n), both in the best and cases.'
 
 **Formal Definition**
 
-Suppose an algorithm’s running time is t(n) for input size n:
+Suppose an algorithm's running time is t(n) for input size n:
 
 1. **O(f(n))**: There exists a constant c>0 and n0 threshold problem size,such that t(n)≤c⋅f(n) for all n>n0 → Worst-case guarantee.
 
    assume there is an algorithm whose worst-case performance is never
    greater than directly proportional to the size of the input problem instance, once the
-   size is "large enough."
+   size is 'large enough.'
 2. **Ω(f(n))**: There exists a different constant c>0 and a different threshold
 problem size, n0 such that t(n)≥c⋅f(n) for all n>n0 → Best-case guarantee.
 
@@ -1278,7 +1278,7 @@ problem size, n0 such that t(n)≥c⋅f(n) for all n>n0 → Best-case guarantee.
 
 * Upper bounds (O) tell you how slow the algorithm could get → useful for planning resources.
 * Lower bounds (Ω) tell you how fast it could go → useful to know if an algorithm can ever be really fast.
-* Θ is used when the algorithm’s growth rate is consistent in both best and cases.
+* Θ is used when the algorithm's growth rate is consistent in both best and cases.
 
 #### Examples
 1. Linear Search (searching for a value in an array of n elements)
@@ -1335,8 +1335,8 @@ To do this, we should perform the following steps:
 1. In the worst- case, we execute the inner loop n times (array length).
 2. In the best case, we only execute the inner loop only twice.
 3. The best case is when the duplicate numbers are in the front of the input array.
-The is when the array doesn’t contain any duplicates.
-4. The case is when the array doesn’t contain duplicates and is of size n:
+The is when the array doesn't contain any duplicates.
+4. The case is when the array doesn't contain duplicates and is of size n:
    * For the outer loop, we have 4*n operations
    * For the inner loop, we have n__(n__8) operations
    * In total, we have 4n + 8n2 operations
@@ -1465,7 +1465,7 @@ Insight: Worst-case guarantees outweigh fast best cases.
 
 Insight: Best case irrelevant; traversal cost dominates.
 
-##### Dijkstra’s Algorithm (With Heap)
+##### Dijkstra's Algorithm (With Heap)
 
 |     |     |     |
 | --- | --- | --- |
@@ -1570,8 +1570,8 @@ To do this, we should perform the following steps:
 . In the worst- case, we execute the inner loop n times (array length).
 . In the best case, we only execute the inner loop only twice.
 . The best case is when the duplicate numbers are in the front of the input array.
-The is when the array doesn’t contain any duplicates.
-. The case is when the array doesn’t contain duplicates and is of size n:
+The is when the array doesn't contain any duplicates.
+. The case is when the array doesn't contain duplicates and is of size n:
 ** For the outer loop, we have 4*n operations
 *** For the inner loop, we have n**(n*8) operations
 ** In total, we have 4n + 8n2 operations
@@ -1621,7 +1621,7 @@ To make average-case analysis reasonable, we assume one of these equivalent mode
 These two give the same average behavior. This avoids adversarial inputs and lets
 probability matter.
 
-**What "average case" means here**
+**What 'average case' means here**
 
 For input size n:
 
@@ -1705,14 +1705,14 @@ Level 2:   n/4 n/4 n/4 n/4
 * Number of levels ≈ log n
 * Total ≈ n log n
 
-**Why case doesn’t dominate the average**
+**Why case doesn't dominate the average**
 
 * case:
   * Highly unbalanced splits every time
   * Probability ≈ 2 / n! (vanishingly small)
 * Average case:
   * Balanced-ish splits are far more likely
-  * Rare bad cases don’t affect expectation much
+  * Rare bad cases don't affect expectation much
 
 **Comparison summary**
 | Case	 | Complexity	 | Why |

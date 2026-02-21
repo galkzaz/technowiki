@@ -3,7 +3,8 @@ id: process-ipc-semaphores
 title: Semaphores
 description: Semaphores
 ---
-## Dijkstra’s semaphore proposal
+
+## Dijkstra's semaphore proposal
 By the mid-1960s, people had already discovered:
 - Busy waiting (Peterson, TSL, XCHG) → wastes CPU, priority inversion
 - sleep / wakeup → lost wakeups
@@ -17,7 +18,7 @@ positive value if one or more wakeups were pending.
 Dijkstra proposed having two operations on semaphores, now usually called
 down and up (generalizations of sleep and wakeup, respectively).
 
-In Dijkstra’s original paper, he used the names P and V instead of
+In Dijkstra's original paper, he used the names P and V instead of
 down and up, respectively. Since these have no mnemonic significance to people
 who do not speak Dutch and only marginal significance to those people who do—
 Proberen (try) and Verhogen (raise, make higher)—we will use the terms down and
@@ -62,9 +63,9 @@ problems and avoiding race conditions. Atomic actions, in which a group of relat
 operations are either all performed without interruption or not performed at all, are
 extremely important in many other areas of computer science as well.
 
-Dijkstra’s insight: Synchronization is counting, not signaling. Instead of remembering that something happened, we must remember how many times it happened.
+Dijkstra's insight: Synchronization is counting, not signaling. Instead of remembering that something happened, we must remember how many times it happened.
 
-Dijkstra’s semaphore is an integer synchronization primitive accessed only through atomic P and V operations; by counting events rather than signaling them, it avoids busy waiting and lost wakeups and enables correct solutions to mutual exclusion and resource allocation problems.
+Dijkstra's semaphore is an integer synchronization primitive accessed only through atomic P and V operations; by counting events rather than signaling them, it avoids busy waiting and lost wakeups and enables correct solutions to mutual exclusion and resource allocation problems.
 
 Dijkstra was strict:
 - No reading the value
@@ -92,9 +93,9 @@ Dijkstra proved that semaphores guarantee:
 - Progress
     * If a process can proceed, it eventually will
 
-This is not accidental — it’s by construction.
+This is not accidental — it's by construction.
 
-**What makes Dijkstra’s proposal revolutionary**
+**What makes Dijkstra's proposal revolutionary**
 
 Before semaphores:
 -  Ad-hoc fixes
@@ -120,8 +121,48 @@ Linux internally:
 -  Uses spinlocks + wait queues
 -  Exposes futex-based semaphores to user space
 
-## Binary vs counting semaphores
-**Binary semaphore (mutex)**
+## semaphores
+A semaphore is a synchronization primitive used to:
+- Control access to shared resources
+- Prevent race conditions
+- Coordinate concurrent processes/threads
+
+
+**Mathematical Definition**
+
+A semaphore S is an integer variable accessed only via two atomic operations:
+1. **wait(S) (also called P or down)**
+```
+S = S - 1
+if S < 0 → block the process
+```
+2. **signal(S) (also called V or up)**
+```
+S = S + 1
+if S ≤ 0 → wake up one blocked process
+```
+The key idea: The decrement and test must be atomic.
+
+Semaphores Solves this problem:
+- Critical section protection
+- Producer–Consumer problem
+- Readers–Writers problem
+- Dining Philosophers
+- Process synchronization
+
+## Types of Semaphores
+Semaphore: A synchronization primitive that can be used to control access:
+    • Binary semaphore (mutex): 0 or 1, used for mutual exclusion.
+    • Counting semaphore: Can be used to track the number of allowed concurrent accesses.
+
+We usually use:
+1. mutex – protects access to a shared counter (read_count) that tracks the number of readers currently reading.
+2. wrt – ensures exclusive access for writers.
+
+### Binary Semaphore (Mutex-like)
+- Value: 0 or 1
+- Used for mutual exclusion
+
 ```
 sem mutex = 1;
 
@@ -130,9 +171,12 @@ critical();
 V(mutex);   // exit
 ```
 Guarantees:
--  Only one process inside
+- Only one process inside
 
-**Counting semaphore (resource pool)**
+### Counting Semaphore (Resource Pool)
+- Value: 0..N
+- Controls access to N identical resources
+
 ```
 sem empty = N;
 sem full  = 0;
@@ -141,6 +185,10 @@ Tracks:
 -  Number of empty slots
 -  Number of full slots
 This is exactly what wakeup bits failed to do.
+
+Example:
+- Printer pool (3 printers)
+- Semaphore initialized to 3
 
 ## Solving the Producer-Consumer Problem Using Semaphores
 Semaphores solve the lost-wakeup problem To make
@@ -205,9 +253,9 @@ down just before entering its critical region and an up just after leaving it, m
 exclusion is guaranteed.
 
 <Tabs>
-<TabItem value="producer-consumer1" label="The producer-consumer problem using semaphores">
+<TabItem value='producer-consumer1' label='The producer-consumer problem using semaphores'>
 
-```c title="The producer-consumer problem using semaphores"
+```c title='The producer-consumer problem using semaphores'
 #define N 100 / * number of slots in the buffer * /
 typedef int semaphore; / * semaphores are a special kind of int * /
 
@@ -243,7 +291,7 @@ void consumer(void)
 
 
 </TabItem>
-<TabItem value="Another Implementaion" label="Another Implementaion">
+<TabItem value='Another Implementaion' label='Another Implementaion'>
 
 ```c
 #define N 10
@@ -299,7 +347,7 @@ void consumer(void)
 </TabItem>
 </Tabs>
 
-```c title="Complete semaphore-based solution"
+```c title='Complete semaphore-based solution'
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdio.h>
@@ -320,7 +368,7 @@ void* producer(void* arg)
     int id = *(int*)arg;
 
     sleep(1);
-    printf("Producer %d: producing item\n", id);
+    printf('Producer %d: producing item\n', id);
 
     sem_wait(&empty);    // wait for empty slot
     sem_wait(&mutex);    // enter critical section
@@ -328,7 +376,7 @@ void* producer(void* arg)
     buffer[in] = id;
     in = (in + 1) % N;
 
-    printf("Producer %d: inserted item\n", id);
+    printf('Producer %d: inserted item\n', id);
 
     sem_post(&mutex);    // exit critical section
     sem_post(&full);     // signal item available
@@ -348,7 +396,7 @@ void* consumer(void* arg)
         item = buffer[out];
         out = (out + 1) % N;
 
-        printf("Consumer: consumed item %d\n", item);
+        printf('Consumer: consumed item %d\n', item);
 
         sem_post(&mutex);    // exit critical section
         sem_post(&empty);    // signal empty slot
@@ -392,7 +440,316 @@ int main(void)
 | Progress guaranteed | ❌              | ✅           |
 
 ## The Readers and Writers Problem Using Semaphores
+The producers-consumers problem is useful for modeling two processes (or
+threads) that exchange blocks of data while sharing a buffer. Another famous problem is the readers and writers problem (Courtois et al., 1971), which models access to a database. 
+
+Imagine, for example, an airline reservation system, with many competing processes wishing to read and write it. It is acceptable to have multiple processes reading the database at the same time, but if one process is updating (writing) the database, no other processes may have access to the database, not even readers. 
+
+The question is how do you program the readers and the writers?
+
+The Readers-Writers Problem is a classic synchronization problem in operating systems:
+    • Multiple readers can read the shared data simultaneously without interfering with each other.
+    • Writers require exclusive access: only one writer can write at a time, and no reader can read while a writer is writing.
+
+The Goal is to void race conditions while allowing maximum concurrency.
+
+### Reader-priority
+Reader priority is a strategy where readers have priority over writers. This means that if there are readers waiting to read, writers must wait until all readers have finished reading before they can write.
+
+We’ll describe the first variant (Reader-priority), where readers can starve writers if many readers keep coming.
+```
+Time -->
+R1      [Reading]
+R2      [Reading]
+W1             [Waiting]
+R3             [Waiting]
+R1, R2 done
+W1      [Writing]
+```
+    • Multiple readers can read simultaneously.
+    • Writers must wait until all readers finish.
+    • No two writers can write at the same time.
+
+In this solution, the first reader to get access to the database does a down on the semaphore db. Subsequent readers merely increment a counter, rc. As readers leave, they decrement the counter, and the last to leave does an up on the semaphore, allowing a blocked writer, if there is one, to get in.
+
+The solution presented here implicitly contains a subtle decision worth noting. Suppose that while a reader is using the database, another reader comes along. Since having two readers at the same time is not a problem, the second reader is admitted. Additional readers can also be admitted if they come along.
+
+Now suppose a writer shows up. The writer may not be admitted to the database, since writers must have exclusive access, so the writer must be suspended. Later, additional readers show up. As long as at least one reader is still active, subsequent readers are admitted. As a consequence of this strategy, as long as there is a steady supply of readers, they will all get in as soon as they arrive. The writer will be kept suspended until no reader is present. If a new reader arrives, say, every
+2 sec, and each reader takes 5 sec to do its work, the writer will never get in. Obvi-
+ously, this is not a satisfactory situation.
+
+To avoid this situation, the program could be written slightly differently: when a reader arrives and a writer is waiting, the reader is suspended behind the writer instead of being admitted immediately. In this way, a writer has to wait for readers that were active when it arrived to finish but does not have to wait for readers that came along after it. The disadvantage of this solution is that it achieves less concurrency and thus lower performance. Courtois et al. present a solution that gives
+priority to writers
+
+```
+typedef int semaphore; / * use your imagination * /
+semaphore mutex = 1; / * controls access to rc * /
+semaphore db = 1; / * controls access to the database * /
+int rc = 0; /* # of processes reading or wanting to * /
+void reader(void)
+{
+while (TRUE) { / * repeat forever * /
+down(&mutex); / * get exclusive access to rc * /
+rc = rc + 1; /* one reader more now * /
+if (rc == 1) down(&db); /* if this is the first reader ... * /
+up(&mutex); /* release exclusive access to rc * /
+read data base( ); /* access the data * /
+down(&mutex); / * get exclusive access to rc * /
+rc = rc < 1; /* one reader fewer now * /
+if (rc == 0) up(&db); /* if this is the last reader ... * /
+up(&mutex); /* release exclusive access to rc * /
+use data read( ); /* noncritical region * /
+}
+}
+void writer(void)
+{
+while (TRUE) { / * repeat forever * /
+think up data( ); /* noncritical region * /
+down(&db); / * get exclusive access * /
+write data base( ); /* update the data * /
+up(&db); /* release exclusive access * /
+}
+}
+```
+**Shared variables:**
+```
+int read_count = 0;       // number of readers currently reading
+Semaphore mutex = 1;       // for protecting read_count
+Semaphore wrt = 1;         // allows exclusive writer access
+```
+**Reader Process**
+```
+do {
+    // Entry section
+    wait(mutex);              // lock mutex to update read_count
+    read_count++;
+    if (read_count == 1)      // first reader locks the writer
+        wait(wrt);
+    signal(mutex);            // release mutex
+
+    // Critical section: Reading
+    read_data();
+
+    // Exit section
+    wait(mutex);
+    read_count--;
+    if (read_count == 0)      // last reader releases writer
+        signal(wrt);
+    signal(mutex);
+
+    // Remainder section
+    do_other_stuff();
+} while (true);
+```
+**Writer Process**
+```
+do {
+    wait(wrt);          // writer requests exclusive access
+    write_data();       // critical section: writing
+    signal(wrt);        // release exclusive access
+
+    do_other_stuff();
+} while (true);
+```
+How It Works
+1. read_count tracks active readers.
+2. First reader locks wrt so writers cannot access.
+3. Last reader releases wrt, allowing writers.
+4. Writers always lock wrt before writing; ensures exclusive access.
+
+Concurrency:
+    • Multiple readers → allowed concurrently.
+    • Writer → exclusive access; readers must wait if a writer is writing.
+
+This implementation gives priority to readers.If readers keep arriving continuously: Writers might starve forever.
+#### C program implementing the Readers-Writers problem
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <unistd.h>
+
+#define NUM_READERS 5
+#define NUM_WRITERS 2
+
+// Shared data
+int shared_data = 0;
+int read_count = 0;
+
+// Semaphores
+sem_t mutex;   // protects read_count
+sem_t wrt;     // controls access to shared_data
+
+// -------------------- READER --------------------
+void* reader(void* arg) {
+    int id = *((int*)arg);
+
+    while (1) {
+        // Entry Section
+        sem_wait(&mutex);
+        read_count++;
+
+        if (read_count == 1) {
+            // First reader locks writers
+            sem_wait(&wrt);
+        }
+
+        sem_post(&mutex);
+
+        // Critical Section (Reading)
+        printf("Reader %d is reading: shared_data = %d\n", id, shared_data);
+        sleep(1);
+
+        // Exit Section
+        sem_wait(&mutex);
+        read_count--;
+
+        if (read_count == 0) {
+            // Last reader releases writers
+            sem_post(&wrt);
+        }
+
+        sem_post(&mutex);
+
+        sleep(1);  // Remainder section
+    }
+
+    return NULL;
+}
+
+// -------------------- WRITER --------------------
+void* writer(void* arg) {
+    int id = *((int*)arg);
+
+    while (1) {
+        // Entry Section
+        sem_wait(&wrt);
+
+        // Critical Section (Writing)
+        shared_data++;
+        printf("Writer %d is writing: shared_data = %d\n", id, shared_data);
+        sleep(2);
+
+        // Exit Section
+        sem_post(&wrt);
+
+        sleep(2);  // Remainder section
+    }
+
+    return NULL;
+}
+
+// -------------------- MAIN --------------------
+int main() {
+    pthread_t readers[NUM_READERS];
+    pthread_t writers[NUM_WRITERS];
+
+    int reader_ids[NUM_READERS];
+    int writer_ids[NUM_WRITERS];
+
+    // Initialize semaphores
+    sem_init(&mutex, 0, 1);
+    sem_init(&wrt, 0, 1);
+
+    // Create reader threads
+    for (int i = 0; i < NUM_READERS; i++) {
+        reader_ids[i] = i + 1;
+        pthread_create(&readers[i], NULL, reader, &reader_ids[i]);
+    }
+
+    // Create writer threads
+    for (int i = 0; i < NUM_WRITERS; i++) {
+        writer_ids[i] = i + 1;
+        pthread_create(&writers[i], NULL, writer, &writer_ids[i]);
+    }
+
+    // Join threads (infinite loop, so program runs forever)
+    for (int i = 0; i < NUM_READERS; i++)
+        pthread_join(readers[i], NULL);
+
+    for (int i = 0; i < NUM_WRITERS; i++)
+        pthread_join(writers[i], NULL);
+
+    // Destroy semaphores
+    sem_destroy(&mutex);
+    sem_destroy(&wrt);
+
+    return 0;
+}
+```
+- `mutex`
+    * Protects read_count from race conditions.
+    * Without it: Two readers updating read_count simultaneously would corrupt it.
+- `wrt`: Ensures:
+    * Only one writer writes at a time
+    * No reader reads while a writer is writing
+
+Execution Behavior Example
+
+You might see output like:
+```
+Reader 1 is reading: shared_data = 0
+Reader 2 is reading: shared_data = 0
+Reader 3 is reading: shared_data = 0
+Writer 1 is writing: shared_data = 1
+Reader 4 is reading: shared_data = 1
+```
+Notice:
+    • Multiple readers run together
+    • Writers run alone
+    • No mixed read/write happens simultaneously
+
+### Writer-priority
+Writer priority is a strategy where writers have priority over readers. This means that if there are writers waiting to write, readers must wait until all writers have finished writing before they can read.
+
+If a writer arrives:
+    • New readers must wait
+    • Writers do NOT starve
+
+#### C program implementing the Readers-Writers problem
+We add:
+    • readTry → blocks readers when a writer is waiting
+    • rmutex → protects read_count
+    • wmutex → protects write_count
+    • resource → actual shared resource lock
+```c
+```
+When the first writer arrives:
+```
+write_count == 1 → readTry locked
+```
+This prevents new readers from entering.
+So:
+    • Existing readers finish
+    • Writer proceeds
+    • Readers remain blocked until all writers finish
+
+- ✔ Writers never starve
+- ❌ Readers may starve
+
+### Fair(No Starvation) solution
+Fair solution ensures that readers and writers are served in a fair manner. This means that readers and writers are served in a round-robin fashion, ensuring that no reader or writer is starved.
+
+This ensures:
+    • FIFO ordering
+    • Readers and writers treated fairly
+    • No starvation
+
+The idea is to use  a turnstile semaphore (serviceQueue) Every thread must pass through it in arrival order.
+```c
+```
+| Solution        | Readers Concurrent | Writers Starve? | Readers Starve? | Fair? |
+| --------------- | ------------------ | --------------- | --------------- | ----- |
+| Reader Priority | Yes                | ✅ Yes           | ❌ No            | ❌     |
+| Writer Priority | Yes                | ❌ No            | ✅ Possible      | ❌     |
+| Fair            | Yes                | ❌ No            | ❌ No            | ✅     |
+
 ## Implementaions of Semaphores in linux
+Linux has multiple types of synchronization primitives, and the implementation differs between:
+- User space
+- Kernel space
+
 Linux POSIX semaphores (sem_t) are not implemented entirely in the kernel — rather:
  - The glibc (C library) provides the sem_init, sem_wait, sem_post, etc. API.
  - These calls operate mostly in user space using atomic operations.
@@ -471,13 +828,13 @@ int sys_futex(u32 __user *uaddr, int futex_op, u32 val, ...) {
 }
 ```
 This is a simplification but captures the main idea:
-    1. The kernel hashes the futex word’s address to find a wait queue.
+    1. The kernel hashes the futex word's address to find a wait queue.
     2. On FUTEX_WAIT, the kernel safely checks the value and enqueues the thread if needed.
     3. On FUTEX_WAKE, it wakes up waiters.
 All of this happens inside the kernel. 
 
 🧱 4) Simplified Semaphore Code Using Futex (Conceptually)
-Here’s a conceptual pseudosource for how semaphores are implemented in user space using futex:
+Here's a conceptual pseudosource for how semaphores are implemented in user space using futex:
 ```
 void sem_wait(sem_t *sem) {
     // atomic_decr_if_pos returns true if sem->value > 0 and decrements
@@ -538,18 +895,18 @@ Here are the relevant kernel source files you can browse:
  - Sleep/wake blocking is handled by the kernel efficiently.
  - Higher-level constructs (mutexes, semaphores, cond vars) are built on top of futexes. 
 
-If you’d like, I can also show an actual C implementation of semaphores using futex directly (no pthreads), with working example code that blocks/wakes using futex syscalls.
+If you'd like, I can also show an actual C implementation of semaphores using futex directly (no pthreads), with working example code that blocks/wakes using futex syscalls.
 
 Below is a minimal, working semaphore implementation built directly on Linux futexes, with no pthread mutexes, no condition variables, no glibc semaphores. This is as close as you can get in user space to how Linux actually does it.
-We’ll go in this order:
-    1. Design (what we’re building)
+We'll go in this order:
+    1. Design (what we're building)
     2. Exact futex wrappers
     3. Semaphore implementation (P / V)
     4. Example: 2 threads competing for a critical section
     5. Exact futex syscall path mapping
 
 1️⃣ Design: futex-based semaphore
-We implement Dijkstra’s semaphore:
+We implement Dijkstra's semaphore:
 S >= 0
 P(S): wait / down
 V(S): signal / up
@@ -657,12 +1014,12 @@ void* worker(void* arg)
 {
     int id = *(int*)arg;
 
-    printf("Thread %d: waiting\n", id);
+    printf('Thread %d: waiting\n', id);
     sem_wait(&sem);
 
-    printf("Thread %d: ENTER critical section\n", id);
+    printf('Thread %d: ENTER critical section\n', id);
     sleep(1);
-    printf("Thread %d: LEAVE critical section\n", id);
+    printf('Thread %d: LEAVE critical section\n', id);
 
     sem_post(&sem);
     return NULL;
@@ -714,7 +1071,7 @@ user space
              └── wake_up_q()
 This is exactly what glibc semaphores do — just with more edge-case handling.
 
-6️⃣ Why this is Dijkstra’s semaphore, literally
+6️⃣ Why this is Dijkstra's semaphore, literally
 Dijkstra concept	Linux futex version
 Integer S	int value
 P(S)	atomic dec + futex_wait
@@ -725,8 +1082,8 @@ No busy waiting	schedule()
 This is not an analogy — it is a direct implementation.
 
 🔑 Final insight (the big one)
-Linux futexes are not locks — they are a mechanism to build Dijkstra’s semaphore correctly with minimal kernel involvement.
-Everything you’ve studied:
+Linux futexes are not locks — they are a mechanism to build Dijkstra's semaphore correctly with minimal kernel involvement.
+Everything you've studied:
  - wakeup bits ❌
  - sleep/wakeup ❌
  - busy waiting ❌

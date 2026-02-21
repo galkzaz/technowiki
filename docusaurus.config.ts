@@ -1,79 +1,79 @@
-import { Config } from "@docusaurus/types";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import { remarkKroki } from "remark-kroki";
+import { Config } from '@docusaurus/types';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import { remarkKroki } from 'remark-kroki';
 
 const config: Config = {
-  title: "TechnoWiki",
-  url: "https://example.com",
-  baseUrl: "/",
-  onBrokenLinks: "warn",
+  title: 'TechnoWiki',
+  url: 'https://example.com',
+  baseUrl: '/',
+  onBrokenLinks: 'warn',
   markdown: {
-    format: "detect",
+    format: 'detect',
     mermaid: true,
     hooks: {
-      onBrokenMarkdownLinks: "warn",
+      onBrokenMarkdownLinks: 'warn',
     },
   },
   themes: [],
   stylesheets: [
     {
-      href: "https://cdn.jsdelivr.net/npm/katex@0.13.24/dist/katex.min.css",
-      type: "text/css",
+      href: 'https://cdn.jsdelivr.net/npm/katex@0.13.24/dist/katex.min.css',
+      type: 'text/css',
       integrity:
-        "sha384-odtC+0UGzzFL/6PNoE8rX/SPcQDXBJ+uRepguP4QkPCm2LBxH3FA3y+fKSiJ+AmM",
-      crossorigin: "anonymous",
+        'sha384-odtC+0UGzzFL/6PNoE8rX/SPcQDXBJ+uRepguP4QkPCm2LBxH3FA3y+fKSiJ+AmM',
+      crossorigin: 'anonymous',
     },
   ],
   presets: [
     [
-      "@docusaurus/preset-classic",
+      '@docusaurus/preset-classic',
       {
         docs: {
-          routeBasePath: "/",
-          sidebarPath: require.resolve("./sidebars.ts"),
+          routeBasePath: '/',
+          sidebarPath: require.resolve('./sidebars.ts'),
           remarkPlugins: [
             remarkMath,
             [
               remarkKroki,
               {
-                server: "https://kroki.io",
-                output: "img-base64",
-                alias: ["plantuml", "ditaa"],
-                target: "mdx3",
+                server: 'https://kroki.io',
+                output: 'img-base64',
+                alias: ['plantuml', 'ditaa'],
+                target: 'mdx3',
               },
             ],
           ],
           rehypePlugins: [rehypeKatex],
           admonitions: {
-            keywords: ["question"],
+            keywords: ['question'],
             extendDefaults: true,
           },
         },
         blog: false,
         theme: {
           customCss: [
-            require.resolve("./src/css/customTheme.scss"),
-            require.resolve("./src/css/index.scss"),
-            require.resolve("./src/css/custom.scss"),
+            require.resolve('./src/css/customTheme.scss'),
+            require.resolve('./src/css/index.scss'),
+            require.resolve('./src/css/custom.scss'),
           ],
         },
       },
     ],
   ],
   plugins: [
-    "docusaurus-plugin-sass",
-    "@docusaurus/theme-mermaid",
-    [require.resolve("@easyops-cn/docusaurus-search-local"), { hashed: true }],
+    'docusaurus-plugin-sass',
+    '@docusaurus/theme-mermaid',
+    [require.resolve('@easyops-cn/docusaurus-search-local'), { hashed: true }],
   ],
   themeConfig: {
     colorMode: {
-      defaultMode: "light",
+      defaultMode: 'light',
       disableSwitch: false,
       respectPrefersColorScheme: true,
     },
     prism: {
-      defaultLanguage: "tsx",
+      defaultLanguage: 'tsx',
     },
     docs: {
       sidebar: {
@@ -85,101 +85,105 @@ const config: Config = {
       maxHeadingLevel: 6,
     },
     navbar: {
-      title: "TechnoWiki",
+      title: 'TechnoWiki',
       logo: {
-        src: "img/logo.svg",
-        alt: "",
+        src: 'img/logo.svg',
+        alt: '',
       },
-      //style: "primary",
+      //style: 'primary',
       hideOnScroll: true,
       items: [
         {
-          label: "Computer Science",
-          position: "right",
+          label: 'Computer Science',
+          position: 'right',
           items: [
-            { label: "Glossary", to: "/glossary" },
-            { label: "Contribute", to: "/contribute" },
+            { label: 'Glossary', to: '/glossary' },
+            { label: 'Contribute', to: '/contribute' },
           ],
         },
         {
-          label: "Mathematics",
-          position: "right",
+          label: 'Mathematics',
+          position: 'right',
           items: [
             {
-              label: "Discrete Mathematics",
-              to: "/mathematics/discrete-mathematics/sets",
+              label: 'Discrete Mathematics',
+              to: '/mathematics/discrete-mathematics/sets',
             },
             {
-              label: "Linear Algebra",
-              to: "/mathematics/linear-algebra/vectors",
+              label: 'Linear Algebra',
+              to: '/mathematics/linear-algebra/vectors',
             },
             {
-              label: "Probability",
-              to: "/mathematics/probability/probability-basics",
-            },
-          ],
-        },
-
-        {
-          label: "Hardware Design",
-          position: "right",
-          items: [
-            {
-              label: "Computer Organization",
-              to: "/hardware-design/computer-organization",
-            },
-            {
-              label: "Digital Logic",
-              type: "doc",
-              docId: "hardware-design/digital-logic/digital-logic",
-            },
-            {
-              label: "Microarchitecture",
-              to: "/hardware-design/microarchitecture",
+              label: 'Probability',
+              to: '/mathematics/probability/probability-basics',
             },
           ],
         },
 
         {
-          label: "Software Systems",
-          position: "right",
+          label: 'Hardware Design',
+          position: 'right',
           items: [
             {
-              label: "Algorithms And Data Structures",
-              to: "/software-systems/algorithms-data-structures/algorithms",
+              label: 'Computer Organization',
+              to: '/hardware-design/computer-organization',
             },
             {
-              label: "Programming Languages",
-              to: "/software-systems/programming-languages/c-lang/Introduction",
+              label: 'Digital Logic',
+              type: 'doc',
+              docId: 'hardware-design/digital-logic/digital-logic',
             },
             {
-              label: "Operating Systems",
-              to: "/software-systems/operating-systems",
+              label: 'Microarchitecture',
+              to: '/hardware-design/microarchitecture',
             },
-            { label: "Databases", to: "/software-systems/databases" },
-            { label: "Compilers", to: "/software-systems/compilers" },
+          ],
+        },
+
+        {
+          label: 'Software Systems',
+          position: 'right',
+          items: [
             {
-              label: "Distributed Systems",
-              to: "/software-systems/distributed-systems",
+              label: 'Algorithms And Data Structures',
+              to: '/software-systems/algorithms-data-structures/algorithms',
             },
             {
-              label: "Parallel Computing",
-              to: "/software-systems/parallel-computing/parallel-computing",
+              label: 'Programming Languages',
+              to: '/software-systems/programming-languages/c-lang/Introduction',
+            },
+            {
+              label: 'Operating Systems',
+              to: '/software-systems/operating-systems',
+            },
+            { label: 'Databases', to: '/software-systems/databases' },
+            { label: 'Compilers', to: '/software-systems/compilers' },
+            {
+              label: 'Distributed Systems',
+              to: '/software-systems/distributed-systems',
+            },
+            {
+              label: 'Parallel Computing',
+              to: '/software-systems/parallel-computing/parallel-computing',
+            },
+            {
+              label: 'AI',
+              to: '/software-systems/ai/',
             },
           ],
         },
         {
-          label: "Embedded Systems",
-          position: "right",
+          label: 'Embedded Systems',
+          position: 'right',
           items: [
             {
-              label: "Microcontrollers",
-              to: "/embedded-systems/microcontrollers/gpio",
+              label: 'Microcontrollers',
+              to: '/embedded-systems/microcontrollers/gpio',
             },
-            { label: "RTOS", to: "/embedded-systems/rtos/tasks" },
+            { label: 'RTOS', to: '/embedded-systems/rtos/tasks' },
             {
-              label: "Embedded Linux",
-              to: "/embedded-systems/embedded-linux/boot-process",
+              label: 'Embedded Linux',
+              to: '/embedded-systems/embedded-linux/boot-process',
             },
           ],
         },

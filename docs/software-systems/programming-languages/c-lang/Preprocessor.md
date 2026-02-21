@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 ## Macros
-When a program contains constants, it’s often a good idea to give them names. 
+When a program contains constants, it's often a good idea to give them names. 
 
 Using a feature known as macro definition, we can name this constant:
 ```c
@@ -21,7 +21,7 @@ will become
 ```
 weight = (volume + 166 - 1) / 166;
 ```
-giving the same effect as if we’d written the latter statement in the first place.
+giving the same effect as if we'd written the latter statement in the first place.
 
 The value of a macro can be an expression:
 ```c
@@ -29,6 +29,6 @@ The value of a macro can be an expression:
 ```
 If it contains operators, the expression should be enclosed in parentheses.
 
-we’ve used only upper-case letters in macro names. This is a convention that most C programmers follow, not a requirement of the language.
+we've used only upper-case letters in macro names. This is a convention that most C programmers follow, not a requirement of the language.
 ## Conditional Compilation
 #ifdef, #ifndef

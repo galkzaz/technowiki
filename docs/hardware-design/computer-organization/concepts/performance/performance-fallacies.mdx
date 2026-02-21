@@ -1,0 +1,330 @@
+---
+id: performance-fallacies
+title: Performance Fallacies
+description: Performance Fallacies
+---
+
+
+## Fallacy: Expecting the improvement of one aspect of a computer to increase overall performance by an amount proportional to the size of the improvement
+🔴 The Fallacy
+“If I improve one part of the computer by X%, overall performance will improve by X%.”
+This sounds reasonable.
+But it is almost always wrong.
+
+🧠 Why It’s Wrong
+Because overall performance depends on how much that part is actually used.
+This is exactly what Gene Amdahl formalized in Amdahl’s Law, discussed in
+Computer Organization and Design.
+
+🔍 Simple Example
+Suppose:
+- 30% of execution time is spent in memory access
+- 70% is CPU computation
+Now imagine:
+You make memory 2× faster.
+Many people would think:
+“Great! The whole program is 2× faster.”
+No.
+Let’s calculate.
+
+📐 Apply Amdahl’s Law
+Speedup=(1−f)+Sf​1​ 
+Here:
+- f=0.3
+- S=2
+Speedup=0.7+0.3/21​=0.7+0.151​=0.851​=1.18 
+So overall speedup is only:
+1.18× 
+Even though memory got 2× faster.
+
+🔎 Why This Happens
+Because:
+70% of the time was never improved.
+You cannot accelerate what you didn’t change.
+
+📊 Another Example (More Extreme)
+Suppose:
+- Floating point takes 10% of time
+- You improve FP by 10×
+What happens?
+Speedup=0.9+0.1/101​=0.9+0.011​=0.911​=1.10× 
+Only 10% improvement overall.
+Even though that part is 10× faster!
+
+🎯 The Core Principle
+Performance improvement depends on:
+- Size of improvement
+- Fraction of time affected
+Both matter.
+Improving something huge that is rarely used gives little benefit.
+
+🏗 Why Architects Care
+When companies like:
+- Intel
+- AMD
+- ARM Holdings
+Design new CPUs, they must ask:
+- What fraction of SPEC benchmarks is memory-bound?
+- What fraction is branch misprediction?
+- What fraction is vector computation?
+Otherwise they risk spending silicon area for minimal gain.
+
+🧩 Connection to CPU Performance Equation
+ Execution Time=IC×CPI×Clock 
+If you reduce CPI for only 20% of instructions:
+Overall CPI does NOT drop by 20%.
+It drops only proportionally to that fraction.
+
+🟢 The Correct Way to Think
+Instead of saying:
+“I improved this by 2×.”
+You must ask:
+“What percentage of total time does this affect?”
+Then apply Amdahl’s Law.
+
+🔥 In One Sentence
+Improving one component by X% does NOT mean total performance improves by X%.
+Overall improvement is limited by how much that component contributes to execution time.
+
+
+## Fallacy: Computers at low utilization use little power
+🔴 The Fallacy
+“Computers at low utilization use little power.”
+This sounds logical… but it is false.
+Real servers:
+- Rarely run at 100% load
+- Often operate between 10%–50% utilization
+- Still consume a large fraction of peak power
+
+📊 Real Observation
+In Google’s warehouse-scale computers (WSCs), described by
+Luiz André Barroso and
+Urs Hölzle:
+- Servers are at 100% utilization < 1% of the time
+- Most of the time they run at 10%–50% utilization
+Yet even highly tuned systems running the SPECpower benchmark from
+Standard Performance Evaluation Corporation still used:
+33% of peak power at only 10% workload
+That is very far from proportional.
+
+🧠 Why This Happens
+Because server power has two components:
+Power=Static+Dynamic 
+🔹 Static Power
+- Leakage current
+- DRAM refresh
+- Power supply losses
+- Always consumed when machine is ON
+🔹 Dynamic Power
+- Switching activity
+- Proportional to utilization
+At low utilization:
+- Dynamic power drops
+- Static power remains
+So total power does NOT drop proportionally.
+
+📉 Example
+Imagine:
+Peak power = 300 W
+At 10% utilization, ideal proportional system would use:
+30W 
+But real system may use:
+100W 
+That’s 33% of peak, not 10%.
+That’s the core problem.
+
+⚡ Why This Matters So Much
+Datacenters:
+- Contain millions of servers
+- Consume massive electricity
+- Pay enormous cooling costs
+- Contribute to CO₂ emissions
+If servers are idle most of the time but still consume 30–50% power, that’s a huge waste.
+
+💡 The Proposed Solution: Energy-Proportional Computing
+Proposed by Barroso & Hölzle:
+Power consumption should be proportional to workload.
+If utilization = 10%
+Power ≈ 10% of peak
+If utilization = 50%
+Power ≈ 50% of peak
+That’s the goal.
+
+🏗 How Architects Try to Achieve This
+- DVFS (Dynamic Voltage and Frequency Scaling)
+Lower frequency and voltage when load drops.
+- Power Gating
+Turn off unused cores completely.
+3️⃣ Clock Gating
+Disable inactive circuits.
+4️⃣ Core Parking
+Disable entire CPU cores.
+5️⃣ Memory Power Scaling
+Put DRAM ranks into low-power states.
+
+🔎 Why This Is Hard
+Some components are difficult to scale:
+- DRAM power doesn’t scale well
+- Network switches must stay active
+- Power supplies are inefficient at low load
+- Leakage current increases with smaller transistors
+
+🏢 Warehouse-Scale Insight
+In warehouse-scale computers:
+- Thousands of machines
+- Load balancing spreads work
+- But most machines stay partially idle
+This is why modern hyperscalers:
+- Consolidate workloads
+- Turn off entire servers
+- Use container scheduling
+- Optimize for power efficiency
+
+📈 Important Performance-Energy Concept
+Earlier we focused on:
+ Execution Time=IC×CPI×Clock 
+Now energy becomes:
+Energy=Power×Time 
+So reducing time is not enough.
+If power remains high at low utilization:
+👉 Energy waste continues.
+
+🎯 Deep Architectural Lesson
+In modern computing:
+Performance alone is not enough.
+Architects must optimize:
+- Performance
+- Energy
+- Power proportionality
+- Thermal behavior
+This shift happened strongly after 2005 when power became the primary design constraint.
+
+🟢 Clean Summary
+The fallacy says:
+“Low utilization means low power.”
+Reality:
+Servers often use 30–50% of peak power even at 10% load.
+The solution:
+Design energy-proportional systems.
+Goal:
+Power∝Utilization
+
+## Fallacy: Designing for performance and designing for energy efficiency are unrelated goals
+Since energy is power over time, it is often the case that hardware or software
+optimizations that take less time save energy overall even if the optimization takes
+a bit more energy when it is used. One reason is that all the rest of the computer is
+consuming energy while the program is running, so even if the optimized portion
+uses a little more energy, the reduced time can save the energy of the whole system
+
+🔴 The Fallacy
+“Designing for performance and designing for energy efficiency are unrelated goals.”
+People often think:
+- Performance → make it faster
+- Energy efficiency → reduce power
+So they assume they are separate.
+But they are deeply connected.
+
+🔑 The Key Equation
+Energy=Power×Time 
+This is the entire story.
+Energy depends on:
+- How much power you use
+- How long you run
+
+🧠 The Critical Insight
+If you make something run faster, you reduce time.
+Even if power increases slightly…
+Total energy can still decrease.
+
+📊 Example
+Suppose a program:
+- Uses 100 watts
+- Runs for 10 seconds
+ joulesEnergy=100×10=1000 joules 
+
+Now you optimize it.
+New version:
+- Uses 120 watts
+- Runs for 6 seconds
+ joulesEnergy=120×6=720 joules 
+Power increased.
+But energy decreased.
+Because time decreased significantly.
+
+🏗 Why This Happens in Real Systems
+When your program runs:
+- CPU consumes power
+- DRAM consumes power
+- Cache consumes power
+- Disk consumes power
+- Network consumes power
+- Cooling consumes power
+All of this continues while time passes.
+So if you reduce runtime:
+You save energy from the entire system, not just the optimized part.
+
+⚡ Performance Optimization Can Save Energy
+Examples:
+- Better Algorithm
+Reduces instruction count → finishes sooner → less total energy.
+- Better Branch Prediction
+Reduces mispredictions → less wasted work → less time → less energy.
+3️⃣ Vectorization (SIMD)
+Processes more data per instruction → fewer cycles → less total runtime.
+
+🔎 When Performance and Energy Align
+They align when:
+  Time reduction>Power increase 
+In many cases, reducing execution time reduces energy.
+This is why performance tuning is often energy tuning.
+
+🧮 Connect to CPU Performance Equation
+ Execution Time=IC×CPI×Clock 
+Energy depends on:
+- IC (instruction count)
+- Activity (affects power)
+- Voltage and frequency
+If you reduce IC significantly:
+- Time drops
+- Dynamic switching drops
+- Energy drops
+
+🚫 When They Don’t Align
+Sometimes increasing performance increases energy.
+Example:
+- Raise frequency
+- Raise voltage significantly
+Dynamic power in CMOS:
+Power∝V2f 
+So increasing voltage increases power quadratically.
+Then:
+Energy may increase even if time decreases.
+That’s why DVFS (dynamic voltage and frequency scaling) is important.
+
+🌍 Why This Matters Today
+In:
+- Datacenters
+- Mobile devices
+- Laptops
+- Embedded systems
+Energy is often more important than raw performance.
+Modern CPUs from:
+- Intel
+- AMD
+- ARM Holdings
+All design for:
+- Performance per watt
+- Not just performance
+
+🎯 Deep Architectural Lesson
+Performance and energy are connected because:
+Energy=Power×Time 
+Reducing time often reduces energy — even if power rises slightly.
+
+🟢 Clean Summary
+The fallacy says:
+Performance design and energy design are separate.
+Reality:
+Faster execution often reduces total energy because the system runs for less time.
+So in many cases:
+👉 Performance optimization = Energy optimization.

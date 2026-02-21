@@ -22,6 +22,11 @@ advantage of multiple processors. Moreover, to get the historic benefit of runni
 faster on new microprocessors, programmers will have to continue to improve the
 performance of their code as the number of cores increases.
 
+Energy efficiency has replaced die area as the most critical resource of
+microprocessor design. Conserving power while trying to increase performance
+has forced the hardware industry to switch to multicore microprocessors, thereby
+requiring the software industry to switch to programming parallel hardware.
+Parallelism is now required for performance.
 ## Types of Parallelism
 
 There are several types of parallelism, including:
@@ -57,7 +62,7 @@ they have completed their work.
 
 Perhaps the simplest form of parallelism to build involves
 computing on elements in parallel, such as when multiplying two vectors.
-Subword parallelism takes advantage of the resources supplied by Moore’s
+Subword parallelism takes advantage of the resources supplied by Moore's
 Law to provide wider arithmetic units that can operate on many operands
 simultaneously.
 
@@ -74,7 +79,7 @@ speculatively using prediction.
 One way to lower the cost of communication is to have all
 processors use the same address space, so that any processor can read or
 write any data. Given that all processors today use caches to keep a temporary
-copy of the data in faster memory near the processor, it’s easy to imagine that
+copy of the data in faster memory near the processor, it's easy to imagine that
 parallel programming would be even more difficult if the caches associated
 with each processor had inconsistent values of the shared data. This chapter
 describes the mechanisms that keep the data in all caches consistent.
