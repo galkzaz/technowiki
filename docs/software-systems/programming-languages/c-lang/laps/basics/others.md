@@ -3,17 +3,13 @@ id: others
 title: others
 description: others
 ---
-
-:::question
-
-Write a program that asks the user to enter a dollars-and-cents amount, then displays the
+<details>
+    <summary>Write a program that asks the user to enter a dollars-and-cents amount, then displays the
 amount with 5% tax added:
-
+```
 Enter an amount: 100.00
-
 With tax added: $105.00
-
-:::
+```</summary>
 
 ```c
 #include <stdio.h>
@@ -38,6 +34,8 @@ int main() {
 - scanf("%f", &amount): This reads the user's input and stores it in the amount variable.
 - The Math: Multiplying by 1.05 is the shorthand way to add 5%. If you prefer to be explicit, you could also write it as amount + (amount * 0.05).
 - %.2f: This is the "magic" formatter in the printf function. It tells C to display the number with exactly two digits after the decimal point, which is perfect for cents.
+
+</details>
 
 <details>
     <summary>Write a program that asks the user to enter a value for x and then displays the value of the
@@ -77,4 +75,37 @@ int main() {
 - Precision: I used float again to allow for decimal inputs, and %.2f to keep the output clean.
 - Operator Precedence: C follows standard algebraic order (PEMDAS), so it handles the multiplications before the additions and subtractions automatically.
 - 
+</details>
+
+<details>
+    <summary>Adding Fractions</summary>
+
+To illustrate scanf’s ability to match patterns, consider the problem of reading a fraction entered by the user. Fractions are customarily written in the form numerator/denominator. Instead of having the user enter the numerator and denominator of a fraction as separate integers, scanf makes it possible to read the entire fraction. The following program, which adds two fractions, illustrates this technique.
+
+```c
+/* Adds two fractions */
+#include <stdio.h>
+int main(void) {
+  int num1, denom1, num2, denom2, result_num, result_denom;
+
+  printf("Enter first fraction: ");
+  scanf("%d/%d", &num1, &denom1);
+
+  printf("Enter second fraction: ");
+  scanf("%d/%d", &num2, &denom2);
+
+  result_num = num1 * denom2 + num2 * denom1;
+  result_denom = denom1 * denom2;
+
+  printf("The sum is %d/%d\n", result_num, result_denom);
+
+  return 0;
+}
+```
+```
+Enter first fraction: 5/6
+Enter second fraction: 3/4
+The sum is 38/24
+```
+Note that the resulting fraction isn’t reduced to lowest terms.
 </details>

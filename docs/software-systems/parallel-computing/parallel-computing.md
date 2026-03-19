@@ -8,7 +8,7 @@ Parallelism has always been crucial to performance in computing, but it was ofte
 hidden.
 
 Forcing programmers to be aware of the parallel hardware and to rewrite
-their programs to be parallel had been the “third rail” of computer architecture,
+their programs to be parallel had been the "third rail" of computer architecture,
 for companies in the past that depended on such a change in behavior failed.
 
 From this historical perspective, it's startling that the whole IT

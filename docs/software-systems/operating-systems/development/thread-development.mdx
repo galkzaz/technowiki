@@ -1,0 +1,819 @@
+---
+id: operating-systems-thread-development
+title: Threads
+description: Operating Systems Thread Development
+---
+
+## Thread Management
+### Thread Creation and Termination
+
+## Mutexes in Pthreads
+
+Pthreads provides a number of functions for synchronizing threads. The basic
+mechanism uses a mutex variable, which can be locked or unlocked, to guard each
+critical region. The implementation of a mutex varies from operating system to operating system, but on Linux it is built on top of futexes.
+### Basic Idea of Mutex in Pthreads
+A mutex (Mutual Exclusion lock) is used to protect a critical section so that only one thread executes it at a time.
+
+Example
+```c
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+void *worker(void *arg)
+{
+    pthread_mutex_lock(&lock);
+
+    /* critical section */
+    shared_counter++;
+
+    pthread_mutex_unlock(&lock);
+}
+```
+Goal: only one thread can execute the critical section at a time.
+
+#### Workflow
+A thread wishing to enter a critical region 
+1. first tries to lock the associated mutex. 
+2. If the mutex is unlocked, the thread can enter immediately and the lock is atomically set, preventing other threads from entering. 
+3. If the mutex is already locked, the calling thread is blocked until it is unlocked. 
+4. If multiple threads are waiting on the same mutex, when it is unlocked, only one of them is allowed to continue and relock it. 
+
+These locks are not mandatory(The OS does not enforce their use.). It is up to the programmer to make sure threads use them correctly.
+
+Example incorrect code:
+```c
+shared_counter++;
+```
+
+If two threads execute this simultaneously:
+```
+shared_counter = 0
+thread A: shared_counter++
+thread B: shared_counter++
+```
+race condition
+
+Correct code:
+
+```c
+pthread_mutex_lock(&lock);
+shared_counter++;
+pthread_mutex_unlock(&lock);
+```
+The OS does not force programmers to use locks. Programmers must protect shared data manually.
+
+When a thread calls:
+```c
+pthread_mutex_lock(&mutex);
+```
+the system performs two phases.
+
+1. **Phase 1 — Fast Path (User Space)**
+
+    The thread tries to atomically change the mutex state.
+    
+    Pseudo-implementation:
+    ```
+    if (atomic_compare_exchange(mutex, 0, 1))
+        success
+    ```
+    Meaning:
+    ```
+    if mutex == unlocked
+        set it to locked
+    ```
+    Example timeline:
+    ```
+    Thread A locks mutex
+    mutex = 0
+    
+    CAS(0→1) succeeds
+    mutex = 1
+    ```
+    Result: Thread A enters critical section
+    
+    No kernel involvement. This makes mutex locking very fast when there is no contention.
+
+2. **Phase 2 — Contention Case**
+
+    If the mutex is already locked:
+    ```
+    mutex = 1
+    ```
+    Thread B tries to lock:
+    ```
+    CAS(0→1) fails
+    ```
+    Now the thread must wait. At this point the runtime library calls futex.
+
+The thread calls:
+```c
+futex_wait(mutex_address)
+```
+Kernel behavior:
+1. verify mutex still locked
+2. add thread to futex wait queue
+3. block thread
+
+Now the CPU can run another thread.
+
+When the owner thread calls:
+```c
+pthread_mutex_unlock(&mutex);
+```
+Simplified logic:
+```
+mutex = 0
+```
+If threads are waiting:
+```
+futex_wake(mutex)
+```
+Kernel behavior: 
+wake one waiting thread
+
+Only one thread is woken. This preserves mutual exclusion.
+
+<!--Why Only One Thread Wakes-->
+
+If the kernel woke all threads, they would all compete for the lock: thundering herd problem, So Linux wakes only one waiter.
+### Conceptual Architecture
+```
+APPLICATION THREAD
+--------------------------------
+pthread_mutex_lock()
+
+        ↓
+
+LIBPTHREAD (glibc)
+--------------------------------
+atomic instructions
+fast path attempt
+
+        ↓ (if contention)
+
+futex_wait()
+
+        ↓
+
+LINUX KERNEL
+--------------------------------
+futex_wait_queue
+scheduler blocks thread
+
+        ↓
+
+futex_wake()
+scheduler wakes thread
+```
+### Mutex State Model
+Conceptually a mutex has two states.
+| State    | Meaning                 |
+| -------- | ----------------------- |
+| unlocked | no thread owns the lock |
+| locked   | a thread owns the lock  |
+
+Simplified internal variable:
+1. 0 = unlocked
+2. 1 = locked
+
+But Linux actually uses a slightly richer state because of futex waiting.
+
+### Timeline Example
+Example with three threads.
+
+Initial state:
+```
+mutex = 0
+```
+1. **Step 1 — Thread A locks**
+
+    CAS(0→1) success
+    
+    State:
+    - mutex = 1
+    - Owner = A
+
+2. **Step 2 — Thread B tries**
+
+    CAS fails
+    
+    Thread B:
+    ```
+    futex_wait()
+    ```
+    State:
+    - mutex = 1
+    - Owner = A
+    - B waiting(sleeping)
+
+3. **Step 3 — Thread C tries**
+
+    Same process:
+
+    CAS fails
+    
+    Thread C:
+    ```
+    futex_wait()
+    ```
+    
+    State:
+    - mutex = 1
+    - Owner = A
+    - B waiting
+    - C waiting
+
+4. **Step 4 — Thread A unlocks**
+    ```
+    mutex = 0
+    futex_wake(1)
+    ```
+   Kernel wakes one waiting thread (B or C)
+    
+    Only one thread is woken. This preserves mutual exclusion.
+    Example:
+    ```
+    B wakes
+    ```
+5. **Step 5 — B acquires lock**
+    ```
+    CAS(0→1)
+    ```
+    State:
+      - mutex = 1
+      - Owner = B
+      - C still waiting
+
+**Why This Design Is Efficient**
+| Case          | Behavior                |
+| ------------- | ----------------------- |
+| no contention | atomic instruction only |
+| short wait    | small spinning          |
+| long wait     | thread sleeps           |
+
+So it combines advantages of:
+```
+spinlocks
++
+blocking mutexes
+```
+### Common Mutex Errors
+1. Deadlock
+    
+    - Thread A holds lock1
+    - Thread B holds lock2
+    - each waits for the other
+
+2. Forgetting unlock
+    ```
+    lock()
+    ... code ...
+    unlock()
+    ```
+
+3. Locking in wrong order
+    ```
+    lock1()
+    ... code ...
+    lock2()
+    ... code ...
+    unlock2()
+    unlock1()
+    ```
+    Can create circular waits.
+### Real Internal Structure of pthread_mutex
+
+Simplified:
+```
+pthread_mutex_t
+    |
+    |-- owner
+    |-- lock state
+    |-- waiters
+```
+Internally it contains a futex word used by the kernel.
+
+### Basic Function calls
+The major calls relating to mutexes are shown in Table. 
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_mutex_init** | Initialize(Create) mutex | * `pthread_mutex_t *mutex` * `const pthread_mutexattr_t *attr` | * `int` |
+| **pthread_mutex_lock** | Acquire mutex(Acquire a lock or block) | * `pthread_mutex_t *mutex` | * `int` |
+| **pthread_mutex_unlock** | Release mutex | * `pthread_mutex_t *mutex` | * `int` |
+| **pthread_mutex_destroy** | Destroy mutex(Destroy an existing mutex) | * `pthread_mutex_t *mutex` | * `int` |
+| **pthread_mutex_trylock** | Try to acquire mutex(Acquire a lock or fail) | * `pthread_mutex_t *mutex` | * `int` |
+| **pthread_mutex_tryunlock** | Try to release mutex | * `pthread_mutex_t *mutex` | * `int` |
+
+- mutexes can be created and destroyed. The calls for performing these operations are `pthread_mutex_init` and `pthread_mutex_destroy`, respectively. 
+- They can also be locked—by `pthread_mutex_lock`—which tries to acquire the lock and
+  blocks if it is already locked. 
+- There is also an option for trying to lock a mutex and failing with an error code instead of blocking if it is already blocked. This call is `pthread_mutex_trylock`. This call allows a thread to effectively do busy waiting if
+  that is ever needed. 
+- Finally, `pthread_mutex_unlock` unlocks a mutex and releases
+  exactly one thread if one or more are waiting on it. Mutexes can also have attributes,
+  but these are used only for specialized purposes.
+
+
+## Condition variable
+### Function calls
+The most important calls related to condition variables are shown in the next table.
+
+As you would probably expect, there are calls to create and destroy condition variables. They can have attributes and there are various calls for managing the
+attributes. The most important operations on condition variables are
+`pthread_cond_wait` and `pthread_cond_signal`. The former blocks the calling
+thread until some other thread signals it (using the latter call). The reasons for
+blocking and waiting are not part of the waiting and signaling protocol, of course.
+The blocking thread often is waiting for the signaling thread to do some work, re-
+lease some resource, or perform some other activity. Only then can the blocking
+thread continue. The condition variables allow this waiting and blocking to be done
+atomically. The `pthread_cond_broadcast` call is used when there are multiple
+threads potentially all blocked and waiting for the same signal.
+
+| Function | Description |
+|----------|-------------|
+| `pthread_cond_init` | Initializes a condition variable. |
+| `pthread_cond_destroy` | Destroys a condition variable. |
+| `pthread_cond_signal` | Wakes up exactly one thread waiting on the condition variable. |
+| `pthread_cond_broadcast` | Wakes up all threads waiting on the condition variable. |
+| `pthread_cond_wait` | Atomically unlocks the mutex and blocks until the condition variable is signaled. |
+
+- Condition variables can be created and destroyed. The calls for performing these operations are `pthread_cond_init` and `pthread_cond_destroy`, respectively. 
+- Condition variables can be signaled—by `pthread_cond_signal`—which wakes up exactly one thread waiting on it. 
+- `pthread_cond_broadcast` wakes up all threads waiting on it. 
+- `pthread_cond_wait` waits for a condition variable to be signaled. It atomically unlocks the mutex passed as the second argument and blocks until the condition variable is signaled. When the thread is woken up, it re-acquires the mutex.
+
+## System Call Details
+NPTL can refer to the
+Native POSIX Thread Library, the standard threading implementation for modern Linux, providing efficient, kernel-level threading (1:1 model) for parallel application
+**Thread Management & Control**
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_create** | Create a new thread | * `pthread_t *thread` * `const pthread_attr_t *attr` * `void *(*start_routine)(void *)` * `void *arg` | * `int` ** `0` → success ** Error number |
+| **pthread_exit** | Terminate calling thread | * `void *retval` | * `void` |
+| **pthread_join** | Wait for thread termination | * `pthread_t thread` * `void **retval` | * `int` |
+| **pthread_detach** | Detach thread | * `pthread_t thread` | * `int` |
+| **pthread_self** | Get calling thread ID | * (none) | * `pthread_t` |
+| **pthread_equal** | Compare thread IDs | * `pthread_t t1` * `pthread_t t2` | * `int` |
+| **pthread_cancel** | Request thread cancellation | * `pthread_t thread` | * `int` |
+| **pthread_setcancelstate** | Enable/disable cancellation | * `int state` * `int *oldstate` | * `int` |
+| **pthread_setcanceltype** | Set cancellation type | * `int type` * `int *oldtype` | * `int` |
+| **pthread_testcancel** | Cancellation point | * (none) | * `void` |
+| **pthread_kill** | Send signal to a thread | * `pthread_t thread` * `int sig` | * `int` |
+| **pthread_once** | One-time initialization | * `pthread_once_t *once_control` * `void (*init_routine)(void)` | * `int` |
+
+**Mutexes (Mutual Exclusion Locks)**
+
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_mutex_init** | Initialize mutex | * `pthread_mutex_t *mutex` * `const pthread_mutexattr_t *attr` | * `int` |
+| **pthread_mutex_destroy** | Destroy mutex | * `pthread_mutex_t *mutex` | * `int` |
+| **pthread_mutex_lock** | Lock mutex (blocking) | * `pthread_mutex_t *mutex` | * `int` |
+| **pthread_mutex_trylock** | Try locking mutex | * `pthread_mutex_t *mutex` | * `int` ** `EBUSY` if locked |
+| **pthread_mutex_unlock** | Unlock mutex | * `pthread_mutex_t *mutex` | * `int` |
+
+**Condition Variables**
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_cond_init** | Initialize condition variable | * `pthread_cond_t *cond` * `const pthread_condattr_t *attr` | * `int` |
+| **pthread_cond_destroy** | Destroy condition variable | * `pthread_cond_t *cond` | * `int` |
+| **pthread_cond_wait** | Wait for condition | * `pthread_cond_t *cond` * `pthread_mutex_t *mutex` | * `int` |
+| **pthread_cond_timedwait** | Timed wait for condition | * `pthread_cond_t *cond` * `pthread_mutex_t *mutex` * `const struct timespec *abstime` | * `int` ** `ETIMEDOUT` possible |
+| **pthread_cond_signal** | Wake one waiting thread | * `pthread_cond_t *cond` | * `int` |
+| **pthread_cond_broadcast** | Wake all waiting threads | * `pthread_cond_t *cond` | * `int` |
+**Thread-Local Storage (TLS)**
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_key_create** | Create TLS key | * `pthread_key_t *key` * `void (*destructor)(void *)` | * `int` |
+| **pthread_key_delete** | Delete TLS key | * `pthread_key_t key` | * `int` |
+| **pthread_setspecific** | Set TLS value | * `pthread_key_t key` * `const void *value` | * `int` |
+| **pthread_getspecific** | Get TLS value | * `pthread_key_t key` | * `void *` |
+
+### Thread functions
+
+#### pthread_create
+
+***What it does***
+
+* Spawns a new thread in the calling process.
+
+***Why it matters***
+
+* Fundamental API to start concurrent execution within a process.
+
+***Parameters***
+
+* ***thread***: out, pointer to store new thread ID.
+* ***attr***: in, pointer to thread attributes object; `NULL` for defaults.
+* ***start_routine***: in, function the thread will execute.
+* ***arg***: in, argument to pass to `start_routine`.
+
+***Return value***
+
+* `0` on success.
+* Error codes like `EINVAL`, `EAGAIN`, `EPERM`.
+
+***Implementation (glibc)***
+
+* [glibc pthread_create.c](https://codebrowser.dev/glibc/glibc/nptl/pthread_create.c.html)
+
+***Kernel / syscall mapping***
+
+* Uses `clone(2)` with `CLONE_VM | CLONE_THREAD | CLONE_SIGHAND | CLONE_FS | CLONE_FILES` flags.
+* See [clone(2) man page](https://man7.org/linux/man-pages/man2/clone.2.html)
+
+#### pthread_join
+
+***What it does***
+
+* Waits for a thread to terminate and retrieves its return value.
+
+***Parameters***
+
+* ***thread***: in, ID of the thread to wait for.
+* ***retval***: out, pointer to location for thread's exit value; can be `NULL`.
+
+***Return value***
+
+* `0` on success.
+* Errors: `EINVAL` if thread not joinable, `ESRCH` if thread does not exist.
+
+***Implementation***
+- Uses futex wait/wake internally to block efficiently until thread exits.
+
+#### pthread_exit
+
+***What it does***
+
+* Terminates execution of the calling thread.
+
+***Parameters***
+
+* ***retval***: in, value returned to any joining thread.
+
+***Return value***
+
+* Does not return.
+
+***Implementation***
+- Teardown notifies waiters via futex wake on internal thread control block.
+
+#### pthread_detach
+
+***What it does***
+
+* Marks a thread as detached so its resources are automatically reclaimed.
+
+***Parameters***
+
+* ***thread***: in, ID of the thread to detach.
+
+***Return value***
+
+* `0` on success, `EINVAL` if invalid thread.
+
+#### pthread_self & pthread_equal
+
+***What they do***
+- `pthread_self()` returns calling thread's ID.
+- `pthread_equal(t1,t2)` compares two thread IDs.
+
+***Return value***
+
+* `pthread_self()`: thread ID
+* `pthread_equal()`: nonzero if equal, 0 otherwise
+
+#### Mutex API
+
+##### pthread_mutex_init / destroy
+
+***What it does***
+
+* Initialize or destroy a mutex.
+
+***Parameters***
+
+* ***mutex***: pointer to mutex object
+* ***attr***: pointer to mutex attributes; can be NULL
+
+***Return value***
+
+* `0` on success, `EBUSY` or `EINVAL` on error
+
+***Implementation***
+- [glibc pthread_mutex_init.c](https://codebrowser.dev/glibc/glibc/nptl/pthread_mutex_init.c.html)
+- Uses `futex(2)` on contention.
+
+##### pthread_mutex_lock / trylock / unlock
+
+***What it does***
+
+* Locks or unlocks a mutex.
+
+***Return value***
+
+* `0` on success
+* Blocks until lock acquired for `lock()`, returns `EBUSY` for `trylock()` if unavailable
+
+***Kernel mapping***
+- Contended locks use `futex_wait` and `futex_wake`
+
+#### Condition Variables
+
+##### pthread_cond_init / destroy
+
+* Initializes or destroys a condition variable.
+
+##### pthread_cond_wait / timedwait / signal / broadcast
+
+***What it does***
+
+* Wait releases mutex and blocks until signaled.
+* Signal wakes one waiter; broadcast wakes all.
+
+***Kernel mapping***
+- Uses `futex(2)` internally for waiting and wake-up.
+
+***Implementation example***
+- [glibc pthread_cond_wait.c](https://codebrowser.dev/glibc/glibc/nptl/pthread_cond_wait.c.html)
+
+#### Read-Write Locks
+
+***Functions***
+- `pthread_rwlock_init`, `pthread_rwlock_destroy`
+- `pthread_rwlock_rdlock`, `pthread_rwlock_wrlock`
+- `pthread_rwlock_tryrdlock`, `pthread_rwlock_trywrlock`
+- `pthread_rwlock_unlock`
+
+***Kernel mapping***
+- Multiple counters and futexes used for reader/writer queues.
+
+#### Barriers
+
+***Functions***
+- `pthread_barrier_init`
+- `pthread_barrier_wait`
+- `pthread_barrier_destroy`
+
+***Use***
+- Synchronizes a group of threads to rendezvous before proceeding.
+
+#### Thread Attributes (pthread_attr_*)
+
+***Functions***
+- `pthread_attr_init`
+- `pthread_attr_destroy`
+- `pthread_attr_setdetachstate`
+- `pthread_attr_setschedpolicy`
+- `pthread_attr_setschedparam`
+
+#### Scheduling & CPU Affinity
+
+***Functions***
+- `pthread_setschedparam`, `pthread_getschedparam`
+- `pthread_setaffinity_np`, `pthread_getaffinity_np`
+
+***Kernel mapping***
+- `sched_setaffinity(2)`, `sched_setscheduler(2)`
+
+#### POSIX vs Linux NPTL Mapping
+
+|     |     |     |
+| --- | --- | --- |
+| POSIX API (pthread_*) | glibc NPTL Internals | Kernel Syscalls |
+| Thread creation | pthread_create → clone(2) | clone(2) with CLONE_THREAD, CLONE_VM, CLONE_FS, CLONE_FILES |
+| Mutexes & Conditional Waits | pthread_mutex_lock → futex(2) | futex(2) (FUTEX_WAIT, FUTEX_WAKE) |
+| Scheduling & Affinity | pthread_setschedparam | sched_setaffinity(2), sched_setscheduler(2) |
+
+#### References
+
+* [glibc pthread_create.c source](https://codebrowser.dev/glibc/glibc/nptl/pthread_create.c.html)
+* [glibc pthread_mutex_init.c source](https://codebrowser.dev/glibc/glibc/nptl/pthread_mutex_init.c.html)
+* [glibc pthread_cond_wait.c source](https://codebrowser.dev/glibc/glibc/nptl/pthread_cond_wait.c.html)
+* [linux kernel futex.c source](https://elixir.bootlin.com/linux/latest/source/kernel/futex.c)
+* [clone(2) man page](https://man7.org/linux/man-pages/man2/clone.2.html)
+* [pthread(7) man page](https://man7.org/linux/man-pages/man7/pthreads.7.html)
+
+### POSIX Pthread Attribute APIs
+| Call Method | Description | Parameters | Return Type |
+| --- | --- | --- | --- |
+| **pthread_attr_init** | Initialize thread attribute object | * `pthread_attr_t *attr` | * `int` |
+| **pthread_attr_destroy** | Destroy thread attribute object | * `pthread_attr_t *attr` | * `int` |
+| **pthread_attr_setdetachstate** | Set detach state | * `pthread_attr_t **attr` * `int detachstate` *** `PTHREAD_CREATE_JOINABLE` ** `PTHREAD_CREATE_DETACHED` | * `int` |
+| **pthread_attr_getdetachstate** | Get detach state | * `const pthread_attr_t *attr` * `int *detachstate` | * `int` |
+| **pthread_attr_setstacksize** | Set thread stack size | * `pthread_attr_t *attr` * `size_t stacksize` | * `int` |
+| **pthread_attr_getstacksize** | Get thread stack size | * `const pthread_attr_t *attr` * `size_t *stacksize` | * `int` |
+| **pthread_attr_setguardsize** | Set guard size | * `pthread_attr_t *attr` * `size_t guardsize` | * `int` |
+| **pthread_attr_getguardsize** | Get guard size | * `const pthread_attr_t *attr` * `size_t *guardsize` | * `int` |
+| **pthread_attr_setinheritsched** | Set scheduling inheritance | * `pthread_attr_t **attr` * `int inheritsched` *** `PTHREAD_INHERIT_SCHED` ** `PTHREAD_EXPLICIT_SCHED` | * `int` |
+| **pthread_attr_getinheritsched** | Get scheduling inheritance | * `const pthread_attr_t *attr` * `int *inheritsched` | * `int` |
+| **pthread_attr_setschedpolicy** | Set scheduling policy | * `pthread_attr_t **attr` * `int policy` *** `SCHED_OTHER` *** `SCHED_FIFO` *** `SCHED_RR` | * `int` |
+| **pthread_attr_getschedpolicy** | Get scheduling policy | * `const pthread_attr_t *attr` * `int *policy` | * `int` |
+| **pthread_attr_setschedparam** | Set scheduling parameters | * `pthread_attr_t *attr` * `const struct sched_param *param` | * `int` |
+| **pthread_attr_getschedparam** | Get scheduling parameters | * `const pthread_attr_t *attr` * `struct sched_param *param` | * `int` |
+| **pthread_mutexattr_init** | Initialize mutex attribute object | * `pthread_mutexattr_t *attr` | * `int` |
+| **pthread_mutexattr_destroy** | Destroy mutex attribute object | * `pthread_mutexattr_t *attr` | * `int` |
+| **pthread_mutexattr_settype** | Set mutex type | * `pthread_mutexattr_t **attr` * `int type` *** `PTHREAD_MUTEX_NORMAL` *** `PTHREAD_MUTEX_RECURSIVE` *** `PTHREAD_MUTEX_ERRORCHECK` | * `int` |
+| **pthread_mutexattr_gettype** | Get mutex type | * `const pthread_mutexattr_t *attr` * `int *type` | * `int` |
+| **pthread_mutexattr_setprotocol** | Set mutex priority protocol | * `pthread_mutexattr_t **attr` * `int protocol` *** `PTHREAD_PRIO_NONE` *** `PTHREAD_PRIO_INHERIT` *** `PTHREAD_PRIO_PROTECT` | * `int` |
+| **pthread_mutexattr_getprotocol** | Get mutex priority protocol | * `const pthread_mutexattr_t *attr` * `int *protocol` | * `int` |
+| **pthread_condattr_init** | Initialize condition attribute object | * `pthread_condattr_t *attr` | * `int` |
+| **pthread_condattr_destroy** | Destroy condition attribute object | * `pthread_condattr_t *attr` | * `int` |
+| **pthread_condattr_setclock** | Set clock used by condition variable | * `pthread_condattr_t *attr` * `clockid_t clock_id` | * `int` |
+| **pthread_condattr_getclock** | Get clock used by condition variable | * `const pthread_condattr_t *attr` * `clockid_t *clock_id` | * `int` |
+| **pthread_rwlockattr_init** | Initialize rwlock attribute object | * `pthread_rwlockattr_t *attr` | * `int` |
+| **pthread_rwlockattr_destroy** | Destroy rwlock attribute object | * `pthread_rwlockattr_t *attr` | * `int` |
+| **pthread_barrierattr_init** | Initialize barrier attribute object | * `pthread_barrierattr_t *attr` | * `int` |
+| **pthread_barrierattr_destroy** | Destroy barrier attribute object | * `pthread_barrierattr_t *attr` | * `int` |
+
+### mapping of pthread attributes → actual kernel behavior
+#### POSIX Pthread Attributes → Linux Kernel Behavior (glibc / NPTL)
+
+This section maps ***each pthread attribute to its actual behavior on Linux****, clearly indicating what is **enforced by the kernel****, what is **partially honored****, and what is **ignored****, followed by **practical usage guidance***.
+
+##### Thread Attributes (`pthread_attr_*`)
+
+**Detach State**
+
+* ***Kernel behavior***
+* `PTHREAD_CREATE_JOINABLE`  
+  Thread exit status is retained until `pthread_join()` is called.
+* `PTHREAD_CREATE_DETACHED`  
+  Thread resources are released immediately on exit.
+* ***Linux implementation***
+* Managed entirely by glibc/NPTL; no kernel-level join object exists.
+* ***Usage***
+* Use detached threads for fire-and-forget workers.
+* Avoid detached threads when return values or synchronization are required.
+
+---
+
+**Stack Size (`pthread_attr_setstacksize`)**
+
+* ***Kernel mapping***
+* Stack allocated using `mmap()`
+* Marked as `VM_STACK`
+* Guard page enforced via `mprotect(PROT_NONE)`
+* ***Linux notes***
+* Minimum size enforced by glibc (typically ≥ 16 KB).
+* Large stacks consume virtual address space, not physical memory.
+* ***Usage***
+* Increase stack size for deep recursion or large local variables.
+* Avoid excessively large stacks.
+
+---
+
+**Guard Size (`pthread_attr_setguardsize`)**
+
+* ***Kernel behavior***
+* Guard pages cause `SIGSEGV` on stack overflow.
+* ***Linux notes***
+* Implemented via `mprotect()`
+* Fully enforced by the kernel.
+* ***Usage***
+* Always keep guard pages enabled.
+* Never disable in production.
+
+---
+
+**Scheduling Policy (`pthread_attr_setschedpolicy`)**
+
+* ***Kernel mapping***
+* `SCHED_OTHER` → CFS scheduler
+* `SCHED_FIFO`, `SCHED_RR` → Real-time scheduler
+* ***Linux restrictions***
+* Requires `CAP_SYS_NICE`
+* Non-privileged calls fail with `EPERM`
+* ***Usage***
+* Use only in real-time systems.
+* Avoid in general-purpose applications.
+
+---
+
+**Scheduling Parameters (`pthread_attr_setschedparam`)**
+
+* ***Kernel behavior***
+* `sched_priority` maps to `task_struct.prio`
+* ***Linux notes***
+* Ignored for `SCHED_OTHER`
+* Meaningful only for RT policies
+* ***Usage***
+* Only use together with real-time scheduling policies.
+
+---
+
+**Scheduling Inheritance (`pthread_attr_setinheritsched`)**
+
+* ***Linux behavior***
+* `PTHREAD_INHERIT_SCHED` inherits creator's scheduler.
+* `PTHREAD_EXPLICIT_SCHED` uses explicitly set values.
+* ***Linux note***
+* Has no effect unless scheduling policy is explicitly changed.
+
+---
+
+#### Mutex Attributes (`pthread_mutexattr_*`)
+
+**Mutex Type (`pthread_mutexattr_settype`)**
+
+* ***Kernel mapping***
+* Implemented using futexes.
+* ***Types***
+* `PTHREAD_MUTEX_NORMAL` - fastest, minimal checks
+* `PTHREAD_MUTEX_ERRORCHECK` - detects deadlocks
+* `PTHREAD_MUTEX_RECURSIVE` - tracks owner and lock count
+* ***Usage***
+* Use NORMAL for performance.
+* Use ERRORCHECK for debugging.
+* Avoid RECURSIVE in hot paths.
+
+---
+
+**Priority Protocol (`pthread_mutexattr_setprotocol`)**
+
+* ***Kernel behavior***
+* `PTHREAD_PRIO_INHERIT` is implemented via `rt_mutex`.
+* `PTHREAD_PRIO_PROTECT` is mostly ignored.
+* Default is `PTHREAD_PRIO_NONE`.
+* ***Usage***
+* Use priority inheritance only in RT systems.
+* Avoid in non-RT code.
+
+---
+
+#### Condition Variable Attributes (`pthread_condattr_*`)
+
+**Clock Selection (`pthread_condattr_setclock`)**
+
+* ***Kernel mapping***
+* Timeout handled using high-resolution timers (`hrtimer`).
+* ***Clocks***
+* `CLOCK_REALTIME` - affected by system time changes.
+* `CLOCK_MONOTONIC` - stable, preferred.
+* ***Usage***
+* Always use `CLOCK_MONOTONIC` for timed waits.
+
+---
+
+#### RWLock Attributes (`pthread_rwlockattr_*`)
+
+* ***Linux behavior***
+* Mostly ignored.
+* RW locks are largely implemented in userspace with futex assistance.
+* ***Usage***
+* Do not rely on rwlock attributes.
+* Use defaults.
+
+---
+
+#### Barrier Attributes (`pthread_barrierattr_*`)
+
+* ***Linux behavior***
+* Fully ignored.
+* Barriers are purely userspace constructs.
+* ***Usage***
+* Attributes provide no benefit on Linux.
+
+---
+
+#### Summary: What Linux Actually Enforces
+
+* Fully enforced:
+  * Stack size and guard size
+  * Detach state
+  * Mutex type
+  * Mutex priority inheritance
+  * Condition variable clock
+* Partially enforced / privileged:
+  * Scheduling policy
+  * Scheduling priority
+* Ignored:
+  * RWLock attributes
+  * Barrier attributes
+
+| Attribute Category | Enforced | Partially | Ignored |
+| --- | --- | --- | --- |
+| Stack / Guard | ✅ | — | — |
+| Detach State | ✅ | — | — |
+| Scheduling Policy | ⚠ | — | — |
+| Scheduling Priority | ⚠ | — | — |
+| Mutex Type | ✅ | — | — |
+| Mutex Priority Inheritance | ✅ | — | — |
+| Condition Clock | ✅ | — | — |
+| RWLock Attributes | — | ⚠ | ✅ |
+| Barrier Attributes | — | — | ✅ |
+
+---
+
+#### Practical Guidance
+
+* ***Use attributes when***
+* Writing real-time or embedded systems
+* Debugging concurrency issues
+* Controlling memory layout precisely
+* ***Avoid attributes when***
+* Writing general-purpose Linux applications
+* Portability is a primary concern
+* Default behavior is sufficient
+* ***Rule of thumb***\
+If an attribute does not affect ***memory layout, scheduling, or futex behavior***, Linux likely ignores it.

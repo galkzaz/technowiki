@@ -10,9 +10,9 @@ Rather than continuing to decrease the response time of one program running
 on the single processor, as of 2006 all desktop and server companies are shipping
 microprocessors with multiple processors per chip, where the benefit is often more
 on throughput than on response time. To reduce confusion between the words
-processor and microprocessor, companies refer to processors as “cores,” and
+processor and microprocessor, companies refer to processors as "cores," and
 such microprocessors are generically called multicore microprocessors. Hence, a
-“quadcore” microprocessor is a chip that contains four processors or four cores.
+"quadcore" microprocessor is a chip that contains four processors or four cores.
 
 In the past, programmers could rely on innovations in hardware, architecture,
 and compilers to double performance of their programs every 18 months without

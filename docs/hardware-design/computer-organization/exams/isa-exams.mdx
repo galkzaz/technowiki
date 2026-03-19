@@ -21,7 +21,7 @@ Show the RISC-V code produced by a compiler.
 A RISC-V instruction operates on two source operands and places the result
 in one destination operand. Hence, the two simple statements above compile
 directly into these two RISC-V assembly language instructions:
-```assembly
+```nasm
 add a, b, c
 sub d, a, e
 ```
@@ -44,20 +44,46 @@ The compiler must break this statement into several assembly instructions,
 since only one operation is performed per RISC-V instruction. The first
 RISC-V instruction calculates the sum of g and h. We must place the result
 somewhere, so the compiler creates a temporary variable, called t0:
-```assembly
+```nasm
 add t0, g, h // temporary variable t0 contains g + h
 ```
 Although the next operation is subtract, we need to calculate the sum of i and
 j before we can subtract. Thus, the second instruction places the sum of i and
 j in another temporary variable created by the compiler, called t1:
-```assembly
+```nasm
 add t1, i, j // temporary variable t1 contains i + j
 ```
 Finally, the subtract instruction subtracts the second sum from the first and
 places the difference in the variable f, completing the compiled code:
-```assembly
+```nasm
 sub f, t0, t1 // f gets t0 − t1, which is (g + h) − (i + j)
 ```
+
+:::question
+
+Compiling a C Assignment Using Registers
+
+It is the compiler’s job to associate program variables with registers. Take, for
+instance, the assignment statement from our earlier example:
+```
+f = (g + h) − (i + j);
+```
+The variables f, g, h, i, and j are assigned to the registers x19, x20, x21, x22,
+and x23, respectively. What is the compiled RISC-V code?
+
+:::
+
+**Answer:**
+
+The compiled program is very similar to the prior example, except we replace
+the variables with the register names mentioned above plus two temporary
+registers, x5 and x6, which correspond to the temporary variables above:
+```
+add x5, x20, x21 // register x5 contains g + h
+add x6, x22, x23 // register x6 contains i + j
+sub x19, x5, x6 // f gets x5 – x6, which is (g + h) − (i + j)
+```
+
 
 :::question
 
@@ -139,3 +165,131 @@ This is generally true for:
 - Normal structured programs
 
 For extremely small, simple operations, the difference may not be dramatic. But for realistic programs, assembly almost always requires the most code.
+
+<QandA>
+<Question>
+
+What RISC-V instruction does this represent? Choose from one of the four options
+below.
+```
+funct7 rs2 rs1 funct3 rd opcode
+32      9  10   000   11   51
+```
+1. sub x9, x10, x11
+2. add x11, x9, x10
+3. sub x11, x10, x9
+4. sub x11, x9, x10
+
+</Question>
+<Answer>
+
+We decode the instruction using the R-type format:
+| funct7 | rs2 | rs1 | funct3 | rd | opcode |
+| ------ | --- | --- | ------ | -- | ------ |
+| 32     | 9   | 10  | 000    | 11 | 51     |
+
+1. Identify the Instruction Type
+
+    - opcode = 51 (decimal)
+    - 51 in decimal = 0110011 (binary)
+    
+    Opcode 0110011 corresponds to R-type arithmetic instructions.
+
+2. Determine the Operation
+
+    For R-type:
+    | funct7  | funct3 | Instruction |
+    | ------- | ------ | ----------- |
+    | 0000000 | 000    | add         |
+    | 0100000 | 000    | sub         |
+    
+    Given:
+    - funct7 = 32 (decimal)
+    - 32 = 0100000 (binary)
+    
+    So the instruction is SUB.
+
+3. Determine the Registers
+
+    Fields mean:
+    - rd = 11 → x11
+    - rs1 = 10 → x10
+    - rs2 = 9 → x9
+    
+    RISC-V syntax:
+    ```
+    sub rd, rs1, rs2
+    ```
+    So:
+    ```
+    sub x11, x10, x9
+    ```
+
+Correct answer:
+**3. sub x11, x10, x9**
+
+
+</Answer>
+</QandA>
+
+## Instruction Types
+<QandA>
+<Question>
+
+Which operations can isolate a field in a doubleword?
+1. AND
+2. A shift left followed by a shift right
+
+</Question>
+<Answer>
+
+To isolate a field in a doubleword (64-bit word), two common techniques are used:
+
+**1️⃣  Using AND with a Mask**
+
+This is the most common method.
+
+Idea: Use a mask with `1s` where the field exists and 0s elsewhere.
+- 1 → keep the bit
+- 0 → clear the bit
+
+Example: Suppose we want to isolate bits 7–4 of a value:
+
+reg = 10111010
+mask = 11110000
+
+Apply AND:
+```
+  10111010
+& 11110000
+-----------
+  10110000
+```
+Result: only bits 7–4 remain, other bits become 0.
+
+In C:
+```c
+field = reg & 0xF0;
+```
+
+**2️⃣  Right shift then mask**
+
+We would use:
+```c
+field = (reg >> 4) & 0xF;
+```
+Example:
+```
+reg = 10111010
+reg >> 4 = 00001011
+mask     = 00001111
+-------------------
+result   = 00001011
+```
+Extracted field:
+```
+1011  (bits 7–4)
+```
+
+</Answer>
+</QandA>

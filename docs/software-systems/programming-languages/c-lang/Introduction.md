@@ -10,7 +10,7 @@ C was developed by Dennis Ritchie at Bell Labs in the early 1970s. It was design
 2. Ken Thompson designed a small language named B based B on BCPL, a systems programming lan-
 guage developed in the mid-1960s. BCPL, in turn, traces its ancestry to Algol 60.
 3. Dennis Ritchie,began to develop an
-extended version of B. He called his language NB (“New B”) at first, and then, as
+extended version of B. He called his language NB ("New B") at first, and then, as
 it began to diverge more from B, he changed the name to C(called K&R C).
 4.  The language was stable enough by 1973 that UNIX could be rewritten in C.
 5. First C standard was ANSI standard X3.159-1989 in 1989, then was approved by the International Organization
@@ -29,7 +29,7 @@ easier to read, and easier to modify. Conventions are important when using
 any programming language, but especially so with C. As noted above, C's
 highly flexible nature makes it possible for programmers to write code that is
 all but unreadable.
-6. Avoid “tricks” and overly complex code. C encourages programming tricks.
+6. Avoid "tricks" and overly complex code. C encourages programming tricks.
 There are usually several ways to accomplish a given task in C; programmers
 are often tempted to choose the method that's most concise. Don't get carried
 away; the shortest solution is often the hardest to comprehend.

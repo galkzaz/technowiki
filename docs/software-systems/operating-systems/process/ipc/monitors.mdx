@@ -1,0 +1,2162 @@
+---
+id: process-ipc-monitors
+title: Monitors
+description: Monitors
+---
+
+A **monitor** is a high-level synchronization construct used in concurrent programming to safely share data between threads or processes. It combines:
+1. Shared data
+2. Procedures that operate on that data
+3. Synchronization mechanisms
+
+into one protected module.
+
+A **monitor** is a synchronized module that protects shared data and allows threads/processes to communicate using condition variables while guaranteeing mutual exclusion.
+
+A **monitor** is a collection of procedures, variables, and data structures that are all grouped together in a special kind
+of module or package. Processes may call the procedures in a monitor whenever
+they want to, but they cannot directly access the monitor’s internal data structures
+from procedures declared outside the monitor.
+
+The key idea: Only one thread/process can execute inside the monitor at a time.
+
+This automatically provides mutual exclusion, making monitors a safer alternative to manually managing locks or semaphores.
+
+**Monitors** have an important property that makes them useful for achieving mutual exclusion: **only one process can be active in a monitor at any instant**.
+
+## Conceptual Structure of a Monitor
+A monitor encapsulates shared resources and synchronization.
+```
++--------------------------------------+
+|              MONITOR                 |
+|--------------------------------------|
+| Shared Variables (Protected Data)    |
+|                                      |
+| Procedure P1()                       |
+| Procedure P2()                       |
+| Procedure P3()                       |
+|                                      |
+| Condition Variables                  |
+|--------------------------------------|
+|  Only ONE thread inside at a time    |
++--------------------------------------+
+```
+Threads interact with the monitor only by calling its procedures.
+
+## Why Monitors Exist
+Low-level primitives like semaphores and mutexes are powerful but error-prone.
+
+Common problems:
+- forgetting to unlock
+- wrong order of operations
+- deadlocks
+- race conditions
+
+Monitors solve this by integrating synchronization with the data structure itself.
+Instead of writing:
+```
+down(mutex)
+access_shared_data()
+up(mutex)
+```
+You simply call:
+```
+monitor.procedure()
+```
+The monitor automatically enforces mutual exclusion.
+
+## Core Components of a Monitor
+1. **Shared Data**
+
+    Variables that multiple threads/processes access.
+    
+    Example:
+    ```c
+    int buffer[10];
+    int count;
+    ```
+2. **Monitor Procedures**
+
+    Functions that manipulate the shared data.
+    
+    Example:
+    ```c
+    insert_item()
+    remove_item()
+    ```
+    Only one thread can execute any monitor procedure at a time.
+
+3. **Condition Variables**
+
+    Used for waiting and signaling events inside a monitor.
+    
+    Operations:
+    | Operation  | Meaning                    |
+    | ---------- | -------------------------- |
+    | `wait()`   | suspend thread             |
+    | `signal()` | wake up one waiting thread |
+    
+    These solve situations where mutual exclusion alone is not enough.
+
+## Monitor Execution Rule
+The fundamental rule: At most ONE thread/process can be active inside the monitor.
+
+If another thread tries to enter: it is automatically blocked in a queue
+
+## Monitor Execution Timeline
+
+Example scenario:
+- Producer enters monitor
+- Buffer full
+- Producer waits
+- Consumer wakes producer
+
+Detailed flow:
+```
+Producer
+   │
+   │ lock(mutex)
+   ▼
+buffer full
+   │
+   │ cond_wait(not_full)
+   ▼
+release mutex
+sleep
+```
+Consumer:
+```
+Consumer
+   │
+   │ lock(mutex)
+   ▼
+remove item
+   │
+   │ cond_signal(not_full)
+   ▼
+Producer wakes
+```
+## Example: Producer-Consumer Using Monitor
+
+This is the classic bounded buffer problem.
+Monitor Definition
+```
+monitor BoundedBuffer {
+    int buffer[N];
+    int count = 0;
+    int in = 0;
+    int out = 0;
+    condition not_full;
+    condition not_empty;
+    procedure insert(item) {
+        if (count == N)
+            wait(not_full);
+        buffer[in] = item;
+        in = (in + 1) % N;
+        count++;
+        signal(not_empty);
+    }
+    procedure remove() {
+        if (count == 0)
+            wait(not_empty);
+        item = buffer[out];
+        out = (out + 1) % N;
+        count--;
+        signal(not_full);
+    }
+}
+```
+**Monitor Execution Flow**
+
+Producer
+```
+producer() {
+    while(true) {
+        item = produce_item()
+        BoundedBuffer.insert(item)
+    }
+}
+```
+Consumer
+```
+consumer() {
+    while(true) {
+        item = BoundedBuffer.remove()
+        consume_item(item)
+    }
+}
+```
+Important:
+The producer and consumer never manipulate the buffer directly.
+Everything goes through the monitor.
+
+## Internal Monitor Queueing
+When multiple threads interact with a monitor, queues appear.
+```
+  +-------------------+
+  |      Monitor      |
+  +-------------------+
+        |       |
+        |       |
+    EntryQ   ConditionQ
+
+EntryQ:
+Threads waiting to enter monitor
+ConditionQ:
+Threads waiting for condition signal
+```
+```
+MONITOR
++--------------------------------+
+|                                |
+|      Shared Buffer             |
+|                                |
++--------------------------------+
+          ▲             ▲
+          │              │
+          │              │
+    Condition Queue   Entry Queue
+    (waiting inside) (waiting outside)
+
+Entry Queue
+-----------
+T3
+T4
+T5
+
+Condition Queue (not_full)
+---------------------------
+Producer1
+Producer2
+
+Condition Queue (not_empty)
+----------------------------
+Consumer1
+```
+Flow example:
+```
+Producer enters monitor
+Buffer full
+Producer wait(not_full)
+Producer moves to condition queue
+Consumer enters monitor
+Removes item
+signal(not_full)
+Producer wakes up
+```
+## Complete Scheduling Flow
+
+Example system state:
+
+- Thread P1 → producer
+- Thread P2 → producer
+- Thread C1 → consumer
+
+**Step 1**
+- P1 enters monitor
+- buffer full
+- P1 → wait(not_full)
+
+Queue state:
+- Condition Queue (not_full)
+- P1
+
+**Step 2**
+- C1 enters monitor
+- remove item
+- signal(not_full)
+
+State:
+- P1 moved to entry queue
+
+**Step 3**
+
+Scheduler decides:
+- C1 exits monitor
+- P1 re-enters monitor
+## Monitor vs Semaphore
+| Feature          | Monitor    | Semaphore    |
+| ---------------- | ---------- | ------------ |
+| Level            | High-level | Low-level    |
+| Mutual exclusion | Automatic  | Manual       |
+| Error risk       | Low        | High         |
+| Code clarity     | High       | Low          |
+| Encapsulation    | Yes        | No           |
+| Data protection  | Built-in   | Not enforced |
+
+Semaphores = synchronization primitives
+
+Monitors = structured synchronization abstraction
+
+## Monitor Implementation in Real Systems
+Most operating systems do not implement monitors directly in the kernel.
+Instead they are implemented using:
+- mutexes
+- condition variables
+
+Monitors are a programming-language construct, so the compiler knows they are special
+and can handle calls to monitor procedures differently from other procedure calls.
+
+A monitor is defined directly in the language syntax, similar to:
+- class
+- struct
+- module
+
+Example (conceptual syntax):
+```
+monitor Buffer {
+    int data;
+    procedure put(x)
+    procedure get()
+}
+```
+Since monitor is part of the language grammar, the compiler recognizes it.
+So when compiling the program, the compiler adds synchronization logic automatically.
+
+Typically, when a process calls a monitor procedure, the first few instructions of
+the procedure will check to see if any other process is currently active within the
+monitor. If so, the calling process will be suspended until the other process has left
+the monitor. If no other process is using the monitor, the calling process may enter.
+
+When a thread calls a monitor procedure, the compiler inserts code to:
+1. Acquire the monitor lock
+2. Execute the procedure
+3. Release the monitor lock
+
+So the programmer writes:
+```
+buffer.put(x)
+```
+But the compiler internally transforms it into something like:
+```
+lock(buffer.monitor_lock)
+put(x)
+unlock(buffer.monitor_lock)
+```
+Thus mutual exclusion is automatic.
+
+**Normal Procedure Call vs Monitor Call**
+
+**Normal Procedure Call**
+```
+call foo()
+```
+Execution:
+```
+caller → foo() → return
+```
+No synchronization.
+
+**Monitor Procedure Call**
+```
+buffer.insert(x)
+```
+Compiler-generated behavior:
+```
+enter_monitor(buffer)
+
+insert(x)
+
+leave_monitor(buffer)
+```
+So the real flow becomes:
+```
+lock(monitor)
+execute procedure
+unlock(monitor)
+```
+**Entry Control Performed by Compiler**
+
+When multiple threads try to call monitor procedures:
+```
+T1 → buffer.insert()
+T2 → buffer.insert()
+T3 → buffer.remove()
+```
+Only one thread enters.
+
+The compiler-generated code ensures:
+```
++-----------------------+
+| Monitor Entry Queue   |
++-----------------------+
+| T2                    |
+| T3                    |
++-----------------------+
+
+T1 executes inside monitor
+```
+It is up to the compiler to implement mutual exclusion on monitor entries, but
+a common way is to use a mutex or a binary semaphore. Because the compiler, not
+the programmer, is arranging for the mutual exclusion, it is much less likely that
+something will go wrong. In any event, the person writing the monitor does not
+have to be aware of how the compiler arranges for mutual exclusion. It is sufficient
+to know that by turning all the critical regions into monitor procedures, no two
+processes will ever execute their critical regions at the same time.
+
+Without compiler support, programmers must manually write:
+```
+lock()
+critical section
+unlock()
+```
+This is error-prone.
+
+Common mistakes:
+- forget unlock
+- unlock wrong mutex
+- lock order deadlock
+
+Monitors prevent these problems. Because: lock/unlock is automatically inserted
+
+Example languages with monitor-like constructs:
+| Language | Monitor Support                 |
+| -------- | ------------------------------- |
+| Java     | built-in monitors               |
+| C#       | lock + Monitor class            |
+| Go       | channels (conceptually similar) |
+| Python   | Condition objects               |
+| C++      | std::condition_variable         |
+
+**Why C Does NOT Have Monitors**
+
+C only provides low-level primitives.
+
+So programmers must build monitors manually using:
+```
+pthread_mutex
+pthread_cond
+```
+Example monitor structure in C:
+```
+struct monitor {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+}
+```
+The compiler does not automatically enforce monitor semantics.
+
+The Key Idea: Because monitors are part of the programming language, the compiler automatically inserts synchronization code when monitor procedures are called.
+
+So the programmer writes:
+```
+monitor.procedure()
+```
+But the compiler generates:
+```
+lock(monitor)
+procedure()
+unlock(monitor)
+```
+
+**Example: Java Monitor**
+Java automatically associates a monitor with every object.
+```java
+class Counter {
+    private int value = 0;
+    public synchronized void increment() {
+        value++;
+    }
+    public synchronized int get() {
+        return value;
+    }
+}
+```
+synchronized means:
+- enter object monitor
+- execute code
+- exit monitor
+
+Compiler/JVM internally converts this to:
+```
+monitor_enter(object)
+
+value++
+
+monitor_exit(object)
+```
+So a call:
+```
+counter.increment();
+```
+actually becomes:
+```
+monitor_enter(counter)
+increment()
+monitor_exit(counter)
+```
+## Monitor Semantics
+Although monitors provide an easy way to achieve mutual exclusion(Only one process can execute inside the monitor.), that is not enough(mutual exclusion alone does not solve waiting problems.). We also need a way for processes to block when they cannot proceed. 
+
+In the producer-consumer problem, it is easy enough to put all the tests for buffer-full and buffer-empty in monitor procedures, but how should the producer block when it finds the buffer full?
+
+in the Producer–Consumer problem. the monitor protects the shared buffer:
+```
+buffer[N]
+count
+in
+out
+```
+But what happens when:
+1. Case 1 — Buffer Full
+
+    Producer tries to insert.
+    ```
+    count == N
+    ```
+    The producer cannot continue.
+    
+    If it stays inside the monitor:
+    - producer holds monitor lock
+    - consumer cannot enter
+    - deadlock
+    
+    This would stop the system.
+
+2. Case 2 — Buffer Empty
+
+    Consumer tries to remove.
+    ```
+    count == 0
+    ```
+    The consumer cannot proceed either.
+    
+    Again, we must block the consumer.
+
+The system needs a way to: temporarily block a thread until a condition becomes true
+
+Examples:
+-buffer not full
+- buffer not empty
+
+This is exactly what condition variables provide. so The solution lies again in the introduction of condition variables, along with two operations on them, `wait` and `signal`. 
+
+**How wait() Works**
+
+When a thread calls:
+```
+wait(condition)
+```
+Three things happen atomically:
+1. thread is added to condition queue
+2. monitor lock is released
+3. thread goes to sleep
+
+ASCII flow:
+```
+Producer inside monitor
+        │
+        ▼
+Buffer full
+        │
+        ▼
+wait(not_full)
+
+        │
+        ▼
+Producer moves to condition queue
+        │
+        ▼
+Monitor lock released
+        │
+        ▼
+Another thread may enter monitor
+```
+1. When a monitor procedure discovers that it cannot continue (e.g., the producer finds the buffer full), it does a `wait` on some condition variable, say, `full`. 
+2. This action causes the calling process to block. 
+3. It also allows another process that had been previously prohibited from entering the monitor to enter now. 
+4. This other process, for example, the consumer, can wake up its sleeping partner by doing a signal on the condition variable that its partner is waiting on.
+
+To avoid having two active processes in the monitor at the same time, we need a rule telling what happens after a signal. 
+
+When a thread executes:
+```
+signal(condition)
+```
+a waiting thread becomes eligible to run. But an important question arises: Who runs next? Options:
+1. The signaled thread runs immediately
+2. The current thread continues
+3. The signaled thread runs only after monitor exit
+
+These correspond to the three monitor models.
+
+1. Hoare proposed letting the newly awakened process run, suspending the other one. 
+2. Brinch Hansen proposed finessing the problem by requiring that a process doing a signal must exit the monitor immediately. In other words, a signal statement may appear only as the final statement in a monitor procedure. 
+3. There is also a third solution, not proposed by either Hoare or Brinch Hansen. This is to let the signaler continue to run and allow the waiting process to start running only after the signaler has exited the monitor.
+
+Brinch Hansen’s proposal is conceptually simpler and is also easier to implement. If a signal is done on a condition variable on which several processes are waiting, only one of them, determined by the system scheduler, is revived.
+
+So There are three classical monitor scheduling semantics that define what exactly happens after signal():
+1. Hoare Monitors
+2. Mesa Monitors
+3. Brinch Hansen Monitors
+
+They differ in who runs immediately after a signal() operation.
+
+### Hoare Monitor (original)**
+Introduced by C. A. R. Hoare (1974).
+
+**Rule**: signal() immediately transfers control to the waiting thread. The signaling thread pauses.
+
+Sequence:
+- Thread A signal()
+- Thread B runs immediately
+
+**Execution Flow**
+
+Suppose:
+- Producer → signal(not_empty)
+- Consumer → waiting
+
+Sequence:
+- Producer signals
+- Producer suspended
+- Consumer runs immediately
+
+**Scheduling Diagram**
+
+Before signal:
+```
+Monitor
+--------------------------------
+Running: Producer
+Waiting(not_empty): Consumer
+
+
+Producer executes signal(not_empty)
+
+```
+After signal:
+```
+Monitor
+--------------------------------
+Running: Consumer
+Waiting (urgent queue): Producer
+```
+Producer waits in a special urgent queue.
+
+**Hoare Monitor Queues**
+```
+                MONITOR
+      +--------------------------+
+      |                          |
+      |      shared data         |
+      |                          |
+      +--------------------------+
+
+Entry Queue
+-----------
+T3
+T4
+
+Condition Queue
+---------------
+Consumer
+
+Urgent Queue
+------------
+Producer
+```
+The urgent queue holds the thread that executed signal().
+
+Key Property: Condition becomes true immediately, Because the waiting thread runs right away. Thus no need to re-check the condition.
+
+Example:
+```
+if buffer_empty
+    wait(not_empty)
+```
+Safe in Hoare monitors.
+### Mesa Monitor (used by most systems)**
+Developed at Xerox PARC (Mesa language).
+
+Used by:
+- Java
+- Linux pthreads
+- C#
+- POSIX condition variables
+
+Rule: signal() only wakes the waiting thread, The signaling thread continues running. The awakened thread must compete again for the monitor.
+
+signal only wakes thread, it competes again for monitor
+
+Sequence:
+- Thread A signal()
+- Thread B moves to ready queue
+- Thread A continues
+
+**Execution Flow**
+
+Producer:
+```
+signal(not_empty)
+```
+Sequence:
+- Producer continues
+- Consumer moves to ready queue
+- Consumer runs later
+
+Before signal:
+```
+Monitor
+-------------------------
+Running: Producer
+Waiting: Consumer
+
+
+Producer executes signal(not_empty)
+```
+
+After signal:
+```
+Monitor
+-------------------------
+Running: Producer
+Ready queue: Consumer
+```
+Consumer must wait until:
+- Producer leaves monitor
+- scheduler chooses consumer
+
+Important Consequence: The condition may no longer be true.
+
+Example:
+
+Consumer wakes but another thread consumes the item first
+
+Therefore Mesa monitors require:
+```
+while(condition_not_true)
+    wait()
+```
+NOT:
+```
+if(condition_not_true)
+    wait()
+```
+**Mesa Monitor Queue Model**
+```
+                MONITOR
+      +--------------------------+
+      |                          |
+      |      shared data         |
+      |                          |
+      +--------------------------+
+
+Entry Queue
+-----------
+Producer2
+Producer3
+
+Condition Queue
+---------------
+Consumer
+
+Ready Queue (outside monitor)
+------------------------------
+Consumer
+```
+### Brinch Hansen Monitors
+
+Proposed by Per Brinch Hansen.
+
+Rule: signal() allowed only when leaving monitor
+
+Meaning:
+```
+signal()
+exit monitor
+```
+The awakened thread runs next.
+
+**Execution Flow**
+
+Producer:
+```
+insert()
+signal(not_empty)
+leave monitor
+```
+Then:
+```
+Consumer runs
+```
+ASCII Scheduling
+```
+Producer inside monitor
+        │
+        ▼
+signal(not_empty)
+        │
+leave monitor
+        │
+        ▼
+Consumer enters monitor
+```
+**Complete Monitor Scheduling Model**
+```
+THREAD CALLS MONITOR PROCEDURE
+           │
+           ▼
+     Acquire Monitor Lock
+           │
+           ▼
+     Condition satisfied?
+       │           │
+      YES         NO
+       │           │
+   continue      wait()
+       │           │
+       │        release lock
+       │        sleep
+       │
+       ▼
+     signal()
+       │
+       ▼
+Mesa: wake thread (later)
+Hoare: switch immediately
+Brinch Hansen: run after exit
+```
+**Comparison of Monitor Types**
+| Feature             | Hoare              | Mesa            | Brinch Hansen  |
+| ------------------- | ------------------ | --------------- | -------------- |
+| Signal effect       | Immediate transfer | Wake later      | Run after exit |
+| Signaler behavior   | Suspended          | Continues       | Must exit      |
+| Condition guarantee | Always true        | Must re-check   | Usually true   |
+| Programming style   | `if wait`          | `while wait`    | `if wait`      |
+| Used in practice    | Rare               | **Most common** | Rare           |
+
+Hoare monitors immediately transfer control to the waiting thread after signal, Mesa monitors only wake the thread to run later (used in real systems), and Brinch Hansen monitors allow signaling only when exiting the monitor.
+
+**Why Mesa Won in Practice**
+
+Hoare monitors require complex scheduling:
+- urgent queues
+- immediate context switches
+
+Mesa monitors are simpler:
+- wake thread
+- scheduler decides later
+
+This fits modern OS schedulers better.
+
+**Example Code Difference**
+
+**Hoare Monitor**
+```
+if buffer_empty
+    wait(not_empty)
+```
+Safe because: signal → consumer runs immediately
+
+**Mesa Monitor (Real Systems)**
+```
+while buffer_empty
+    wait(not_empty)
+```
+Because: signal does NOT guarantee condition still true
+
+**Real System Mapping**
+| System                        | Monitor Type |
+| ----------------------------- | ------------ |
+| Java `synchronized`           | Mesa         |
+| POSIX pthreads                | Mesa         |
+| Linux kernel wait queues      | Mesa-like    |
+| C# `Monitor`                  | Mesa         |
+| Original theoretical monitors | Hoare        |
+
+So modern systems almost always use Mesa semantics.
+
+## Full Monitor Implementation in C (pthreads)
+Monitor Data Structure
+```c
+#include <pthread.h>
+#include <stdio.h>
+
+#define N 5
+
+typedef struct {
+
+    int buffer[N];
+    int count;
+    int in;
+    int out;
+
+    pthread_mutex_t mutex;
+
+    pthread_cond_t not_full;
+    pthread_cond_t not_empty;
+
+} monitor_t;
+```
+Monitor Initialization
+```c
+void monitor_init(monitor_t *m)
+{
+    m->count = 0;
+    m->in = 0;
+    m->out = 0;
+
+    pthread_mutex_init(&m->mutex,NULL);
+
+    pthread_cond_init(&m->not_full,NULL);
+    pthread_cond_init(&m->not_empty,NULL);
+}
+```
+Monitor Insert Procedure (Producer)
+```c
+void insert(monitor_t *m,int item)
+{
+    pthread_mutex_lock(&m->mutex);
+
+    while(m->count == N)
+        pthread_cond_wait(&m->not_full,&m->mutex);
+
+    m->buffer[m->in] = item;
+
+    m->in = (m->in + 1) % N;
+    m->count++;
+
+    pthread_cond_signal(&m->not_empty);
+
+    pthread_mutex_unlock(&m->mutex);
+}
+```
+Important detail: pthread_cond_wait()
+- 1 unlocks mutex
+- 2 sleeps
+- 3 relocks mutex when awakened
+
+Monitor Remove Procedure (Consumer)
+```c
+int remove_item(monitor_t *m)
+{
+    int item;
+
+    pthread_mutex_lock(&m->mutex);
+
+    while(m->count == 0)
+        pthread_cond_wait(&m->not_empty,&m->mutex);
+
+    item = m->buffer[m->out];
+
+    m->out = (m->out + 1) % N;
+    m->count--;
+
+    pthread_cond_signal(&m->not_full);
+
+    pthread_mutex_unlock(&m->mutex);
+
+    return item;
+}
+```
+## Relationship to Linux
+Linux kernel does not use classical monitors, but it uses equivalent primitives:
+- mutex
+- spinlock
+- wait_queue
+- futex
+
+A classical monitor does not exist directly in Linux, but it is implemented by combining:
+```
+monitor
+   │
+   ├── mutex (mutual exclusion)
+   └── condition variables (waiting/signaling)
+            │
+            ▼
+        pthread library
+            │
+            ▼
+           futex
+            │
+            ▼
+        Linux kernel scheduler
+```
+
+```
++--------------------------------------------------+
+|                Application Code                  |
+|--------------------------------------------------|
+|              Monitor Implementation              |
+|      (mutex + condition variables)               |
++--------------------------------------------------+
+|                  pthreads                        |
+|     pthread_mutex / pthread_cond implementation  |
++--------------------------------------------------+
+|                   FUTEX                          |
+|      fast user-space locking primitive           |
++--------------------------------------------------+
+|               Linux Kernel Scheduler             |
++--------------------------------------------------+
+```
+Typical monitor implementation in Linux user-space:
+- pthread_mutex_t
+- pthread_cond_t
+
+Example:
+```
+pthread_mutex_lock()
+pthread_cond_wait()
+pthread_cond_signal()
+pthread_mutex_unlock()
+```
+**Kernel Level Futex Queue**
+
+When a thread sleeps via pthread_cond_wait, internally:
+```
+pthread_cond_wait
+      │
+      ▼
+futex(FUTEX_WAIT)
+      │
+      ▼
+kernel wait queue
+```
+ASCII kernel view:
+```
+Linux Kernel
+--------------------------------
+
+Futex Wait Queue
+----------------
+Thread P1
+Thread P2
+Thread C3
+
+Scheduler Queue
+----------------
+Runnable Threads
+```
+Wakeup path:
+```
+pthread_cond_signal()
+      │
+      ▼
+futex(FUTEX_WAKE)
+      │
+      ▼
+kernel wakes thread
+```
+**Full Stack Scheduling Diagram**
+```
+Thread
+calls
+insert()
+
+        │
+        ▼
++------------------------------+
+|        MONITOR CODE          |
+|  pthread_mutex_lock()        |
+|  pthread_cond_wait()         |
++------------------------------+
+                │
+                ▼
++------------------------------+
+|        pthread library       |
+|   cond_wait → futex_wait     |
++------------------------------+
+                │
+                ▼
++------------------------------+
+|        Linux Kernel          |
+|      futex wait queue        |
++------------------------------+
+                │
+                ▼
++------------------------------+
+|         Scheduler            |
+|        context switch        |
++------------------------------+
+```
+**Real Linux Source Files**
+
+Mutex implementation:
+- kernel/locking/mutex.c
+
+Futex implementation:
+- kernel/futex/core.c
+- kernel/futex/waitwake.c
+
+glibc pthread implementation:
+- nptl/pthread_mutex_lock.c
+- nptl/pthread_cond_wait.c
+## Monitor Implementation Model
+Internally, monitors are built from:
+
+mutex lock + condition variables
+
+Pseudo implementation:
+```
+enter_monitor():
+    lock(mutex)
+leave_monitor():
+    unlock(mutex)
+wait(condition):
+    add_to_condition_queue()
+    unlock(mutex)
+    sleep()
+    lock(mutex)
+signal(condition):
+    wakeup_waiting_thread()
+````
+## When Monitors Are Best
+Monitors are ideal for:
+- bounded buffers
+- thread-safe data structures
+- producer-consumer pipelines
+- resource pools
+- task queues
+
+## Drawbacks
+By making the mutual exclusion of critical regions automatic, monitors make
+parallel programming much less error prone than using semaphores.
+-Semaphores → manual synchronization (error-prone)
+- Monitors   → automatic synchronization (safer)
+
+With semaphores:
+```
+down(mutex);
+/* critical section */
+up(mutex);
+```
+You can easily:
+- forget up()
+- swap order of operations
+- cause deadlock
+
+With monitors:
+- enter monitor → lock automatically
+- leave monitor → unlock automatically
+
+Compiler/runtime enforces correctness
+
+Nevertheless, they too have some drawbacks.
+1. Monitors Need Language Support
+    - monitors are a programming-language concept(Monitors are NOT just a library They are a LANGUAGE FEATURE). 
+    - The compiler must recognize them and arrange for the mutual exclusion somehow or other.the compiler must:
+        1. Detect monitor boundaries
+        2. Insert locking automatically
+        3. Control entry/exit
+        4. Transform wait/signal semantics 
+    - C,Pascal, and most other languages do not have monitors, so it is unreasonable to expect their compilers to enforce any mutual exclusion rules. In fact, how could the compiler even know which procedures were in monitors and which were not?
+    - In C, this:
+        ```c
+          void insert() {
+              // Is this a monitor function?
+          }
+        ```
+        The compiler has NO IDEA:
+        - whether this needs mutual exclusion
+        - which lock to use
+        - which functions belong to same monitor
+    - These same languages do not have semaphores either, but adding semaphores is easy: all you need to do is add two short assembly-code routines to the library to issue the up and down system calls. The compilers do not even have to know that they exist. Of course, the operating systems have to know about the semaphores, but at least if you have a semaphore-based operating system, you can still write the user programs for it in C or C++ (or even assembly language).
+        - Semaphores are just functions:
+            ```c
+            down(&sem);
+            up(&sem);
+            ```
+            - No compiler support needed
+            - Just a library + OS syscall
+        - Semaphores = explicit + low-level,They rely on: Atomic instructions (TSL, XCHG, CAS)+ Kernel support,So they can be used in: C, C++, Assembly, or  Any language,
+
+    - With monitors, you need a language that has them built in.
+    - Why Monitors Are Rare in Systems Programming Because languages like C, C++,Do NOT support monitors natively
+2. Distributed Systems 
+    - Another problem with monitors, and also with semaphores, is that they were designed for solving the mutual exclusion problem on one or more CPUs that all  have access to a common memory
+    - By putting the semaphores in the shared memory and protecting them with TSL or XCHG instructions, we can avoid races.
+        - Monitors Assume: Shared memory
+            ```
+            CPU1 ─┐
+            CPU2 ─┼──► SAME MEMORY
+            CPU3 ─┘
+            ```
+    - When we move to a distributed system consisting of multiple CPUs, each with its own private memory and connected by a local area network, these primitives become inapplicable.
+        - Distributed Systems Are:
+            ```
+            CPU1 → Memory1
+            CPU2 → Memory2
+            CPU3 → Memory3
+            ```
+            Connected via network:
+            ```
+            CPU1 ◄────► CPU2 ◄────► CPU3
+            ```
+        - Monitors depend on: `shared variables + atomic access`, But in distributed systems: NO shared memory exists, So you CANNOT:
+            - lock a global mutex
+            - use condition variables
+            - rely on atomic instructions
+        - Even semaphores need:  `shared memory + atomic ops`, Without that: `down()` and `up()` cannot be atomic
+        - Both semaphores and monitors solve: LOCAL synchronization, They do NOT solve: DISTRIBUTED coordination.
+
+The conclusion is that semaphores are too low level and monitors are not usable except in a few programming languages. Also, none of the primitives allow information exchange between machines. Something else is needed. That "something" is: **Message Passing**(nstead of shared memory: Processes communicate via messages)
+
+## Producer-Consumer Problem
+<!--If you'd like, I can also show something extremely useful for OS understanding:
+
+A full ASCII timeline of the Producer–Consumer monitor execution showing context switches, condition queues, and scheduler decisions step-by-step.
+
+It makes monitor behavior crystal clear.-->
+A skeleton of the producer-consumer problem with monitors is given in next code, An outline of the producer-consumer problem with monitors. Only
+one monitor procedure at a time is active. The buffer has N slots
+```Pascal
+monitor ProducerConsumer
+  condition full, empty;
+  integer count;
+
+  procedure insert(item: integer);
+  begin
+    if count = N then wait(full);
+    insert_item(item);
+    count := count + 1;
+    if count = 1 then signal(empty)
+  end;
+  
+  function remove: integer;
+  begin
+    if count = 0 then wait(empty);
+    remove := remove_item();
+    count := count - 1;
+    if count = N - 1 then signal(full)
+  end;
+
+  count := 0;
+end monitor;
+
+procedure producer;
+begin
+  while true do
+  begin
+      item = produce item;
+      ProducerConsumer.insert(item)
+  end
+end;
+
+procedure consumer;
+begin
+  while true do
+  begin
+    item = ProducerConsumer.remove;
+    consume item(item)
+  end
+end;
+```
+This monitor manages a bounded buffer:
+- Buffer size = N
+- count = number of items currently in buffer
+
+Two condition variables:
+- full  → producers wait here when buffer is full
+- empty → consumers wait here when buffer is empty
+
+Core Monitor Guarantee: Only ONE procedure runs inside the monitor at a time, So: `insert()` and `remove()` are never executed concurrently, This gives automatic mutual exclusion.
+
+**Conceptual Model**
+```
+Producer:
+  if full → sleep
+  else insert → maybe wake consumer
+
+Consumer:
+  if empty → sleep
+  else remove → maybe wake producer
+```
+
+**insert() procedure**
+
+```Pascal
+if count = N then wait(full);
+```
+Meaning: If buffer is full → producer cannot continue
+
+So: producer goes to sleep on condition "full"
+
+wait(full) releases the monitor lock, So other threads (like consumers) can enter.
+
+Insert Operation
+```Pascal
+insert_item(item);
+count := count + 1;
+```
+Adds item to buffer and updates count.
+
+Wake Consumers
+```Pascal
+if count = 1 then signal(empty)
+```
+Why count = 1?
+- Before insertion → buffer was empty (count = 0)
+- After insertion → buffer has 1 item
+
+So: wake ONE consumer waiting on "empty"
+
+**remove() procedure**
+```Pascal
+if count = 0 then wait(empty);
+```
+Meaning: If buffer empty → consumer cannot proceed, So: consumer sleeps on "empty"
+
+Remove Operation
+```Pascal
+remove := remove_item();
+count := count - 1;
+```
+Removes item from buffer.
+
+Wake Producers
+```Pascal
+if count = N - 1 then signal(full)
+```
+Why count = N - 1?
+- Before removal → buffer was full (count = N)
+- After removal → one slot is free (count = N-1)
+
+So: wake ONE producer waiting on "full"
+
+Why Use if count = 1 and if count = N-1? This is an optimization. We only signal when the state changes from:
+| Transition | Action        |
+| ---------- | ------------- |
+| 0 → 1      | wake consumer |
+| N → N-1    | wake producer |
+
+Why? No need to signal if threads are not waiting.
+
+Producer & Consumer Outside Monitor
+
+Producer
+```Pascal
+while true do
+begin
+  item = produce_item;
+  ProducerConsumer.insert(item)
+end
+```
+Meaning:
+- produce outside monitor (no blocking)
+- insert inside monitor (synchronized)
+
+Consumer
+```Pascal
+while true do
+begin
+  item = ProducerConsumer.remove;
+  consume_item(item)
+end
+```
+Meaning:
+- remove inside monitor
+- consume outside monitor
+
+**Full Execution Flow (Step-by-Step)**
+
+**Case 1: Buffer Full**
+- count = N
+- Producer calls insert()
+- Flow:
+    - Producer enters monitor
+        - → sees count = N
+        - → wait(full)
+        - → releases monitor
+        - → sleeps
+- Now: Consumer can enter
+
+**Case 2: Consumer Runs**
+- Consumer enters monitor
+    - → removes item
+    - → count = N - 1
+    - → signal(full)
+- Effect: One producer wakes up
+
+**Case 3: Producer Resumes**
+- Depending on semantics:
+    - Brinch Hansen:
+        - Consumer exits monitor
+        - Producer enters monitor
+        - continues insert()
+
+**ASCII Diagram of Monitor Behavior**
+
+Initial State
+```
+Buffer: FULL
+
+Condition Queue (full)
+-----------------------
+Producer1
+Producer2
+
+Monitor:
+---------
+Consumer running
+```
+Consumer Removes Item
+```
+count = N → N-1
+signal(full)
+```
+After Signal
+```
+Producer1 wakes
+
+Buffer:
+-------
+1 free slot
+
+Queues:
+--------
+Condition(full): Producer2
+```
+
+This code uses:
+```
+if condition then wait(...)
+```
+This works ONLY under: Hoare or Brinch Hansen semantics, But in real systems (Mesa semantics):
+```
+while condition do wait(...)
+```
+Because: Condition may change before thread runs
+
+
+**cycle-by-cycle execution trace**
+
+We’ll assume:
+- Buffer size `N = 2`
+- Threads:
+    - P1 → Producer
+    - P2 → Producer
+    - C1 → Consumer
+
+1. **Initial State**
+    - count = 0 (buffer empty)
+    - Monitor: FREE
+    - Entry Queue: empty
+    - Condition(empty): empty
+    - Condition(full): empty
+2. **Step 1 — Consumer Comes First**
+  - C1 calls remove()
+  - Execution:
+      - C1 enters monitor
+      - count = 0 → cannot remove
+      - C1 calls wait(empty)
+  - What wait() does:
+      1. C1 moves to Condition(empty)
+      2. C1 releases monitor
+      3. C1 sleeps
+  - State Now
+      - Monitor: FREE
+      - Condition(empty):
+          - C1 (sleeping)
+      - Condition(full): empty
+      - Entry Queue: empty
+3. **Step 2 — Producer P1 Arrives**
+    - P1 calls insert(item)
+    - Execution:
+        - P1 enters monitor
+        - count = 0 → OK
+        - insert item
+        - count = 1
+    - Now:
+        - if count == 1 → signal(empty)
+    - Signal Happens
+        - signal(empty) wakes C1
+    - BUT (Brinch Hansen semantics):
+        - P1 MUST exit monitor first
+    - State After Step 2
+        - Buffer: 1 item
+        - Monitor: FREE (after P1 exits)
+        - Condition(empty): empty
+        - Condition(full): empty
+        - READY queue:
+            - C1 (woken up)
+4. **Step 3 — Consumer C1 Runs**
+    - Scheduler picks C1
+    - Execution:
+        - C1 enters monitor
+        - remove item
+        - count = 0
+    - Now:
+        - if count == N-1 → (0 == 1?) → NO
+        - (no signal)
+    - C1 exits.
+    - State Now
+        - Buffer: empty (count = 0)
+        - Monitor: FREE
+        - All queues empty
+5. **Step 4 — Both Producers Arrive (Interesting Case)**
+    - P1 and P2 both call insert()
+    - Step 4.1 — P1 Enters
+        - P1 enters monitor
+        - insert item
+        - count = 1
+        - signal(empty) → no one waiting
+        - P1 exits
+    - Step 4.2 — P2 Enters
+        - P2 enters monitor
+        - insert item
+        - count = 2 (FULL)
+        - P2 exits
+    - State Now
+        - Buffer: FULL (count = 2)
+        - Monitor: FREE
+        - No one waiting yet
+6. **Step 5 — Producer Tries Again (Blocking Case)**
+    - P1 calls insert()
+    - Execution:
+        - P1 enters monitor
+        - count = 2 (FULL)
+        - → wait(full)
+    - wait(full) Effect
+        - P1 moves to Condition(full)
+        - P1 sleeps
+        - monitor released
+    - State Now
+        - Buffer: FULL
+        - Condition(full):
+            - P1 (sleeping)
+        - Monitor: FREE
+7. **Step 6 — Consumer C1 Arrives**
+  - C1 calls remove()
+  - Execution:
+      - C1 enters monitor
+      - remove item
+      - count = 1
+  - Now:
+      - if count == N-1 → 1 == 1 → TRUE
+      - → signal(full)
+  - Signal Happens
+      - P1 wakes up
+      - BUT:
+      - C1 continues and exits monitor first
+  - State After Step 6
+      - Buffer: 1 item
+      - READY queue:
+          - P1 (woken)
+      - Monitor: FREE
+8. **Step 7 — Producer Resumes**
+    - Scheduler picks P1
+    - Execution:
+        - P1 re-enters monitor
+        - continues insert()
+        - count = 2
+    - Buffer is full again.
+
+Full Timeline View
+```
+Time →
+------------------------------------------------------------
+
+C1:  remove → wait(empty) ────────────────┐
+                                          │ wakes
+P1:           insert → signal(empty) → exit
+                                          │
+C1:                      resumes → remove → exit
+
+P1: insert → exit
+P2: insert → exit (buffer full)
+
+P1: insert → wait(full) ────────────────┐
+                                        │ wakes
+C1: remove → signal(full) → exit        │
+                                        │
+P1:                     resumes → insert → exit
+```
+
+There are TWO different queues:
+1. **Entry Queue (outside monitor)**: Threads waiting to ENTER monitor
+2. **Condition Queues (inside monitor logic)**: Threads waiting for a CONDITION
+    - Example:
+    - Condition(empty): consumers
+    - Condition(full): producers
+
+Unified ASCII Diagram
+```
+                 +----------------------+
+                 |       MONITOR        |
+                 |----------------------|
+                 |   Shared Buffer      |
+                 +----------------------+
+                   ▲                ▲
+                   │                │
+                   │                │
+           Condition(empty)   Condition(full)
+              (consumers)        (producers)
+
+Entry Queue
+-----------
+Threads waiting to ENTER monitor
+```
+
+**Key Insights**
+1. Mutual Exclusion: monitor ensures only one thread inside(Only ONE thread inside monitor at any time)
+2. Condition Synchronization
+    - wait() → sleep + release monitor
+    - signal() → wake one thread
+3. Correct Coordination
+  - Producers wait when full
+  - Consumers wait when empty
+
+This monitor:
+- protects the buffer (mutual exclusion)
+- blocks producers when buffer is full
+- blocks consumers when buffer is empty
+- wakes the correct process using condition variables
+
+### monitors vs while sleep/wakeup
+You may be thinking that the operations wait and signal look similar to sleep
+and wakeup, which we saw earlier had fatal race conditions. Well, they are very
+similar, but with one crucial difference: sleep and wakeup failed because while one
+process was trying to go to sleep, the other one was trying to wake it up. 
+
+The classic failure is a lost wakeup:
+```
+Consumer: if (count == 0)
+              sleep();
+
+Producer: add item
+          wakeup(consumer);
+```          
+❌ Race Condition
+```
+Time →
+--------------------------------------
+
+Consumer: checks count == 0   ✔
+           (about to sleep...)
+
+⚡ CONTEXT SWITCH
+
+Producer: inserts item
+          calls wakeup()  ❗ (no one sleeping yet → LOST)
+
+⚡ CONTEXT SWITCH
+
+Consumer: calls sleep()  ❗ (sleeps forever)
+```
+The wakeup is lost → deadlock.
+
+With monitors, that cannot happen. The automatic mutual exclusion on monitor procedures guarantees that if, say, the producer inside a monitor procedure discovers that
+the buffer is full, it will be able to complete the wait operation without having to worry about the possibility that the scheduler may switch to the consumer just
+before the wait completes. The consumer will not even be let into the monitor at all
+until the wait is finished and the producer has been marked as no longer runnable.
+
+Inside a monitor: ONLY ONE THREAD runs at a time, So this dangerous interleaving becomes impossible.
+
+The Critical Difference
+
+sleep/wakeup
+```
+check condition   (not protected)
+↓
+sleep()           (not atomic with check)
+```
+monitor (wait)
+```
+check condition   (inside monitor lock)
+↓
+wait()            (atomic: release lock + sleep)
+```
+What "Atomic wait" Actually Does
+
+When you call:
+```
+wait(empty)
+```
+it behaves like:
+1. Add thread to condition queue
+2. Release monitor lock
+3. Block thread
+
+All three steps happen atomically (indivisible)
+
+Why Scheduler Cannot Break It
+
+In monitors, this is impossible because:
+```
+Producer is inside monitor
+↓
+Consumer is OUTSIDE (blocked on entry)
+```
+So:
+```
+Producer:
+    wait(full)
+    (atomic)
+
+Consumer:
+    cannot run inside monitor yet
+```
+### Linux
+#### Linux Kernel alternative to Monitors
+Linux does NOT use monitors as a language construct. Instead, it builds everything from lower-level primitives.
+
+The Kernel Toolkit
+- spinlocks
+- mutexes
+- rwlocks
+- wait queues
+- completions
+- seqlocks
+- RCU
+
+As A monitor is:
+```
+mutex + condition variables + shared state
+```
+Linux implements the SAME pattern manually.
+
+**Kernel Wait Queue (Condition Variable Equivalent)**
+```
+wait_event(queue, condition);
+wake_up(queue);
+```
+Internals
+
+Wait
+1. add task to wait queue
+2. set state = TASK_INTERRUPTIBLE
+3. schedule()  → sleep
+
+Wake
+1. wake_up():
+    1. mark task runnable
+    2. enqueue in run queue
+
+This is basically: condition variable + scheduler
+
+**Kernel Mutex (Futex-Based)**
+
+Linux mutex:
+- fast path:
+    - atomic CAS → acquire
+- slow path:
+    - sleep via futex / wait queue
+
+Structure
+```
+mutex:
+    owner
+    wait_list
+```
+
+**Full "Monitor Equivalent" in Kernel**
+```c
+struct resource {
+    mutex lock;
+    wait_queue_head_t wait;
+    int condition;
+};
+```
+Usage
+```c
+mutex_lock(&res->lock);
+while (!condition)
+    wait_event(res->wait, condition);
+//... critical section ...
+wake_up(&res->wait);
+mutex_unlock(&res->lock);
+```
+This IS a Monitor (but manual)
+| Monitor Concept | Linux Equivalent |
+| --------------- | ---------------- |
+| implicit lock   | mutex_lock       |
+| wait()          | wait_event       |
+| signal()        | wake_up          |
+| condition var   | wait queue       |
+
+**Why Kernel Avoids Monitors**
+1. Reason 1 — Language
+    - Kernel is written in C → no monitor support
+2. Reason 2 — Performance
+    - Monitors are:
+        - too abstract
+        - too rigid
+    - Kernel needs:
+        - fine control over scheduling + locking
+3. Reason 3 — Flexibility
+    - Kernel must handle:
+        - interrupt context
+        - non-blocking paths
+        - real-time constraints
+
+Monitors cannot express these well.
+
+Advanced Kernel Trick: Split Locks + Wait Queues
+
+Instead of one big monitor Kernel splits responsibilities
+
+Example Pattern
+- spinlock → protect data
+- wait_queue → handle sleeping
+
+Why?
+- spinlocks = fast (no sleep)
+- wait queues = scalable sleep mechanism
+
+Linux does NOT remove monitor semantics, It decomposes them into:
+- locks
+- wait queues
+- scheduler
+#### pthreads + futex + Linux scheduler
+let’s map that exact monitor execution all the way down to Linux:
+```
+Monitor  →  pthreads  →  futex  →  kernel scheduler
+```
+This is the real execution path your OS follows.
+
+**1. Mapping Monitor → pthreads**
+
+Your monitor:
+- wait(empty)
+- signal(full)
+
+becomes in pthreads:
+```c
+pthread_mutex_lock(&m->mutex);
+while (count == 0)
+    pthread_cond_wait(&m->not_empty, &m->mutex);
+//... critical section ...
+pthread_cond_signal(&m->not_full);
+pthread_mutex_unlock(&m->mutex);
+```
+So:
+- monitor wait()   → pthread_cond_wait()
+- monitor signal() → pthread_cond_signal()
+
+**2. What pthread_cond_wait() REALLY Does**
+
+This is the most important part.
+
+When you call:
+```c
+pthread_cond_wait(&cond, &mutex);
+```
+it performs three atomic steps:
+1. Add thread to condition queue
+2. Unlock mutex
+3. Sleep (via futex)
+
+Internal View
+```
+Thread inside monitor:
+pthread_cond_wait()
+        │
+        ▼
++---------------------------+
+| add to cond->wait queue   |
+| unlock(mutex)             |
+| futex_wait()              |
++---------------------------+
+        │
+        ▼
+Thread SLEEPS in kernel
+```
+**3. Futex: The Bridge to Kernel**
+
+When the thread sleeps:
+```
+futex(uaddr, FUTEX_WAIT, val, ...)
+```
+Kernel does:
+```
+if (*uaddr == val)
+    put thread in WAIT QUEUE
+    schedule another thread
+```
+Kernel Wait Queue
+```
+FUTEX WAIT QUEUE (kernel)
+--------------------------
+C1  (sleeping consumer)
+P1  (sleeping producer)
+```
+**4. Full Execution (Same Scenario as Before)**
+
+We replay one key cycle, now including futex + scheduler.
+
+Step 1 — Consumer Blocks
+- C1 calls remove()
+- count == 0
+User Space
+```c
+pthread_cond_wait(&not_empty, &mutex);
+```
+Kernel Transition
+```
+unlock(mutex)
+↓
+futex_wait(not_empty)
+↓
+C1 → moved to kernel wait queue
+```
+State Now
+- User space:
+    - mutex = unlocked
+- Kernel:
+    - Futex queue(not_empty):
+        - C1 (sleeping)
+- CPU:
+    - Scheduler picks another thread
+
+Step 2 — Producer Runs
+- P1 calls insert()
+- User Space
+    - lock(mutex)  (fast path, no kernel)
+    - insert item
+    - count = 1
+    - pthread_cond_signal(not_empty)
+
+Step 3 — Signal → Futex Wake
+```c
+pthread_cond_signal(&not_empty);
+````
+Internally:
+```
+futex(FUTEX_WAKE, 1)
+```
+Kernel: Wake ONE thread from wait queue
+
+Kernel State Change
+- Futex queue(not_empty):
+    - (empty)
+- READY queue:
+    - C1 (now runnable)
+
+5. Scheduler Decision
+- Now two threads exist:
+    - Running: P1
+    - Ready:   C1
+- Scheduler decides:
+    - P1 continues (Mesa / Brinch Hansen behavior)
+    - Then:
+    - P1 unlocks mutex
+
+6. Consumer Wakes and Competes
+- Now:
+    - C1 tries to run
+- It must re-acquire mutex:
+    - pthread_mutex_lock(&mutex);
+- If mutex is free:
+    - C1 enters monitor
+- Otherwise:
+    - C1 blocks again (futex on mutex)
+
+Full System Timeline (User + Kernel)
+```
+Time →
+----------------------------------------------------------------
+C1: remove()
+    → pthread_cond_wait()
+    → futex_wait()  ────────────────┐ (sleep)
+                                   │
+P1:             insert()
+                → signal()
+                → futex_wake(C1)
+                                   │
+Scheduler: C1 becomes READY        │
+                                   │
+P1: continues → unlock(mutex)      │
+                                   │
+C1: wakes → lock(mutex) → run ◄────┘
+```
+```
+USER SPACE (pthread)                KERNEL SPACE
+Thread C1
+-----------------------------------------------
+pthread_cond_wait()
+  │
+  ▼
+unlock(mutex)
+  │
+  ▼
+futex_wait()  ────────────────►  Futex Queue
+                                 -------------
+                                 C1 (sleeping)
+Thread P1
+-----------------------------------------------
+pthread_cond_signal()
+  │
+  ▼
+futex_wake() ────────────────►  Wake C1
+                                 │
+                                 ▼
+                            READY QUEUE
+Scheduler
+-----------------------------------------------
+Pick next thread → C1 runs later
+```
+
+Why Futex is FAST
+- Most operations happen in user space:
+    - lock/unlock → no syscall (fast)
+- Kernel is used only when:
+    - thread must sleep
+    - thread must wake others
+
+Mapping Back to Monitor Concepts
+| Monitor Concept  | pthread             | Kernel               |
+| ---------------- | ------------------- | -------------------- |
+| Mutual exclusion | pthread_mutex       | futex (if contended) |
+| wait()           | pthread_cond_wait   | futex_wait           |
+| signal()         | pthread_cond_signal | futex_wake           |
+| condition queue  | pthread cond queue  | futex wait queue     |
+| scheduling       | OS scheduler        | Linux scheduler      |
+
+Final Unified Model
+```
+MONITOR (concept)
+   │
+   ▼
+pthread_mutex + pthread_cond
+   │
+   ▼
+futex (sleep/wake)
+   │
+   ▼
+Linux kernel wait queue
+   │
+   ▼
+CPU scheduler
+```
+<!--12. The Most Important Mental Model-->
+When a thread does:
+```
+wait()
+```
+it becomes:
+```
+RUNNING
+  ↓
+BLOCKED (condition queue)
+  ↓
+KERNEL FUTEX QUEUE
+  ↓
+SCHEDULER removes it from CPU
+```
+When signal() happens:
+```
+KERNEL wakes thread
+  ↓
+thread becomes READY
+  ↓
+scheduler may run it later
+```
+Final Takeaway: Monitors are NOT magic. They are built from: **mutex + condition** variables, Which are implemented using: **futex + kernel scheduling**
+
+### Java Implementation
+Java is an object-oriented language
+that supports user-level threads and also allows methods (procedures) to be
+grouped together into classes. By adding the keyword synchronized to a method
+declaration, Java guarantees that once any thread has started executing that method,
+no other thread will be allowed to start executing any other synchronized method
+of that object. Without synchronized, there are no guarantees about interleaving.
+
+```Java
+public class ProducerConsumer {
+
+    static final int N = 100; // constant giving the buffer size
+    static producer p = new producer(); // instantiate a new producer thread
+    static consumer c = new consumer(); // instantiate a new consumer thread
+    static our_monitor mon = new our_monitor(); // instantiate a new monitor
+
+    public static void main(String args[]) {
+        p.start(); // star t the producer thread
+        c.start(); // star t the consumer thread
+    }
+
+    static class producer extends Thread {
+
+        public void run() {
+            // run method contains the thread code
+            int item;
+            while (true) {
+                // producer loop
+                item = produce_item();
+                mon.insert(item);
+            }
+        }
+
+        private int produce_item() {} // actually produce
+    }
+
+    static class consumer extends Thread {
+
+        public void run() {
+            //run method contains the thread code
+            int item;
+            while (true) {
+                // consumer loop
+                item = mon.remove();
+                consume_tem(item);
+            }
+        }
+
+        private void consume_tem(int item) {} // actually consume
+    }
+
+    static class our_monitor {
+
+        // this is a monitor
+        private int buffer[] = new int[N];
+        private int count = 0,
+            lo = 0,
+            hi = 0; // counters and indices
+
+        public synchronized void insert(int val) {
+            if (count == N) go_to_sleep(); // if the buffer is full, go to sleep
+            buffer[hi] = val; // inser t an item into the buffer
+            hi = (hi + 1) % N; // slot to place next item in
+            count = count + 1; // one more item in the buffer now
+            if (count == 1) notify(); // if consumer was sleeping, wake it up
+        }
+
+        public synchronized int remove() {
+            int val;
+            if (count == 0) go_to_sleep(); // if the buffer is empty, go to sleep
+            val = buffer[lo]; // fetch an item from the buffer
+            lo = (lo + 1) % N; // slot to fetch next item from
+            count = count < 1; // one few items in the buffer
+            if (count == N < 1) notify(); // if producer was sleeping, wake it up
+            return val;
+        }
+
+        private void go_to_sleep() {
+            try {
+                wait();
+            } catch (InterruptedException exc) {}
+        }
+    }
+}
+```
+This solution has four classes. The outer class, ProducerConsumer,
+creates and starts two threads, p and c. The second and third classes, producer and
+consumer, respectively, contain the code for the producer and consumer. Finally,
+the class our monitor, is the monitor. It contains two synchronized threads that are
+used for actually inserting items into the shared buffer and taking them out. Unlike
+the previous examples, here we have the full code of insert and remove.
+
+The producer and consumer threads are functionally identical to their count-
+erparts in all our previous examples. The producer has an infinite loop generating
+data and putting it into the common buffer. The consumer has an equally infinite
+loop taking data out of the common buffer and doing some fun thing with it.
+
+The interesting part of this program is the class our monitor, which holds the
+buffer, the administration variables, and two synchronized methods. When the pro-
+ducer is active inside insert, it knows for sure that the consumer cannot be active
+inside remove, making it safe to update the variables and the buffer without fear of
+race conditions. The variable count keeps track of how many items are in the buff-
+er. It can take on any value from 0 through and including N < 1. The variable lo is
+the index of the buffer slot where the next item is to be fetched. Similarly, hi is the
+index of the buffer slot where the next item is to be placed. It is permitted that
+lo = hi, which means that either 0 items or N items are in the buffer. The value of
+count tells which case holds.
+
+Synchronized methods in Java differ from classical monitors in an essential
+way: Java does not have condition variables built in. Instead, it offers two proce-
+dures, wait and notify, which are the equivalent of sleep and wakeup except that
+when they are used inside synchronized methods, they are not subject to race con-
+ditions. In theory, the method wait can be interrupted, which is what the code sur-
+rounding it is all about. Java requires that the exception handling be made explicit.
+For our purposes, just imagine that `go_to_sleep` is the way to go to sleep.

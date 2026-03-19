@@ -25,8 +25,8 @@ Proberen (try) and Verhogen (raise, make higher)—we will use the terms down an
 up instead.
 
 A **semaphore** is an integer variable shared between processes, with two atomic operations:
-- P (from proberen — “to test”)
-- V (from verhogen — “to increment”)
+- P (from proberen — "to test")
+- V (from verhogen — "to increment")
 
 No other operations are allowed. Formally:
 ```
@@ -127,7 +127,6 @@ A semaphore is a synchronization primitive used to:
 - Prevent race conditions
 - Coordinate concurrent processes/threads
 
-
 **Mathematical Definition**
 
 A semaphore S is an integer variable accessed only via two atomic operations:
@@ -152,8 +151,8 @@ Semaphores Solves this problem:
 
 ## Types of Semaphores
 Semaphore: A synchronization primitive that can be used to control access:
-    • Binary semaphore (mutex): 0 or 1, used for mutual exclusion.
-    • Counting semaphore: Can be used to track the number of allowed concurrent accesses.
+- Binary semaphore (mutex): 0 or 1, used for mutual exclusion.
+- Counting semaphore: Can be used to track the number of allowed concurrent accesses.
 
 We usually use:
 1. mutex – protects access to a shared counter (read_count) that tracks the number of readers currently reading.
@@ -439,6 +438,154 @@ int main(void)
 | Atomic sleep        | ❌              | ✅           |
 | Progress guaranteed | ❌              | ✅           |
 
+### deadlocks
+Look closely at the order of the downs before inserting or removing items
+from the buffer above. 
+- Suppose that the two `downs` in the producer’s code were reversed in order, so mutex was decremented before empty instead of after it.
+
+Original (correct):
+```
+down(empty)
+down(mutex)
+```
+Incorrect:
+```
+down(mutex)
+down(empty)
+```
+So the producer code becomes:
+```
+down(mutex);
+down(empty);
+
+insert_item();
+
+up(mutex);
+up(full);
+```
+- If the buffer were completely full, the producer would block, with mutex set to 0.
+- Consequently, the next time the consumer tried to access the buffer, it would do a
+down on mutex, now 0, and block too. Both processes would stay blocked forever
+and no more work would ever be done. 
+
+Assume:
+```
+buffer is FULL
+empty = 0
+mutex = 1
+```
+Step 1 — Producer runs
+
+Producer executes:
+```
+down(mutex)
+```
+Result:
+```
+mutex = 0
+producer holds mutex
+```
+Now producer tries:
+```
+down(empty)
+```
+But:
+```
+empty = 0
+```
+So producer blocks.
+
+State now:
+```
+producer blocked
+mutex = 0 (still locked)
+```
+Step 2 — Consumer runs
+
+Consumer attempts:
+```
+down(full)
+```
+This succeeds because the buffer is full.
+
+Next consumer executes:
+```
+down(mutex)
+```
+But:
+```
+mutex = 0
+```
+So consumer blocks.
+
+5. System State
+
+Now both threads are blocked:
+| Thread   | Waiting For |
+| -------- | ----------- |
+| Producer | `empty`     |
+| Consumer | `mutex`     |
+
+But:
+- mutex held by blocked producer
+- producer waiting for consumer to free space
+- consumer waiting for producer to release mutex
+
+This creates a circular wait.
+
+This unfortunate situation is called a dead-lock.
+
+State diagram:
+```
+Producer
+   ↓ waiting for empty
+(empty slot)
+
+Consumer
+   ↓ waiting for mutex
+(mutex locked by producer)
+````
+Neither can proceed.
+```
+Producer ←→ Consumer
+   circular wait
+```
+The system is permanently stuck.
+
+**Why the Correct Order Works**
+
+Correct producer order:
+```
+down(empty)
+down(mutex)
+```
+If buffer is full: `down(empty)` blocks immediately
+
+Producer never acquires mutex. So:
+- mutex remains free
+- consumer can run
+- consumer removes item
+- consumer signals empty
+- producer continues
+
+System progresses safely.
+
+Correct sequence:
+```
+Producer
+  wait empty
+  lock mutex
+  produce
+  unlock mutex
+  signal full
+```
+Incorrect sequence:
+```
+Producer
+  lock mutex
+  wait empty
+```
+This creates: mutex locked while waiting, which is dangerous.
 ## The Readers and Writers Problem Using Semaphores
 The producers-consumers problem is useful for modeling two processes (or
 threads) that exchange blocks of data while sharing a buffer. Another famous problem is the readers and writers problem (Courtois et al., 1971), which models access to a database. 
@@ -448,8 +595,8 @@ Imagine, for example, an airline reservation system, with many competing process
 The question is how do you program the readers and the writers?
 
 The Readers-Writers Problem is a classic synchronization problem in operating systems:
-    • Multiple readers can read the shared data simultaneously without interfering with each other.
-    • Writers require exclusive access: only one writer can write at a time, and no reader can read while a writer is writing.
+- Multiple readers can read the shared data simultaneously without interfering with each other.
+- Writers require exclusive access: only one writer can write at a time, and no reader can read while a writer is writing.
 
 The Goal is to void race conditions while allowing maximum concurrency.
 
@@ -466,9 +613,9 @@ R3             [Waiting]
 R1, R2 done
 W1      [Writing]
 ```
-    • Multiple readers can read simultaneously.
-    • Writers must wait until all readers finish.
-    • No two writers can write at the same time.
+- Multiple readers can read simultaneously.
+- Writers must wait until all readers finish.
+- No two writers can write at the same time.
 
 In this solution, the first reader to get access to the database does a down on the semaphore db. Subsequent readers merely increment a counter, rc. As readers leave, they decrement the counter, and the last to leave does an up on the semaphore, allowing a blocked writer, if there is one, to get in.
 
@@ -558,8 +705,8 @@ How It Works
 4. Writers always lock wrt before writing; ensures exclusive access.
 
 Concurrency:
-    • Multiple readers → allowed concurrently.
-    • Writer → exclusive access; readers must wait if a writer is writing.
+- Multiple readers → allowed concurrently.
+- Writer → exclusive access; readers must wait if a writer is writing.
 
 This implementation gives priority to readers.If readers keep arriving continuously: Writers might starve forever.
 #### C program implementing the Readers-Writers problem
@@ -696,23 +843,23 @@ Writer 1 is writing: shared_data = 1
 Reader 4 is reading: shared_data = 1
 ```
 Notice:
-    • Multiple readers run together
-    • Writers run alone
-    • No mixed read/write happens simultaneously
+- Multiple readers run together
+- Writers run alone
+- No mixed read/write happens simultaneously
 
 ### Writer-priority
 Writer priority is a strategy where writers have priority over readers. This means that if there are writers waiting to write, readers must wait until all writers have finished writing before they can read.
 
 If a writer arrives:
-    • New readers must wait
-    • Writers do NOT starve
+- New readers must wait
+- Writers do NOT starve
 
 #### C program implementing the Readers-Writers problem
 We add:
-    • readTry → blocks readers when a writer is waiting
-    • rmutex → protects read_count
-    • wmutex → protects write_count
-    • resource → actual shared resource lock
+- readTry → blocks readers when a writer is waiting
+- rmutex → protects read_count
+- wmutex → protects write_count
+- resource → actual shared resource lock
 ```c
 ```
 When the first writer arrives:
@@ -721,9 +868,9 @@ write_count == 1 → readTry locked
 ```
 This prevents new readers from entering.
 So:
-    • Existing readers finish
-    • Writer proceeds
-    • Readers remain blocked until all writers finish
+- Existing readers finish
+- Writer proceeds
+- Readers remain blocked until all writers finish
 
 - ✔ Writers never starve
 - ❌ Readers may starve
@@ -732,9 +879,9 @@ So:
 Fair solution ensures that readers and writers are served in a fair manner. This means that readers and writers are served in a round-robin fashion, ensuring that no reader or writer is starved.
 
 This ensures:
-    • FIFO ordering
-    • Readers and writers treated fairly
-    • No starvation
+- FIFO ordering
+- Readers and writers treated fairly
+- No starvation
 
 The idea is to use  a turnstile semaphore (serviceQueue) Every thread must pass through it in arrival order.
 ```c
@@ -745,6 +892,148 @@ The idea is to use  a turnstile semaphore (serviceQueue) Every thread must pass 
 | Writer Priority | Yes                | ❌ No            | ✅ Possible      | ❌     |
 | Fair            | Yes                | ❌ No            | ❌ No            | ✅     |
 
+## Drawbacks of Semaphores
+Semaphores are a fundamental synchronization primitive used to control access to shared resources in concurrent systems. Despite their power and flexibility, they suffer from several important drawbacks that make them error-prone and difficult to use correctly in practice.
+1. Lack of Structure (Unstructured Synchronization)
+    
+    Semaphores are low-level primitives that provide no inherent structure for organizing concurrent programs.
+        - The operations down() (P) and up() (V) can be placed anywhere in the code.
+        - There is no syntactic relationship between acquiring and releasing a semaphore.
+    Problem:
+      down(S);
+      ...
+      (many lines of code)
+      ...
+      up(S);
+    This separation makes programs:
+        - Hard to read
+        - Hard to verify
+        - Easy to misuse
+
+2. Error-Prone Usage
+    
+    Semaphores are highly susceptible to programming errors.
+    Common mistakes include:
+    - Forgetting to perform up() → deadlock
+    - Performing up() too early → race condition
+    - Swapping the order of operations → incorrect behavior
+    - Using the wrong semaphore → logical bugs
+    Example:
+      down(mutex);
+      down(empty);   ← wrong order → deadlock possible
+    There is no compiler support to detect such errors.
+
+3. Difficult to Reason About
+
+    Programs using semaphores are hard to understand and verify.
+        - The correctness depends on the global ordering of operations across multiple threads.
+        - There is no encapsulation of shared data and synchronization logic.
+    State of system = distributed across many threads
+    This leads to:
+        - Poor maintainability
+        - High cognitive load for programmers
+
+4. No Direct Association with Data
+
+    Semaphores are not tied to specific data structures.
+        - A semaphore does not "know" what resource it protects.
+        - The programmer must manually ensure the correct association.
+    mutex → protects what?
+    (empty/full) → which buffer?
+    This increases the risk of:
+        - Misuse
+        - Inconsistent protection
+
+5. Risk of Deadlock
+
+    Improper use of semaphores can easily lead to deadlocks.
+    Causes include:
+        - Incorrect ordering of down() operations
+        - Circular waiting between threads
+        - Missing up() operations
+    Thread A: down(S1) → down(S2)
+    Thread B: down(S2) → down(S1)
+    Result:
+    A waits for B, B waits for A → deadlock
+
+6. Risk of Starvation
+
+    Semaphores do not guarantee fairness.
+        - A thread may wait indefinitely even if the resource becomes available.
+        - Scheduling decisions are typically left to the OS.
+    Thread T1 repeatedly acquires semaphore
+    Thread T2 never gets scheduled → starvation
+
+7. Priority Inversion
+
+    Semaphores can lead to priority inversion:
+    Low-priority thread holds semaphore
+    High-priority thread waits for it
+    Medium-priority threads run instead
+    Result:
+    High-priority thread is indirectly blocked by lower-priority one
+    This is a serious issue in real-time systems.
+
+8. No Support for Condition Synchronization (Directly)
+
+    Semaphores do not naturally express condition-based waiting.
+        - Programmers must manually encode conditions using multiple semaphores.
+        - This often leads to complex and fragile designs.
+    empty / full / mutex → must coordinate manually
+    Compared to condition variables:
+    wait(condition)
+    signal(condition)
+    Semaphores are less expressive.
+
+9. Hidden Scheduling Behavior
+
+    The behavior of semaphores depends on the scheduler and implementation:
+        - Which waiting thread is awakened is often unspecified.
+        - This leads to non-deterministic behavior.
+
+10. Not Scalable to Distributed Systems
+
+    Semaphores assume:
+    Shared memory + atomic operations
+    In distributed systems:
+    No shared memory → semaphores cannot be used directly
+    They must be replaced by:
+        - Message passing
+        - Distributed locks
+
+11. Mixing Synchronization and Resource Counting
+
+    Semaphores combine two different roles:
+    1. Mutual exclusion
+    2. Resource counting
+    This dual purpose can lead to confusion:
+        - Binary semaphore vs counting semaphore
+        - Misuse of one as the other
+
+12. Lack of Compiler and Language Support
+
+    Semaphores are typically implemented as:
+    Library functions + OS primitives
+        - The compiler does not enforce correct usage
+        - No static checking of synchronization correctness
+
+Summary Table
+| Drawback                     | Description                                  |
+| :--------------------------- | :------------------------------------------- |
+| Unstructured                 | No enforced code organization                |
+| Error-prone                  | Easy to misuse (missing up/down)             |
+| Hard to reason               | Global state, no encapsulation               |
+| No data association          | Not tied to specific resources               |
+| Deadlocks                    | Easy to create circular waits                |
+| Starvation                   | No fairness guarantees                       |
+| Priority inversion           | High-priority threads can be blocked         |
+| Weak condition support       | No direct wait/signal semantics              |
+| Non-deterministic scheduling | Wakeup order unspecified                     |
+| Not distributed              | Requires shared memory                       |
+| Mixed semantics              | Counting + locking combined                  |
+| No compiler support          | Errors not detected at compile time          |
+
+Semaphores are powerful but dangerous. They provide flexibility at the cost of safety, making them suitable for low-level systems programming, but less desirable for high-level concurrent design.
 ## Implementaions of Semaphores in linux
 Linux has multiple types of synchronization primitives, and the implementation differs between:
 - User space
@@ -754,86 +1043,11 @@ Linux POSIX semaphores (sem_t) are not implemented entirely in the kernel — ra
  - The glibc (C library) provides the sem_init, sem_wait, sem_post, etc. API.
  - These calls operate mostly in user space using atomic operations.
  - Only when contention occurs do they make a futex system call into the kernel. 
-In other words:
-Linux semaphores are built on top of futexes, using the futex interface to block and wake threads efficiently. 
 
-📦 2) What is a Futex?
-A futex (“fast userspace mutex”) is a kernel system call that programs use to build synchronization primitives such as:
- - Semaphores
- - Mutexes
- - Condition variables
- - Read-write locks
-A futex is simply:
-A four-byte integer in shared memory that both user space and the kernel understand. 
-Futex operations
-The futex syscall generally takes three key parameters:
-futex(uaddr, FUTEX_WAIT, val, timeout);
-futex(uaddr, FUTEX_WAKE, nr_wake);
-Where:
- - uaddr = address of the futex word in user memory
- - FUTEX_WAIT = “block if value equals expected”
- - FUTEX_WAKE = “wake up N waiters” 
-Key design point
- - Uncontended fast path: all work happens in user space with atomics (no syscall).
- - Contended path: the thread issues FUTEX_WAIT → enters kernel wait queue.
- - Waker threads issue FUTEX_WAKE → kernel wakes N threads. 
-This hybrid design avoids expensive syscalls in the common uncontended case.
+ In other words:
+Linux semaphores are built on top of futexes, using the [fute](software-systems/operating-systems/process/ipc/futex.mdx) interface to block and wake threads efficiently. 
+ 
 
-🛠️ 3) The futex() System Call Implementation Path
-User-space perspective
-The first thing semaphores do is manipulate a counter:
-```
-if (atomic_decrement_if_positive(&sem->value)) {
-    // success without kernel
-} else {
-    futex(uaddr, FUTEX_WAIT, expected_value, NULL);
-}
-```
-If the counter is zero, the thread issues a FUTEX_WAIT syscall. 
-Kernel inspection of futex
-When the kernel receives a futex() syscall (e.g., FUTEX_WAIT or FUTEX_WAKE), it enters code in the futex subsystem:
-📌 Entry is typically in:
- - kernel/futex/core.c
- - kernel/futex/waitwake.c
-Links to actual source on GitHub:
-🔗 futex core: https://github.com/torvalds/linux/blob/master/kernel/futex/core.c 
-🔗 wait & wake code: https://github.com/torvalds/linux/blob/master/kernel/futex/waitwake.c 
-Rough outline of the kernel path
-```
-int sys_futex(u32 __user *uaddr, int futex_op, u32 val, ...) {
-    if (op == FUTEX_WAIT) {
-        hash_bucket = hash_futex(uaddr);     // pick a hash bucket
-        spin_lock(&hash_bucket->lock);
-
-        if (get_user(uval, uaddr) != expected)
-            return -EAGAIN;                  // value changed → user should retry
-
-        queue_me_on_waitqueue(&queue, hash_bucket);
-        spin_unlock(&hash_bucket->lock);
-
-        schedule();                          // block this thread
-        return 0;
-    }
-
-    if (op == FUTEX_WAKE) {
-        hash_bucket = hash_futex(uaddr);
-        spin_lock(&hash_bucket->lock);
-
-        wake_up_n_waiters(hash_bucket, nr_wake);
-
-        spin_unlock(&hash_bucket->lock);
-        return nr_wake;
-    }
-    // other futex ops exist...
-}
-```
-This is a simplification but captures the main idea:
-    1. The kernel hashes the futex word's address to find a wait queue.
-    2. On FUTEX_WAIT, the kernel safely checks the value and enqueues the thread if needed.
-    3. On FUTEX_WAKE, it wakes up waiters.
-All of this happens inside the kernel. 
-
-🧱 4) Simplified Semaphore Code Using Futex (Conceptually)
 Here's a conceptual pseudosource for how semaphores are implemented in user space using futex:
 ```
 void sem_wait(sem_t *sem) {
@@ -856,22 +1070,27 @@ This pseudosource:
 ✔ Calls futex(FUTEX_WAKE) to wake one waiting thread when posting
 This structure is effectively what glibc does on top of the futex syscall. 
 
-🧠 5) How Linux Semaphores Work in Practice
+**How Linux Semaphores Work in Practice**
+
 POSIX semaphores (sem_t)
  - Implemented in glibc using futexes for blocking. 
-Kernel internals
- - The kernel futex implementation tracks:
-        ◦ A hash table of futex wait queues keyed by the address of the futex word in user space. 
-        ◦ Wait queues where threads block.
-        ◦ Wake-ups performed by futex syscalls.
-Library layering
-In glibc:
- - sem_waitcommon.c contains the core logic that handles:
-        ◦ Decrementing the value
-        ◦ Managing possible blocked threads
-        ◦ Issuing futex calls only when necessary 
 
-🧾 6) Source Code References (exact)
+ Kernel internals
+ - The kernel futex implementation tracks:
+      * A hash table of futex wait queues keyed by the address of the futex word in user space. 
+      * Wait queues where threads block.
+      * Wake-ups performed by futex syscalls.
+
+Library layering
+
+ In glibc:
+ - sem_waitcommon.c contains the core logic that handles:
+      * Decrementing the value
+      * Managing possible blocked threads
+      * Issuing futex calls only when necessary 
+
+**Source Code References (exact)**
+
 Here are the relevant kernel source files you can browse:
 📌 Futex hash + core logic
 → https://github.com/torvalds/linux/blob/master/kernel/futex/core.c 
@@ -913,13 +1132,13 @@ V(S): signal / up
 Key idea (Linux-style):
  - The semaphore value is an atomic integer
  - Fast path:
-        ◦ Try to decrement atomically
-        ◦ If success → stay in user space
+      * Try to decrement atomically
+      * If success → stay in user space
  - Slow path:
-        ◦ If value < 0 → sleep using futex(FUTEX_WAIT)
+      * If value < 0 → sleep using futex(FUTEX_WAIT)
  - Wakeup:
-        ◦ Increment value
-        ◦ Call futex(FUTEX_WAKE) to wake one waiter
+      * Increment value
+      * Call futex(FUTEX_WAKE) to wake one waiter
 
 2️⃣ Futex syscall wrapper (raw Linux)
 ```c
@@ -1095,3 +1314,24 @@ If you want next, I can:
  - Show why spurious wakeups are safe
  - Compare this with condition variables
  - Walk through the exact kernel code line-by-line
+
+## Real World cases
+**How Distributed Locks Replace Semaphores**
+In distributed systems there is no shared memory, so we can’t do:
+```
+down(sem) / up(sem)
+```
+Instead, we emulate the same guarantees using a remote coordination service.
+
+Core Idea
+```
+Semaphore (shared memory)
+    ↓
+Distributed Lock (shared service)
+```
+You replace: atomic memory ops with: atomic network operations on a central system
+
+Distributed locks replace semaphores by: moving the "shared state" into a reliable external system
+
+## real Linux kernel bugs caused by semaphore misuse
+<!--Show real Linux kernel bugs caused by semaphore misuse-->

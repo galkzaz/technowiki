@@ -9,28 +9,23 @@ independently of each other. Some processes, however, cooperate to achieve their
 intended purposes, and these processes need methods of communicating with one
 another and synchronizing their actions.
 
-Processes frequently need to synchronize and communicate with other proc-
-esses. For example, in a shell pipeline, the output of the first process must be pas-
-sed to the second process, and so on down the line. Thus, there is a need for com-
-munication between processes, preferably in a well-structured way not using inter-
+Processes frequently need to synchronize and communicate with other processes. For example, in a shell pipeline, the output of the first process must be passed to the second process, and so on down the line. Thus, there is a need for communication between processes, preferably in a well-structured way not using inter-
 rupts.
 
-One way for processes to communicate is by reading and writing informa-
-tion in disk files. However, for many applications, this is too slow and inflexible.
-Therefore, Linux, like all modern UNIX implementations, provides a rich set of mech-
-anisms for interprocess communication (IPC), including the following:
+One way for processes to communicate is by reading and writing information in disk files. However, for many applications, this is too slow and inflexible.
+Therefore, Linux, like all modern UNIX implementations, provides a rich set of mechanisms for interprocess communication (IPC), including the following:
 
 * ***signals***, which are used to indicate that an event has occurred;
 * ***pipes*** (familiar to shell users as the | operator) and FIFOs, which can be used to
 transfer data between processes;
-* sockets, which can be used to transfer data from one process to another, either
+* **sockets**, which can be used to transfer data from one process to another, either
 on the same host computer or on different hosts connected by a network;
 * ***file locking***, which allows a process to lock regions of a file in order to prevent
 other processes from reading or updating the file contents;
-* message queues, which are used to exchange messages (packets of data) between
+* **message queues**, which are used to exchange messages (packets of data) between
 processes;
 * ***semaphores***, which are used to synchronize the actions of processes; and
-* shared memory, which allows two or more processes to share a piece of memory.
+* **shared memory**, which allows two or more processes to share a piece of memory.
 When one process changes the contents of the shared memory, all of the other
 processes can immediately see the changes.
 
@@ -41,11 +36,78 @@ domain sockets essentially perform the same function of allowing unrelated pro-
 cesses on the same system to exchange data. Both exist in modern UNIX systems
 because FIFOs came from System V, while sockets came from BSD.
 
+Synchronization Evolution:
+1. Hardware → TSL, CAS
+2. OS Primitives → Semaphores
+3. Language Constructs → Monitors
+4. Distributed Systems → Message Passing
+
+## Differnce between Threads and Processes
+When processes share most or all of their address spaces:
+They begin to resemble threads.
+However, a fundamental distinction remains.
+Threads Share:
+- Address space
+- Open file descriptors
+- Signal handlers
+- Timers
+- Process identity
+
+Processes (even if sharing memory) Have:
+- Separate file descriptor tables
+- Separate signal handling state
+- Separate kernel process structures
+- Separate scheduling identities
+
+Thus:
+Threads are lighter-weight execution contexts within one process.
+Processes remain independently managed kernel entities.
+
+it is always true that multiple processes
+sharing a common address space never have the efficiency of user-level threads
+since the kernel is deeply involved in their management.
+
+Even when processes share memory:
+- The kernel manages each separately.
+- Context switches involve kernel-level scheduling.
+- System calls are required for many operations.
+- Page tables and TLB effects are separate.
+User-level threads:
+- Switch via simple register save/restore.
+- Avoid kernel transitions.
+- Are significantly cheaper to manage.
+Thus:
+Shared-memory processes never reach the efficiency of user-level threads.
+
+Synchronization requires:
+    1. Shared state
+    2. Atomic modification of that state
+
+Threads satisfy (1) automatically.
+Processes require explicit OS support.
+This is why:
+- Classical textbook algorithms assume shared memory.
+- Real-world multiprocess synchronization depends heavily on OS mechanisms.
+
+We now see three layers:
+1. **Pure Thread Model**
+    * Shared memory by default
+    * Fast synchronization
+    * Minimal kernel involvement
+2. **Shared-Memory Processes**
+    * Explicit memory sharing required
+    * Kernel involved in setup
+    * Moderate overhead
+3. **Kernel-Resident Synchronization**
+    * No shared user memory required
+    * Always system-call based
+    * Highest overhead
+
 ## Signals
 signals are
 more usually employed in a wide range of other contexts, 
 
-Signals are often described as “software interrupts.” The arrival of a signal
+Signals are often described as "software interrupts." The arrival of a signal
 informs a process that some event or exceptional condition has occurred. There
 are various types of signals, each of which identifies a different event or condition.
 Each signal type is identified by a different integer, defined with symbolic names of

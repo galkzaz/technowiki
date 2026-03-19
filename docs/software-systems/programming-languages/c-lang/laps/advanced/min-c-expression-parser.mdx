@@ -1,0 +1,643 @@
+---
+id: c-lang-lap-advanced-min-c-expression-parser
+title: Mini C Expression Parser
+description: Mini C Expression Parser written in C.
+---
+
+Below is a mini C expression parser written in C.
+
+It demonstrates:
+- Tokenization (lexer)
+- Recursive-descent parsing
+- Precedence handling via grammar structure
+- AST construction
+- Simple AST printing
+
+It supports:
+- `+ - * /`
+- Parentheses
+- Integer literals
+- Unary `+` and `-`
+
+This is a minimal but real compiler-style implementation.
+
+## Grammar Implemented
+
+We encode precedence directly in the grammar:
+```
+expression     → additive
+additive       → multiplicative ( ( + | - ) multiplicative )*
+multiplicative → unary ( ( * | / ) unary )*
+unary          → ( + | - ) unary | primary
+primary        → NUMBER | '(' expression ')'
+```
+Notice:
+- * and / are deeper → higher precedence
+- Loops → left associativity
+- Recursion in unary → right associativity
+
+## Code
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <string.h>
+
+/* ============================
+   TOKENIZER
+   ============================ */
+
+typedef enum {
+    TOK_NUMBER,
+    TOK_PLUS,
+    TOK_MINUS,
+    TOK_STAR,
+    TOK_SLASH,
+    TOK_LPAREN,
+    TOK_RPAREN,
+    TOK_END
+} TokenType;
+
+typedef struct {
+    TokenType type;
+    int value;  // only used for numbers
+} Token;
+
+const char *input;
+Token current_token;
+
+void next_token() {
+    while (isspace(*input)) input++;
+
+    if (isdigit(*input)) {
+        current_token.type = TOK_NUMBER;
+        current_token.value = strtol(input, (char**)&input, 10);
+        return;
+    }
+
+    switch (*input) {
+        case '+': current_token.type = TOK_PLUS;  break;
+        case '-': current_token.type = TOK_MINUS; break;
+        case '*': current_token.type = TOK_STAR;  break;
+        case '/': current_token.type = TOK_SLASH; break;
+        case '(': current_token.type = TOK_LPAREN;break;
+        case ')': current_token.type = TOK_RPAREN;break;
+        case '\0': current_token.type = TOK_END;  return;
+        default:
+            fprintf(stderr, "Unexpected character: %c\n", *input);
+            exit(1);
+    }
+
+    input++;
+}
+
+/* ============================
+   AST DEFINITIONS
+   ============================ */
+
+typedef enum {
+    AST_NUMBER,
+    AST_BINARY,
+    AST_UNARY
+} ASTType;
+
+typedef struct AST {
+    ASTType type;
+    int value;              // for numbers
+    TokenType op;           // operator for unary/binary
+    struct AST *left;
+    struct AST *right;
+} AST;
+
+AST* new_number(int value) {
+    AST* node = malloc(sizeof(AST));
+    node->type = AST_NUMBER;
+    node->value = value;
+    node->left = node->right = NULL;
+    return node;
+}
+
+AST* new_binary(TokenType op, AST* left, AST* right) {
+    AST* node = malloc(sizeof(AST));
+    node->type = AST_BINARY;
+    node->op = op;
+    node->left = left;
+    node->right = right;
+    return node;
+}
+
+AST* new_unary(TokenType op, AST* operand) {
+    AST* node = malloc(sizeof(AST));
+    node->type = AST_UNARY;
+    node->op = op;
+    node->left = operand;
+    node->right = NULL;
+    return node;
+}
+
+/* ============================
+   PARSER (Recursive Descent)
+   ============================ */
+
+AST* parse_expression();
+
+AST* parse_primary() {
+    if (current_token.type == TOK_NUMBER) {
+        AST* node = new_number(current_token.value);
+        next_token();
+        return node;
+    }
+
+    if (current_token.type == TOK_LPAREN) {
+        next_token();
+        AST* node = parse_expression();
+        if (current_token.type != TOK_RPAREN) {
+            fprintf(stderr, "Expected ')'\n");
+            exit(1);
+        }
+        next_token();
+        return node;
+    }
+
+    fprintf(stderr, "Unexpected token in primary\n");
+    exit(1);
+}
+
+AST* parse_unary() {
+    if (current_token.type == TOK_PLUS ||
+        current_token.type == TOK_MINUS) {
+
+        TokenType op = current_token.type;
+        next_token();
+        return new_unary(op, parse_unary());
+    }
+
+    return parse_primary();
+}
+
+AST* parse_multiplicative() {
+    AST* left = parse_unary();
+
+    while (current_token.type == TOK_STAR ||
+           current_token.type == TOK_SLASH) {
+
+        TokenType op = current_token.type;
+        next_token();
+        AST* right = parse_unary();
+        left = new_binary(op, left, right);
+    }
+
+    return left;
+}
+
+AST* parse_additive() {
+    AST* left = parse_multiplicative();
+
+    while (current_token.type == TOK_PLUS ||
+           current_token.type == TOK_MINUS) {
+
+        TokenType op = current_token.type;
+        next_token();
+        AST* right = parse_multiplicative();
+        left = new_binary(op, left, right);
+    }
+
+    return left;
+}
+
+AST* parse_expression() {
+    return parse_additive();
+}
+
+/* ============================
+   AST PRINTER
+   ============================ */
+
+void print_ast(AST* node, int depth) {
+    for (int i = 0; i < depth; i++) printf("  ");
+
+    if (node->type == AST_NUMBER) {
+        printf("NUMBER(%d)\n", node->value);
+    }
+    else if (node->type == AST_UNARY) {
+        printf("UNARY(%c)\n",
+            node->op == TOK_MINUS ? '-' : '+');
+        print_ast(node->left, depth + 1);
+    }
+    else if (node->type == AST_BINARY) {
+        char op_char;
+        switch (node->op) {
+            case TOK_PLUS:  op_char = '+'; break;
+            case TOK_MINUS: op_char = '-'; break;
+            case TOK_STAR:  op_char = '*'; break;
+            case TOK_SLASH: op_char = '/'; break;
+            default: op_char = '?';
+        }
+        printf("BINARY(%c)\n", op_char);
+        print_ast(node->left, depth + 1);
+        print_ast(node->right, depth + 1);
+    }
+}
+
+/* ============================
+   MAIN
+   ============================ */
+
+int main() {
+    char buffer[256];
+
+    printf("Enter expression: ");
+    fgets(buffer, sizeof(buffer), stdin);
+
+    input = buffer;
+    next_token();
+
+    AST* tree = parse_expression();
+
+    if (current_token.type != TOK_END) {
+        fprintf(stderr, "Unexpected trailing input\n");
+        return 1;
+    }
+
+    printf("\nAST:\n");
+    print_ast(tree, 0);
+
+    return 0;
+}
+```
+
+## Example Run
+
+Input:
+```
+3 + 4 * (2 - 1)
+```
+Output:
+```
+BINARY(+)
+  NUMBER(3)
+  BINARY(*)
+    NUMBER(4)
+    BINARY(-)
+      NUMBER(2)
+      NUMBER(1)
+```
+Notice:
+- `*` is deeper than `+`
+- Precedence emerges from grammar
+- Left associativity is implemented using loops
+
+## Code Explaination
+### Overall Architecture
+The program has 4 stages:
+```
+Input string
+    ↓
+Tokenizer (next_token)
+    ↓
+Parser (recursive descent)
+    ↓
+AST construction
+    ↓
+AST printer
+```
+It does not evaluate, it only builds a syntax tree.
+
+### The Tokenizer (Lexical Analysis)
+Token structure
+```
+typedef struct {
+    TokenType type;
+    int value;  // only for numbers
+} Token;
+```
+A token represents one atomic unit:
+- NUMBER
+- +
+- -
+- *
+- /
+- (
+- )
+- END
+
+Global input pointer
+```c
+const char *input;
+```
+Token current_token;
+- input points to the current character in the string.
+- current_token always stores the current token.
+
+`next_token()`
+
+This function:
+- Skips whitespace
+- Recognizes numbers
+- Recognizes operators
+- Advances input pointer
+
+Key part:
+```c
+if (isdigit(*input)) {
+    current_token.type = TOK_NUMBER;
+    current_token.value = strtol(input, (char**)&input, 10);
+    return;
+}
+```
+Important detail:
+
+strtol:
+- Converts integer
+- Moves input forward automatically
+
+For operators:
+```
+case '+': current_token.type = TOK_PLUS;
+```
+Then:
+```
+input++;
+```
+So each call to `next_token()` advances the lexer.
+
+### AST (Abstract Syntax Tree)
+Node types
+```c
+typedef enum {
+    AST_NUMBER,
+    AST_BINARY,
+    AST_UNARY
+} ASTType;
+```
+An AST node can be:
+- A number
+- A binary operation
+- A unary operation
+
+AST structure
+```c
+typedef struct AST {
+    ASTType type;
+    int value;              
+    TokenType op;           
+    struct AST *left;
+    struct AST *right;
+} AST;
+```
+Depending on type:
+
+**If NUMBER:**
+```
+value used
+left = right = NULL
+```
+If BINARY
+```
+op = + - * /
+left = left operand
+right = right operand
+```
+If UNARY:
+```
+op = + or -
+left = operand
+right = NULL
+```
+This mirrors real compiler AST structures.
+
+### The Parser (Recursive Descent)
+This is the most important part.
+We implement grammar functions corresponding to precedence levels.
+
+`parse_expression()`
+```
+AST* parse_expression() {
+    return parse_additive();
+}
+```
+Top level simply delegates to additive level.
+
+`parse_additive()`
+
+Handles:
+```
+multiplicative ( (+|-) multiplicative )*
+```
+Implementation:
+```c
+AST* left = parse_multiplicative();
+while (current_token.type == TOK_PLUS ||
+       current_token.type == TOK_MINUS) {
+    TokenType op = current_token.type;
+    next_token();
+    AST* right = parse_multiplicative();
+    left = new_binary(op, left, right);
+}
+```
+Important:
+- First parse left operand
+- While we see + or -
+- Build tree incrementally
+- Loop makes it left associative
+
+Example:
+```
+3 - 2 - 1
+```
+Becomes:
+```
+((3 - 2) - 1)
+```
+`parse_multiplicative()`
+
+Same structure:
+```
+unary ( (*|/) unary )*
+```
+This enforces higher precedence than additive.
+Because parse_additive() calls parse_multiplicative() first.
+That’s the key.
+
+`parse_unary()`
+
+Handles:
+```
+(+|-) unary
+```
+Implementation:
+```c
+if (current_token.type == TOK_PLUS ||
+    current_token.type == TOK_MINUS) {
+    TokenType op = current_token.type;
+    next_token();
+    return new_unary(op, parse_unary());
+}
+```
+Notice:
+It calls itself recursively.
+That gives right associativity.
+
+Example:
+```
+- - 3
+```
+Becomes:
+```
+-( -(3) )
+```
+`parse_primary()`
+
+Handles:
+- numbers
+- parentheses
+
+If number:
+```
+AST* node = new_number(current_token.value);
+next_token();
+return node;
+```
+If `(`:
+- Consume (
+- Parse expression
+- Expect `)`
+- Consume `)`
+
+This allows nested expressions.
+
+**Why Precedence Works**
+
+Because of call order:
+```
+expression
+  → additive
+    → multiplicative
+      → unary
+        → primary
+```
+Multiplication is deeper than addition.
+So:
+```
+3 + 4 * 2
+```
+Parsing order:
+- parse_additive
+    * left = parse_multiplicative → 3
+    * sees +
+    * right = parse_multiplicative
+        * parse_unary → 4
+        * sees *
+        * right = parse_unary → 2
+AST:
+```
+    +
+   / \
+  3   *
+     / \
+    4   2
+```
+- Precedence emerges naturally.
+- No numeric precedence table is used.
+
+**Why Associativity Works**
+
+**Left associative operators**
+
+Implemented with:
+```
+while (...) {
+    left = new_binary(op, left, right);
+}
+```
+That repeatedly grows tree on left side.
+
+**Right associative operators**
+
+Would be implemented with recursion:
+
+```
+left = parse_lower();
+if (token == OP) {
+    next_token();
+    right = parse_same_level();
+}
+```
+We did that in unary.
+
+### AST Printer
+```c
+void print_ast(AST* node, int depth)
+```
+Prints tree with indentation.
+Example:
+```
+3 + 4 * 2
+```
+Produces:
+```
+BINARY(+)
+  NUMBER(3)
+  BINARY(*)
+    NUMBER(4)
+    NUMBER(2)
+```
+Indentation = tree depth.
+
+**Full Execution Flow Example**
+
+Input:
+```
+3 + 4 * (2 - 1)
+```
+Step 1: Lexer
+
+Produces tokens:
+```
+NUMBER(3)
++
+NUMBER(4)
+*
+(
+NUMBER(2)
+-
+NUMBER(1)
+)
+END
+```
+Step 2: Parser
+
+Builds AST:
+```
+        +
+       / \
+      3   *
+         / \
+        4   -
+           / \
+          2   1
+```
+
+**What This Demonstrates (Compiler View)**
+- Precedence comes from function nesting
+- Associativity comes from loops vs recursion
+- AST mirrors mathematical structure
+- Parsing is deterministic
+
+<!--AI
+If you'd like next, I can extend this to:
+• Add assignment and right associativity
+• Add variables and symbol table
+• Add evaluation
+• Convert this into a Pratt parser
+• Or build a mini interpreter-->
+<!--If you'd like, next we can:
+• Add evaluation (turn it into an interpreter)
+• Add assignment with right associativity
+• Add variables and symbol table
+• Convert to Pratt parser
+• Add logical operators with short-circuit
+A Pratt parser implementation example
+A walkthrough of how a[i] = i++ + ++i; is handled
+Or a deep dive into short-circuit code generation
+-->

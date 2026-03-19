@@ -115,7 +115,7 @@ When designing an intelligent or automated system, it is essential to select an 
 
 First, when might you choose not to use a foundation model—or any ML component at all? 
 1. If your inputs are fully predictable and every possible output can be described in advance, a handful of lines of procedural code are often faster, cheaper, and far easier to test than an ML–based pipeline.
-    * For example, parsing a log file that always follows the format “YYYY‐MM‐DD HH:MM:SS—message” can be handled reliably with a small regular‐expression‐based parser in Python or Go. 
+    * For example, parsing a log file that always follows the format "YYYY‐MM‐DD HH:MM:SS—message" can be handled reliably with a small regular‐expression‐based parser in Python or Go. 
     * Likewise, if your application demands millisecond‐level latency—such as an embedded system that must react to sensor data in real time—there simply isn't time for a language model API call. 
     * In such cases, traditional code is the right choice. 
     * Finally, regulated domains (medical devices, aeronautics, certain financial systems) often require fully deterministic, auditable decision logic—black‐box neural models won't satisfy certification requirements. 
@@ -129,7 +129,7 @@ First, when might you choose not to use a foundation model—or any ML component
 Traditional chatbots or RAG systems occupy the next tier of complexity: 
 1. they add natural language understanding and document retrieval but stop short of autonomous, multistep planning. 
 2. If your primary need is to let users ask questions about a knowledge base—say, searching a product manual, a legal archive, or corporate wikis—a RAG system can embed documents into a vector store, retrieve relevant passages in response to a query, and generate coherent, context‐aware answers. 
-3. For instance, an internal IT help desk might use RAG to answer “How do I reset my VPN credentials?” by fetching the latest troubleshooting guide and summarizing the relevant steps. 
+3. For instance, an internal IT help desk might use RAG to answer "How do I reset my VPN credentials?" by fetching the latest troubleshooting guide and summarizing the relevant steps. 
 4. Unlike autonomous agents, RAG systems do not independently decide on follow‐up actions (like filing a ticket or scheduling a callback); they simply surface information.
 5. A traditional chatbot or RAG approach makes sense when the task is primarily question‐answering over structured or unstructured content, with limited need for external API calls or decision orchestration. 
 6. Maintenance costs are lower than for agents—.
@@ -140,11 +140,11 @@ Finally, we reach autonomous agents—situations where
 1. neither simple code, nor rigid workflows, nor RAG suffice 
 2. because inputs are unstructured, novel, or highly variable, and 
 3. because you require dynamic, multistep planning or continuous learning from feedback. 
-4. Consider a customer support center that receives free‐form emails with issues ranging from “my laptop battery is swelling and might erupt” to “I keep getting billed for services I didn't order.” A rule‐based workflow or a RAG‐powered FAQ lookup would shatter under such open‐ended variety, but an agent powered by a foundation model can parse intent, extract relevant entities, consult a knowledge base, draft an appropriate response, and even escalate to a human if necessary—all without being told every possible branch in advance. 
+4. Consider a customer support center that receives free‐form emails with issues ranging from "my laptop battery is swelling and might erupt" to "I keep getting billed for services I didn't order." A rule‐based workflow or a RAG‐powered FAQ lookup would shatter under such open‐ended variety, but an agent powered by a foundation model can parse intent, extract relevant entities, consult a knowledge base, draft an appropriate response, and even escalate to a human if necessary—all without being told every possible branch in advance. 
 5. Similarly, in supply chain management, an agent that ingests real‐time inventory data, supplier lead times, and sales forecasts can replan shipment schedules dynamically; a deterministic workflow would require constant manual updates to handle new exceptions.
 6. Agents also excel when many subtasks must run in parallel—such as a security operations agent that simultaneously queries threat intelligence APIs, scans network telemetry, and monitors system logs for anomalies.
 7. Similarly, a security operations agent that simultaneously queries threat intelligence APIs, scans network telemetry, and performs sandbox analysis on suspicious binaries. 
-8. Because agents operate asynchronously and reprioritize based on real‐time data, they avoid the brittle “one‐step‐at‐a‐time” nature of workflows or RAG systems. 
+8. Because agents operate asynchronously and reprioritize based on real‐time data, they avoid the brittle "one‐step‐at‐a‐time" nature of workflows or RAG systems. 
 9. To justify the higher compute and maintenance costs of running a foundation model, you need this level of contextual reasoning, parallel task orchestration, or ongoing self‐improvement—scenarios where rigid code, workflows, or chatbots would be too brittle or expensive to maintain.
 
 | Characteristic | Traditional code | Workflow | Autonomous agent |
@@ -212,9 +212,9 @@ Inputs are expressed in natural language or may vary in phrasing, but still fall
 - Slight ambiguity
 
 Examples:
-- “Reset my password.”
-- “I forgot my login credentials.”
-- “I cannot access my account.”
+- "Reset my password."
+- "I forgot my login credentials."
+- "I cannot access my account."
 
 Here, a traditional chatbot or intent-classification system is appropriate. The system must interpret language but does not require deep reasoning or external knowledge retrieval.
 
@@ -230,8 +230,8 @@ Inputs may be unstructured, lengthy, ambiguous, or drawn from diverse domains.
 
 Examples:
 - Summarizing large documents('Summarize this 200-page PDF')
-- Answering questions from a corporate knowledge base(“What did the Q3 earnings say about risk exposure?”)
-- Analyzing source code or technical reports(“Analyze this codebase”)
+- Answering questions from a corporate knowledge base("What did the Q3 earnings say about risk exposure?")
+- Analyzing source code or technical reports("Analyze this codebase")
 
 In such cases, a RAG system or, in some scenarios, an autonomous agent may be required to handle the breadth and unpredictability of input.
 

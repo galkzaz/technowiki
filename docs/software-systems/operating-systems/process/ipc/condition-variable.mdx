@@ -1,0 +1,572 @@
+---
+id: process-ipc-condition-variable
+title: Condition variables
+description: Condition variables
+---
+
+A **condition variable** represents a queue of waiting threads.
+
+Example monitor:
+-condition not_full
+- condition not_empty
+
+Each condition variable has two operations:
+| Operation  | Meaning                 |
+| ---------- | ----------------------- |
+| `wait()`   | block the thread        |
+| `signal()` | wake one waiting thread |
+
+
+In addition to mutexes, Pthreads offers a second synchronization mechanism, condition variables. Mutexes are good for allowing or blocking access to a critical region. Condition variables allow threads to block due to some
+condition not being met. Almost always the two methods are used together. 
+
+It is also worth noting that condition variables (unlike semaphores) have no
+memory. If a signal is sent to a condition variable on which no thread is waiting,
+the signal is lost. Programmers have to be careful not to lose signals.
+
+In Pthreads, condition variables are used together with mutexes to allow threads to wait for certain conditions to become true.
+
+There are a few core function calls that every program using condition variables relies on.
+| Function                   | Purpose                       |
+| -------------------------- | ----------------------------- |
+| `pthread_cond_init()`      | initialize(Create) condition variable |
+| `pthread_cond_wait()`      | wait for condition (sleep)    |
+| `pthread_cond_signal()`    | wake one waiting thread       |
+| `pthread_cond_broadcast()` | wake all waiting threads      |
+| `pthread_cond_timedwait()` | wait with timeout             |
+| `pthread_cond_destroy()`   | destroy condition variable    |
+
+there are calls to create and destroy condition variables. They can have attributes and there are various calls for managing the attributes. 
+
+The most important operations on condition variables are `pthread_cond_wait` and `pthread_cond_signal`. `pthread_cond_wait` blocks the calling thread until some other thread signals it (using the latter call). 
+
+The reasons for blocking and waiting are not part of the waiting and signaling protocol, of course. The blocking thread often is waiting for the signaling thread to do some work, release some resource, or perform some other activity. Only then can the blocking thread continue. The condition variables allow this waiting and blocking to be done
+atomically. 
+
+The `pthread_cond_broadcast` is used when there are multiple threads potentially all blocked and waiting for the same signal.
+
+**1. pthread_cond_init()**
+
+Initializes a condition variable.
+
+Syntax
+```c
+int pthread_cond_init(pthread_cond_t *cond,
+                      const pthread_condattr_t *attr);
+```
+Example
+```c
+pthread_cond_t cond;
+pthread_cond_init(&cond, NULL);
+```
+Purpose: Creates a condition variable so threads can:
+- wait
+- signal
+- broadcast
+
+If attr = NULL, default attributes are used.
+
+**2. pthread_cond_wait()**
+
+This is the most important function.
+
+Syntax
+```c
+int pthread_cond_wait(pthread_cond_t *cond,
+                      pthread_mutex_t *mutex);
+```
+Example
+```c
+pthread_mutex_lock(&mutex);
+
+while(buffer == 0)
+    pthread_cond_wait(&cond, &mutex);
+
+pthread_mutex_unlock(&mutex);
+```
+What it does: `pthread_cond_wait()` performs three atomic steps:
+1. releases the mutex
+2. blocks the thread
+3. when awakened → re-locks the mutex
+
+This prevents race conditions.
+
+**3. pthread_cond_signal()**
+
+Wakes one thread waiting on the condition variable.
+
+Syntax
+```c
+int pthread_cond_signal(pthread_cond_t *cond);
+```
+Example
+
+Producer waking consumer:
+
+```c
+pthread_cond_signal(&condc);
+```
+Meaning: wake one waiting thread
+
+Used when only one thread needs to proceed.
+
+**4. pthread_cond_broadcast()**
+
+Wakes all waiting threads.
+
+Syntax
+```c
+int pthread_cond_broadcast(pthread_cond_t *cond);
+```
+Example
+```c
+pthread_cond_broadcast(&cond);
+```
+Meaning: wake all threads waiting on this condition
+
+Used when: many threads may proceed
+
+Example: thread pool workers waiting for tasks
+
+**5. pthread_cond_timedwait()**
+
+Like `pthread_cond_wait()` but includes a timeout.
+
+Syntax
+```c
+int pthread_cond_timedwait(
+    pthread_cond_t *cond,
+    pthread_mutex_t *mutex,
+    const struct timespec *abstime);
+```
+Example
+```c
+struct timespec ts;
+clock_gettime(CLOCK_REALTIME, &ts);
+ts.tv_sec += 5;
+
+pthread_cond_timedwait(&cond, &mutex, &ts);
+```
+Meaning: wait for condition or timeout after 5 seconds
+
+**6. pthread_cond_destroy()**
+
+Destroys a condition variable when it is no longer needed.
+
+Syntax
+```c
+int pthread_cond_destroy(pthread_cond_t *cond);
+```
+Example
+```c
+pthread_cond_destroy(&cond);
+```
+This frees system resources.
+
+## Condition variables and mutexes
+Mutexes are good for allowing or blocking
+access to a critical region. Condition variables allow threads to block due to some
+condition not being met. Almost always the two methods are used together.
+
+Condition variables and mutexes are always used together. The pattern is for
+one thread to lock a mutex, then wait on a conditional variable when it cannot get
+what it needs. Eventually another thread will signal it and it can continue. The
+`pthread_cond_wait` call atomically unlocks the mutex it is holding. Then, upon
+successful return, the mutex shall have been locked again and owned by the calling
+thread. For this reason, the mutex is one of the parameters.
+### Typical Usage Pattern
+Condition variables always follow this pattern.
+```c
+pthread_mutex_lock(&mutex);
+
+while(condition_not_true)
+    pthread_cond_wait(&cond, &mutex);
+
+/* critical section */
+
+pthread_mutex_unlock(&mutex);
+```
+Another thread changes the condition:
+```c
+pthread_mutex_lock(&mutex);
+
+condition = true;
+
+pthread_cond_signal(&cond);
+
+pthread_mutex_unlock(&mutex);
+```
+**Key Rule**
+
+Always use:
+```
+while(condition_not_true)
+```
+NOT
+```
+if(condition_not_true)
+```
+Reason: spurious wakeups, A thread may wake up even if nobody signaled it.
+
+### Internal Linux Mechanism
+
+Inside Linux:
+```
+pthread_cond_wait()
+        ↓
+glibc runtime
+        ↓
+futex_wait()
+        ↓
+kernel scheduler
+
+When signaled:
+
+pthread_cond_signal()
+        ↓
+futex_wake()
+```
+So condition variables ultimately rely on **Linux futex** synchronization.
+### The Producer-Consumer Problem
+Let us now look at the interaction of threads, mutexes, and condition variables in a bit more detail.
+
+As a simple example, consider the producer-consumer scenario again: one
+thread puts things in a buffer and another one takes them out. If the producer dis-
+covers that there are no more free slots available in the buffer, it has to block until
+one becomes available. Mutexes make it possible to do the check atomically with-
+out interference from other threads, but having discovered that the buffer is full, the
+producer needs a way to block and be awakened later. This is what condition vari-
+ables allow.
+
+As an example of how mutexes and condition variables are used, next code 
+shows a very simple producer-consumer problem with a single item buffer. 
+- When the producer has filled the buffer, it must wait until the consumer empties it before producing the next item. 
+- Similarly, when the consumer has removed an item, it must wait until the producer has produced another one. 
+
+While very simple, this example illustrates the basic mechanisms. The statement that puts a thread to sleep should always check the condition to make sure it is satisfied before continuing, as the thread might have been awakened due to a UNIX signal or some other reason.
+```c
+#include <stdio.h>
+#include <pthread.h>
+#define MAX 1000000000 /* how many numbers to produce */
+
+pthread mutex_t the_mutex;
+pthread cond_t condc, condp; /* used for signaling */
+int buffer = 0; /* buffer used between producer and consumer */
+
+void *producer(void *ptr) /* produce data */
+{ 
+    int i;
+    for (i= 1; i <= MAX; i++) {
+        pthread_mutex_lock(&the_mutex); /* get exclusive access to buffer */
+        while (buffer != 0) pthread_cond_wait(&condp, &the_mutex);
+        buffer = i; /* put item in buffer */
+        pthread_cond_signal(&condc); /* wake up consumer */
+        pthread_mutex_unlock(&the_mutex); /* release access to buffer */
+    }
+    pthread exit(0);
+}
+void *consumer(void *ptr) /* consume data */
+{ 
+    int i;
+    for (i = 1; i <= MAX; i++) {
+        pthread_mutex_lock(&the_mutex); /* get exclusive access to buffer */
+        while (buffer ==0 ) pthread_cond_wait(&condc, &the_mutex);
+        buffer = 0; /* take item out of buffer (not shown) and reinitialize */
+        pthread_cond_signal(&condp); /* wake up producer */
+        pthread_mutex_unlock(&the_mutex); /* release access to buffer */
+    }
+    pthread exit(0);
+}
+int main(int argc, char **argv)
+{
+    pthread_t pro, con;
+    
+    pthread_mutex_init(&the_mutex, 0);
+    pthread_cond_init(&condc, 0);
+    pthread_cond_init(&condp, 0);
+    
+    pthread_create(&con, 0, consumer, 0);
+    pthread_create(&pro, 0, producer, 0);
+    
+    pthread_join(pro, 0);
+    pthread_join(con, 0);
+    
+    pthread_cond_destroy(&condc);
+    pthread_cond_destroy(&condp);
+    pthread_mutex_destroy(&the_mutex);
+}
+```
+This program demonstrates the classic Producer–Consumer problem using Pthreads mutexes and condition variables.
+There are two threads:
+- Producer → generates numbers 1..MAX
+- Consumer → consumes them
+
+A single shared buffer holds one item at a time.
+
+The synchronization mechanisms ensure:
+1. Producer does not overwrite an unconsumed value
+2. Consumer does not read an empty buffer
+3. Only one thread accesses the buffer at a time
+
+1. Global Variables
+#define MAX 1000000000
+pthread_mutex_t the_mutex;
+pthread_cond_t condc, condp;
+int buffer = 0;
+MAX
+Number of items to produce/consume.
+
+the_mutex
+mutex protecting the shared buffer
+Purpose:
+ensures mutual exclusion
+only one thread can access buffer at a time
+
+condc (consumer condition)
+condition variable used to wake the consumer
+Producer signals this when data becomes available.
+
+condp (producer condition)
+condition variable used to wake the producer
+Consumer signals this when buffer becomes empty.
+
+buffer
+single-slot buffer
+State:
+| Value    | Meaning                       |
+| -------- | ----------------------------- |
+| 0        | buffer empty                  |
+| non-zero | buffer contains produced item |
+
+
+2. **Producer Thread**
+    ```c
+    void *producer(void *ptr)
+    {
+        int i;
+        for (i = 1; i <= MAX; i++) {
+    ```
+    Producer generates numbers 1..MAX.
+    
+    1. **Step 1 — Lock the mutex**
+    pthread_mutex_lock(&the_mutex);
+    This guarantees:
+    exclusive access to buffer
+    No other thread can read/write the buffer simultaneously.
+    
+    2. **Step 2 — Wait if buffer is full**
+    while (buffer != 0)
+        pthread_cond_wait(&condp, &the_mutex);
+    Meaning:
+    if buffer already contains data
+    producer must wait
+    Why while?
+    pthread_cond_wait may wake spuriously
+    So the condition must be rechecked.
+    
+    What pthread_cond_wait does internally
+    It performs three atomic operations:
+    1. release the mutex
+    2. put thread to sleep
+    3. when awakened → reacquire mutex
+    So the producer sleeps until the consumer signals.
+    
+    3. **Step 3 — Produce data**
+    buffer = i;
+    Now the buffer contains an item.
+    Example:
+    buffer = 25
+    
+    4. **Step 4 — Signal consumer**
+    pthread_cond_signal(&condc);
+    This wakes one consumer thread waiting on condc.
+    Meaning:
+    data is now available
+    
+    5. **Step 5 — Unlock mutex**
+    pthread_mutex_unlock(&the_mutex);
+    Now another thread can access the buffer.
+
+3. **Consumer Thread**
+    ```c
+    void *consumer(void *ptr)
+    {
+        int i;
+        for (i = 1; i <= MAX; i++) {
+    ```
+    Consumer processes MAX items.
+    
+    1. **Step 1 — Lock mutex**
+    ```c
+    pthread_mutex_lock(&the_mutex);
+    ```
+    Ensures exclusive access to the buffer.
+    
+    2. **Step 2 — Wait if buffer empty**
+    ```c
+    while (buffer == 0)
+        pthread_cond_wait(&condc, &the_mutex);
+    ```
+    Meaning:
+    if no data available
+    consumer must sleep
+    Consumer waits until producer signals condc.
+    
+    3. **Step 3 — Consume data**
+    ```c
+    buffer = 0;
+    ```
+    Consumer removes the item.
+    (Actual processing is omitted in this example.)
+    State becomes:
+    buffer empty
+    
+    4. **Step 4 — Signal producer**
+    ```c
+    pthread_cond_signal(&condp);
+    ```
+    Meaning:
+    buffer now empty
+    producer can produce again
+    
+    5. **Step 5 — Unlock mutex**
+    ```c
+    pthread_mutex_unlock(&the_mutex);
+    ```
+    Other threads may now access the buffer.
+
+4. **Main Function**
+    
+    **Thread creation**
+    ```c
+    pthread_create(&con, 0, consumer, 0);
+    pthread_create(&pro, 0, producer, 0);
+    ```
+    Creates two threads:
+    - consumer thread
+    - producer thread
+    
+    **Waiting for completion**
+    ```c
+    pthread_join(pro, 0);
+    pthread_join(con, 0);
+    ```
+    Main thread waits for both threads to finish.
+    
+    **Cleanup**
+    ```c
+    pthread_cond_destroy(&condc);
+    pthread_cond_destroy(&condp);
+    pthread_mutex_destroy(&the_mutex);
+    ```
+    Releases synchronization objects.
+
+5. **Execution Timeline Example**
+
+    Initial state:
+    - buffer = 0
+    
+    1. **Step 1 — Consumer starts first**
+    Consumer:
+    buffer == 0
+    So it executes:
+    ```c
+    pthread_cond_wait(condc)
+    ```
+    Consumer sleeps.
+    
+    2. **Step 2 — Producer runs**
+    Producer:
+    buffer = 1
+    Signals:
+    ```c
+    pthread_cond_signal(condc)
+    ```
+    Consumer wakes.
+    
+    3. **Step 3 — Consumer consumes**
+    Consumer:
+    buffer = 0
+    Signals:
+    ```c
+    pthread_cond_signal(condp)
+    ```
+    Producer wakes if waiting.
+    
+    Cycle repeats
+    ```
+    Producer → Consumer → Producer → Consumer
+    ```
+
+6. **Why Two Condition Variables?**
+
+We need two independent events.
+| Condition | Used By  | Meaning         |
+| --------- | -------- | --------------- |
+| condc     | consumer | buffer has data |
+| condp     | producer | buffer empty    |
+
+7. **Why Mutex Is Required With Condition Variables**
+    Condition variables do not protect data.
+    They only:
+    - sleep
+    - wake
+    
+    The mutex ensures:
+    - atomic check + sleep
+    - Without the mutex, we get a race condition:
+    
+    Example:
+    ```
+    consumer checks buffer == 0
+    producer fills buffer
+    consumer sleeps anyway
+    ```
+    Now data exists but consumer sleeps forever.
+    Mutex prevents this.
+
+8. Complete Synchronization Model
+```
+        PRODUCER THREAD
+               |
+        lock mutex
+               |
+     while buffer full
+          wait(condp)
+               |
+        write buffer
+               |
+       signal(condc)
+               |
+        unlock mutex
+
+
+        CONSUMER THREAD
+               |
+        lock mutex
+               |
+     while buffer empty
+          wait(condc)
+               |
+        read buffer
+               |
+       signal(condp)
+               |
+        unlock mutex
+```
+9. **Why This Is Efficient**
+
+    This design avoids: Busy waiting, Threads do not spin.
+    
+    Instead: sleep → wake via futex
+    
+    This makes it CPU-efficient.
+
+10. **Key Synchronization Rules Demonstrated Rule**
+
+    | Rule                              | Explanation                   |
+    | --------------------------------- | ----------------------------- |
+    | Lock before accessing shared data | protects buffer               |
+    | Use while instead of if           | handle spurious wakeups       |
+    | Signal after state change         | notify waiting thread         |
+    | Unlock mutex after signaling      | allow other thread to proceed |

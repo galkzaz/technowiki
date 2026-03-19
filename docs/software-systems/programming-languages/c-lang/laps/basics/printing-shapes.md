@@ -31,14 +31,14 @@ int main(void)
 ## using loops instead of hard-coding the spaces.
 The pattern has two parts:
     1. A diagonal going down-left
-    2. A “V” shape at the bottom
+    2. A "V" shape at the bottom
 Here is one clean way to produce the exact same output programmatically:
 
 ```c
 /*
  * The pattern has two parts:
  1 . A diagonal going down-lef*t
- 2. A “V” shape at the bottom
+ 2. A "V" shape at the bottom
  */
 void using_for_loop() {
   int i, j;

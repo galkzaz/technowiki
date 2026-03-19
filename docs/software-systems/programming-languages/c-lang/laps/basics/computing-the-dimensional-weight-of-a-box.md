@@ -9,8 +9,8 @@ Shipping companies don't especially like boxes that are large but very light, si
 they take up valuable space in a truck or airplane. In fact, companies often charge
 extra for such a box, basing the fee on its volume instead of its weight. In the
 United States, the usual method is to divide the volume by 166 (the allowable num-
-ber of cubic inches per pound). If this number—the box's “dimensional” or “volu-
-metric” weight—exceeds its actual weight, the shipping fee is based on the
+ber of cubic inches per pound). If this number—the box's "dimensional" or "volu-
+metric" weight—exceeds its actual weight, the shipping fee is based on the
 dimensional weight. (The 166 divisor is for international shipments; the dimen-
 sional weight of a domestic shipment is typically calculated using 194 instead.)
 
@@ -28,7 +28,7 @@ weight = volume / 166;
 where weight and volume are integer variables representing the box's weight and volume.
 
 Unfortunately, this formula isn't quite what we need. In C, when one
-integer is divided by another, the answer is “truncated”: all digits after the decimal
+integer is divided by another, the answer is "truncated": all digits after the decimal
 point are lost. The volume of a 12″ × 10″ × 8″ box will be 960 cubic inches. Dividing by 166 gives the answer 5 instead of 5.783, so we have in effect rounded down
 to the next lowest pound; the shipping company expects us to round up(so the correct result is 6).
 

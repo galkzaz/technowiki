@@ -10,8 +10,8 @@ Q: What does GCC stand for? [p. 11]
 
 :::
 
-A: GCC originally stood for “GNU C compiler.” It now stands for “GNU Compiler
-Collection,” because the current version of GCC compiles programs written in a
+A: GCC originally stood for "GNU C compiler." It now stands for "GNU Compiler
+Collection," because the current version of GCC compiles programs written in a
 variety of languages, including Ada, C, C++, Fortran, Java, and Objective-C.
 
 :::question
@@ -20,15 +20,15 @@ Q: OK, so what does GNU stand for?
 
 :::
 
-A: GNU stands for “GNU's Not UNIX!” (and is pronounced guh-NEW, by the way).
+A: GNU stands for "GNU's Not UNIX!" (and is pronounced guh-NEW, by the way).
 GNU is a project of the Free Software Foundation, an organization set up by Rich-
 ard M. Stallman as a protest against the restrictions of licensed UNIX software.
 According to its web site, the Free Software Foundation believes that users should
-be free to “run, copy, distribute, study, change and improve” software. The GNU
+be free to "run, copy, distribute, study, change and improve" software. The GNU
 Project has rewritten much traditional UNIX software from scratch and made it
 publicly available at no charge.
 GCC and other GNU software are crucial to Linux. Linux itself is only the
-“kernel” of an operating system (the part that handles program scheduling and
+"kernel" of an operating system (the part that handles program scheduling and
 basic I/O services); the GNU software is necessary to have a fully functional oper-
 ating system.
 For more information on the GNU Project, visit www.gnu.org.
@@ -55,7 +55,7 @@ grams. When these options are used, GCC is quite good at finding potential troub
 spots in a program. Here are some of the more popular options:
 -Wall Causes the compiler to produce warning messages when it
 detects possible errors. (-W can be followed by codes for
-specific warnings; -Wall means “all -W options.”) Should
+specific warnings; -Wall means "all -W options.") Should
 be used in conjunction with -O for maximum effect.
 -W Issues additional warning messages beyond those produced
 by -Wall.
@@ -152,7 +152,7 @@ compiler will flag the */ symbol on the third line as an error.
 C's prohibition against nested comments can sometimes be a problem. Sup-
 pose we've written a long program containing many short comments. To disable a
 portion of the program temporarily (during testing, say), our first impulse is to
-“comment out” the offending lines with /* and */. Unfortunately, this method
+"comment out" the offending lines with /* and */. Unfortunately, this method
 won't work if the lines contain old-style comments. C99 comments (those begin-
 ning with //) can be nested inside old-style comments, however—another advan-
 tage to using this kind of comment.
@@ -165,8 +165,8 @@ Q: Where does the float type get its name? [p. 17]
 
 :::
 
-A: float is short for “floating-point,” a technique for storing numbers in which the
-decimal point “floats.” A float value is usually stored in two parts: the fraction
+A: float is short for "floating-point," a technique for storing numbers in which the
+decimal point "floats." A float value is usually stored in two parts: the fraction
 (or mantissa) and the exponent. The number 12.0 might be stored as 1.5 × 23, for
 example, where 1.5 is the fraction and 3 is the exponent. Some programming lan-
 guages call this type real instead of float.
@@ -178,8 +178,8 @@ Q: Why do floating-point constants need to end with the letter f? [p. 19]
 :::
 
 A: For the full explanation, see Chapter 7. Here's the short answer: a constant that
-contains a decimal point but doesn't end with f has type double (short for “dou-
-ble precision”). double values are stored more accurately than float values.
+contains a decimal point but doesn't end with f has type double (short for "dou-
+ble precision"). double values are stored more accurately than float values.
 Moreover, double values can be larger than float values, which is why we
 need to add the letter f when assigning to a float variable. Without the f, a
 warning may be generated about the possibility of a number being stored into a
@@ -329,7 +329,7 @@ There are 14 tokens.
 
 :::question
 
-Q: Create and run Kernighan and Ritchie's famous “hello, world” program:
+Q: Create and run Kernighan and Ritchie's famous "hello, world" program:
 #include <stdio.h>
 int main(void)
 {
