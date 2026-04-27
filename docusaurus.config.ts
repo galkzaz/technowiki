@@ -41,7 +41,7 @@ const sharedDocsConfig = {
 const config: Config = {
   title: "TechnoWiki",
   tagline: "Computer Science & Engineering Knowledge Base",
-  url: "galkzaz.github.io",
+  url: "https://galkzaz.github.io",
   baseUrl: "/technowiki/",
   organizationName: 'galkzaz', // Usually your GitHub org/user name.
   projectName: 'technowiki', // Usually your repo name.
