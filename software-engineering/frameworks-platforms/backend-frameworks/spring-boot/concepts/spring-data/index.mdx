@@ -1,0 +1,637 @@
+---
+id: frameworks-platforms-backend-frameworks-spring-boot-spring-data
+title: Spring Data
+sidebar_position: 1
+---
+
+Spring Data comes with a common programming model for persisting data in various types of
+database engines, ranging from traditional relational databases (SQL databases) to various types
+of NoSQL database engines, such as document databases (for example, MongoDB), key-value
+databases (for example, Redis), and graph databases (for example, Neo4j).
+
+The Spring Data project is divided into several subprojects.
+
+## Enabling Spring Data
+<Tabs>
+  <TabItem value="maven" label="Maven">
+  
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-jpa</artifactId>
+</dependency>
+```
+
+  </TabItem>
+  <TabItem value="gradle" label="Gradle">
+  
+```groovy
+implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+```
+  </TabItem>
+</Tabs>
+
+## Core Concepts
+The main problem with all the previous mechanisms of persistence is you don’t have 
+the chance to access both types of databases, relational or non-relational. But Spring 
+Data solves this problem, allowing you to access databases using repositories with an 
+interface to do CRUD operations. Also, you can create concrete that implements the 
+repository interfaces with the idea of doing specific operations not covered by the Spring 
+Data framework. These repositories are available in almost all implementations to access 
+databases to reduce the complexity of using multiple databases in the same application. 
+There are basic repositories that you use to extend the functionality of your repositories. 
+In particular, two are most relevant. CrudRepository has the basic operations for all the 
+entities. PagingAndSortingRepository contains all the logic to obtain the information of 
+one structure in a database using the criteria of pagination and sorting.
+
+![Spring Data supports MongoDB]/docs/assets/software-engineering/frameworks-platforms/backend-frameworks/spring-boot/spring-data/The-structure-of-repositories-depends-on-the-database.png)
+
+Spring Data provides common abstractions and patterns for accessing data,
+making it straightforward to navigate the different modules dedicated to relational and non-relational databases.
+
+![A driver configures the connection between the application and the database. Entities represent domain objects and can be stored and retrieved through a repository](/docs/assets/software-engineering/frameworks-platforms/backend-frameworks/spring-boot/spring-data/interaction between an application using Spring Data and a database.png)
+
+The two core concepts of the programming model in Spring Data are **entities*- and **repositories**.
+**Entities*- and **repositories*- generalize how data is stored and accessed from the various types of
+databases. They provide a common abstraction but still support adding database-specific behavior
+to the entities and repositories. 
+
+Even though Spring Data provides a common programming model for different types
+of databases, this doesn’t mean that you will be able to write portable source code.
+For example, switching the database technology from a SQL database to a NoSQL
+database will, in general, not be possible without some changes in the source code!
+
+
+## Entity
+An entity describes the data that will be stored by Spring Data. Entity classes are, in general, annotated with a mix of generic Spring Data annotations and annotations that are specific to each
+database technology.
+
+For example, an entity that will be stored in a relational database can be annotated with JPA
+annotations such as the following:
+```java
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.IdClass;
+import jakarta.persistence.Table;
+
+@Entity
+@IdClass(ReviewEntityPK.class)
+@Table(name = "review")
+public class ReviewEntity {
+    @Id private int productId;
+    @Id private int reviewId;
+    private String author;
+    private String subject;
+    private String content;
+```
+If an entity is to be stored in a MongoDB database, annotations from the Spring Data MongoDB
+subproject can be used together with generic Spring Data annotations. For example, consider
+the following code:
+```java
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
+import org.springframework.data.mongodb.core.mapping.Document;
+@Document
+public class RecommendationEntity {
+    @Id
+    private String id;
+    @Version
+    private int version;
+    
+    private int productId;
+    private int recommendationId;
+    private String author;
+    private int rate;
+    private String content;
+```
+The @Id and @Version annotations are generic annotations, while the @Document annotation is specific to the Spring Data MongoDB subproject.
+
+This can be revealed by studying the import statements; the import statements that contain mongodb come from the Spring Data MongoDB subproject.
+## Repository 
+When you write an application that needs to persist/retrieve information from a 
+database, you create a class or layer that contains all these operations in most cases.
+
+There are multiples ways to group these operations: all together in the same class, one 
+class per table, but the most common way to do it is to create a class that represents the 
+DAO pattern, with all the operations of one 
+table. This means that you can have multiple classes to access the database, where the 
+main difference is the table you access. To reduce the complexity of having multiple classes with the same code, Spring Data offers the possibility to use an abstraction that 
+contains all these operations, and you only need to indicate the name of the entity/table 
+that you access.
+
+Spring Data offers interfaces that provide common database operations. You need 
+to create an interface that extends from one of that common interfaces and indicate 
+which table or structure you want to access. Behind the scenes, Spring Data transforms 
+this interface into one query to save/retrieve the information depending on the type of 
+database.
+![](/docs/assets/software-engineering/frameworks-platforms/backend-frameworks/spring-boot/spring-data/Example-repositories-that-extend-default-Spring-Data-methods.png)
+
+Repositories are used to store and access data from different types of databases. In its most basic form, a repository can be declared as a Java interface, and Spring Data will generate its implementation on the fly using opinionated conventions. These conventions can be overridden and/or complemented by additional configuration and, if required, some Java code.
+
+## Defining repositories
+Spring Data comes with a set of interfaces for defining repositories:
+1. The `CrudRepository` interface provides standard methods for performing basic create, read, 
+update, and delete operations on the data stored in the databases.
+2. The `PagingAndSortingRepository` interface adds support for paging and sorting to the 
+CrudRepository interface.
+
+## CrudRepository
+To specify a repository for handling the `ReviewEntity` JPA entity, we only need to declare the
+following:
+```java
+import org.springframework.data.repository.CrudRepository;
+
+public interface ReviewRepository extends
+CrudRepository<ReviewEntity, ReviewEntityPK> {
+    Collection<ReviewEntity> findByProductId(int productId);
+}
+```
+In this example, we use a class, ReviewEntityPK, to describe a composite primary key. It looks
+as follows:
+```java
+public class ReviewEntityPK implements Serializable {
+    public int productId;
+    public int reviewId;
+}
+```
+We have also added an extra method, `findByProductId`, which allows us to look up Review entities based on productid – a field that is part of the primary key. The method follows a naming convention defined by Spring Data that allows Spring Data to generate the implementation of this method on the fly as well.
+
+If we want to use the repository, we can simply inject it in the constructor and then start to use
+it, as in the following example:
+```java
+private final ReviewRepository repository;
+
+public ReviewService(ReviewRepository repository) {
+    this.repository = repository;
+}
+public void someMethod() {
+    repository.save(entity);
+    repository.delete(entity);
+    repository.findByProductId(productId);
+}
+```
+### PagingAndSortingRepository
+
+
+======
+Cities API::
++
+- **Country.java**
+
+  ```java
+  ```
+- **Multiplication microservices**
+
+  ```java
+  ```
+- **Microservices with Spring Boot 3 and Spring Cloud**
+
+  We will use the interfaces CrudRepository and PagingAndSortingRepository. We will use the CrudRepository interface as the base for the Recommendation and Review repositories 
+  and also the PagingAndSortingRepository interface as the base for the Product repository.
+
+  We will also add a few extra query methods to our repositories for looking up entities using the business key, productId.
+
+  - **Country.java**
+
+  +
+  ```java
+  ```
+- **Polar Book Shop**
+
+  ```java
+  ```
+  ======
+
+## defining custom queries in Spring Data
+  There are two main options for defining custom queries in Spring Data:
+
+### Automatic Custom Queries
+Defining query methods following a specific naming convention.
+
+Spring Data JPA provides full support for read and write operations.
++
+The structure of 
+the query is split into two parts: the first one defines the subject of the query and the 
+second one is the predicate. The subject of the query defines which type of operation 
+the query needs to execute instead. The predicate is the attributes part of the clause that 
+filters, orders, or is distinct.
+
++
+| Repository method building block | Examples |
+| --- | --- |
+| Action | find, exists, delete, count |
+| Limit | One, All, First10 |
+| - | By |
+| Property expression | findByIsbn, findByTitleAndAuthor, findByAuthorOrPrice |
+| Comparison | findByTitleContaining, findByIsbnEndingWith, findByPriceLessThan |
+| Ordering operator | orderByTitleAsc, orderByTitleDesc |
++
+Following Table describes the most relevant subject keywords. Some of these keywords 
+could not be supported for specific non-relational databases.
+|     |     |
+| --- | --- |
+| Keyword | Description |
+| findBy… getBy… queryBy… | These keywords are generally associated with a select query and return an element or set of elements that can be a Collection or Streamable subtype. |
+| countBy… | Returns the number of elements that match the query. |
+| existBy… | Returns a boolean type with true if there is something that matches the query. |
+| deleteBy… | Removes a set of elements that matches the query but does not return anything. |
+Following Table shows the equivalence between predicate keywords and the database 
+keyword.
+|     |     |
+| --- | --- |
+| Logical Keyword | Keyword expressions |
+| LIKE | Like |
+| IS_NULL | Null or IsNull |
+| LESS_THAN | LessThan |
+| GREATER_THAN | GreaterThan |
+| AND | And |
+| OR | Or |
+| AFTER | After or IsAfter |
+| BEFORE | Before or IsBefore |
+```java
+  Optional<Book> findByIsbn(String isbn);
+
+  boolean existsByIsbn(String isbn);
+```
+### Manual Custom Queries
+Using the @Query annotation to provide an SQL-like statement that will be executed by the method.
++
+```java
+  @Modifying
+  @Transactional
+  @Query("delete from Book where isbn = :isbn")
+  void deleteByIsbn(String isbn);
+```
+
+There are many ways to declare a query:
+
+- Declare it as constant at the top of the interface so that you have all 
+the declarations of methods to understand each of them.
+- Externalize all the queries into a properties file and import them 
+dynamically into each repository. One of the cons of this approach 
+is that you need to have a good organization to know which file 
+contains the queries of each repository.
+- Lastly, have a class that contains all the queries of a specific 
+repository. This approach is useful when you have a lot of queries 
+that are too long. You clear your repository to have only the methods 
+in one place and all the queries in another place. Also, define naming 
+patterns to identify the idea behind each query.
+
+Why do you need to create a manual query if there is a way to do it automatically? 
+- One answer is that you need to improve the performance of the query that Spring Data 
+generates
+- or you don’t need all the attributes of the table. You cover a specific scenario. 
+This situation has the name of Projections. 
+- Another answer is that the query is so 
+complex that not exist keyword to express it. No rule explains all the potential scenarios 
+when you need to use one mechanism instead of another.
+
+### Implementing Repository Methods(Custom Repository Implementations)
+```java
+public interface CustomCurrencyJPARepository {
+    List < Currency > myCustomFindMethod(String code);
+}
+
+@Repository
+@Transactional
+public class CustomCurrencyJPARepositoryImpl extends
+CustomCurrencyJPARepository {
+    // Include all the dependencies necessary to access the database
+    List < Currency > myCustomFindMethod(String code) {
+        //Here all the logic related to your custom method
+    }
+}
+```
+you must inject all the dependencies you need to 
+access the database in the constructor. For example, in a relational database, you need to 
+include EntityManager.
+
+another approach exists in the 
+middle between writing the entire query manually or delegating all the responsibility 
+to create the query to Spring Data. The Criteria API offers a way to create queries in a 
+programmatic way preventing errors in the syntaxis. To implement this approach, you 
+must create a custom repository containing all the logic to create the query.
+```java
+public interface CustomCurrencyJPARepository {
+    List &lt; Currency > myCustomFindMethod(String code);
+}
+```
+```java
+@Repository
+@Transactional
+public class CustomCurrencyJPARepositoryImpl extends
+CustomCurrencyJPARepository {
+    EntityManager em;
+    public CustomCurrencyRepositoryImpl(EntityManager em) {
+        this.em = em;
+    }
+    List < Currency > myCustomFindMethod(String code) {
+        CriteriaBuilder cb = em.getCriteriaBuilder();
+        CriteriaQuery < Currency > cq = cb.createQuery(Currency.class);
+        // You need to define the main entity
+        Root < Currency > currency = cq.from(Currency.class);
+        // Define all the conditions of the query
+        Predicate codePredicate = cb.equal(currency.get("code"), code);
+        //You can have more than one where clause
+        cq.where(codePredicate);
+        // Create the query and after that executed
+        TypedQuery < Currency > query = em.createQuery(cq);
+        return query.getResultList();
+    }
+}
+```
+The flow of this method is first to create a criteria builder responsible for creating the 
+elements of the query. After that, you need to indicate which entity you want to obtain 
+as part of the response, in this case, Currency. The next step is to define the root of the 
+query: the table that appears in the FROM XXXX block in the SQL sentence. Also, you 
+can include all the conditions the query needs to match using the predicate conditions, 
+which do not necessarily need to be only one. You can create as many as you want. 
+Lastly, you need to create the query and indicate which type of response you want, which 
+could be a list or one element.
+Chapter 3 Spring Data and Different Types of Persistence
+
+### specifications
+For JPA, Spring Data offers another possibility to encapsulate all this logic to create 
+the query using classes. The specifications are classes you can create to extend from the 
+Specification interface, which encapsulates the logic of custom queries but does not 
+create an implementation of a repository. This approach helps you only have interfaces 
+representing the layer to access a database
+
+## Spring Data JDBC vs Spring Data JPA
++
+Spring Data offers two main options for integrating applications with a relational database over the JDBC driver: Spring Data JDBC and Spring Data JPA. How to choose
+between the two? As always, the answer is that it depends on your requirements and
+specific context.
+
+**Spring Data JPA*- (https://spring.io/projects/spring-data-jpa) is the most-used module in the Spring Data project. It’s based on the Java Persistence API (JPA), a standard specification included in Jakarta EE (previously known as Java EE). Hibernate is the most popular implementation. It’s a robust and battle-tested object-relational mapping (ORM) framework for managing data persistence in Java applications. Hibernate provides many useful features, but it’s also a complex framework. If you’re not aware of aspects like persistence context, lazy loading, dirty checking, or sessions, you might face issues that will be hard to debug without a sound familiarity with JPA and Hibernate. Once you know the framework better, you’ll appreciate how much Spring Data JPA simplifies things and boosts your productivity.
+
+**Spring Data JDBC*- (https://spring.io/projects/spring-data-jdbc) is a more recent addition to the Spring Data family. It integrates with relational databases following the domain-driven design (DDD) concepts like aggregates, aggregate roots, and repositories. It’s lightweight, simpler, and an excellent choice for microservices where
+domains are usually defined as bounded contexts (another DDD concept). It gives
+developers more control over SQL queries and allows the use of immutable entities.
+Being a simpler alternative to Spring Data JPA, it’s not a drop-in replacement for every scenario, since it doesn’t provide all the features offered by JPA.
+
+You should considering your requirements, and then deciding which module suits the specific scenario better.
+
+- Spring Data offers a feature to initialize a data source at startup time. By default, you can use a schema.sql file to create a schema and a data.sql file to insert data in the newly created tables. Such files should be placed in the src/main/resources folder.
+- Spring Data loads the schema.sql file only when using an embedded, in-memory database.FOr other DB, we need to enable the functionality explicitly.
+
+  ```yml
+    spring:
+        sql:
+            init:
+                mode: always
+  ```
+- Hibernate, the foundation for Spring Data JPA, offers automatically generating schemas from the entities defined in Java.
+
+## Connection pooling
+Opening and closing database connections are relatively expensive operations, so you
+don’t want to do that every time your application accesses data. The solution is connection pooling: the application establishes several connections with the database and
+reuses them, rather than creating new ones for each data access operation. This is a
+considerable performance optimization.
+
+Spring Boot uses HikariCP for connection pooling, and you can configure it from
+the application.yml file. You want to configure at least a connection timeout
+(spring.datasource.hikari.connection-timeout) and a maximum number of connections in the pool (spring.datasource.hikari.maximum-pool-size), because these
+both affect application resilience and performance. As you saw for the Tomcat thread
+pool, multiple factors influence which values you should use. As a starting point, you
+can refer to the HikariCP analysis of pool sizing (https://github.com/brettwooldridge/
+HikariCP/wiki/About-Pool-Sizing).
+
+Configuring the connection pool to interact with the database
+
+```yml
+spring:
+datasource:
+    username: user
+    password: password
+    url: jdbc:postgresql://localhost:5432/polardb_catalog
+    hikari:
+    # The maximum time (ms) to spend waiting to get a connection from the pool
+    connection-timeout: 2000 #ms
+    # The maximum number of connections HikariCP will keep in the pool
+    maximum-pool-size: 5
+```
+
+======
+CaveatEmptor::
++
+- **Country.java**
+
+  ```java
+  ```
+- **Cities API**
+
+  - **Country.java**
+
+    ```java
+    ```
+- **Multiplication microservices**
+
+  ```java
+  ```
+- **Microservices with Spring Boot 3 and Spring Cloud**
+
+  Database connection configuration
+
+  With the database in place, we now need to set up the configuration for the core microservices so they 
+  know how to connect to their databases. This is set up in each core microservice’s configuration file, 
+  application.yml, in the product-service, recommendation-service, and review-service projects.
+  The configuration for the product and recommendation services are similar, so we will only look into 
+  the configuration of the product service. The following part of the configuration is of interest:
+
+- **product-service application.yml**
+
+  - When running without Docker using the default Spring profile, the database is expected to be 
+  reachable on localhost:27017.
+  - Setting the log level for MongoTemplate to DEBUG will allow us to see which MongoDB statements 
+  are executed in the log.
+  - When running inside Docker using the Spring profile, docker, the database is expected to be 
+  reachable on mongodb:27017.
+
+    ```yml
+    server.port: 7001
+    server.error.include-message: always
+
+    spring.data.mongodb: ①
+      host: localhost
+      port: 27017
+      database: product-db
+      auto-index-creation: true
+
+    logging:
+      level:
+        root: INFO
+        se.magnus: DEBUG
+        org.springframework.data.mongodb.core.MongoTemplate: DEBUG ②
+
+    ---
+    spring.config.activate.on-profile: docker
+
+    server.port: 8080
+
+    spring.data.mongodb.host: mongodb
+    ```
+- **review service  application.yml**
+
+  - By default, Hibernate will be used by Spring Data JPA as JPA’s EntityManager.
+  - The spring.jpa.hibernate.ddl-auto property is used to tell Spring Data JPA to create new 
+  or update existing SQL tables during startup.
+  - When running without Docker, using the default Spring profile, the database is expected to 
+  be reachable on localhost using the default port 3306.
+  - By default, HikariCP is used by Spring Data JPA as the JDBC connection pool. To minimize startup problems on computers with limited hardware resources, the initializationFailTimeout
+  parameter is set to 60 seconds. This means that the Spring Boot application will wait for up to 
+  60 seconds during startup to establish a database connection.
+  - The log-level settings for Hibernate will cause Hibernate to print the SQL statements used and 
+  the actual values used. Please note that when used in a production environment, writing the 
+  actual values to the log should be avoided for privacy reasons.
+  - When running inside Docker using the Spring profile, docker, the database is expected to be 
+  reachable on the mysql hostname using the default port 3306.
+  ```yml
+  server.port: 7003
+  server.error.include-message: always
+
+  # Strongly recommend to set this property to "none" in a production environment!
+  spring.jpa.hibernate.ddl-auto: update ①
+
+  spring.datasource: ②
+    url: jdbc:postgresql://localhost/review-db
+    username: user
+    password: pwd
+
+  spring.datasource.hikari.initializationFailTimeout: 60000
+
+  logging:
+    level:
+      root: INFO
+      se.magnus: DEBUG
+      org.hibernate.SQL: DEBUG
+      org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+
+  ---
+  spring.config.activate.on-profile: docker
+
+  server.port: 8080
+
+  spring.datasource:
+    url: jdbc:postgresql://postgresql/review-db
+  ```
+- **Polar Book Shop**
+
+  ```java
+  ```
+  ======
+
+## Logging the database connection URL
+When scaling up the number of microservices where each microservice connects to its own database, 
+it can be hard to keep track of what database each microservice actually uses. To avoid this confusion, a good practice is to add a LOG statement directly after the startup of a microservice that logs connection information that is used to connect to the database.
+- **SQL**
+
+  ```java
+  package se.magnus.microservices.core.review;
+
+  import org.slf4j.Logger;
+  import org.slf4j.LoggerFactory;
+  import org.springframework.boot.SpringApplication;
+  import org.springframework.boot.autoconfigure.SpringBootApplication;
+  import org.springframework.context.ConfigurableApplicationContext;
+  import org.springframework.context.annotation.ComponentScan;
+
+  @SpringBootApplication
+  @ComponentScan("se.magnus")
+  public class ReviewServiceApplication {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ReviewServiceApplication.class);
+
+    public static void main(String[] args) {
+      ConfigurableApplicationContext ctx = SpringApplication.run(ReviewServiceApplication.class, args);
+
+      String postgresUri = ctx.getEnvironment().getProperty("spring.datasource.url");
+      LOG.info("Connected to POSTGRES: " + postgresUri);
+    }
+  }
+  ```
+- **NOSql**
+
+  ```java
+  package se.magnus.microservices.core.product;
+
+  import org.slf4j.Logger;
+  import org.slf4j.LoggerFactory;
+  import org.springframework.boot.SpringApplication;
+  import org.springframework.boot.autoconfigure.SpringBootApplication;
+  import org.springframework.context.ConfigurableApplicationContext;
+  import org.springframework.context.annotation.ComponentScan;
+
+  @SpringBootApplication
+  /*
+   - To enable Spring Boot’s autoconfiguration feature to detect Spring Beans in
+   - the api and util
+   - projects, we also need to add a @ComponentScan annotation to the main
+   - application class, which
+   - includes the packages of the api and util projects:
+   */
+  @ComponentScan("se.magnus")
+  public class ProductServiceApplication {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ProductServiceApplication.class);
+
+    public static void main(String[] args) {
+      ConfigurableApplicationContext ctx = SpringApplication.run(ProductServiceApplication.class, args);
+
+      String mongodDbHost = ctx.getEnvironment().getProperty("spring.data.mongodb.host");
+      String mongodDbPort = ctx.getEnvironment().getProperty("spring.data.mongodb.port");
+      LOG.info("Connected to MongoDb: " + mongodDbHost + ":" + mongodDbPort);
+    }
+  }
+  ```
+
+## Data Auditing
+The Spring Data libraries support auditing to track who created an entity and
+who updated it last. You can enable this feature in both Spring Data JDBC and
+Spring Data R2DBC by configuring an AuditorAware (or ReactiveAuditorAware) bean to return the username of the currently authenticated user.
+
+When data auditing is enabled, you can use the @CreatedBy and @LastModifiedBy
+annotations to automatically inject the right values when a create or update
+operation occurs.
+
+## Summary
+
+- The main elements in Spring Data are database drivers, entities, and repositories.
+  - Entities represent domain objects and can be stored and retrieved through a repository
+  (Java Database Connectivity API) in imperative/blocking applications or an
+  R2DBC driver in reactive/non-blocking applications. For non-relational databases, each vendor has its own dedicated solution.
+  - Entities—Domain objects that are persisted in a database. They must contain a
+  field to uniquely identify each instance (a primary key) and can use dedicated
+  annotations to configure the mapping between Java objects and database entries.
+  - Repositories—The abstractions used for data storage and retrieval. Spring Data
+  provides basic implementations, which are further extended by each module to
+  provide features specific to the database in use.
+- Spring Data JDBC is a framework that supports integrating Spring applications
+with relational databases relying on a JDBC driver.
+- Entities represent domain objects and can be managed by Spring Data JDBC as
+immutable objects. They must have the field hosting the primary key annotated
+with @Id.
+- Spring Data lets you capture audit metadata whenever an entity is created or
+updated. You can enable this feature with @EnableJdbcAuditing.
+- Data repositories grant access to entities from the database. You need to define
+an interface, and then Spring Data will generate the implementation for you.
+- Depending on your requirements, you can extend one of the available
+Repository interfaces provided by Spring Data, such as CrudRepository.
+- In Spring Data JDBC, all mutating custom operations (create, update, delete)
+should run in transactions.
+- Use the @Transactional annotation to run operations in a single unit of work.
+- You can run integration tests for the Spring Data JDBC slice using the @DataJdbcTest annotation.
+- Environment parity is essential for the quality and reliability of your tests and
+deployment pipeline.
+- You can test the integration between your application and backing services
+defined as containers by using the Testcontainers library. It lets you use lightweight, throwaway containers in your integration tests.
+- Database schemas are critical for applications. In production, you should use a
+tool like Flyway, which provides version control for your database.
+- Flyway should manage any database changes to ensure reproducibility, traceability, and reliability.
+- Data sources are one of the primary causes of differences across environments. It’s
+common practice to use an in-memory database while developing locally—something
+like H2 or HSQL. But that affects the predictability and robustness of your applications.
+Even if all relational databases speak the SQL language and Spring Data JDBC provides
+generic abstractions, each vendor has its own dialect and unique features that make it
+essential to use the same database in production that you use in development and testing. Otherwise, you may not catch errors that might happen only in production.

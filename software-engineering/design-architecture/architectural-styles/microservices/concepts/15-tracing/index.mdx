@@ -1,0 +1,96 @@
+# Tracing
+
+Event logs, health probes, and metrics provide a wide variety of valuable data for inferring the internal state of an application. However, none of them consider that cloud
+native applications are distributed systems. A user request is likely to be processed by
+multiple applications, but so far we have no way to correlate data across application
+boundaries.
+
+A simple way to solve that problem could be to generate an identifier for each
+request at the edge of the system (a correlation ID), use it in event logs, and pass it over
+to the other services involved. By using that correlation ID, we could fetch all log messages related to a particular transaction from multiple applications.
+
+If we follow that idea further, we’ll get to distributed tracing, a technique for tracking requests as they flow through a distributed system, letting us localize where errors
+occur and troubleshoot performance issues. 
+
+To understand what is going on in a distributed system such as a system landscape of cooperat-
+ing microservices, it is crucial to be able to track and visualize how requests and messages flow 
+between microservices when processing an external call to the system landscape.
+
+A distributed tracing backend is responsible for aggregating, storing, and making traces searchable.
+
+a mature event-driven system may have processes that span different microservices. Knowing what’s going on with many concurrent users and multiple event chains might become an impossible task, especially when these chains have branches with multiple event types triggering the same action.To solve this problem, you need to correlate all actions and events within the same process chain. A simple way to do this is to inject the same identifier across all HTTP calls, RabbitMQ messages, and Java threads handling the different actions. Then, you can print this identifier in all the related logs.
+Ideally, you should have a unique identifier per action, which is generated at the origin of the chain. Furthermore, it’d be better if you could propagate it transparently, without having to model this traceability concern explicitly in all the services.
+
+In this pattern we record information (e.g. start time, end time) about the work (e.g. service requests) performed when handling the external request in a centralized service. This can be done by:
+
+* Assigns each external request a unique external request id.
+* Pass this external request id to all services that are involved in handling the request.
+* Include the external request id while logging.
+* Records information (e.g. start time, end time) about the requests and operations performed when handling a external request in a centralized service.
+
+This instrumentation might be part of the functionality provided by a Microservice Chassis framework.
+
+The drawback is aggregating and storing traces can require significant infrastructure.
+
+There are three main concepts in distributed tracing:
++
+* A trace represents the activities associated with a request or a transaction, identified uniquely by a trace ID. It’s composed of one or more spans across one or
+more services.
+* Each step of the request processing is called a span, characterized by start and
+end timestamps and identified uniquely by the pair trace ID and span ID.
+* Tags are metadata that provide additional information regarding the span context, such as the request URI, the username of the currently logged-in user, or
+the tenant identifier.
+
+For example in a Bookshop, you can fetch books through the gateway (Edge Service), and the request is then forwarded to Catalog Service. The trace related to handling such a request would involve these two applications and at least three spans:
++
+* The first span is the step performed by Edge Service to accept the initial HTTP
+request.
+* The second span is the step performed by Edge Service to route the request to
+Catalog Service.
+* The third span is the step performed by Catalog Service to handle the routed
+request.
+
+There are multiple choices related to distributed tracing systems. 
++
+* First, we must
+choose the format and protocol we’ll use to generate and propagate traces. like  OpenTelemetry (also called OTel )
+* Next we need to choose whether to use OpenTelemetry directly (with the OpenTelemetry Java instrumentation) or rely on a façade that instruments the code in a vendor-neutral way and integrates with different distributed tracing systems (such as
+Spring Cloud Sleuth). 
+* Once the applications are instrumented for distributed tracing, we’ll need a tool to
+collect and store traces. In the Grafana observability stack, the distributed tracing
+backend of choice is Tempo.
+
+A few standards have emerged for implementing distributed tracing and defining
+guidelines for generating and propagating traces and spans. OpenZipkin is the more
+mature project (https://zipkin.io). OpenTracing and OpenCensus are more recent
+projects that have tried to standardize ways of instrumenting application code to support distributed tracing. They are both deprecated now, since they joined forces to work
+on OpenTelemetry: the ultimate framework to “instrument, generate, collect, and
+export telemetry data (metrics, logs, and traces).” Tempo supports all those options.
+Spring Cloud Sleuth (https://spring.io/projects/spring-cloud-sleuth) is a project that
+provides auto-configuration for distributed tracing in Spring Boot applications. It takes
+care of instrumenting commonly used libraries in Spring applications and provides an
+abstraction layer on top of specific distributed tracing libraries. OpenZipkin is the
+default choice.
+
+Starting with Spring Boot 3, distributed tracing is handled by Micrometer Tracing, replacing 
+Spring Cloud Sleuth. Micrometer Tracing can mark requests and messages/events that are part 
+of the same processing flow with a common correlation ID.
+
+Micrometer Tracing can also be used to decorate log records with correlation IDs to make it 
+easier to track log records from different microservices that come from the same processing flow. 
+Zipkin is a distributed tracing system (http://zipkin.io) that Micrometer Tracing can send 
+tracing data to for storage and visualization. Later on, in Chapter 19, Centralized Logging with the 
+EFK Stack, we will learn how to find and visualize log records from one and the same processing 
+flow using the correlation ID.
+
+The infrastructure for handling distributed tracing information in Micrometer Tracing and Zip-
+kin is originally based on Google Dapper (https://research.google/pubs/dapper-a-large-
+scale-distributed-systems-tracing-infrastructure/). In Dapper, the tracing information 
+from a complete workflow is called a trace tree, and subparts of the tree, such as the basic units 
+of work, are called spans. Spans can, in turn, consist of sub-spans, which form the trace tree. A 
+correlation ID is called TraceId, and a span is identified by its own unique SpanId, along with 
+the TraceId of the trace tree it belongs to.
+
+## Examples
+
+* [Simple tracing using Spring and Zipkin Server](https://github.com/spring-kb/tracing-spring-zipkin)

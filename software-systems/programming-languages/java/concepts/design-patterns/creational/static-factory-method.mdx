@@ -1,0 +1,263 @@
+---
+title: Static Factory Methods
+sidebar_position: 1
+---
+
+The traditional way for a class to allow a client to obtain an instance is to provide
+a public constructor. There is another technique that should be a part of every
+programmer’s toolkit. A class can provide a public **static factory method**, which is
+simply a static method that returns an instance of the class. 
+
+Here’s a simple example from Boolean (the boxed primitive class for boolean). This method translates a boolean primitive value into a Boolean object reference:
+```java
+public static Boolean valueOf(boolean b) {
+    return b ? Boolean.TRUE : Boolean.FALSE;
+}
+```
+
+A **static factory method** is a static method in a class that returns an instance of that class (or a subtype), instead of creating objects directly using a constructor.
+
+Instead of writing:
+```java
+User user = new User("user", 25);
+```
+You write:
+```java
+User user = User.create("user", 25);
+```
+Where:
+```java
+class User {
+    private String name;
+    private int age;
+
+    private User(String name, int age) {  // constructor can be private
+        this.name = name;
+        this.age = age;
+    }
+
+    public static User create(String name, int age) {
+        return new User(name, age);
+    }
+}
+```
+**Static Factory Methods** are fundamentally a creational pattern alternative to constructors:
+- Encapsulate object creation
+- Allow naming (e.g., of(), valueOf())
+- Enable caching, reuse, polymorphism
+
+A class can provide its clients with static factory methods instead of, or in addition to, public constructors.
+
+a static factory method is not the same as the Factory Method pattern from Design Patterns.
+
+## Advantages
+Providing a static factory method instead of a public constructor has both advantages and disadvantages.
+1. **They can have meaningful names**
+
+One advantage of static factory methods is that, unlike constructors, they
+have names. If the parameters to a constructor do not, in and of themselves,
+describe the object being returned, a static factory with a well-chosen name is
+easier to use and the resulting client code easier to read.
+
+Constructors are limited to the class name, but factory methods can express intent:
+```java
+User.of("test", 25);
+User.fromJson(json);
+User.guestUser();
+```
+Much clearer than overloaded constructors.
+
+For example, the constructor `BigInteger(int, int, Random)`, which returns a `BigInteger` that is
+probably prime, would have been better expressed as a static factory method
+named `BigInteger.probablePrime`. (This method was added in Java 4.)
+
+:::info
+
+In Java, `BigInteger.probablePrime(int bitLength, Random rnd)` is a static method in the `java.math.BigInteger` class that returns a randomly generated positive `BigInteger` of a specified bit length that is "probably" prime. 
+
+:::
+
+A class can have only a single constructor with a given signature. Program-
+mers have been known to get around this restriction by providing two constructors
+whose parameter lists differ only in the order of their parameter types. This is a
+really bad idea. The user of such an API will never be able to remember which
+constructor is which and will end up calling the wrong one by mistake. People
+reading code that uses these constructors will not know what the code does
+without referring to the class documentation
+
+Because they have names, static factory methods don’t share the restriction
+discussed in the previous paragraph. In cases where a class seems to require
+multiple constructors with the same signature, replace the constructors with static
+factory methods and carefully chosen names to highlight their differences.
+
+2. **they are not required to create a new object each time they’re invoked**
+
+A second advantage of static factory methods is that, unlike constructors,
+they are not required to create a new object each time they’re invoked. 
+
+A constructor must create a new object every time:
+```java
+Boolean b1 = new Boolean(true);
+Boolean b2 = new Boolean(true);
+
+System.out.println(b1 == b2); // false
+```
+Always different objects.
+
+This allows immutable classes to use preconstructed instances, or to cache
+instances as they’re constructed, and dispense them repeatedly to avoid creating
+unnecessary duplicate objects. 
+
+The `Boolean.valueOf(boolean)` method illustrates this technique: it never creates an object. 
+```java
+Boolean b1 = Boolean.valueOf(true);
+Boolean b2 = Boolean.valueOf(true);
+
+System.out.println(b1 == b2); // true
+```
+Same object reused.
+
+Internally, something like this happens((Caching / Reuse)):
+```java
+public static final Boolean TRUE = new Boolean(true);
+public static final Boolean FALSE = new Boolean(false);
+
+public static Boolean valueOf(boolean b) {
+    return b ? TRUE : FALSE;
+}
+```
+Only two instances ever exist.
+
+This technique is similar to the  Flyweight pattern. 
+
+**Advantages**
+- performance
+    - It can greatly improve performance if equivalent objects are requested often, especially if they are expensive to create.
+    - Avoid object creation (which is expensive under heavy load)
+    - Reduce GC pressure
+    - Improve memory locality
+    - Very important in high-throughput systems (microservices)
+- Identity Guarantees
+    - The ability of static factory methods to return the same object from repeated invocations allows classes to maintain strict control over what instances exist at any time. 
+    - Classes that do this are said to be **instance-controlled**. 
+    - Normally:
+    ```java
+    a.equals(b)  // compares value
+    a == b       // compares reference
+    ```
+    With caching:
+    ```java
+    a.equals(b) && a == b
+    ```
+    Both are true, This is called instance control
+    - There are several reasons to write instance-controlled classes. A class that controls its instances can guarantee:
+      - Singleton
+          - Instance control allows a class to guarantee that it is a singleton or noninstantiable. 
+          - Only one instance exists
+      - Limited instances
+          - (e.g., Boolean → only TRUE/FALSE)
+      - Canonical instances
+          - Also, it allows an immutable value class to make the guarantee that no two equal instances exist: a.equals(b) if and only if a == b. This means:
+              - No duplicate objects exist
+              - Equality becomes identity
+              -  Extremely powerful optimization
+          - No duplicates for equal values
+          - This is the basis of the Flyweight pattern(Reuse shared objects instead of creating new ones.). 
+          - Instead of:
+          ```java
+          new Color(255, 0, 0); // created many times
+          ```
+          Use:
+          ```java
+          Color.of(255, 0, 0); // returns cached instance
+          ```
+          Only one "red" object exists.
+          - Enum types provide this guarantee
+
+**Real Java Examples**
+1. **Boolean.valueOf**
+Only 2 objects
+2. **Integer.valueOf**
+```java
+Integer a = Integer.valueOf(100);
+Integer b = Integer.valueOf(100);
+
+System.out.println(a == b); // true (cached)
+```
+But:
+```java
+Integer x = Integer.valueOf(1000);
+Integer y = Integer.valueOf(1000);
+
+System.out.println(x == y); // false (not cached)
+```
+JVM caches small integers (usually -128 to 127)
+
+3. **Enum (STRONGEST guarantee)**
+```java
+enum Status {
+    SUCCESS, FAILED
+}
+Status s1 = Status.SUCCESS;
+Status s2 = Status.SUCCESS;
+
+System.out.println(s1 == s2); // always true
+```
+Enums are instance-controlled by design
+
+**Why Immutable Classes Benefit Most**
+
+For mutable objects:
+```java
+user.setName("X"); // changes state
+```
+Sharing is dangerous.
+
+For immutable objects:
+```java
+String s = "hello";
+```
+Safe to reuse because state never changes.
+
+**Real Microservices Impact**
+
+In high-scale systems:
+- Millions of requests 
+- Thousands of identical values (IDs, statuses, configs) 
+
+Using caching:
+- reduces heap usage 
+- reduces GC pauses 
+- improves latency 
+
+**When NOT to Use This**
+
+Don’t force caching when:
+- Objects are large and rarely reused 
+- Cache management becomes complex 
+- Memory overhead > benefit
+
+## Disadvantages
+## Constructor vs Static Factory Method
+Why are static factory methods better than constructors? A strong answer includes:
+- Named constructors 
+- Can return subtype 
+- Can cache and reuse instances
+- Enable instance-controlled classes
+
+When to use each
+
+Limitations of constructors
+## Real Examples
+### JDK examples
+Static factories are used heavily in the JDK: 
+- Integer.valueOf() 
+- List.of() 
+- Optional.of() 
+
+They interact with: 
+- Immutability 
+- Object pooling 
+- Hidden implementations
+
+## Comparison with Factory Pattern

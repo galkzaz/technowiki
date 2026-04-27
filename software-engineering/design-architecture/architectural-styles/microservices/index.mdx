@@ -1,0 +1,1937 @@
+---
+id: design-architecture-architectural-styles-microservices
+title: Microservices
+sidebar_position: 1
+---
+## Challenges with autonomous software components
+Decomposing the platform introduced a number of new challenges
+that we were not exposed to (at least not to the same degree) when developing more traditional,
+monolithic applications:
+- Adding new instances to a component required manually configuring load balancers and
+manually setting up new nodes. This work was both time-consuming and error-prone.
+- The platform was initially prone to errors caused by the other systems it was communi-
+cating with. If a system stopped responding to requests that were sent from the platform
+in a timely fashion, the platform quickly ran out of crucial resources, for example, OS
+threads, specifically when exposed to a large number of concurrent requests. This caused
+components in the platform to hang or even crash. Since most of the communication in
+the platform was based on synchronous communication, one component crashing could
+lead to cascading failures; that is, clients of the crashing components could also crash after
+a while. This is known as a chain of failures.
+- Keeping the configuration in all the instances of the components consistent and up to
+date quickly became a problem, causing a lot of manual and repetitive work. This led to
+quality problems from time to time.
+- Monitoring the state of the platform in terms of latency issues and hardware usage (for
+example, usage of CPU, memory, disks, and the network) was more complicated compared
+to monitoring a single instance of a monolithic application.
+- Collecting log files from a number of distributed components and correlating related log events from the components was also difficult, but feasible since the number of components was fixed and known in advance.
+
+## Microservices
+Many of the pioneers initially developed monolithic applications that made them very successful
+from a business perspective. But over time, these monolithic applications became more and more
+difficult to maintain and evolve. They also became challenging to scale beyond the capabilities
+of the largest machines available (also known as vertical scaling).
+
+Eventually, the pioneers started to find ways to split monolithic applications into smaller compo-
+nents that could be released and scaled independently of each other. Scaling small components
+can be done using horizontal scaling, that is, deploying a component on a number of smaller
+servers and placing a load balancer in front of it. If done in the cloud, the scaling capability is
+potentially endless – it is just a matter of how many virtual servers you bring in (given that your
+component can scale out on a huge number of instances, but more on that later on).
+
+Microservices architecture is a way of building software systems as a collection of small, independent services that each handle a specific business capability.
+Instead of one big application (a monolith), you split the system into multiple services that communicate over a network (usually HTTP/REST, messaging, or gRPC).
+
+Microservices derive from SOA, but SOA is different from microservices.
+This architecture involves fragmenting the application into small, autonomous services that communicate
+via APIs. It provides scalability, flexibility, and simplified maintenance, but introduces challenges in
+handling distributed systems complexities.
+
+So, to summarize, microservice architecture is, in essence, an architectural style where we decompose a monolithic application into a group of cooperating autonomous software components.
+The motivation is to enable faster development and to make it easier to scale the application
+
+You can’t have ACID guarantees across microservices because you can’t achieve real transactions in a microservices architecture. They are deployed independently, so they live in different processes, and their databases should also be decoupled. Besides, to avoid interdependencies, we also concluded that you should accept eventual
+consistency.
+Atomicity, or ensuring that either all related data is stored or nothing is, is hard to achieve across microservices
+Modular monolithic application
+If your project’s requirements are not compatible with eventual consistency across domains, a modular monolithic application might suit you better.
+
+## Defining a microservice
+Think of it like this:
+- Monolith = one large program doing everything
+- Microservices = many small programs, each doing one thing well
+
+Example (e-commerce):
+- User Service → handles accounts
+- Order Service → handles orders
+- Payment Service → handles payments
+
+Each service is:
+- Independently deployable
+- Loosely coupled
+- Owned by a small team
+
+A microservice architecture is about splitting up monolithic applications into smaller components,
+which achieves two major goals:
+- Faster development, enabling continuous deployments
+- Easier to scale, manually or automatically
+
+A microservice is essentially an autonomous software component that is independently upgradeable, replaceable, and scalable. To be able to act as an autonomous component, it must fulfill
+certain criteria, as follows:
+- It must conform to a shared-nothing architecture; that is, microservices don’t share data
+in databases with each other!
+- It must only communicate through well-defined interfaces, either using APIs and synchronous services or preferably by sending messages asynchronously. The APIs and message
+formats used must be stable and well documented and evolve by following a defined
+versioning strategy.
+- It must be deployed as separate runtime processes. Each instance of a microservice runs
+in a separate runtime process, for example, a Docker container.
+- Microservice instances are stateless so that incoming requests to a microservice can be
+handled by any of its instances.
+
+Using a set of cooperating microservices, we can deploy to a number of smaller servers instead
+of being forced to deploy to a single big server, like we have to do when deploying a monolithic
+application.
+
+Given that the preceding criteria have been fulfilled, it is easier to scale up a single microservice into more instances (for example, using more virtual servers) compared to scaling up a big
+monolithic application.
+
+Utilizing autoscaling capabilities that are available in the cloud is also a possibility but is not
+typically feasible for a big monolithic application. It’s also easier to upgrade or even replace a
+single microservice compared to upgrading a big monolithic application.
+
+## Key Characteristics
+1. **Single Responsibility**
+Each service focuses on one business domain (aligned with Domain-Driven Design).
+
+2. **Independent Deployment**
+    
+    You can deploy/update one service without touching others.
+
+3. Decentralized Data
+    
+    Each service has its own database:
+- No shared DB across services 
+- Communication via APIs/events 
+
+4. Communication Over Network
+    
+    Services talk via:
+- REST APIs 
+- Message brokers (Kafka, RabbitMQ) 
+- gRPC 
+
+5. Technology Freedom
+    
+    Each service can use different tech:
+- Java (Spring Boot) 
+- Python (FastAPI) 
+- Node.js, Go, etc.
+
+## Size of microservice
+How big should a microservice be? 
+
+there’s no fixed size. If you try to measure a microservice by lines of code or number of classes, you’re already on the wrong track.
+
+The right unit of size is a business capability, not code.
+
+A microservice should be: Small enough to do one thing well, but big enough to avoid constant cross-service chatter.
+
+That balance is where most designs fail.
+
+use the following rules of thumb:
+- Small enough for a developer to keep track of
+- Big enough to not jeopardize performance (that is, latency) and/or data consistency (SQL foreign keys between data that’s stored in different microservices are no longer something you can take for granted)
+
+A microservice should be: As small as possible, but no smaller than the point where it becomes operationally painful.
+
+Because every service adds:
+- Deployment pipeline 
+- Monitoring 
+- Logging 
+- Network overhead
+
+Guide
+1. Start with: Modular Monolith
+2. Separate modules by domain internally
+3. Then split when:
+- A module needs independent scaling
+- A team owns it separately
+- It becomes a bottleneck
+
+**Quick Checklist**
+
+Before creating a new microservice, ask:
+- Does it represent a clear business capability? 
+- Does it need independent scaling or deployment? 
+- Will splitting reduce or increase complexity? 
+- Can it own its own data?
+
+If you hesitate on these → don’t split yet.
+### Guiding Principle: Business Boundaries
+Use Domain-Driven Design and think in terms of bounded contexts.
+
+Good examples:
+- Order Service → manages orders lifecycle 
+- Payment Service → handles transactions 
+- Inventory Service → tracks stock 
+
+Bad examples:
+- “UserValidationService” (too tiny, technical concern) 
+- “CoreService” (too big, unclear responsibility)
+
+### Practical Sizing Heuristics
+1. Single Responsibility (But Not Too Atomic)
+If your service:
+- Has one clear purpose → good 
+- Needs 5 other services to complete one request → too small 
+
+Over-splitting leads to chatty microservices (performance killer)
+
+2. Database Ownership
+Each microservice should:
+- Own its data 
+- Not share tables with others 
+If two services constantly need the same data → they might be one service.
+
+3. Independent Deployment Test
+Ask:
+“Can I deploy this service without breaking others?”
+- If yes → good boundary 
+- If no → coupling is too high 
+
+4. Team Ownership Rule
+A good microservice is:
+- Owned by one small team (5–10 people max) 
+If multiple teams constantly touch it → it’s too big.
+
+5. Change Frequency
+If parts of your service:
+- Change for different reasons → split them 
+Example:
+- Pricing logic changes often 
+- Order storage rarely changes
+
+Separate services 
+
+6. Runtime Behavior
+Watch for:
+- Too many network calls → too small 
+- Huge memory/CPU footprint → too big 
+
+### Common Mistakes
+❌ Too Small (Nano-services)
+- Every tiny function becomes a service 
+- Leads to: 
+        ◦ High latency 
+        ◦ Complex debugging 
+        ◦ Network overhead 
+
+❌ Too Big (Mini-monolith)
+- One service doing multiple domains 
+- Hard to scale independently 
+- Teams step on each other 
+
+### Real-World Example
+Bad split:
+- Order Service 
+- Order Validation Service 
+- Order Pricing Service 
+- Order Tax Service 
+
+This creates excessive network calls.
+
+Better:
+- Order Service (includes validation + pricing logic) 
+- Payment Service 
+- Inventory Service
+
+## Architecture Components
+1. **API Gateway**: Single entry point for clients
+
+    Handles:
+    - Authentication 
+    - Routing 
+    - Rate limiting 
+
+2. **Service Discovery**: Helps services find each other dynamically(e.g., Netflix Eureka, Consul)
+3. **Load Balancer**: Distributes traffic across service instances
+
+4. **Message Broker**: Used for async communication(e.g., Kafka, RabbitMQ)
+
+5. **Configuration Server**: Centralized configuration management
+
+## Communication Styles
+1. Synchronous (Request/Response)
+- REST calls 
+- Simple but tightly coupled 
+2. Asynchronous (Event-driven)
+- Publish/Subscribe 
+- More scalable and resilient
+
+## Advantages and Challenges
+Advantages
+-  Scalability → scale only needed services 
+-  Fault isolation → one service fails, others survive 
+-  Faster development → teams work independently 
+-  Technology flexibility 
+
+Challenges
+- Distributed system complexity 
+- Another downside (but not always obvious initially) of decomposing an application into a group
+    of autonomous components is that they form a distributed system. Distributed systems are
+    known to be, by their nature, very hard to deal with.
+- Many small components that use synchronous communication can cause a chain of failure problem, especially under high load
+- Keeping the configuration up to date for many small components can be challenging
+- It’s hard to track a request that’s being processed and involves many components, for example, when performing root cause analysis, where each component stores log records locally
+- Analyzing the usage of hardware resources on a component level can be challenging as well
+- Manual configuration and management of many small components can become costly and error-prone
+- Network latency 
+- Data consistency (eventual consistency) 
+- Debugging is harder 
+- DevOps overhead (CI/CD, monitoring, logging)
+
+building microservices based on these false assumptions(Peter Deutsch, 1994) leads to solutions that are
+prone to both temporary network glitches and problems that occur in other microservice instances.
+1. The network is reliable
+2. Latency is zero
+3. Bandwidth is infinite
+4. The network is secure
+5. The topology doesn’t change
+6. There is one administrator
+7. The transport cost is zero
+8. The network is homogeneous
+
+When the number of microservices in a system landscape increases, the likelihood of problems
+also goes up. A good rule of thumb is to design your microservice architecture based on the as-
+sumption that there is always something going wrong in the system landscape. The microservice
+architecture needs to be designed to handle this, in terms of detecting problems and restarting
+failed components. Also, on the client side, ensure that requests are not sent to failed microservice
+instances. When problems are corrected, requests to the previously failing microservice should
+be resumed; that is, microservice clients need to be resilient. All of this needs, of course, to be
+fully automated. With a large number of microservices, it is not feasible for operators to handle
+this manually!
+
+## When to Use
+Use microservices when:
+- System is large and complex 
+- Multiple teams are working 
+- Need high scalability 
+
+Avoid when:
+- Small project 
+- Simple CRUD app 
+- Small team
+
+## Example Flow
+User places an order:
+1. API Gateway receives request 
+2. Order Service creates order 
+3. Payment Service processes payment 
+4. Inventory Service updates stock 
+5. Notification Service sends email 
+
+All services collaborate but remain independent.
+
+## real microservices system design
+let’s walk through a real, production-style microservices system design, not just theory. I’ll use an E-commerce platform because it exposes most real-world challenges (scaling, consistency, async flows, failures).
+
+**System: E-commerce Platform (Amazon-like)**
+
+**Core Requirements**
+- Users can browse products 
+- Add to cart and place orders 
+- Pay securely 
+- Track orders 
+- Handle high traffic (sales, spikes) 
+
+**High-Level Architecture**
+```
+Client (Web / Mobile)
+        ↓
+   API Gateway
+        ↓
+----------------------------------------
+|  User  | Product | Order  | Payment  |
+| Service| Service | Service| Service  |
+----------------------------------------
+        ↓
+ Async Messaging (Event Bus)
+        ↓
+----------------------------------------
+| Inventory | Notification | Shipping  |
+| Service   | Service      | Service   |
+----------------------------------------
+```
+**Entry Point: API Gateway**
+- Single entry for all clients 
+- Routes requests to services 
+- Handles: 
+- Authentication (JWT) 
+- Rate limiting 
+- Logging 
+
+**Core Microservices**
+1. User Service
+- Manages users, auth, profiles 
+- Own DB: users table 
+
+2. Product Service
+- Product catalog 
+- Search, categories 
+- Often backed by: 
+- DB (PostgreSQL) 
+- Search engine (Elasticsearch) 
+
+3. Order Service
+- Creates and manages orders 
+- Tracks state: CREATED → PAID → SHIPPED → DELIVERED
+
+4. Payment Service
+- Handles transactions 
+- Integrates with external payment providers 
+- Must be: 
+- Secure 
+- Idempotent 
+
+**Supporting Services (Async)**
+5. Inventory Service
+- Updates stock after order 
+- Prevents overselling 
+
+6. Notification Service
+- Sends: 
+- Emails 
+- SMS 
+- Push notifications 
+
+7. Shipping Service
+- Handles delivery logic 
+- Integrates with logistics providers 
+
+**Communication Design**
+1. Synchronous (REST)
+
+    Used when immediate response is required:
+- Client → API Gateway → Order Service 
+- Order Service → Payment Service 
+
+2. Asynchronous (Event-Driven)
+
+Used for decoupling:
+After order is placed:
+```
+Order Service → publishes "OrderCreated"
+        ↓
+Inventory Service → reduces stock
+Notification Service → sends email
+Shipping Service → prepares shipment
+```
+This uses message brokers like Kafka or RabbitMQ.
+
+**Data Ownership**
+Each service owns its database:
+- User DB 
+- Order DB 
+- Product DB 
+- Payment DB 
+
+❌ No shared database
+
+**Communication via APIs/events**
+
+Real Problem: Distributed Transactions, You cannot use ACID transactions across services.
+
+Instead, use: Saga Pattern
+
+Example (Order Flow):
+1. Order Service → create order 
+2. Payment Service → charge user 
+3. Inventory Service → reserve stock 
+
+If payment fails:
+- Order Service rolls back (cancel order) 
+
+**Event Flow (Realistic)**
+1. User clicks "Buy"
+2. Order Service creates order (PENDING)
+3. Payment Service charges card
+4. Payment SUCCESS → emits event
+5. Order Service updates → PAID
+6. Inventory Service reduces stock
+7. Shipping Service starts delivery
+8. Notification Service sends confirmation
+
+**Scaling Strategy**
+- Product Service → heavy read → scale horizontally 
+- Order Service → moderate → scale per demand 
+- Payment Service → careful scaling (consistency) 
+
+Use:
+- Load balancers 
+- Auto-scaling 
+- Caching (Redis) 
+
+**Observability**
+
+In real systems, you must add:
+- Centralized logging (ELK stack) 
+- Metrics (Prometheus + Grafana) 
+- Distributed tracing (Jaeger) 
+
+Without this → debugging is a nightmare.
+
+**Security**
+- API Gateway handles auth 
+- Services use: 
+- JWT tokens 
+- mTLS (service-to-service) 
+
+**Failure Handling (Real-World)**
+
+What if:
+- Payment fails? → retry + compensation 
+- Inventory fails? → compensate order 
+- Notification fails? → retry async 
+
+Never assume success.
+
+**What Makes This “Real”**
+
+This design includes:
+- Event-driven architecture 
+- Data isolation 
+- Failure handling (Saga) 
+- Scalability 
+- Observability 
+
+If you build this from day one, you will:
+- Over-engineer 
+- Slow down development 
+- Increase cost 
+
+Start as modular monolith, then evolve.
+
+## Production Architecture (Spring Ecosystem)
+```
+                    ┌───────────────────────┐
+                    │   Web / Mobile Apps   │
+                    └──────────┬────────────┘
+                               │
+                        ┌──────▼──────┐
+                        │ API Gateway │
+                        │ Spring Cloud│
+                        │   Gateway   │
+                        └──────┬──────┘
+                               │
+        ┌──────────────────────┼──────────────────────┐
+        │                      │                      │
+ ┌──────▼──────┐       ┌───────▼──────┐       ┌──────▼─────┐
+ │ Auth Service│       │ User Service  │      │ Product Svc │
+ │ Spring Boot │       │ Spring Boot   │      │ Spring Boot │
+ └──────┬──────┘       └───────┬───────┘      └──────┬──────┘
+        │                      │                     │
+        │                      │                     │
+   ┌────▼────┐           ┌─────▼─────┐         ┌─────▼────┐
+   │  MySQL  │           │ PostgreSQL│         │ MongoDB   │
+   └─────────┘           └───────────┘         └───────────┘
+
+
+        ┌──────────────────────┼──────────────────────┐
+        │                      │                      │
+ ┌──────▼──────┐       ┌───────▼───────┐      ┌──────▼──────┐
+ │ Order Svc   │       │ Payment Svc   │      │ Inventory   │
+ │ Spring Boot │       │ Spring Boot   │      │ Service     │
+ └──────┬──────┘       └───────┬───────┘      └──────┬──────┘
+        │                      │                     │
+   ┌────▼────┐           ┌─────▼─────┐         ┌─────▼─────┐
+   │PostgreSQL│          │ PostgreSQL│         │ PostgreSQL│
+   └─────────┘           └───────────┘         └───────────┘
+
+
+                ┌─────────────────────────────┐
+                │        Kafka Cluster        │
+                │  (Event Streaming Platform) │
+                └──────────┬──────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+ ┌──────▼──────┐   ┌───────▼────────┐  ┌─────▼────────┐
+ │ Notification│   │ Shipping Svc   │  │ Analytics Svc│
+ │ Service     │   │ Spring Boot    │  │ (Stream Proc)│
+ └─────────────┘   └────────────────┘  └──────────────┘
+
+
+        ┌────────────────────────────────────────────┐
+        │ Service Discovery (Eureka)                 │
+        │ Config Server (Spring Cloud Config)        │
+        │ Circuit Breaker (Resilience4j)             │
+        └────────────────────────────────────────────┘
+
+
+        ┌────────────────────────────────────────────┐
+        │ Observability Stack                        │
+        │ Prometheus + Grafana (metrics)             │
+        │ ELK Stack (logs)                           │
+        │ Jaeger / Zipkin (distributed tracing)      │
+        └────────────────────────────────────────────┘
+```
+Breakdown of Key Layers
+
+**API Layer**
+- Spring Cloud Gateway 
+- Routing 
+- Authentication (JWT / OAuth2) 
+- Rate limiting 
+
+**Core Services (Spring Boot)**
+
+Each service:
+- Independent deployment 
+- Own database 
+- REST + Kafka communication 
+
+Examples:
+- Order Service → PostgreSQL 
+- Product Service → MongoDB (better for catalog/search) 
+- Auth Service → MySQL 
+
+**Event Streaming (Kafka)**
+
+Using Apache Kafka:
+
+Example Topics:
+- order-created 
+- payment-completed 
+- inventory-updated 
+
+Flow:
+```
+Order Service → publish "order-created"
+        ↓
+Payment Service consumes → process payment
+        ↓
+publish "payment-success"
+        ↓
+Inventory + Notification consume
+```
+- Decouples services
+- Enables scalability
+
+**Service Discovery**
+
+Using Spring Cloud Netflix Eureka:
+- Services register themselves 
+- Others discover dynamically 
+
+**Configuration Management**
+
+Using Spring Cloud Config:
+- Central config repo (Git) 
+- Dynamic config updates 
+
+**Resilience Layer**
+
+Using Resilience4j:
+- Circuit breakers 
+- Retries 
+- Rate limiting 
+
+**Observability (Critical in Production)**
+
+Metrics
+- Prometheus + Grafana 
+
+Logging
+- ELK Stack 
+
+Tracing
+- Jaeger or Zipkin 
+
+**Security**
+- OAuth2 / JWT via Auth Service 
+- mTLS for service-to-service (optional but recommended) 
+
+**Deployment (Real Production)**
+
+Typically deployed using:
+- Docker containers 
+- Kubernetes (EKS / GKE / AKS) 
+
+With:
+- Auto-scaling 
+- Rolling updates 
+- Health checks
+
+## Microservices vs Monolith
+| Feature     | Monolith      | Microservices |
+| ----------- | ------------- | ------------- |
+| Deployment  | Single unit   | Independent   |
+| Scalability | Whole app     | Per service   |
+| Complexity  | Low (initial) | High          |
+| Flexibility | Low           | High          |
+
+Microservices are powerful—but not always the right choice.
+
+A lot of teams jump into microservices too early and end up with:
+- “Distributed monolith” 
+- High operational cost 
+- Slow development 
+
+Start with a modular monolith, then break into microservices when needed.
+
+## Design patterns for microservices
+You don’t start with all patterns.
+You introduce them when:
+- You hit scaling issues 
+- You face failures 
+- You need independence
+
+### Service discovery
+**Problem**
+
+How can clients find microservices and their instances?
+
+Services run dynamically (containers, scaling): IPs change constantly, Hard to locate services.
+
+Microservices instances are typically assigned dynamically allocated IP addresses when they start
+up, for example, when running in containers. This makes it difficult for a client to make a request to
+a microservice that, for example, exposes a REST API over HTTP.
+
+**Solution**
+
+Add a new component – a service discovery service – to the system landscape, which keeps track
+of currently available microservices and the IP addresses of its instances.
+
+Use a registry where services register themselves.
+
+Example: Spring Cloud Netflix Eureka
+
+**Solution requirements**
+
+- Service registration
+- Automatically register/unregister microservices and their instances as they come and go.
+- The client must be able to make a request to a logical endpoint for the microservice. The request will be routed to one of the available microservice instances.
+- Requests to a microservice must be load-balanced over the available instances.
+- Health checks
+- We must be able to detect instances that are currently unhealthy so that requests will not be routed to them.
+- Client-side or server-side discovery
+- this design pattern can be implemented using two different strategies:
+    - Client-side routing: The client uses a library that communicates with the service discovery
+        service to find out the proper instances to send the requests to.
+    - Server-side routing: The infrastructure of the service discovery service also exposes a
+        reverse proxy that all requests are sent to. The reverse proxy forwards the requests to a
+        proper microservice instance on behalf of the client
+
+**Trade-offs**
+- Extra infrastructure 
+- Consistency issues if registry is stale 
+
+**When to Use**
+- Needed outside Kubernetes 
+- Inside Kubernetes → often replaced by DNS
+
+### API Gateway(Edge server) Pattern
+**Problem**
+
+In a system landscape of microservices, it is in many cases desirable to expose some of the micros-
+ervices to the outside of the system landscape and hide the remaining microservices from external
+access. The exposed microservices must be protected against requests from malicious clients.
+
+Clients (web/mobile) must call many services:
+- User service 
+- Order service 
+- Product service 
+
+Leads to:
+- Multiple round trips 
+- Complex client logic 
+- Security duplication 
+
+**Solution**
+
+Add a new component, an edge server, to the system landscape that all incoming requests will
+go through.
+
+Introduce a single entry point:
+- API Gateway routes requests to internal services 
+
+Example: Spring Cloud Gateway
+
+**Requirements**
+- Routing rules 
+- Hide internal services that should not be exposed outside their context; that is, only route requests to microservices that are configured to allow external requests
+- Authentication (JWT/OAuth2) 
+- Expose external services and protect them from malicious requests; that is, use standard protocols and best practices such as OAuth, OIDC, JWT tokens, and API keys to ensure that the clients are trustworthy
+- Rate limiting 
+- Request aggregation 
+
+**Trade-offs**
+- Single point of failure (must scale it) 
+- Adds latency (extra hop) 
+
+**When to Use**
+- Always in microservices exposed to clients 
+
+### Reactive Microservices Pattern
+**Problem**
+
+Traditionally, as Java developers, we are used to implementing synchronous communication
+using blocking I/O, for example, a RESTful JSON API over HTTP. Using blocking I/O means that
+a thread is allocated from the operating system for the length of the request. If the number of
+concurrent requests goes up, a server might run out of available threads in the operating system,
+causing problems ranging from longer response times to crashing servers. Using a microservice
+architecture typically makes this problem even worse, where typically a chain of cooperating
+microservices is used to serve a request. The more microservices involved in serving a request,
+the faster the available threads will be drained.
+
+Traditional microservices are often blocking (thread-per-request):
+- Each request holds a thread until completion 
+- Threads get exhausted under high load 
+- Slow downstream services → cascading delays 
+
+Example:
+- Order Service calls Payment Service (slow) 
+- Thread waits → system throughput drops 
+
+Result:
+- Poor scalability 
+- High latency under load 
+- Resource inefficiency 
+
+**Solution**
+
+Use non-blocking I/O to ensure that no operating system threads are allocated while waiting for
+processing to occur in another service, that is, a database or another microservice, for example,
+by using a reactive programming model such as Project Reactor or using virtual threads.
+
+Use a reactive, non-blocking architecture based on:
+- Event-driven communication 
+- Asynchronous processing 
+- Backpressure handling 
+
+In Java ecosystem:
+- Spring WebFlux 
+- Project Reactor 
+
+Core idea: Don’t wait → react when data is ready
+
+🧠 Key Concepts (Core of the Pattern)
+1. Non-Blocking I/O
+Instead of:
+Thread waits → response → continue
+You get:
+Register callback → continue → react later
+
+2. Reactive Streams
+Data flows as streams:
+- Mono → single value 
+- Flux → multiple values 
+
+3. Backpressure
+System controls flow:
+“Don’t send more data than consumer can handle”
+
+4. Event-Driven Model
+Works naturally with:
+- Kafka 
+- Message queues 
+
+**Requirements**
+
+Some solution requirements are as follows:
+- Whenever feasible, use an asynchronous programming model, sending messages without
+waiting for the receiver to process them.
+- If a synchronous programming model is preferred, use reactive frameworks that can ex-
+ecute synchronous requests using non-blocking I/O, without allocating a thread while
+waiting for a response. This will make the microservices easier to scale in order to handle
+an increased workload.
+- Microservices must also be designed to be resilient and self-healing. Resilient means being
+capable of producing a response even if one of the services it depends on fails; self-healing
+means that once the failing service is operational again, the microservice must be able
+to resume using it.
+
+To implement properly, you need:
+1. Reactive Stack End-to-End
+- Reactive web framework (WebFlux) 
+- Reactive DB drivers (R2DBC, reactive MongoDB) 
+- Reactive messaging 
+
+Mixing blocking + reactive = performance collapse
+
+2. Async Communication
+- Kafka / event streaming 
+- Non-blocking HTTP clients (WebClient) 
+
+3. Proper Thread Model
+- Event loop model (few threads, high throughput) 
+
+4. Backpressure Support
+- Libraries that support Reactive Streams spec 
+
+**Example Flow (Reactive)**
+```
+Client → API Gateway → Order Service
+        ↓
+Order Service → async call Payment (non-blocking)
+        ↓
+Meanwhile thread is free
+        ↓
+Payment response arrives → pipeline continues
+        ↓
+Emit event → Kafka → Inventory + Notification
+```
+No thread is blocked waiting
+
+**Trade-offs**
+
+❌ Complexity
+- Harder to debug 
+- Steep learning curve 
+
+❌ Tooling Limitations
+- Not all libraries are reactive 
+- JDBC is blocking → must use R2DBC 
+
+❌ Overkill for Simple Systems
+- Adds unnecessary complexity 
+
+❌ Mental Model Shift
+- Imperative → declarative/reactive 
+
+**When to Use**
+
+Use reactive microservices when:
+1. High Concurrency
+- Thousands of concurrent users 
+
+2. I/O Bound Systems
+- Many external calls (DB, APIs) 
+
+**Streaming / Real-Time Systems**
+- Notifications 
+- Analytics pipelines 
+
+**Avoid When**
+- CPU-heavy workloads 
+- Simple CRUD apps 
+- Small systems
+
+**Related Patterns**
+
+Reactive microservices usually combine with: 
+- Event-Driven Architecture, Using Apache Kafka
+- Circuit Breaker: Using Resilience4j
+- CQRS: Reactive reads scale very well
+
+Reactive is not standalone—it amplifies other patterns
+
+### Externalized(Central) Configuration
+**Problem**
+
+An application is, traditionally, deployed together with its configuration, for example, a set of environment variables and/or files containing configuration information. Given a system landscape based on a microservice architecture, that is, with a large number of deployed microservice instances, some queries arise:
+- How do I get a complete picture of the configuration that is in place for all the running microservice instances?
+- How do I update the configuration and make sure that all the affected microservice instances are updated correctly?
+
+Config hardcoded in services, Hard to change per environment.
+
+**Solution**
+
+Centralized config
+
+Add a new component, a configuration server, to the system landscape to store the configuration of all the microservice
+
+Example: Spring Cloud Config
+
+**Requirements**
+
+Make it possible to store configuration information for a group of microservices in one place, with
+different settings for different environments (for example, dev, test, qa, and prod).
+
+- Config server or ConfigMaps 
+- Versioning 
+
+**Trade-offs**
+- Dependency on config service 
+
+**When to Use**
+- Multi-environment deployments
+
+### Circuit Breaker Pattern
+**Problem**
+
+Service A calls Service B, B is slow or down, A keeps waiting → system collapse (cascading failure).
+
+A system landscape of microservices that uses synchronous intercommunication can be exposed
+to a chain of failures. If one microservice stops responding, its clients might get into problems as
+well and stop responding to requests from their clients. The problem can propagate recursively
+throughout a system landscape and take out major parts of it.
+
+This is especially common in cases where synchronous requests are executed using blocking I/O,
+that is, blocking a thread from the underlying operating system while a request is being processed.
+Combined with a large number of concurrent requests and a service that starts to respond unexpectedly slowly, thread pools can quickly become drained, causing the caller to hang and/or crash. This failure can spread unpleasantly quickly to the caller’s caller, and so on.
+
+**Solution**
+
+Add a circuit breaker that prevents new outgoing requests from a caller if it detects a problem
+with the service it calls.
+
+Stop calling failing service temporarily
+
+Example: Resilience4j
+
+States:
+- Closed → normal 
+- Open → block calls 
+- Half-open → test recovery 
+
+**Requirements**
+
+- Open the circuit and fail fast (without waiting for a timeout) if problems with the service are detected.
+- Probe for failure correction (also known as a half-open circuit); that is, allow a single request to go through on a regular basis to see whether the service is operating normally again.
+- Close the circuit if the probe detects that the service is operating normally again. This capability is very important since it makes the system landscape resilient to these kinds of problems; in other words, it self-heals.
+- Timeout handling 
+- Failure thresholds 
+- Fallback logic 
+
+**Trade-offs**
+
+- Adds complexity 
+- Requires tuning 
+
+**When to Use**
+
+- Any synchronous service-to-service call 
+
+### Control loop Pattern(a.k.a. Feedback Loop)
+This one shows up a lot in autoscaling, resilience, and self-healing systems—especially with Kubernetes and modern cloud platforms.
+
+**Problem**
+
+In a system landscape with a large number of microservice instances spread out over a number of servers, it is very difficult to manually detect and correct problems such as crashed or hung microservice instances
+
+Microservices run in a dynamic environment:
+-  Traffic spikes unexpectedly 
+-  Pods crash 
+-  CPU/memory usage fluctuates 
+-  External dependencies slow down 
+
+Static configuration fails:
+-  Fixed number of instances → under/over-provisioning 
+-  Manual intervention → too slow 
+
+**Solution**
+
+Add a new component, a control loop, to the system landscape.
+
+![The control loop design pattern](/docs/assets/software-engineering/software-architecture/architecture-styles/microservice/patterns/control-loop-design-pattern.png)
+
+Use a continuous feedback loop that:
+```
+Observes → Decides → Acts → Repeats
+```
+This loop automatically adjusts the system toward a desired state.
+
+**Core Concept**
+
+A control loop constantly compares:
+-  Current State (what’s happening now) 
+-  Desired State (what we want) 
+
+Then takes action to reduce the gap.
+
+Control Loop Cycle
+```
+[Observe] → [Analyze] → [Decide] → [Act] → (repeat)
+```
+
+**Example (Auto-Scaling)**
+- Observe: CPU = 85%
+- Desired: CPU < 60%
+- → Decide: Need more instances
+- → Act: Scale pods from 3 → 6
+- → Observe again
+
+**Requirements**
+
+The control loop will constantly observe the actual state of the system landscape, comparing it with a desired state, as specified by the operators. If the two states differ, it will take action to make the actual state equal to the desired state.
+
+1. Metrics Collection (Observe): You need real-time data:
+    -  CPU, memory 
+    -  Request latency 
+    -  Error rate 
+    - Tools:  Prometheus 
+
+2. Desired State Definition: Clear targets:
+    -  CPU threshold (e.g., 60%) 
+    -  Latency SLA (e.g., < 200ms) 
+
+3. Decision Logic: Rules or algorithms:
+    -  Threshold-based 
+    -  Predictive scaling (advanced) 
+
+4. Actuator (Execution): Something that can change the system:
+    -  Scale pods 
+    -  Restart services 
+    -  Throttle traffic 
+
+5. Continuous Loop: Runs repeatedly (every few seconds/minutes)
+
+**Real-World Implementations**
+
+**Kubernetes Controllers**
+
+ In the world of containers, a container orchestrator such as Kubernetes
+is typically used to implement this pattern. 
+
+Kubernetes is built on control loops.
+
+Example:
+-  Deployment Controller: 
+    - Desired: 5 pods 
+    - Current: 3 pods 
+    - Action: create 2 pods 
+
+**Horizontal Pod Autoscaler (HPA)**
+-  Observes CPU or custom metrics 
+-  Scales pods automatically 
+
+**Circuit Breaker (Related Concept)**
+
+Using Resilience4j
+-  Observe failures 
+-  Open circuit 
+-  Retry later 
+
+Also a form of control loop
+
+**Trade-offs**
+
+❌ Oscillation (Flapping)
+
+System keeps scaling up/down rapidly, Caused by poor thresholds
+
+❌ Delay in Reaction
+-  Metrics lag 
+-  Scaling takes time 
+
+❌ Complexity
+-  Requires tuning 
+-  Hard to predict behavior 
+
+❌ Over-correction
+-  Scale too much → waste resources 
+-  Scale too little → performance issues 
+
+**When to Use**
+
+Always in production systems, Especially:
+-  Cloud-native apps 
+-  Kubernetes deployments 
+
+Critical for:
+-  Auto-scaling 
+-  Self-healing 
+-  Load balancing 
+
+❌ Less useful for:
+-  Static, small systems 
+-  Low-traffic apps 
+
+**Related Patterns**
+- Monitoring: Provide input to control loop
+- Reactive Systems: React to events and metrics 
+- Circuit Breaker: Feedback-based failure control 
+
+**Control Theory**
+
+Based on feedback systems from engineering(e.g., thermostat controlling temperature)
+
+**Best Practices (Production)**
+1. Add Hysteresis
+Avoid rapid oscillation:
+-  Scale up at 70% 
+-  Scale down at 40% 
+
+2. Use Cooldown Periods
+Wait before next action
+
+3. Combine Metrics
+Don’t rely on CPU only:
+-  Latency 
+-  Queue length 
+
+4. Start Simple
+-  Threshold-based first 
+-  Add intelligence later 
+
+5. Monitor the Loop Itself
+-  Is it overreacting? 
+-  Is it too slow? 
+
+🚨 Common Mistakes
+❌ No Clear Desired State
+
+System behaves unpredictably
+
+❌ Overly Aggressive Scaling
+
+Resource waste + instability
+
+❌ Ignoring Metric Lag
+
+Wrong decisions
+
+❌ Single Metric Dependency
+
+Misleading signals
+
+### Saga Pattern (Distributed Transactions)
+**Problem**
+
+You need a transaction across services:
+Order → Payment → Inventory
+
+No global ACID transaction
+
+**Solution**
+
+Break into local transactions + compensation
+Two types:
+- Choreography (event-based) 
+- Orchestration (central controller) 
+
+**Requirements**
+
+- Event system (Kafka) 
+- Compensation logic (undo steps) 
+Example using Apache Kafka
+
+**Trade-offs**
+
+- Complex logic 
+- Eventual consistency (not immediate) 
+
+**When to Use**
+
+- Multi-service workflows
+
+Event-Driven Architecture
+**Problem**
+
+Tightly coupled services:
+- Order must directly call Inventory, Notification 
+
+Hard to scale and maintain
+
+**Solution**
+
+Use events instead of direct calls
+Example:
+OrderCreated → Inventory, Notification consume
+
+**Requirements**
+
+- Message broker (Kafka, RabbitMQ) 
+- Event schema design 
+- Idempotency 
+
+**Trade-offs**
+
+- Harder debugging 
+- Event ordering challenges 
+
+**When to Use**
+
+- High scalability systems 
+- Async workflows 
+
+### Database per Service
+**Problem**
+
+Shared database:
+- Tight coupling 
+- Schema conflicts 
+
+**Solution**
+
+Each service owns its DB
+
+**Requirements**
+
+- Data duplication strategies 
+- API-based data access 
+
+**Trade-offs**
+
+- Data consistency challenges 
+- More storage 
+
+**When to Use**
+
+- Always in true microservices 
+
+### CQRS (Command Query Responsibility Segregation)
+**Problem**
+
+Same model for:
+- Reads (queries) 
+- Writes (commands) 
+
+Leads to performance bottlenecks
+
+**Solution**
+
+Split:
+- Write model 
+- Read model 
+
+**Requirements**
+
+- Event syncing 
+- Separate data stores (optional) 
+
+**Trade-offs**
+
+- Increased complexity 
+- Eventual consistency 
+
+**When to Use**
+
+- Read-heavy systems (e.g., product catalogs) 
+
+### Strangler Fig Pattern
+**Problem**
+
+You have a monolith
+You want microservices
+
+Big rewrite is risky
+
+**Solution**
+
+Gradually replace parts of monolith
+
+**Requirements**
+
+- Routing layer 
+- Incremental migration strategy 
+
+**Trade-offs**
+
+- Temporary complexity 
+- Hybrid system 
+
+**When to Use**
+
+- Legacy modernization
+
+### Observability Patterns
+
+Here are a few Observability Patterns:
+
+- Log aggregation -- aggregate application logs
+- Application metrics -- instrument a service’s code to gather statistics about operations
+- Audit logging -- record user activity in a database
+- Distributed tracing -- instrument services with code that assigns each external request an unique identifier that is passed between services. Record information (e.g. start time, end time) about the work (e.g. service requests) performed when handling the external request in a centralized service
+- Exception tracking -- report all exceptions to a centralized exception tracking service that aggregates and tracks exceptions and notifies developers.
+- Health check API -- service API (e.g. HTTP endpoint) that returns the health of the service and can be pinged, for example, by a monitoring service
+ 
+### Centralized Log Analysis Pattern
+**Problem**
+
+Traditionally, an application would write log events to log files that are stored in the local filesys-
+tem of the server that the application runs on. Given a system landscape based on a microservice
+architecture, that is, with a large number of deployed microservice instances on a large number
+of smaller servers, we can ask the following questions:
+- How do I get an overview of what is going on in the system landscape when each micro-
+service instance writes to its own local log file?
+- How do I find out if any of the microservice instances get into trouble and start writing
+error messages to their log files?
+- If end users start to report problems, how can I find related log messages; that is, how
+can I identify which microservice instance is the root cause of the problem?
+
+In microservices, logs are scattered everywhere:
+- Order Service logs in one container 
+- Payment Service logs in another 
+- Pods restart → logs disappear 
+- Debugging a request requires checking multiple services 
+
+You end up with:
+- No single view of system behavior 
+- Impossible debugging of distributed flows 
+- Lost logs due to container lifecycle 
+
+**Solution**
+
+Add a new component that can manage centralized logging and is capable of the following:
+- Detecting new microservice instances and collecting log events from them
+- Interpreting and storing log events in a structured and searchable way in a central database
+- Providing APIs and graphical tools for querying and analyzing log events
+
+Collect all logs into a centralized logging system where you can:
+- Aggregate logs from all services 
+- Search and filter logs 
+- Correlate logs across services 
+
+Typical stack:
+- ELK Stack 
+    - Elasticsearch → storage + search 
+    - Logstash → processing 
+    - Kibana → visualization 
+- EFK (Fluentd/Fluent Bit instead of Logstash) 
+
+**Requirements**
+
+Some solution requirements are as follows:
+- Microservices stream log events to standard system output, stdout. This makes it easier for a log collector to find the log events compared to when log events are written to microservice-specific log files.
+Introduction to Microservices24
+- Microservices tag the log events with the correlation ID(distributed tracing design pattern).
+- A canonical log format is defined, so that log collectors can transform log events collected from the microservices to a canonical log format before log events are stored in the central database. Storing log events in a canonical log format is required to be able to query and analyze the collected log events.
+
+1. Log Collection
+Agents collect logs from services:
+- Fluent Bit / Filebeat 
+- Sidecar or DaemonSet in Kubernetes 
+
+2. Central Storage
+- Scalable log storage (Elasticsearch) 
+- Indexing for fast search 
+
+3. Log Format Standardization
+
+All services must log in a structured format:
+```
+{
+  "timestamp": "2026-04-19T10:00:00Z",
+  "service": "order-service",
+  "level": "INFO",
+  "traceId": "abc123",
+  "message": "Order created"
+}
+```
+4. Correlation IDs (Critical)
+
+Every request must carry:
+- traceId 
+- spanId 
+
+Enables tracing across services
+
+5. Visualization & Querying
+- Dashboards 
+- Full-text search 
+- Filtering by: 
+    - service 
+    - error 
+    - traceId 
+
+**Example Flow**
+```
+User request → API Gateway (traceId=123)
+        ↓
+Order Service logs (traceId=123)
+        ↓
+Payment Service logs (traceId=123)
+        ↓
+All logs → Fluent Bit → Elasticsearch
+        ↓
+Kibana → search "traceId=123"
+```
+You see the full request journey
+
+**Trade-offs**
+
+❌ Storage Cost
+- Logs grow fast 
+- Requires retention policies 
+
+❌ Operational Complexity
+- Managing Elasticsearch clusters 
+- Index tuning 
+
+❌ Performance Overhead
+- Logging too much → slows system 
+
+❌ Noise
+- Too many logs → hard to find useful info 
+
+**When to Use**
+
+Always in microservices, Even small systems benefit early
+
+❌ Overkill?
+
+Only for:
+- Tiny apps 
+- Single-service systems 
+
+**Related Patterns**
+
+Centralized logging works closely with:
+- Distributed Tracing: Tools like:
+    - Jaeger 
+    - Zipkin 
+    - Logs + traces = full observability
+- Monitoring
+    - Prometheus 
+    - Grafana 
+    - Metrics + logs together
+- Event-Driven Systems
+    - Using Apache Kafka
+    - Logs help debug async flows
+
+### Distributed Tracing Pattern
+**Problem**
+
+It must be possible to track requests and messages that flow between microservices while pro-
+cessing an external request to the system landscape.
+Some examples of fault scenarios are as follows:
+- If end users start to file support cases regarding a specific failure, how can we identify the
+microservice that caused the problem, that is, the root cause?
+- If one support case mentions problems related to a specific entity, for example, a specific
+order number, how can we find log messages related to processing this specific order – for
+example, log messages from all microservices that were involved in processing it?
+- If end users start to file support cases regarding an unacceptably long response time, how
+can we identify which microservice in a call chain is causing the delay?
+
+A single user request flows through multiple services:
+```
+API Gateway → Order → Payment → Inventory → Notification
+```
+Each service:
+- Logs independently 
+- Has its own latency 
+- May call other services 
+
+Problems:
+- You can’t see the end-to-end flow 
+- Hard to identify where latency happens 
+- Failures are scattered across services 
+
+Even with centralized logs, you still ask: Which service caused the delay?
+
+**Solution**
+
+Track each request across services using a trace:
+- Assign a trace ID to every request 
+- Each service creates spans (units of work) 
+- All spans together form a trace tree 
+
+To track the processing between cooperating microservices, we need to ensure that all related
+requests and messages are marked with a common correlation ID and that the correlation ID is
+part of all log events. Based on a correlation ID, we can use the centralized logging service to find
+all related log events. If one of the log events also includes information about a business-related
+identifier, for example, the ID of a customer, product, or order, we can find all related log events
+for that business identifier using the correlation ID.
+To be able to analyze delays in a call chain of cooperating microservices, we must be able to collect timestamps for when requests, responses, and messages enter and exit each microservice.
+
+Tools:
+- Jaeger 
+- Zipkin 
+
+**Key Concepts**
+1. Trace: Represents the full journey of a request
+2. Span: A single operation within a trace
+
+    Example:
+    - API Gateway → span 
+    - Order Service → span 
+    - Payment call → span 
+3. Trace ID: Unique ID shared across all services
+4. Span ID: Unique per operation
+5. Parent-Child Relationship
+
+    Spans form a tree:
+    ```
+    API Gateway
+      └── Order Service
+            └── Payment Service
+                  └── Inventory Service
+    ```
+
+**Requirements**
+1. Context Propagation
+    - Assign unique correlation IDs to all incoming or new requests and events in a well-known place, such as a header with a standardized name
+    - When a microservice makes an outgoing request or sends a message, it must add the correlation ID to the request and message
+    - All log events must include the correlation ID in a predefined format so that the centralized logging service can extract the correlation ID from the log event and make it searchable
+    - Trace records must be created for when requests, responses, and messages both enter or exit a microservice instance
+    - Every request must carry tracing headers:
+        - traceId 
+        - spanId 
+    - Usually via HTTP headers: traceparent / b3 headers
+2. Instrumentation
+    - Services must be instrumented using libraries like OpenTelemetry, Spring Cloud Sleuth (older approach) 
+3. Trace Collector
+    - Collect and store traces: Jaeger / Zipkin backend 
+4. Visualization UI
+    - Timeline view 
+    - Latency breakdown 
+    - Dependency graph 
+
+**Example Flow**
+```
+User Request (traceId=abc123)
+        ↓
+API Gateway (span1)
+        ↓
+Order Service (span2)
+        ↓
+Payment Service (span3 - slow!)
+        ↓
+Inventory Service (span4)
+```
+In UI (Jaeger):
+- You clearly see: 
+    - Payment took 2.5s 
+    - Others took milliseconds 
+
+Bottleneck identified instantly
+
+**Trade-offs**
+
+❌ Overhead
+- Adds small latency 
+- Extra network/storage 
+
+❌ Complexity
+- Requires instrumentation 
+- Needs proper propagation 
+
+❌ Sampling
+- You can’t trace 100% of requests at scale 
+- Must sample (e.g., 1–10%) 
+
+**When to Use**
+
+Always in microservices (production), Especially when:
+- Many service calls 
+- Performance matters 
+- Debugging is critical 
+
+❌ Less useful for
+- Monoliths 
+- Very small systems 
+
+**Related Patterns**
+
+- Centralized Logging
+    - Using ELK Stack
+    - Logs + traceId = powerful debugging
+- Monitoring
+    - Prometheus 
+    - Grafana 
+    - Metrics tell what, tracing tells where
+- Event-Driven Systems: Using Apache Kafka, Tracing async flows is harder—but still possible
+
+**Best Practices (Production)**
+1. Always Propagate Trace Context: If one service drops it → trace breaks
+2. Combine with Logs
+    
+    Include traceId in logs:
+    ```
+    {
+      "traceId": "abc123",
+      "message": "Payment processed"
+    }
+    ```
+3. Use Sampling Smartly
+    - 100% in dev 
+    - 5–10% in production 
+4. Trace External Calls
+    - DB queries 
+    - HTTP calls 
+    - Kafka events 
+5. Keep Spans Meaningful: Not too granular, not too vague
+
+### Centralized Monitoring & Alarms Pattern
+This pattern is what turns a microservices system from “running” into operable in production. Without it, you only notice problems when users complain.
+
+**Problem**
+
+If observed response times and/or the usage of hardware resources become unacceptably high,
+it can be very hard to discover the root cause of the problem. For example, we need to be able to
+analyze hardware resource consumption per microservice.
+
+In microservices:
+- Dozens of services running independently 
+- Failures happen silently (timeouts, memory leaks, slow DB) 
+- Logs are reactive (you check after something breaks) 
+
+You lack:
+- Real-time visibility 
+- Early warning signals 
+- Automatic alerting 
+
+**Solution**
+
+Continuously collect metrics from all services, visualize them, and trigger alerts when thresholds are violated.
+
+To curb this, we add a new component, a monitor service, to the system landscape, which is capable of collecting metrics about hardware resource usage for each microservice instance level.
+
+Typical stack:
+- Prometheus → metrics collection 
+- Grafana → visualization 
+- Alerting system → notifications (email, Slack, PagerDuty) 
+
+Core Idea: Measure everything → detect anomalies → alert before users notice
+
+**Requirements**
+1. Metrics Collection (Instrumentation)
+    - It must be able to collect metrics from all the servers that are used by the system landscape, which includes autoscaling servers
+    - It must be able to detect new microservice instances as they are launched on the available servers and start to collect metrics from them.
+    - Each service exposes metrics like:
+        - Request count 
+        - Latency 
+        - Error rate 
+        - CPU/memory 
+    - Example: /metrics endpoint (Prometheus format)
+
+2. Central Metrics Store
+    - Prometheus:
+        - Scrapes metrics from services 
+        - Stores time-series data 
+
+3. Visualization
+    - It must be able to provide APIs and graphical tools for querying and analyzing the collected metrics.
+    - Grafana dashboards:
+        - Real-time graphs 
+        - Historical trends 
+        - Service-level views 
+
+4. Alerting System
+    - It must be possible to define alerts that are triggered when a specified metric exceeds a specified threshold value
+    - Define rules like: IF error_rate > 5% FOR 2 minutes
+    → trigger alert: Alerts go to:
+        - Email 
+        - Slack 
+        - On-call engineer 
+
+5. Service-Level Objectives (SLOs)
+    - Define what “healthy” means:
+        - 99.9% uptime 
+        - Latency < 200ms 
+
+**Example Flow**
+```
+Order Service exposes metrics
+        ↓
+Prometheus scrapes every 15s
+        ↓
+Stores time-series data
+        ↓
+Grafana visualizes dashboards
+        ↓
+Alert rule triggers (high latency)
+        ↓
+Notification sent to team
+```
+**Trade-offs**
+
+❌ Alert Fatigue
+
+Too many alerts → people ignore them
+
+❌ Noise vs Signal
+
+Bad thresholds → false alarms
+
+❌ Operational Overhead
+- Managing Prometheus 
+- Maintaining dashboards 
+
+❌ Storage Costs
+
+Metrics data grows over time
+
+**When to Use**
+
+Always in production microservices
+
+Non-negotiable for:
+- High availability systems 
+- Customer-facing apps 
+
+❌ Overkill?
+- Small apps 
+- Local/dev environments 
+
+**Related Patterns**
+- Centralized Logging: Logs explain what happened
+- Distributed Tracing: Traces show where it happened
+- Control Loop: Monitoring feeds control loops (auto-scaling decisions)
+
+**What to Monitor (Golden Signals)**
+
+Google SRE defines:
+1. Latency: How fast requests are
+2. Traffic: Number of requests
+3. Errors: Failure rate
+4. Saturation: Resource usage (CPU, memory)
+
+If you monitor these → you’re 80% covered
+
+**Example Alerts (Realistic)**
+- High error rate (>5%)
+- High latency (>500ms)
+- Pod restarts > 3/min
+- CPU > 80% for 5 min
+- Kafka lag increasing
+
+**Best Practices (Production)**
+1. Alert on Symptoms, Not Causes
+- ❌  CPU high
+- ✅ User latency high
+
+2. Use Severity Levels
+- Critical → wake someone up 
+- Warning → log or notify later 
+
+3. Avoid Alert Storms
+- Group alerts 
+- Use cooldowns 
+
+4. Build Dashboards Per Service
+- One dashboard per domain 
+- One global system dashboard 
+
+5. Tie Alerts to SLOs
+- Alerts should reflect user impact
+
+**Common Mistakes**
+
+❌ Monitoring Everything
+
+Too much data, no insight
+
+❌ No Alerts
+
+Monitoring without action is useless
+
+❌ Bad Thresholds
+
+Either silence or spam
+
+❌ Ignoring Trends
+
+Only reacting, not preventing
+
+### How These Patterns Work Together
+
+In a real system:
+- API Gateway → entry point 
+- Service Discovery → find services 
+- Circuit Breaker → protect calls 
+- Saga → manage transactions 
+- Kafka → async communication 
+- DB per service → decoupling 
+
+These are not isolated—they form a system of patterns
+
+## Decomposing a monolithic application into microservices
+One of the most difficult decisions (and expensive if done wrong) is how to decompose a monolithic application into a set of cooperating microservices. If this is done in the wrong way, you will end up with problems such as the following:
+- Slow delivery: Changes in the business requirements will affect too many of the microservices, resulting in extra work
+- Bad performance: To be able to perform a specific business function, a lot of requests have to be passed between various microservices, resulting in long response times
+- Inconsistent data: Since related data is separated into different microservices, inconsistencies can appear over time in data that’s managed by different microservices
+
+A good approach to finding proper boundaries for microservices is to apply domain-driven design and its concept of bounded contexts. According to Eric Evans, a bounded context is:  description of a boundary (typically a subsystem, or the work of a particular team) within which a particular model is defined and applicable
+##  Related Areas
+### Importance of DevOps
+One of the benefits of a microservice architecture is that it enables
+shorter delivery times and, in extreme cases, allows continuous delivery of new versions.
+To be able to deliver that fast, you need to establish an organization where dev and ops
+work together under the mantra you built it, you run it. This means that developers are no
+longer allowed to simply pass new versions of the software over to the operations team.
+
+Instead, the dev and ops teams need to work much more closely together, organized into
+teams that have full responsibility for the end-to-end life cycle of one microservice (or a
+group of related microservices). Besides the organizational part of dev and ops, the teams
+also need to automate the delivery chain, that is, the steps for building, testing, packaging,
+and deploying the microservices to the various deployment environments. This is known
+as setting up a delivery pipeline.
+### Organizational aspects and Conway’s law
+Another interesting aspect of how a microservice architecture might affect the organization is Conway’s law, which states the following:
+
+:::info[Conway’s law]
+
+Any organization that designs a system (defined broadly) will produce
+a design whose structure is a copy of the organization’s communication
+structure.
+
+:::
+
+This means that the traditional approach of organizing IT teams for large applications
+based on their technology expertise (for example, UX, business logic, and database teams)
+will lead to a big three-tier application – typically, a big monolithic application with a
+separately deployable unit for the UI, one for processing the business logic, and one for the
+big database. To successfully deliver an application based on a microservice architecture,
+the organization needs to be changed into teams that work with one or a group of related
+microservices. The team must have the skills that are required for those microservices,
+for example, languages and frameworks for the business logic and database technologies
+for persisting its data.
+
+### Importance of API design
+If a group of microservices exposes a common, externally
+available API, it is important that the API is easy to understand and adheres to the following guidelines:
+- If the same concept is used in multiple APIs, it should have the same description
+in terms of the naming and data types used.
+- It is of great importance that APIs are allowed to evolve in an independent but
+controlled manner. This typically requires applying a proper versioning schema
+for the APIs, for example, https://semver.org/. This implies supporting multiple
+major versions of an API over a specific period of time, allowing clients of the API
+to migrate to new major versions at their own pace
+### Migration paths from on-premises to the cloud 
+Many companies today run their work-
+loads on-premises, but are searching for ways to move parts of their workload to the cloud.
+Since most cloud providers today offer Kubernetes as a service, an appealing migration
+approach can be to first move the workload into Kubernetes on-premises (as microservices or not) and then redeploy it on a Kubernetes-as-a-service offering provided by a
+preferred cloud provider.
+## Microservices Architecture Components to Software Map
+| Component                          | Open Source                                 | Proprietary       | AWS                                 | Google Cloud             | Azure                          |
+| ---------------------------------- | ------------------------------------------- | ----------------- | ----------------------------------- | ------------------------ | ------------------------------ |
+| **API Gateway**                    | Kong, NGINX                                 | Apigee Edge       | Amazon API Gateway                  | Apigee                   | Azure API Management           |
+| **Service Discovery**              | Consul, Spring Cloud Netflix Eureka         | —                 | AWS Cloud Map                       | Built-in (GKE DNS)       | Azure Service Discovery        |
+| **Load Balancer**                  | HAProxy                                     | F5 BIG-IP         | Elastic Load Balancer (ELB)         | Cloud Load Balancing     | Azure Load Balancer            |
+| **Container Orchestration**        | Kubernetes                                  | Red Hat OpenShift | Amazon EKS                          | Google Kubernetes Engine | Azure Kubernetes Service       |
+| **Service Mesh**                   | Istio, Linkerd                              | —                 | AWS App Mesh                        | Anthos Service Mesh      | Open Service Mesh              |
+| **Configuration Management**       | Spring Cloud Config, Consul                 | —                 | AWS Systems Manager Parameter Store | Cloud Config             | Azure App Configuration        |
+| **Authentication & Authorization** | Keycloak                                    | Okta              | Amazon Cognito                      | Identity Platform        | Azure AD (Entra ID)            |
+| **Messaging / Event Streaming**    | Apache Kafka, RabbitMQ                      | Confluent Cloud   | Amazon MSK / SQS / SNS              | Pub/Sub                  | Azure Service Bus / Event Hubs |
+| **Database (SQL)**                 | PostgreSQL, MySQL                           | Oracle DB         | Amazon RDS                          | Cloud SQL                | Azure SQL Database             |
+| **Database (NoSQL)**               | MongoDB, Cassandra                          | —                 | DynamoDB                            | Firestore / Bigtable     | Cosmos DB                      |
+| **Caching**                        | Redis                                       | —                 | ElastiCache                         | Memorystore              | Azure Cache for Redis          |
+| **Centralized Logging**            | ELK Stack (Elasticsearch, Logstash, Kibana) | Splunk            | CloudWatch Logs                     | Cloud Logging            | Azure Monitor Logs             |
+| **Distributed Tracing**            | Jaeger, Zipkin                              | Datadog APM       | AWS X-Ray                           | Cloud Trace              | Azure Application Insights     |
+| **Monitoring & Metrics**           | Prometheus, Grafana                         | Datadog           | CloudWatch                          | Cloud Monitoring         | Azure Monitor                  |
+| **CI/CD Pipeline**                 | Jenkins, GitLab CI/CD                       | CircleCI          | CodePipeline / CodeBuild            | Cloud Build              | Azure DevOps                   |
+| **Secrets Management**             | HashiCorp Vault                             | —                 | AWS Secrets Manager                 | Secret Manager           | Azure Key Vault                |
+| **Container Registry**             | Harbor                                      | Docker Hub        | Amazon ECR                          | Artifact Registry        | Azure Container Registry       |
+| **Ingress Controller**             | NGINX, Traefik                              | —                 | ALB Ingress Controller              | GKE Ingress              | Azure Application Gateway      |
+
+Practical “Real Stack” Examples
+
+Fully Open Source Stack
+- Kubernetes + Istio 
+- Kafka 
+- PostgreSQL + Redis 
+- ELK + Prometheus + Grafana 
+
+Maximum control, highest complexity
+
+AWS-Native Stack
+- EKS + API Gateway 
+- MSK (Kafka) 
+- RDS + DynamoDB 
+- CloudWatch + X-Ray 
+
+Less ops, strong integration
+
+GCP-Native Stack
+- GKE + Apigee 
+- Pub/Sub 
+- Cloud SQL + Firestore 
+- Cloud Monitoring + Trace 
+
+Azure-Native Stack
+- AKS + API Management 
+- Service Bus 
+- Azure SQL + Cosmos DB 
+- Azure Monitor + App Insights

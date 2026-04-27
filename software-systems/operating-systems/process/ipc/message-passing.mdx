@@ -1,0 +1,963 @@
+---
+id: process-ipc-message-passing
+title: Message Passing
+description: Message Passing
+---
+
+**Message passing** is an interprocess communication (IPC) mechanism in which processes or threads communicate and synchronize by explicitly sending and receiving messages, rather than sharing memory.
+
+Message passing is a communication model where processes
+exchange data via explicit messages, eliminating the need
+for shared memory and making it suitable for both local
+and distributed systems.
+## Basic Idea
+
+In message passing systems:
+- Processes do NOT share memory
+- Processes communicate by exchanging messages
+
+Message passing replaces: shared memory + synchronization
+
+with: communication + coordination
+## Fundamental Operations
+his method of interprocess commu-
+nication uses two primitives, send and receive, which, like semaphores and unlike
+monitors, are system calls rather than language constructs. As such, they can easily
+be put into library procedures.
+
+Message passing is built on two primitive operations:
+- send(destination, message): transmits a message to another process
+- receive(source, message): obtains a message from another process
+
+The former call sends a message to a given destination and the latter one receives a
+message from a given source (or from ANY, if the receiver does not care). If no
+message is available, the receiver can block until one arrives. Alternatively, it can
+return immediately with an error code.
+
+## Communication Model
+General Model
+```
+Process A                Process B
+-----------              -----------
+send(msg)  ───────────►  receive(msg)
+```
+- Data flows explicitly
+- No shared variables are required
+
+## Addressing Schemes
+
+**1. Direct Communication**
+
+Processes explicitly name each other:
+```
+send(P, message)
+receive(Q, message)
+```
+- Sender and receiver must know each other
+- Communication link is established automatically
+
+**2. Indirect Communication (Mailboxes / Ports)**
+
+Messages are sent to a mailbox (queue):
+```
+send(mailbox, message)
+receive(mailbox, message)
+```
+- Processes communicate via shared mailboxes
+- Decouples sender and receiver
+
+## Synchronization Types
+
+Message passing can be blocking or non-blocking.
+
+**1. Blocking (Synchronous)**
+
+- send() blocks until message is received
+- receive() blocks until message arrives
+
+Behavior: Sender waits ↔ Receiver waits
+
+- Provides synchronization
+- Can reduce concurrency
+
+**2. Non-Blocking (Asynchronous)/88
+
+send() returns immediately
+
+receive() may:
+- return message
+- return null if no message
+
+- Higher concurrency
+- Requires explicit synchronization
+
+## Buffering Strategies
+Messages are stored in queues during transmission.
+
+**1. Zero Capacity (No Buffer)**
+
+send must wait for receive
+- Strict synchronization
+- Like a rendezvous
+
+**2. Bounded Capacity**
+
+Queue has limited size (N)
+- Sender blocks if queue is full
+- Receiver blocks if queue is empty
+
+**3. Unbounded Capacity**
+
+Queue can grow indefinitely
+- Sender never blocks
+- Receiver blocks only if empty
+
+## Design Issues for Message-Passing Systems
+Message-passing systems have many problems and design issues that do not
+arise with semaphores or with monitors, especially if the communicating processes
+are on different machines connected by a network. For example
+### Unreliable Communication
+messages can be ost by the network. 
+
+In message passing (especially over networks): Things can go wrong:
+- messages can be lost
+- messages can be delayed
+- messages can be duplicated
+- messages can arrive out of order
+
+Basic Scenario
+```
+Sender ─────► Network ─────► Receiver
+```
+Unlike shared memory:
+```
+No guarantee the message arrives!
+```
+**First Solution: Acknowledgements (ACKs)**
+
+To guard against lost messages, the sender and receiver can agree that as soon as a message has been received, the receiver will send back a special acknowledgement message. If the sender has not received the acknowledgement within a certain time interval, it retransmits the message.
+
+Protocol
+```
+Sender:
+    send(message)
+    wait for ACK
+    if timeout → resend
+
+Receiver:
+    receive(message)
+    send ACK
+```
+Now consider what happens if the message is received correctly, but the acknowledgement back to the sender is lost. The sender will retransmit the message, so the receiver will get it twice.
+```
+1. Sender → message → Receiver   ✔ received
+2. Receiver → ACK → ❌ LOST
+3. Sender times out
+4. Sender retransmits message
+5. Receiver gets SAME message again
+```
+This is a duplicate message problem.
+
+To fix duplication: It is essential that the receiver be able to distinguish a new message from the retransmission of an old one.
+
+This problem is solved by putting consecutive sequence numbers in each original message. If the receiver gets a message bearing the same sequence number as the previous message, it knows that the message is a duplicate that can be ignored.
+
+Example
+```
+Message 1 → seq = 100
+Message 2 → seq = 101
+```
+Receiver Logic
+```
+if seq == last_seq:
+    ignore (duplicate)
+else:
+    process message
+    update last_seq
+```
+Timeline with Fix
+```
+Sender → msg(seq=100) → Receiver ✔
+Receiver processes it
+
+ACK lost ❌
+
+Sender retransmits msg(seq=100)
+
+Receiver:
+    sees seq=100 again
+    → duplicate → IGNORE ✔
+```
+This Introduces a New Concept **Idempotency**, Meaning: Processing the same message multiple times, does NOT change the result.
+
+Successfully communicating in the face of unreliable message passing is a major part of the study of computer networks
+
+This small example reveals a much bigger reality:
+- Message Loss: Message never arrives
+    - Solution: Retransmission + timeout
+- Duplicate Messages: Same message arrives multiple times
+    - Solution: Sequence numbers
+- Out-of-Order Delivery: msg(2) arrives before msg(1)
+    - Solution: Reordering buffer using sequence numbers
+- Network Partition: Sender and receiver cannot reach each other
+    - Solution: Retry / fail / consensus protocols
+- Partial Failures: One node crashes, others still running
+    - This never happens in shared memory systems.
+
+TCP (Transmission Control Protocol) does exactly this:
+- sequence numbers
+- acknowledgements
+- retransmissions
+- ordering guarantees
+
+This Doesn’t Exist in Monitors/Semaphores, Because They assume:
+- shared memory
+- single system
+- reliable execution
+
+So:
+- No message loss
+- No duplication
+- No network delay
+
+### Process Naming Problem
+Message systems also have to deal with the question of how processes are named, so that the process specified in a send or receive call is unambiguous.
+
+These problems do not exist in shared-memory systems (monitors/semaphores), but are central in distributed systems.
+
+In message passing, you must specify:
+```
+send(message, destination)
+receive(source)
+```
+But What exactly is "destination"?
+
+**Why Naming Is Hard**
+
+In a distributed system:
+- processes run on different machines
+- machines may restart
+- IP addresses may change
+- multiple instances may exist
+
+So naming must be:
+- unique
+- stable
+- discoverable
+
+**Common Naming Approaches**
+1. Direct Addressing
+
+    ```
+    send(msg, IP:PORT)
+    ```
+    Example:
+    ```
+    send("file.txt", 192.168.1.10:8080)
+    ```
+    Problems:
+    - not flexible
+    - breaks if server moves
+
+2. Symbolic Names (DNS-style)
+
+    ```
+    send(msg, "fileserver.company.com")
+    ```
+    - Human-friendly
+    - Resolved dynamically
+
+3. Mailbox / Port-Based Naming
+
+    ```
+    send(msg, mailbox_id)
+    ```
+    Used in OS and IPC:
+    - Process → sends to mailbox
+    - Any process → can receive
+    - ✔ decouples sender/receiver
+
+4. Indirect Naming (Directory Service)
+
+    ```
+    send(msg, "file_service")
+    ```
+    - System resolves: "file_service" → actual machine/process
+    - Used in:
+        - microservices
+        - distributed systems
+
+### Authentication Problem
+Authentication is also an issue in message systems: how can the client tell that it is communicating with the real file server, and not with an imposter?
+
+suppose you found a process:
+```
+fileserver.company.com
+```
+New problem: Is this REALLY the file server?
+
+The Imposter Problem
+```
+Client → connects to fake server
+Fake server → steals data ❌
+```
+This is a security attack:
+- Man-in-the-middle (MITM)
+- Spoofing
+
+Authentication Goal is to Ensure “I am talking to the REAL server”
+
+**Common Authentication Mechanisms**
+1. Password-Based (Weak)
+- Client sends password
+- Server verifies
+- ❌ Can be intercepted
+
+2. Challenge–Response
+- Server → sends challenge
+- Client → proves identity using secret
+- ✔ No password sent directly
+
+3. Cryptographic Certificates (Modern Standard)
+- Used in: HTTPS / TLS
+- Example (TLS Handshake Simplified)
+```
+1. Client → request connection
+2. Server → sends certificate
+3. **Client**:
+      verifies certificate authority (CA)
+      checks server identity
+4. Secure channel established
+```
+- ✔ Prevents impersonation
+
+5. Public Key Cryptography
+- Server has:
+    - private key (secret)
+    - public key (shared)
+- Client verifies:
+    - only real server could produce this response
+
+This Does NOT Exist in Monitors/Semaphores, Because:
+- all threads share same memory
+- same OS
+- same trust boundary
+
+So:
+- No need for naming
+- No need for authentication
+
+Distributed-System Issues Naming + authentication lead to:
+
+**1. Service Discovery**
+
+“How do I find the service?”
+Solutions:
+- DNS
+- service registries (e.g., Consul, etcd)
+
+**2. Identity Management**
+
+“How do I prove identity?”
+Solutions:
+- certificates
+- tokens (JWT)
+- Kerberos
+
+**3. Trust Models**
+
+“Who do I trust?”
+- Certificate Authorities (CA)
+- Zero-trust systems
+
+
+
+## Advantages and Disadvantages
+**Advantages of Message Passing**
+- No Shared Memory: No race conditions on shared variables
+- Built-in Synchronization: send/receive naturally coordinate processes
+- Suitable for Distributed Systems: Works across machines over a network
+- Better Modularity: Processes are independent and loosely coupled
+
+**Disadvantages of Message Passing**
+- Performance Overhead
+    - Message copying + system calls
+    - Slower than shared memory for local communication.
+- Complexity in Large Systems: Managing many messages and protocols is difficult
+- Blocking Issues: Improper use can lead to deadlocks
+- Limited Data Sharing: Data must be explicitly copied between processes
+
+## direct process-to-process messaging passing
+
+## Unbuffered Mailbox-based message passing
+
+## Unbuffered messaging Rendezvous (synchronous message passing)
+The other extreme from having mailboxes is to eliminate all buffering. When
+this approach is taken, if the send is done before the receive, the sending process is
+blocked until the receive happens, at which time the message can be copied direct-
+ly from the sender to the receiver, with no buffering. Similarly, if the receive call is
+done first, the receiver is blocked until a send happens. This strategy is often known as a rendezvous. It is easier to implement than a buffered message scheme
+but is less flexible since the sender and receiver are forced to run in lockstep.
+
+**Core Idea**
+- No buffering at all.
+- Sender and receiver must meet at the same time.
+
+This is why it’s called:
+```
+RENDEZVOUS = “meeting point”
+```
+**How It Works**
+
+**Case 1: Sender Comes First**
+1. Sender calls `send(msg)`
+2. No receiver yet → sender BLOCKS
+3. Receiver calls `receive()`
+4. Data copied directly
+5. Both continue
+
+**Case 2: Receiver Comes First**
+1. Receiver calls `receive()`
+2. No sender yet → receiver BLOCKS
+3. Sender calls `send(msg)`
+4. Data copied directly
+5. Both continue
+
+**Timeline Visualization**
+```
+Sender:    send() ──wait──────────────┐
+                                      ├── data transfer ──► continue
+Receiver:          ──wait── receive() ┘
+```
+- Both must arrive together
+- No intermediate storage
+
+Communication is SYNCHRONOUS, Meaning: send() completes ⇔ receive() happens
+
+**Compare with Mailboxes (Buffered)**
+
+Buffered (Mailbox)
+```
+send() → store in mailbox → return immediately
+```
+Rendezvous
+```
+send() → wait for receiver → transfer → return
+```
+In rendezvous:
+
+No:
+- queues
+- kernel buffers
+- message storage
+
+Instead: Direct copy:
+```
+    sender memory → receiver memory
+```
+
+Conceptual Comparison
+| Feature         | Mailbox (Buffered)     | Rendezvous (Unbuffered)
+| ----------------|------------------------|-------------------------
+| Buffer          | Yes (size N)           | No
+| Send behavior   | Usually non-blocking   | Always blocking
+| Receive         | Blocks if empty        | Blocks if no sender
+| Parallelism     | High                   | Low
+| Complexity      | Higher                 | Lower
+| Coupling        | Loose                  | Tight
+
+**Advantages**
+1. Simpler Implementation
+- No need to manage:
+    - queues
+    - buffer sizes
+    - overflow conditions
+2. Strong Synchronization
+- Sender KNOWS receiver got the message
+- No need for ACKs (locally)
+- No lost messages
+
+3. No Memory Overhead
+- 0 buffering → minimal memory usage
+
+**Disadvantages**
+1. Lockstep Execution
+- Sender and receiver must run together, So:
+    - Producer cannot run ahead
+    - Consumer cannot run ahead
+2. Lower Parallelism
+- No decoupling between processes
+- Buffered systems allow: Producer → burst of work → continue
+- Rendezvous forces: Producer ↔ Consumer tightly synchronized
+3. Performance Limitation
+- Frequent blocking → more context switches
+
+
+## MPI (Message-Passing Interface)
+Message passing is commonly used in parallel programming systems. One
+well-known message-passing system, for example, is MPI (Message-Passing
+Interface). It is widely used for scientific computing.
+## Implementation Mechanisms
+Message passing is implemented using:
+- Pipes (UNIX)
+- Message queues
+- Sockets (TCP/UDP)
+- RPC (Remote Procedure Call)
+- Middleware systems (e.g., Kafka, RabbitMQ)
+
+## Message Passing vs Monitors vs Semaphores
+| Aspect               | Semaphores               | Monitors                  | Message Passing           |
+| :------------------- | :----------------------- | :------------------------ | :------------------------ |
+| Abstraction Level    | Low-level primitive      | High-level construct      | High-level model          |
+| Core Idea            | Counters + P/V ops       | Encapsulated shared state | Send/receive messages     |
+| Memory Model         | Shared memory            | Shared memory             | No shared memory required |
+| Synchronization      | Manual                   | Automatic (implicit)      | Built into communication  |
+| Operations           | down(), up()             | wait(), signal()          | send(), receive()         |
+| Mutual Exclusion     | Explicit (binary sem)    | Implicit (monitor lock)   | Not needed (no sharing)   |
+| Condition Sync       | Indirect, complex        | Direct (cond variables)   | Via message semantics     |
+| Safety               | Error-prone              | Safer                     | Safe (no shared data)     |
+| Structure            | Unstructured             | Structured                | Structured                |
+| Compiler Support     | Not required             | Required                  | Not required              |
+| Language Dependency  | None                     | Language-level feature    | None                      |
+| Ease of Use          | Difficult                | Easier                    | Moderate                  |
+| Deadlocks            | Common                   | Less likely               | Still possible            |
+| Race Conditions      | Common                   | Reduced                   | Avoided (mostly)          |
+| Starvation           | Possible                 | Possible                  | Depends on system         |
+| Performance (local)  | Very fast                | Fast                      | Slower (copy overhead)    |
+| Performance (remote) | Not applicable           | Not applicable            | Suitable                  |
+| Distributed Systems  | ❌ Not suitable          | ❌ Not suitable           | ✔ Designed for it         |
+| Scalability          | Limited                  | Limited                   | High                      |
+| Flexibility          | High (but dangerous)     | Moderate                  | High                      |
+| Debugging            | Hard                     | Easier                    | Easier (clear flow)       |
+| Typical Use          | OS kernels, low-level    | High-level concurrency    | Distributed systems       |
+
+Key Conceptual Differences
+1. Control vs Communication
+    - Semaphores → control access
+    - Monitors   → structure access
+    - Message Passing → replace access with communication
+2. Where Synchronization Happens
+    - Semaphores → programmer responsibility
+    - Monitors   → compiler/runtime enforced
+    - Message Passing → inherent in send/receive
+3. System Scope
+    - Shared memory (single machine): Semaphores, Monitors
+    - Distributed systems: Message Passing ONLY
+
+Semaphores / Monitors:  → control access to shared memory
+
+Linux IPC: → implements message passing in real systems
+
+Distributed systems: → built on sockets (network message passing)
+    
+If data is shared → use locks (semaphores/monitors)
+
+If data is NOT shared → use message passing (IPC)
+
+Modern systems prefer: message passing (safer, scalable, distributed)
+## Producer–Consumer Using Message Passing
+### direct process-to-process messaging
+let us see how the producer-consumer problem can be solved with message passing and no shared memory.
+- assume that all messages are the same size and that.
+- messages sent but not yet received are buffered automatically by the operating system.
+
+```c
+#define N 100 / * number of slots in the buffer * /
+
+void producer(void)
+{
+    int item;
+    message m; / * message buffer * /
+    while (TRUE) {
+        item = produce_item( ); /* generate something to put in buffer * /
+        receive(consumer, &m); / * wait for an empty to arrive * /
+        build_message(&m, item); / * construct a message to send * /
+        send(consumer, &m); / * send item to consumer * /
+    }
+}
+void consumer(void)
+{
+    int item, i;
+    message m;
+    for (i = 0; i < N; i++) send(producer, &m); / * send N empties * /
+    while (TRUE) {
+        receive(producer, &m); / * get message containing item * /
+        item = extract_item(&m); /* extract item from message * /
+        send(producer, &m); / * send back empty reply * /
+        consume_item(item); / * do something with the item * /
+    }
+}
+```
+In this solution, a total of `N` messages is used, analogous to the `N` slots in a shared-memory buffer. 
+
+this solution encodes `buffering + synchronization + flow control` without shared memory.
+
+No shared buffer at all. Instead: 
+```
+The "buffer" = a fixed number (`N`) of messages circulating.
+```
+So: 
+- Shared memory solution: `N` buffer slots
+- This solution: `N` message objects (tokens)
+
+Messages themselves act as buffer slots
+
+**States**
+
+The Key Concept: “Empty” vs “Full” Messages, ach message is always in one of two states:
+- `EMPTY` → available slot
+- `FULL`  → contains data (item)
+
+Analogy, Think of:
+- `N` boxes moving between producer and consumer
+- Empty box → producer can fill it
+- Full box → consumer can consume it
+
+Total number of messages = N (constant), They are just moving:
+```
+Producer side + Consumer side = N
+```
+
+**Workflow**
+1. Initialization Phase
+    - The consumer starts out by sending `N` empty messages to the producer. 
+    ```c
+    for (i = 0; i < N; i++)
+        send(producer, &m);   // send N empty messages
+    ```
+    - Meaning Consumer → gives producer `N` empty “containers”.
+    - So initially:
+        - Producer has `N` empty messages
+        - Consumer has `0` messages
+2. Producer
+    - Wait for empty slot
+    - Whenever the producer has an item to give to the consumer, 
+    - it takes an empty message and sends back a full one. 
+    - In this way, the total number of messages in the system remains constant in time, so they can be stored in a given amount of memory known in advance.
+3. Consumer
+    - Wait for full slot
+    - Consume item
+    - Turn it into empty slot
+    - Return it
+
+**Synchronization**
+1. **Case 1**: Producer is Faster
+    - If the producer works faster than the consumer, all the messages will end up full, waiting for the consumer; the producer will be blocked, waiting for an empty to come back. 
+    - Producer keeps filling messages
+        - eventually all N messages become FULL
+        - all are at consumer side
+    - Now: Producer tries: `receive(consumer, &m)`, BUT: no empty messages exist, Producer blocks.
+2. **Case 2**: Consumer is Faster
+    - If the consumer works faster, then the reverse happens: all the messages will be empties waiting for the producer to fill them up; the consumer will be blocked, waiting for a full message.
+    - Consumer keeps consuming
+        - all messages become EMPTY
+        - all are at producer side
+    - Now: Consumer tries: `receive(producer, &m)`, BUT: no full messages exist, Consumer blocks
+
+There is NO explicit buffer array
+Instead:
+Buffer = messages “in flight” inside OS
+Because:
+"messages sent but not yet received are buffered automatically"
+
+**Visual Flow**
+```
+Initially:
+Consumer → [EMPTY x N] → Producer
+
+Then cycle:
+
+Producer:
+    EMPTY → FULL → send →
+
+Consumer:
+    receive FULL → consume → EMPTY → send →
+```
+Loop continues forever.
+
+**Why This Works So Well**
+1. Mutual Exclusion
+    - No shared data → no races
+2. Bounded Buffer
+    - Max items = `N` (number of messages)
+3. Blocking Behavior
+    - `receive()` blocks automatically, So:
+        - No busy waiting
+        - No explicit synchronization code
+
+This is a TOKEN-BASED FLOW CONTROL system, Where: Token = message
+
+Rule
+- To produce → must own a token (empty message)
+- To consume → must receive a token (full mes
+
+**Why Fixed Number of Messages Matters**
+
+Memory usage is bounded, Unlike naive message systems: Producer could flood system, Here: Max outstanding messages = `N`.
+**Comparing with Semaphores**
+
+Compare with classical solution:
+- empty = `N`
+- full  = `0`
+
+Mapping
+- Empty messages ↔ empty semaphore
+- Full messages  ↔ full semaphore
+
+Producer
+- `receive(empty)`  ≈ `down(empty)`
+- `send(full)`      ≈ `up(full)`
+
+Consumer
+- `receive(full)`   ≈ `down(full)`
+- `send(empty)`     ≈ `up(empty)`
+
+<!--implement direct process to process version of producer-consumer in C-->
+### direct process-to-mailboxes messaging
+let us look at how messages are addressed. One way is to assign each process a unique address and have messages be addressed to processes. 
+
+A different way is to invent a new data structure, called a **mailbox**. 
+
+A **mailbox** is a place to buffer a certain number of messages, typically specified when the mailbox is created. 
+
+When mailboxes are used, the address parameters in the send and receive calls are mailboxes, not processes. When a process tries to send to a mailbox that is full, it is suspended until a message is removed from that mailbox, making room for a new one.
+
+The Key Shift: From Processes → Mailboxes
+
+Previously:
+```
+send(consumer, msg)
+receive(producer, msg)
+```
+Now:
+```
+send(mailbox, msg)
+recive(mailbox, msg)
+```
+Communication happens via mailboxes, not directly between processes
+
+For the producer-consumer problem, both the producer and consumer would create mailboxes large enough to hold `N` messages(Two-Mailbox Design (Producer–Consumer)):
+
+We create: 
+- producer_mailbox  → holds EMPTY messages
+- consumer_mailbox  → holds FULL messages
+
+Flow
+- Consumer → producer_mailbox → Producer
+- Producer → consumer_mailbox → Consumer
+
+**Workflow**
+
+1. Initialization
+    - Consumer: send `N` EMPTY messages → producer_mailbox, So:
+        - producer_mailbox = N empty messages
+        - consumer_mailbox = 0 messages
+2. Producer Behavior
+    - The producer would send messages containing actual data to the consumer’s mailbox,
+    - So Producer
+        - receive(producer_mailbox)   → get EMPTY
+        - fill message with data
+        - send(consumer_mailbox)      → send FULL
+2. Consumer Behavior
+    - the consumer would send empty messages to the producer’s mailbox. 
+    - So Consumer
+        - receive(consumer_mailbox)   → get FULL
+        - consume item
+        - send(producer_mailbox)      → return EMPTY
+
+When mailboxes are used, the buffering mechanism is clear: the destination mailbox holds messages that have been sent to the destination process but have not yet been accepted. So:
+- consumer_mailbox = buffer of FULL items
+- producer_mailbox = buffer of EMPTY slots
+
+Sender blocks if mailbox is full, Receiver blocks if mailbox is empty, This gives you:
+- flow control
+- synchronization
+- bounded memory
+
+All in one mechanism.
+
+**Visualization**
+```
+[producer_mailbox] (EMPTY slots)
+        ↓
+     Producer
+        ↓
+[consumer_mailbox] (FULL items)
+        ↓
+     Consumer
+```
+**Why This Is Better Conceptually**
+
+Compared to earlier solution:
+- Old: implicit buffering inside OS (less visible)
+- Now:  explicit mailboxes = explicit buffers
+
+Much clearer design
+
+**Real System Examples**
+
+**Linux Message Queues**
+```
+msgsnd(queue, msg)
+msgrcv(queue, msg)
+```
+✔ queue capacity = buffer size
+
+**Pipes**
+```
+write() → pipe buffer
+read()  → from pipe buffer
+```
+✔ pipe buffer = mailbox
+
+**Go Channels**
+```
+ch := make(chan int, N)
+```
+✔ channel buffer = mailbox
+
+<!--implement mailbox version of producer-consumer in C-->
+### Producer–Consumer with Rendezvous
+No buffer → no N slots → no queue
+
+Behavior
+
+1. **Producer**:
+    - produce item
+    - `send(item)` → waits for consumer
+
+2. **Consumer**:
+    - `receive(item)` → waits for producer
+    - consume item
+
+Result: 
+- Exactly 1 item at a time
+- No accumulation:
+- Buffered system:  up to N items
+- Rendezvous: at most 1 item
+
+<!--implement rendezvous version of producer-consumer in C-->
+## LInux Real Cases
+Linux provides real-world implementations of message passing (and some shared-memory IPC).
+
+**2.1 Pipes (Anonymous Pipes)**
+
+Concept: Unidirectional byte stream between related processes
+
+Structure
+```
+Process A          Kernel Buffer          Process B
+---------          -------------          ---------
+write()  ───────►  [   PIPE   ]  ───────► read()
+```
+Properties
+- FIFO (first-in, first-out)
+- Blocking by default
+- No message boundaries (byte stream)
+- Typically used between parent/child
+
+Example
+```c
+int fd[2];
+pipe(fd);
+write(fd[1], "hello", 5);
+read(fd[0], buf, 5);
+```
+Use Case
+- Shell pipelines:
+```
+ls | grep ".c"
+```
+
+**2.2 Named Pipes (FIFOs)**
+
+Concept: Pipe with a name in the filesystem
+
+Structure
+```
+Process A ──► FIFO file ──► Process B
+```
+Properties
+- Works between unrelated processes
+- Persistent (exists as a file)
+
+Example
+```
+mkfifo mypipe
+```
+**2.3 Message Queues (POSIX / System V)**
+
+Concept: Kernel-managed queue of discrete messages
+
+Structure
+```
+Sender ─────► [ Message Queue ] ─────► Receiver
+```
+Properties
+- Messages have boundaries
+- Can include priorities
+- Kernel stores messages
+
+Example (POSIX)
+```c
+mq_send(mq, msg, size, priority);
+mq_receive(mq, buffer, size, &priority);
+```
+Advantages over Pipes
+- Structured messages
+- Priority handling
+- Multiple readers/writers
+
+**2.4 Sockets**
+
+Concept: Bidirectional communication endpoint
+
+Types
+1. UNIX domain sockets → local IPC
+2. TCP/UDP sockets     → network communication
+
+Structure
+```
+Process A  ◄────►  Kernel  ◄────►  Process B
+```
+Example
+```
+send(sock, msg, len, 0);
+recv(sock, buf, len, 0);
+```
+Properties
+- Full-duplex (two-way)
+- Works locally and over network
+- Supports streams (TCP) or messages (UDP)
+
+Use Case
+- Client-server apps
+- Microservices
+- Distributed systems
+
+**2.5 Shared Memory**
+
+Concept: Processes share a memory region
+
+Structure
+```
+Process A ─┐
+           ├──► Shared Memory ◄--┐
+Process B ─┘                      │
+                                  ▼
+                         Needs synchronization!
+```
+Important: Shared memory ≠ message passing
+
+Requires: semaphores / mutexes
+
+Linux IPC Comparison Table
+| Mechanism      | Type        | Direction   | Scope       | Message Type|
+| :------------- | :---------- | :---------- | :-----------| :---------- |
+| Pipe           | Stream      | One-way     | Local       | Byte stream |
+| FIFO           | Stream      | One-way     | Local       | Byte stream |
+| Msg Queue      | Message     | Two-way     | Local       | Structured  |
+| Socket (UNIX)  | Stream/msg  | Two-way     | Local       | Both        |
+| Socket (TCP)   | Stream      | Two-way     | Network     | Byte stream |
+| Socket (UDP)   | Message     | Two-way     | Network     | Datagram    |
+| Shared Memory  | Memory      | N/A         | Local       | N/A         |

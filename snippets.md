@@ -1,3 +1,10 @@
+## Replace pattern
+
+to replace all bullets with bold ****
+
+^(\d+\.\s)([^**].+)\:
+$1**$2**:
+
 ## Arrows
 ↑ ↓ → ← ↔
 ↖ ↗ ↘ ↙
@@ -23,6 +30,17 @@
 </TabItem>
 </Tabs>
 
+
+<Tabs groupId="code">
+<TabItem value="maven" label="Maven">
+```maven
+```
+</TabItem>
+<TabItem value="gradle" label="Gradle">
+```groovy
+```
+</TabItem>
+</Tabs>
 
 <details>
 <summary>summary</summary>
@@ -62,7 +80,7 @@ Contains High-Level Algorithm
 Introduce algorithm in pseudocode with a small example showing its execution.
 <Tabs>
 
-<TabItem value="Ps1" label="Pesudocode1" default>
+<TabItem value="Ps1" label="Pseudocode1" default>
 
 ```
 
@@ -70,7 +88,7 @@ Introduce algorithm in pseudocode with a small example showing its execution.
 
 </TabItem>
 
-<TabItem value="Pesudocode2" label="Pesudocode2">
+<TabItem value="Pseudocode2" label="Pseudocode2">
 
 ```
 

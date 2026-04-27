@@ -1,0 +1,1365 @@
+---
+id: design-architecture-design-patterns-creational-builder
+title: Builder
+sidebar_position: 1
+---
+<!--If you want next:
+
+Show Builder pitfalls in Spring/JPA (very important in backend systems)
+Convert this into a generic reusable builder base class
+Or give a Fluent Builder vs Telescoping Constructor comparison with benchmarks
+I can show how Director becomes harmful in modern backend systems (Spring / APIs)
+Or  convert this into a generic reusable Builder framework in Java
+Or compare Classic vs Fluent Builder in real system design decisions
+Show a hybrid approach (Director + Fluent Builder) used in real frameworks
+Or why Classic Builder often fails in REST API design (very important insight)
+Or  compare Builder vs Factory in backend systems
+give a comparison pseudocode: Builder vs Factory vs Prototype-->
+## Overview
+
+The **Builder Pattern** is a creational design pattern that separates the construction of a complex object from its representation, allowing the same construction process to create different representations.
+
+The Gang of Four describes the purpose of the "`Prototype`" pattern as follows:
+
+> Separate the construction of a complex object from its representation, so that the same construction process can produce different representations.
+
+With the builder pattern, you have an object that is complex or complicated to construct- This object cannot be created in one pass, but goes through an elaborate construction process.
+
+* A Builder is an object whose task is to build other objects.
+* The design process is isolated in the Builder.
+* Usually the construction process of the objects to be built is complex or complicated; often several steps are required.
+* Builders can also be chained together and thus made dependent on each other.
+* Since the data is independent of the object creation, many similar objects can be created.
+* Typically, builders are used to build a composite.
+
+It is especially useful when:
+- Object creation involves many optional parameters
+- Construction must follow step-by-step logic
+- You want to avoid telescoping constructors
+## Intent
+**Builder** is a creational design pattern that lets you construct complex objects step by step- The pattern allows you to produce different types and representations of an object using the same construction code.
+
+![](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/intent.png)
+- Construct a complex object step by step
+- Allow different representations of the same object
+- Improve readability and maintainability of object creation
+- Separate the construction of a complex object from its representation so that the same construction process can create different representations.
+- Parse a complex representation, create one of several targets.
+
+## Identification
+
+The Builder pattern can be recognized in a class, which has a single creation method and several methods to configure the resulting object- 
+
+Builder methods often support chaining (for example, `someBuilder.setValueA(1).setValueB(2).create()`).
+
+## Also Known As
+None (commonly just called Builder)
+
+## Motivation (Problem)
+An application needs to create the elements of a complex aggregate. The specification for the aggregate exists on secondary storage and one of many representations needs to be built in primary storage.
+
+When creating objects with many parameters:
+```java
+new Computer("Intel i7", "16GB", "1TB", true, false, true);
+```
+Problems:
+- Hard to read
+- Hard to maintain
+- Error-prone (parameter order matters)
+- Difficult to extend
+
+Imagine a complex object that requires laborious, step-by-step initialization of many fields and nested objects- Such initialization code is usually buried inside a monstrous constructor with lots of parameters- Or even worse: scattered all over the client code.
+
+![You might make the program too complex by creating a subclass for every possible configuration of an object.](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/image-1.png)
+
+You might make the program too complex by creating a subclass for every possible configuration of an object.
+
+For example, let's think about how to create a `House` object- To build a simple house, you need to construct four walls and a floor, install a door, fit a pair of windows, and build a roof- But what if you want a bigger, brighter house, with a backyard and other goodies (like a heating system, plumbing, and electrical wiring)?
+
+The simplest solution is to extend the base `House` class and create a set of subclasses to cover all combinations of the parameters- But eventually you'll end up with a considerable number of subclasses- Any new parameter, such as the porch style, will require growing this hierarchy even more.
+
+There's another approach that doesn't involve breeding subclasses- You can create a giant constructor right in the base `House` class with all possible parameters that control the house object- While this approach indeed eliminates the need for subclasses, it creates another problem.
+
+![The constructor with lots of parameters has its downside: not all the parameters are needed at all times.](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/image-2.png)
+
+The constructor with lots of parameters has its downside: not all the parameters are needed at all times.
+
+In most cases most of the parameters will be unused, making [the constructor calls pretty ugly](/smells/long-parameter-list)- For instance, only a fraction of houses have swimming pools, so the parameters related to swimming pools will be useless nine times out of ten.
+
+## Solution
+Separate the algorithm for interpreting (i.e. reading and parsing) a stored persistence mechanism (e.g. RTF files) from the algorithm for building and representing one of many target products (e.g. ASCII, TeX, text widget). The focus/distinction is on creating complex aggregates.
+
+The Builder pattern suggests that you extract the object construction code out of its own class and move it to separate objects called **builders**.
+
+![The Builder pattern lets you construct complex objects step by step- The Builder doesn’t allow other objects to access the product while it’s being built.](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/image-3.png)
+
+The Builder pattern lets you construct complex objects step by step- The Builder doesn't allow other objects to access the product while it's being built.
+
+The pattern organizes object construction into a set of steps (`buildWalls`, `buildDoor`, etc.)- To create an object, you execute a series of these steps on a builder object- The important part is that you don't need to call all of the steps- You can call only those steps that are necessary for producing a particular configuration of an object.
+
+Some of the construction steps might require different implementation when you need to build various representations of the product- For example, walls of a cabin may be built of wood, but the castle walls must be built with stone.
+
+In this case, you can create several different builder classes that implement the same set of building steps, but in a different manner- Then you can use these builders in the construction process (i.e., an ordered set of calls to the building steps) to produce different kinds of objects.
+
+![Different builders execute the same task in various ways.](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/image-4.png)
+
+The "director" invokes "builder" services as it interprets the external format. The "builder" creates part of the complex object each time it is called and maintains all intermediate state. When the product is finished, the client retrieves the result from the "builder".
+
+For example, imagine a builder that builds everything from wood and glass, a second one that builds everything with stone and iron and a third one that uses gold and diamonds- By calling the same set of steps, you get a regular house from the first builder, a small castle from the second and a palace from the third- However, this would only work if the client code that calls the building steps is able to interact with builders using a common interface.
+
+So, Encapsulate object construction in a separate Builder class that:
+- Provides step-by-step methods
+- Returns this for chaining
+- Builds the final object via a build() method
+
+You can go further and extract a series of calls to the builder steps you use to construct a product into a separate class called **director**- The director class defines the order in which to execute the building steps, while the builder provides the implementation for those steps.
+
+![The director knows which building steps to execute to get a working product.](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/image-5.png)
+
+The director knows which building steps to execute to get a working product.
+
+Having a director class in your program isn't strictly necessary- You can always call the building steps in a specific order directly from the client code- However, the director class might be a good place to put various construction routines so you can reuse them across your program.
+
+In addition, the director class completely hides the details of product construction from the client code- The client only needs to associate a builder with a director, launch the construction with the director, and get the result from the builder.
+
+## Structure
+Key Components
+- Product: The complex object being built
+- Builder: Interface/abstract class defining construction steps
+- Concrete Builder: Implements builder steps
+- Director (optional): Controls construction order
+
+![Structure](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/image-6.png)
+- The **Builder** interface declares product construction steps that are common to all types of builders.
+- **Concrete Builders** provide different implementations of the construction steps- Concrete builders may produce products that don't follow the common interface.
+- **Products** are resulting objects- Products constructed by different builders don't have to belong to the same class hierarchy or interface.
+- The **Director** class defines the order in which to call construction steps, so you can create and reuse specific configurations of products.
+- The **Client** must associate one of the builder objects with the director- Usually, it's done just once, via parameters of the director's constructor- Then the director uses that builder object for all further construction- However, there's an alternative approach for when the client passes the builder object to the production method of the director- In this case, you can use a different builder each time you produce something with the director.
+
+The Reader encapsulates the parsing of the common input. The Builder hierarchy makes possible the polymorphic creation of many peculiar representations or targets.
+![document-converter-example](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/document-converter-example.png)
+Check list
+1. Decide if a common input and many possible representations (or outputs) is the problem at hand. 
+2. Encapsulate the parsing of the common input in a Reader class. 
+3. Design a standard protocol for creating all possible output representations. Capture the steps of this protocol in a Builder interface. 
+4. Define a Builder derived class for each target representation. 
+5. The client creates a Reader object and a Builder object, and registers the latter with the former. 
+6. The client asks the Reader to "construct". 
+7. The client asks the Builder to return the result
+
+## UML (Conceptual)
+```
+Builder (interface)
+ ├── buildPartA()
+ ├── buildPartB()
+ └── getResult()
+
+ConcreteBuilder
+ ├── implements Builder
+ └── constructs Product
+
+Product
+ └── final complex object
+
+Director (optional)
+ └── uses Builder to construct object
+```
+## Example
+The Builder pattern separates the construction of a complex object from its representation so that the same construction process can create different representations. This pattern is used by fast food restaurants to construct children’s meals. Children’s meals typically consist of a main item, a side item, a drink, and a toy (e.g., a hamburger, fries, Coke, and toy dinosaur). Note that there can be variation in the content of the children’s meal, but the construction process is the same. Whether a customer orders a hamburger, cheeseburger, or chicken, the process is the same. The employee at the counter directs the crew to assemble a main item, side item, and toy. These items are then placed in a bag. The drink is placed in a cup and remains outside of the bag. This same process is used at competing restaurants.
+![fast food restaurants to construct children's meals.](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/children-meal-builder-example.png)
+## Variations
+- Classic Builder (with Director)
+    Director enforces construction order
+    Useful in predefined workflows
+- Fluent Builder (Most Common)
+    Method chaining (return this)
+    No Director
+- Immutable Builder
+    Final object is immutable
+    Builder is mutable
+- Step Builder (Advanced)
+    Enforces order at compile-time using interfaces
+## Pseudocode
+### Classic Builder (with Director)
+```
+// Product
+class Product
+    attribute partA
+    attribute partB
+    attribute partC
+
+    method show()
+        print(partA, partB, partC)
+
+
+// Builder Interface
+interface Builder
+    method buildPartA()
+    method buildPartB()
+    method buildPartC()
+    method getResult() : Product
+
+
+// Concrete Builder
+class ConcreteBuilder implements Builder
+    private product : Product
+
+    constructor()
+        product = new Product()
+
+    method buildPartA()
+        product.partA = "A"
+
+    method buildPartB()
+        product.partB = "B"
+
+    method buildPartC()
+        product.partC = "C"
+
+    method getResult() : Product
+        return product
+
+
+// Director (optional)
+class Director
+    method construct(builder : Builder) : Product
+        builder.buildPartA()
+        builder.buildPartB()
+        builder.buildPartC()
+        return builder.getResult()
+
+
+// Client
+builder = new ConcreteBuilder()
+director = new Director()
+
+product = director.construct(builder)
+product.show()
+```
+### Fluent Builder (Modern / Most Used)
+```
+class Product
+    private attribute field1
+    private attribute field2
+    private attribute optionalField
+
+    // Private constructor
+    constructor(builder)
+        field1 = builder.field1
+        field2 = builder.field2
+        optionalField = builder.optionalField
+
+
+class Builder
+    attribute field1
+    attribute field2
+    attribute optionalField
+
+    constructor(field1, field2)
+        this.field1 = field1
+        this.field2 = field2
+
+    method setOptionalField(value) : Builder
+        optionalField = value
+        return this   // enables chaining
+
+    method build() : Product
+        // validation logic (optional)
+        return new Product(this)
+
+
+// Client
+product = new Builder("value1", "value2")
+              .setOptionalField("extra")
+              .build()
+```
+### Step Builder (Enforcing Order – Advanced)
+```
+interface Step1
+    method setField1(value) : Step2
+
+interface Step2
+    method setField2(value) : BuildStep
+
+interface BuildStep
+    method build() : Product
+
+
+class Builder implements Step1, Step2, BuildStep
+    attribute field1
+    attribute field2
+
+    method setField1(value) : Step2
+        field1 = value
+        return this
+
+    method setField2(value) : BuildStep
+        field2 = value
+        return this
+
+    method build() : Product
+        return new Product(field1, field2)
+
+
+// Client
+product = new Builder()
+              .setField1("A")
+              .setField2("B")
+              .build()
+```
+## Implementation
+- Make sure that you can clearly define the common construction steps for building all available product representations- Otherwise, you won't be able to proceed with implementing the pattern.
+- Declare these steps in the base builder interface.
+- Create a concrete builder class for each of the product representations and implement their construction steps.
+
+  Don't forget about implementing a method for fetching the result of the construction- The reason why this method can't be declared inside the builder interface is that various builders may construct products that don't have a common interface- Therefore, you don't know what would be the return type for such a method- However, if you're dealing with products from a single hierarchy, the fetching method can be safely added to the base interface.
+
+- Think about creating a director class- It may encapsulate various ways to construct a product using the same builder object.
+- The client code creates both the builder and the director objects- Before construction starts, the client must pass a builder object to the director- Usually, the client does this only once, via parameters of the director's class constructor- The director uses the builder object in all further construction-. 
+
+  There's an alternative approach, where the builder is passed to a specific product construction method of the director.
+- The construction result can be obtained directly from the director only if all products follow the same interface- Otherwise, the client should fetch the result from the builder.
+
+## Examples
+### Classic Builder (with Director)
+#### Example: Building Car 
+the folllowing example of the **Builder** pattern illustrates how you can reuse the same object construction code when building different types of products, such as cars, and create the corresponding manuals for them.
+
+![The example of step-by-step construction of cars and the user guides that fit those car models.](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/image-7.png)
+
+A car is a complex object that can be constructed in a hundred different ways- Instead of bloating the `Car` class with a huge constructor, we extracted the car assembly code into a separate car builder class- This class has a set of methods for configuring various parts of a car.
+
+If the client code needs to assemble a special, fine-tuned model of a car:
+1- it can work with the builder directly- 
+2- On the other hand, the client can delegate the assembly to the director class, which knows how to use a builder to construct several of the most popular models of cars.
+
+You might be shocked, but every car needs a manual (seriously, who reads them?)- The manual describes every feature of the car, so the details in the manuals vary across the different models- That's why it makes sense to reuse an existing construction process for both real cars and their respective manuals- Of course, building a manual isn't the same as building a car, and that's why we must provide another builder class that specializes in composing manuals- This class implements the same building methods as its car-building sibling, but instead of crafting car parts, it describes them- By passing these builders to the same director object, we can construct either a car or a manual.
+
+The final part is fetching the resulting object- A metal car and a paper manual, although related, are still very different things- We can't place a method for fetching results in the director without coupling the director to concrete product classes- Hence, we obtain the result of the construction from the builder which performed the job.
+```
+// Using the Builder pattern makes sense only when your products
+// are quite complex and require extensive configuration- The
+// following two products are related, although they don't have
+// a common interface.
+class Car is
+    // A car can have a GPS, trip computer and some number of
+    // seats- Different models of cars (sports car, SUV,
+    // cabriolet) might have different features installed or
+    // enabled.
+
+class Manual is
+    // Each car should have a user manual that corresponds to
+    // the car's configuration and describes all its features.
+
+// The builder interface specifies methods for creating the
+// different parts of the product objects.
+interface Builder is
+    method reset()
+    method setSeats(...)
+    method setEngine(...)
+    method setTripComputer(...)
+    method setGPS(...)
+
+// The concrete builder classes follow the builder interface and
+// provide specific implementations of the building steps- Your
+// program may have several variations of builders, each
+// implemented differently.
+class CarBuilder implements Builder is
+    private field car:Car
+
+....
+// A fresh builder instance should contain a blank product
+// object which it uses in further assembly.
+constructor CarBuilder() is
+    this.reset()
+
+// The reset method clears the object being built.
+method reset() is
+    this.car = new Car()
+
+// All production steps work with the same product instance.
+method setSeats(...) is
+    // Set the number of seats in the car.
+
+method setEngine(...) is
+    // Install a given engine.
+
+method setTripComputer(...) is
+    // Install a trip computer.
+
+method setGPS(...) is
+    // Install a global positioning system.
+
+// Concrete builders are supposed to provide their own
+// methods for retrieving results- That's because various
+// types of builders may create entirely different products
+// that don't all follow the same interface- Therefore such
+// methods can't be declared in the builder interface (at
+// least not in a statically-typed programming language).
+//
+// Usually, after returning the end result to the client, a
+// builder instance is expected to be ready to start
+// producing another product- That's why it's a usual
+// practice to call the reset method at the end of the
+// \`getProduct\` method body- However, this behavior isn't
+// mandatory, and you can make your builder wait for an
+// explicit reset call from the client code before disposing
+// of the previous result.
+method getProduct():Car is
+    product = this.car
+    this.reset()
+    return product
+....
+
+// Unlike other creational patterns, builder lets you construct
+// products that don't follow the common interface.
+class CarManualBuilder implements Builder is
+    private field manual:Manual
+
+....
+constructor CarManualBuilder() is
+    this.reset()
+
+method reset() is
+    this.manual = new Manual()
+
+method setSeats(...) is
+    // Document car seat features.
+
+method setEngine(...) is
+    // Add engine instructions.
+
+method setTripComputer(...) is
+    // Add trip computer instructions.
+
+method setGPS(...) is
+    // Add GPS instructions.
+
+method getProduct():Manual is
+    // Return the manual and reset the builder.
+....
+
+// The director is only responsible for executing the building
+// steps in a particular sequence- It's helpful when producing
+// products according to a specific order or configuration.
+// Strictly speaking, the director class is optional, since the
+// client can control builders directly.
+class Director is
+    // The director works with any builder instance that the
+    // client code passes to it- This way, the client code may
+    // alter the final type of the newly assembled product.
+    // The director can construct several product variations
+    // using the same building steps.
+    method constructSportsCar(builder: Builder) is
+        builder.reset()
+        builder.setSeats(2)
+        builder.setEngine(new SportEngine())
+        builder.setTripComputer(true)
+        builder.setGPS(true)
+
+ method constructSUV(builder: Builder) is
+     // ...
+
+// The client code creates a builder object, passes it to the
+// director and then initiates the construction process- The end
+// result is retrieved from the builder object.
+class Application is
+
+....
+method makeCar() is
+    director = new Director()
+
+    CarBuilder builder = new CarBuilder()
+    director.constructSportsCar(builder)
+    Car car = builder.getProduct()
+
+    CarManualBuilder builder = new CarManualBuilder()
+    director.constructSportsCar(builder)
+
+    // The final product is often retrieved from a builder
+    // object since the director isn't aware of and not
+    // dependent on concrete builders and products.
+    Manual manual = builder.getProduct()
+```
+#### Example: Building Children's meals
+Roles:
+- Customer → Client
+- Cashier → Director
+- Restaurant crew → Builder
+- Meal → Product
+
+**Pseudocode (Restaurant Builder Pattern)**
+```
+// Product
+class Meal
+    attribute mainItem
+    attribute sideItem
+    attribute drink
+    attribute toy
+
+    method showItems()
+        print("Main:", mainItem)
+        print("Side:", sideItem)
+        print("Drink:", drink)
+        print("Toy:", toy)
+
+
+// Builder Interface
+interface MealBuilder
+    method buildMainItem()
+    method buildSideItem()
+    method buildDrink()
+    method buildToy()
+    method getMeal() : Meal
+
+
+// Concrete Builder 1
+class HamburgerMealBuilder implements MealBuilder
+    private meal : Meal
+
+    constructor()
+        meal = new Meal()
+
+    method buildMainItem()
+        meal.mainItem = "Hamburger"
+
+    method buildSideItem()
+        meal.sideItem = "Fries"
+
+    method buildDrink()
+        meal.drink = "Coke"
+
+    method buildToy()
+        meal.toy = "Toy Dinosaur"
+
+    method getMeal()
+        return meal
+
+
+// Concrete Builder 2
+class ChickenMealBuilder implements MealBuilder
+    private meal : Meal
+
+    constructor()
+        meal = new Meal()
+
+    method buildMainItem()
+        meal.mainItem = "Chicken Burger"
+
+    method buildSideItem()
+        meal.sideItem = "Salad"
+
+    method buildDrink()
+        meal.drink = "Juice"
+
+    method buildToy()
+        meal.toy = "Toy Car"
+
+    method getMeal()
+        return meal
+
+
+// Director (Cashier)
+class Cashier
+    method constructMeal(builder : MealBuilder) : Meal
+        builder.buildMainItem()
+        builder.buildSideItem()
+        builder.buildToy()
+
+        // drink handled separately (outside the bag idea)
+        builder.buildDrink()
+
+        return builder.getMeal()
+
+
+// Client (Customer)
+builder = new HamburgerMealBuilder()
+cashier = new Cashier()
+
+meal = cashier.constructMeal(builder)
+meal.showItems()
+```
+
+**Java Implementation**
+Product: Meal
+```java
+class Meal {
+    private String mainItem;
+    private String sideItem;
+    private String drink;
+    private String toy;
+
+    public void setMainItem(String mainItem) {
+        this.mainItem = mainItem;
+    }
+
+    public void setSideItem(String sideItem) {
+        this.sideItem = sideItem;
+    }
+
+    public void setDrink(String drink) {
+        this.drink = drink;
+    }
+
+    public void setToy(String toy) {
+        this.toy = toy;
+    }
+
+    public void showItems() {
+        System.out.println("Meal includes:");
+        System.out.println("Main Item: " + mainItem);
+        System.out.println("Side Item: " + sideItem);
+        System.out.println("Drink: " + drink);
+        System.out.println("Toy: " + toy);
+    }
+}
+```
+Builder Interface
+```java
+interface MealBuilder {
+    void buildMainItem();
+    void buildSideItem();
+    void buildDrink();
+    void buildToy();
+    Meal getMeal();
+}
+```
+Concrete Builder: Hamburger Meal
+```java
+class HamburgerMealBuilder implements MealBuilder {
+    private Meal meal = new Meal();
+
+    public void buildMainItem() {
+        meal.setMainItem("Hamburger");
+    }
+
+    public void buildSideItem() {
+        meal.setSideItem("Fries");
+    }
+
+    public void buildDrink() {
+        meal.setDrink("Coke");
+    }
+
+    public void buildToy() {
+        meal.setToy("Toy Dinosaur");
+    }
+
+    public Meal getMeal() {
+        return meal;
+    }
+}
+```
+Concrete Builder: Chicken Meal
+```java
+class ChickenMealBuilder implements MealBuilder {
+    private Meal meal = new Meal();
+
+    public void buildMainItem() {
+        meal.setMainItem("Chicken Burger");
+    }
+
+    public void buildSideItem() {
+        meal.setSideItem("Salad");
+    }
+
+    public void buildDrink() {
+        meal.setDrink("Orange Juice");
+    }
+
+    public void buildToy() {
+        meal.setToy("Toy Car");
+    }
+
+    public Meal getMeal() {
+        return meal;
+    }
+}
+```
+Director: Cashier
+```java
+class Cashier {
+
+    public Meal constructMeal(MealBuilder builder) {
+        // Step-by-step process (same for all meals)
+        builder.buildMainItem();
+        builder.buildSideItem();
+        builder.buildToy();
+
+        // Drink handled separately (conceptual detail)
+        builder.buildDrink();
+
+        return builder.getMeal();
+    }
+}
+```
+Client: Customer
+```java
+public class Main {
+    public static void main(String[] args) {
+
+        Cashier cashier = new Cashier();
+
+        // Order Hamburger Meal
+        MealBuilder hamburgerBuilder = new HamburgerMealBuilder();
+        Meal hamburgerMeal = cashier.constructMeal(hamburgerBuilder);
+        hamburgerMeal.showItems();
+
+        System.out.println();
+
+        // Order Chicken Meal
+        MealBuilder chickenBuilder = new ChickenMealBuilder();
+        Meal chickenMeal = cashier.constructMeal(chickenBuilder);
+        chickenMeal.showItems();
+    }
+}
+```
+#### Example: Building Different Types of Houses 
+We want to construct houses step by step, but:
+- The construction process is fixed 
+- The final result varies (e.g., luxury vs basic house) 
+
+1- Product
+```java
+class House {
+    private String foundation;
+    private String structure;
+    private String roof;
+    private String interior;
+    public void setFoundation(String foundation) {
+        this.foundation = foundation;
+    }
+    public void setStructure(String structure) {
+        this.structure = structure;
+    }
+    public void setRoof(String roof) {
+        this.roof = roof;
+    }
+    public void setInterior(String interior) {
+        this.interior = interior;
+    }
+    public void show() {
+        System.out.println("House built with:");
+        System.out.println("Foundation: " + foundation);
+        System.out.println("Structure: " + structure);
+        System.out.println("Roof: " + roof);
+        System.out.println("Interior: " + interior);
+    }
+}
+```
+2- Builder Interface
+```java
+interface HouseBuilder {
+    void buildFoundation();
+    void buildStructure();
+    void buildRoof();
+    void buildInterior();
+    House getHouse();
+}
+```
+3- Concrete Builders
+
+Luxury House Builder
+```java
+class LuxuryHouseBuilder implements HouseBuilder {
+    private House house = new House();
+    public void buildFoundation() {
+        house.setFoundation("Reinforced Concrete Foundation");
+    }
+    public void buildStructure() {
+        house.setStructure("Steel and Glass Structure");
+    }
+    public void buildRoof() {
+        house.setRoof("Premium Roof with Insulation");
+    }
+    public void buildInterior() {
+        house.setInterior("Luxury Interior with Smart Systems");
+    }
+    public House getHouse() {
+        return house;
+    }
+}
+```
+Basic House Builder
+```java
+class BasicHouseBuilder implements HouseBuilder {
+    private House house = new House();
+    public void buildFoundation() {
+        house.setFoundation("Simple Concrete Foundation");
+    }
+    public void buildStructure() {
+        house.setStructure("Brick Structure");
+    }
+    public void buildRoof() {
+        house.setRoof("Standard Roof");
+    }
+    public void buildInterior() {
+        house.setInterior("Basic Interior");
+    }
+    public House getHouse() {
+        return house;
+    }
+}
+```
+4- Director
+```java
+class ConstructionDirector {
+    public House constructHouse(HouseBuilder builder) {
+        builder.buildFoundation();
+        builder.buildStructure();
+        builder.buildRoof();
+        builder.buildInterior();
+        return builder.getHouse();
+    }
+}
+```
+5- Client Code
+```java
+public class Main {
+    public static void main(String[] args) {
+        ConstructionDirector director = new ConstructionDirector();
+        // Build Luxury House
+        HouseBuilder luxuryBuilder = new LuxuryHouseBuilder();
+        House luxuryHouse = director.constructHouse(luxuryBuilder);
+        luxuryHouse.show();
+        System.out.println();
+        // Build Basic House
+        HouseBuilder basicBuilder = new BasicHouseBuilder();
+        House basicHouse = director.constructHouse(basicBuilder);
+        basicHouse.show();
+    }
+}
+```
+Key Observations
+1- Director Controls the Process
+    ```java
+    builder.buildFoundation();
+    builder.buildStructure();
+    builder.buildRoof();
+    builder.buildInterior();
+    ```
+    - The order is fixed 
+    - The algorithm is centralized 
+
+2- Builders Change Representation
+
+    Same process → different results:
+    - LuxuryHouseBuilder → high-end house 
+    - BasicHouseBuilder → simple house 
+
+3- When This Style Is Useful
+
+    Use Classic Builder + Director when:
+    - Construction must follow a strict sequence 
+    - You want to reuse the same algorithm 
+    - Different representations share identical steps 
+
+Real-World Analogy
+
+Think of:
+- Director → Project Manager 
+- Builder → Construction Team 
+- Product → Final Building 
+
+The manager decides how to build, the team decides what materials/quality.
+
+When NOT to Use Director
+If the client already controls the process (common in modern APIs), the Director becomes unnecessary → use Fluent Builder instead.
+#### Example: HTTP Request Object
+Key Idea
+- Director controls the construction process 
+- Builder defines steps 
+- Concrete builders decide how each step is implemented 
+
+1- Product
+```java
+import java.util.Map;
+class HttpRequest {
+    private String url;
+    private String method;
+    private Map<String, String> headers;
+    private Map<String, String> queryParams;
+    private String body;
+    private int timeout;
+    public void setUrl(String url) { this.url = url; }
+    public void setMethod(String method) { this.method = method; }
+    public void setHeaders(Map<String, String> headers) { this.headers = headers; }
+    public void setQueryParams(Map<String, String> queryParams) { this.queryParams = queryParams; }
+    public void setBody(String body) { this.body = body; }
+    public void setTimeout(int timeout) { this.timeout = timeout; }
+    public void show() {
+        System.out.println("HTTP Request:");
+        System.out.println("URL: " + url);
+        System.out.println("Method: " + method);
+        System.out.println("Headers: " + headers);
+        System.out.println("Query Params: " + queryParams);
+        System.out.println("Body: " + body);
+        System.out.println("Timeout: " + timeout);
+    }
+}
+```
+2- Builder Interface
+```java
+import java.util.Map;
+interface HttpRequestBuilder {
+    void buildUrl();
+    void buildMethod();
+    void buildHeaders();
+    void buildQueryParams();
+    void buildBody();
+    void buildTimeout();
+    HttpRequest getRequest();
+}
+```
+3- Concrete Builders
+GET Request Builder
+```java
+import java.util.HashMap;
+class GetRequestBuilder implements HttpRequestBuilder {
+    private HttpRequest request = new HttpRequest();
+    public void buildUrl() {
+        request.setUrl("https://api.example.com/users");
+    }
+    public void buildMethod() {
+        request.setMethod("GET");
+    }
+    public void buildHeaders() {
+        request.setHeaders(new HashMap<>());
+    }
+    public void buildQueryParams() {
+        HashMap<String, String> params = new HashMap<>();
+        params.put("page", "1");
+        request.setQueryParams(params);
+    }
+    public void buildBody() {
+        request.setBody(null); // GET has no body
+    }
+    public void buildTimeout() {
+        request.setTimeout(30);
+    }
+    public HttpRequest getRequest() {
+        return request;
+    }
+}
+```
+POST Request Builder
+```java
+import java.util.HashMap;
+class PostRequestBuilder implements HttpRequestBuilder {
+    private HttpRequest request = new HttpRequest();
+    public void buildUrl() {
+        request.setUrl("https://api.example.com/users");
+    }
+    public void buildMethod() {
+        request.setMethod("POST");
+    }
+    public void buildHeaders() {
+        HashMap<String, String> headers = new HashMap<>();
+        headers.put("Content-Type", "application/json");
+        request.setHeaders(headers);
+    }
+    public void buildQueryParams() {
+        request.setQueryParams(new HashMap<>());
+    }
+    public void buildBody() {
+        request.setBody("{\"name\":\"Gamal\"}");
+    }
+    public void buildTimeout() {
+        request.setTimeout(60);
+    }
+    public HttpRequest getRequest() {
+        return request;
+    }
+}
+```
+4- Director
+```java
+class HttpRequestDirector {
+    public HttpRequest construct(HttpRequestBuilder builder) {
+        builder.buildUrl();
+        builder.buildMethod();
+        builder.buildHeaders();
+        builder.buildQueryParams();
+        builder.buildBody();
+        builder.buildTimeout();
+        return builder.getRequest();
+    }
+}
+```
+5- Client Code
+```java
+public class Main {
+    public static void main(String[] args) {
+        HttpRequestDirector director = new HttpRequestDirector();
+        // Build GET request
+        HttpRequestBuilder getBuilder = new GetRequestBuilder();
+        HttpRequest getRequest = director.construct(getBuilder);
+        getRequest.show();
+        System.out.println();
+        // Build POST request
+        HttpRequestBuilder postBuilder = new PostRequestBuilder();
+        HttpRequest postRequest = director.construct(postBuilder);
+        postRequest.show();
+    }
+}
+```
+What Changed Compared to Fluent Builder
+1- Construction is Fixed
+
+    builder.buildUrl();
+    builder.buildMethod();
+    ...
+    - The sequence is controlled by the Director 
+    - Client has no fine-grained control 
+
+2- Variations via Builders (Not Parameters)
+    - GetRequestBuilder → GET request 
+    - PostRequestBuilder → POST request 
+    Instead of:
+    .method("POST").body(...)
+
+3- Trade-offs
+
+    ✅ Pros
+    - Enforces strict construction workflow 
+    - Good for predefined request types 
+    - Centralizes creation logic 
+    
+    ❌ Cons
+    - Not flexible (hard to customize per request) 
+    - Requires many builder classes 
+    - Overkill for dynamic APIs 
+
+When This Version Makes Sense
+
+Use this style when:
+- You have fixed request templates (e.g., SDKs) 
+- You want to enforce strict construction rules 
+- The process must be standardized 
+
+Important Insight (Real-World)
+
+For HTTP requests specifically:
+- Fluent Builder → dominant in modern APIs 
+- Classic Builder → rare, mostly in: 
+    - Code generators 
+    - SDK abstractions 
+    - Predefined workflows
+
+### Fluent Builder (Modern / Most Used)
+#### Examle: Computer builder
+Example (Java)
+```java
+class Computer {
+    private String CPU;
+    private String RAM;
+    private String storage;
+    private boolean hasGPU;
+    private boolean hasBluetooth;
+
+    private Computer(Builder builder) {
+        this.CPU = builder.CPU;
+        this.RAM = builder.RAM;
+        this.storage = builder.storage;
+        this.hasGPU = builder.hasGPU;
+        this.hasBluetooth = builder.hasBluetooth;
+    }
+
+    public static class Builder {
+        private String CPU;
+        private String RAM;
+        private String storage;
+        private boolean hasGPU;
+        private boolean hasBluetooth;
+
+        public Builder(String CPU, String RAM) {
+            this.CPU = CPU;
+            this.RAM = RAM;
+        }
+
+        public Builder storage(String storage) {
+            this.storage = storage;
+            return this;
+        }
+
+        public Builder GPU(boolean value) {
+            this.hasGPU = value;
+            return this;
+        }
+
+        public Builder bluetooth(boolean value) {
+            this.hasBluetooth = value;
+            return this;
+        }
+
+        public Computer build() {
+            return new Computer(this);
+        }
+    }
+
+```
+Usage
+```java
+Computer pc = new Computer.Builder("Intel i7", "16GB")
+                    .storage("1TB SSD")
+                    .GPU(true)
+                    .bluetooth(true)
+                    .build();
+```
+#### Example: HTTP Request Object
+We want to build an HTTP request with:
+- Required: url, method 
+- Optional: headers, query params, body, timeout
+
+Implementation
+```java
+import java.util.HashMap;
+import java.util.Map;
+
+public class HttpRequest {
+
+    private final String url;
+    private final String method;
+    private final Map<String, String> headers;
+    private final Map<String, String> queryParams;
+    private final String body;
+    private final int timeout;
+
+    // Private constructor
+    private HttpRequest(Builder builder) {
+        this.url = builder.url;
+        this.method = builder.method;
+        this.headers = builder.headers;
+        this.queryParams = builder.queryParams;
+        this.body = builder.body;
+        this.timeout = builder.timeout;
+    }
+
+    // Getters (optional)
+    public String getUrl() { return url; }
+    public String getMethod() { return method; }
+    public Map<String, String> getHeaders() { return headers; }
+    public Map<String, String> getQueryParams() { return queryParams; }
+    public String getBody() { return body; }
+    public int getTimeout() { return timeout; }
+
+    // Static Builder class
+    public static class Builder {
+        private final String url;
+        private final String method;
+
+        private Map<String, String> headers = new HashMap<>();
+        private Map<String, String> queryParams = new HashMap<>();
+        private String body = null;
+        private int timeout = 30; // default value
+
+        // Required fields via constructor
+        public Builder(String url, String method) {
+            this.url = url;
+            this.method = method;
+        }
+
+        public Builder addHeader(String key, String value) {
+            headers.put(key, value);
+            return this;
+        }
+
+        public Builder addQueryParam(String key, String value) {
+            queryParams.put(key, value);
+            return this;
+        }
+
+        public Builder body(String body) {
+            this.body = body;
+            return this;
+        }
+
+        public Builder timeout(int seconds) {
+            this.timeout = seconds;
+            return this;
+        }
+
+        public HttpRequest build() {
+            // Simple validation
+            if (url == null || url.isEmpty()) {
+                throw new IllegalStateException("URL must not be empty");
+            }
+            if (method == null || method.isEmpty()) {
+                throw new IllegalStateException("Method must not be empty");
+            }
+
+            return new HttpRequest(this);
+        }
+    }
+}
+```
+Usage (Fluent Style)
+```java
+public class Main {
+    public static void main(String[] args) {
+
+        HttpRequest request = new HttpRequest.Builder("https://api.example.com", "POST")
+                .addHeader("Authorization", "Bearer token")
+                .addHeader("Content-Type", "application/json")
+                .addQueryParam("page", "1")
+                .body("{\"name\": \"Gamal\"}")
+                .timeout(60)
+                .build();
+
+        System.out.println("Request created for: " + request.getUrl());
+    }
+}
+```
+**Why This Is a Good Fluent Builder Example**
+- Readable
+    - `.addHeader(...).addQueryParam(...).body(...).timeout(...)`
+- Safe 
+    - Required fields enforced in constructor 
+    - Validation inside `build()` 
+- Immutable Result 
+    - All fields are final 
+    - No setters in HttpRequest 
+- Extensible 
+    - Easy to add new optional fields without breaking code 
+
+**Real-World Parallels**
+
+This pattern is used heavily in:
+- Java HTTP clients (e.g., request builders) 
+- Database query builders 
+- Configuration objects 
+- Libraries like Lombok (@Builder)
+
+### hybrid approach (Director + Fluent Builder)
+### Step Builder (Enforcing Order – Advanced)
+
+## Step-by-Step Execution
+- Client creates a Builder object
+- Sets required parameters via constructor
+- Configures optional parameters via chained methods
+- Calls build() to construct final object
+- Builder passes itself to the Product constructor
+
+## When to Use
+- Many optional parameters
+    - Use the Builder pattern to get rid of a “telescoping constructor”.
+    - Say you have a constructor with ten optional parameters- Calling such a beast is very inconvenient; therefore, you overload the constructor and create several shorter versions with fewer parameters- These constructors still refer to the main one, passing some default values into any omitted parameters.
+        ```
+        class Pizza {
+            Pizza(int size) { ..- }
+            Pizza(int size, boolean cheese) { ..- }
+            Pizza(int size, boolean cheese, boolean pepperoni) { ..- }
+            // ...
+        ```
+    - Creating such a monster is only possible in languages that support method overloading, such as C# or Java.
+    - The Builder pattern lets you build objects step by step, using only those steps that you really need- After implementing the pattern, you don’t have to cram dozens of parameters into your constructors anymore.
+- Use the Builder pattern when you want your code to be able to create different representations of some product (for example, stone and wooden houses).
+    - The Builder pattern can be applied when construction of various representations of the product involves similar steps that differ only in the details.
+    - The base builder interface defines all possible construction steps, and concrete builders implement these steps to construct particular representations of the product- Meanwhile, the director class guides the order of construction.
+
+- Complex object construction logic
+    - Use the Builder to construct Composite trees or other complex objects.
+    - The Builder pattern lets you construct products step-by-step- You could defer execution of some steps without breaking the final product- You can even call steps recursively, which comes in handy when you need to build an object tree.
+    - A builder doesn’t expose the unfinished product while running construction steps- This prevents the client code from fetching an incomplete result.
+
+- Need for immutable objects
+- Want readable and maintainable creation code
+## When NOT to Use
+- Simple objects with few parameters
+- No need for step-by-step construction
+- Overengineering small models
+## Advantages
+- You can construct objects step-by-step, defer construction steps or run steps recursively.
+- You can reuse the same construction code when building various representations of products.
+- Single Responsibility Principle: You can isolate complex construction code from the business logic of the product.
+- Improves readability
+- Avoids telescoping constructors
+- Supports immutability
+- Fine-grained control over construction
+- Easier to extend
+## Disadvantages
+- More code (extra class)
+- Slight overhead for simple objects
+- Can increase complexity unnecessarily
+    - The overall complexity of the code increases since the pattern requires creating multiple new classes.
+
+## Relations with Other Patterns
+- Many designs start by using Factory Method (less complicated and more customizable via subclasses) and evolve toward Abstract Factory, Prototype, or Builder (more flexible, but more complicated).
+- Builder focuses on constructing complex objects step by step. Abstract Factory specializes in creating families of related objects. Abstract Factory returns the product immediately, whereas Builder lets you run some additional construction steps before fetching the product.
+- You can use Builder when creating complex Composite trees because you can program its construction steps to work recursively.
+- You can combine Builder with Bridge: the director class plays the role of the abstraction, while different builders act as implementations.
+- Abstract Factories, Builders and Prototypes can all be implemented as Singletons.
+
+## Comparison with Other Patterns
+Affords finer control over the construction process. Unlike creational patterns that construct products in one shot, the Builder pattern constructs the product step by step under the control of the "director".
+
+| Pattern          | Difference                  |
+| ---------------- | --------------------------- |
+| Factory          | Creates object in one step  |
+| Abstract Factory | Creates families of objects |
+| Builder          | Step-by-step construction   |
+| Prototype        | Clones existing objects     |
+
+## Common Pitfalls
+- Forgetting validation in build() 
+- Exposing mutable internal state 
+- Overusing for simple DTOs 
+- Not making Product immutable
+
+## Best Practices
+Best Practices
+- Make Product immutable 
+- Validate inside build() 
+- Use fluent API naming 
+- Keep Builder static inner class 
+- Provide sensible defaults
+
+## Real-World Examples
+StringBuilder (Java)
+HTTP request builders (e.g., OkHttp)
+SQL query builders
+Lombok @Builder
+Spring’s UriComponentsBuilder
+
+### JDK examples
+Builder is widely used in Java core libraries:
+
+* java.lang.StringBuilder#append() (unsynchronized)
+* java.lang.StringBuffer#append() (synchronized)
+* java.nio.ByteBuffer#put() (also in CharBuffer, ShortBuffer, IntBuffer, LongBuffer, FloatBuffer and DoubleBuffer)
+* javax.swing.GroupLayout.Group#addComponent()
+* All implementations java.lang.Appendable
+
+### Spring
+
+#### EmbeddedDatabaseBuilder
+```java
+@Bean
+public DataSource dataSource() {
+  return new EmbeddedDatabaseBuilder()
+          .setName("dataSource")
+          .setType(EmbeddedDatabaseType.H2)
+          .addScript("schema.sql")
+          .addScript("data.sql")
+          .build();
+}
+```
+#### UserDetails Builder
+
+The User class from the org.springframework.security.core.userdetails package is a simple way to build instances of the UserDetails type
+https://github.com/spring-projects/spring-security/blob/main/core/src/main/java/org/springframework/security/core/userdetails/User.java
+```java
+UserDetails u = User.withUsername("bill")
+  .password("12345")
+  .authorities("read", "write")
+  .accountExpired(false)
+  .disabled(true)
+  .build();
+```
+
+## Summary
+
+The Builder Pattern is ideal for constructing complex objects in a clear, controlled, and flexible way, especially when dealing with many optional parameters or enforcing immutability.
+## Examples
+
+https://github.com/java-kb/design_patterns

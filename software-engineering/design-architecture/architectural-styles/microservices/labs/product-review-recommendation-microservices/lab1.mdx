@@ -1,0 +1,1926 @@
+---
+id: software-engineering-design-architecture-architectural-styles-microservices-labs-product-review-recommendation-microservices-lab1
+title: "Lab1: Creating a Set of Cooperating Microservices"
+sidebar_position: 2
+---
+<!--# Lab1: Creating a Set of Cooperating Microservices-->
+Since at this stage we don’t have any service discovery mechanism in place, we will run all microservices on localhost and use hardcoded port numbers for each microservice. We will use the following ports:
+- The product composite service: 7001
+- The product service: 7002
+- The recommendation service: 7003
+- The review service: 7004
+
+We will get rid of the hardcoded ports later when we start using Docker and Kubernetes!
+
+To get started with developing our microservices, we will use a tool called Spring Initializr to generate skeleton code for us.
+
+To make it easier to reproduce the creation of the microservices, we will use the command-line tool.
+
+## Initalize Project
+For each microservice, we will create a Spring Boot project that does the following:
+- Uses Gradle as a build tool
+- Uses Java 24 to compile and run the microservice
+- Packages the project as a fat JAR file
+- Brings in dependencies for the Actuator and WebFlux Spring modules
+- Is based on Spring Boot v3.5.0 (which depends on Spring Framework v6.2.6)
+
+Create a folder for your microservices:
+```bash
+mkdir some-temp-folder
+cd some-temp-folder
+./create-projects.bash
+```
+
+Create a script to create the four projects
+```bash[title="create-projects.bash"]
+#!/usr/bin/env bash
+
+mkdir microservices
+cd microservices
+
+spring init \
+--boot-version=3.5.0 \
+--type=gradle-project \
+--java-version=24 \
+--packaging=jar \
+--name=product-service \
+--package-name=se.magnus.microservices.core.product \
+--groupId=se.magnus.microservices.core.product \
+--dependencies=actuator,webflux \
+--version=1.0.0-SNAPSHOT \
+product-service
+
+spring init \
+--boot-version=3.5.0 \
+--type=gradle-project \
+--java-version=24 \
+--packaging=jar \
+--name=review-service \
+--package-name=se.magnus.microservices.core.review \
+--groupId=se.magnus.microservices.core.review \
+--dependencies=actuator,webflux \
+--version=1.0.0-SNAPSHOT \
+review-service
+
+spring init \
+--boot-version=3.5.0 \
+--type=gradle-project \
+--java-version=24 \
+--packaging=jar \
+--name=recommendation-service \
+--package-name=se.magnus.microservices.core.recommendation \
+--groupId=se.magnus.microservices.core.recommendation \
+--dependencies=actuator,webflux \
+--version=1.0.0-SNAPSHOT \
+recommendation-service
+
+spring init \
+--boot-version=3.5.0 \
+--type=gradle-project \
+--java-version=24 \
+--packaging=jar \
+--name=product-composite-service \
+--package-name=se.magnus.microservices.composite.product \
+--groupId=se.magnus.microservices.composite.product \
+--dependencies=actuator,webflux \
+--version=1.0.0-SNAPSHOT \
+product-composite-service
+
+cd ..
+
+```
+## Run microservices
+We can build each microservice separately with the following command:
+```bash
+cd microservices/product-composite-service; ./gradlew build; cd -; \
+cd microservices/product-service; ./gradlew build; cd -; \
+cd microservices/recommendation-service; ./gradlew build; cd -; \
+cd microservices/review-service; ./gradlew build; cd -;
+```
+
+## Setting up multi-project builds in Gradle
+To make it a bit simpler to build all the microservices with one command, we can set up a multi-project build in Gradle. 
+
+YOu can run the script
+```bash[title="create-mult-module-project.bash"]
+
+#!/bin/bash
+
+ First, we create the settings.gradle file, which describes what projects Gradle should build
+cat <<EOF > settings.gradle
+include ':microservices:product-service'
+include ':microservices:review-service'
+include ':microservices:recommendation-service'
+include ':microservices:product-composite-service'
+EOF
+  Next, we copy the Gradle executable files that were generated from one of the projects so that we can reuse them for the multi-project builds:
+cp -r microservices/product-service/gradle .
+cp microservices/product-service/gradlew .
+cp microservices/product-service/gradlew.bat .
+cp microservices/product-service/.gitignore .
+ We no longer need the generated Gradle executable files in each project, so we can remove them with the following commands:
+find microservices -depth -name "gradle" -exec rm -rfv "{}" \;
+find microservices -depth -name "gradlew*" -exec rm -fv "{}" \;
+
+```
+The steps are as follows:
+1. First, we create the settings.gradle file, which describes what projects Gradle should build:
+```bash
+cat <<EOF > settings.gradle
+include ':microservices:product-service'
+include ':microservices:review-service'
+include ':microservices:recommendation-service'
+include ':microservices:product-composite-service'
+EOF
+```
+2. Next, we copy the Gradle executable files that were generated from one of the projects so
+that we can reuse them for the multi-project builds:
+```bash
+cp -r microservices/product-service/gradle .
+cp microservices/product-service/gradlew .
+cp microservices/product-service/gradlew.bat .
+cp microservices/product-service/.gitignore .
+```
+3. We no longer need the generated Gradle executable files in each project, so we can remove
+them with the following commands:
+```bash
+find microservices -depth -name "gradle" -exec rm -rfv "{}" \;
+find microservices -depth -name "gradlew*" -exec rm -fv "{}" \;
+```
+4. Now, we can build all the microservices with one command:
+```bash
+./gradlew build
+```
+With skeleton projects for the microservices created using Spring Initializr and successfully built
+using Gradle, we are ready to add some code to the microservices in the next steps.
+
+:::note
+
+From a DevOps perspective, a multi-project setup might not be preferred. Instead, to enable each microservice to have its own build and release cycle, setting up a separate build pipeline for each microservice project would probably be preferred.
+However, for the purposes of this book, we will use the multi-project setup to make it easier to build and deploy the whole system landscape with a single command
+
+:::
+
+First, we will add two projects (api and util) that will contain code that is shared by the microservice projects, and then we will implement the RESTful APIs.
+- We will use Java interfaces in order to describe our RESTful APIs and model classes to describe the data that the API uses in its requests and responses. 
+- To describe what types of errors can be returned by the API, a number of exception classes are also defined. 
+
+:::note
+
+from a DevOps perspective, it would be preferable to build all the projects in their own build pipeline and have version-controlled dependencies
+for the api and util projects in the microservice projects, that is, so that
+each microservice can choose what versions of the api and util projects to
+use. But to keep the build and deployment steps simple in the context of this
+book, we will make the api and util projects part of the multi-project build.
+
+:::
+## Adding an API project
+Describing a RESTful API in a Java interface instead of directly in the Java class is, to me, a good way of separating the API definition from its implementation. We will further extend this pattern later in this book when we add more API information in the Java interfaces to be exposed in an OpenAPI specification.
+
+:::note
+
+It is debatable whether it is a good practice to store API definitions for a group of microservices in a common API module. It could potentially cause undesired dependencies between the microservices, resulting in monolithic characteristics, for example, causing a more complex and slow development process. To me, it is a good choice for microservices that are part of the same delivery organization, that is, whose releases are governed by the same organization (compare this to a bounded context in domain-driven design, where our microservices are placed in a single bounded context). As already discussed, microservices within the same bounded context need to have API definitions that are based on a common information model, so storing these API definitions in the same API module doesn’t add any undesired dependencies.
+
+:::
+
+To add an api project, we need to do the following:
+1. First, we will set up a separate Gradle project where we can place our API definitions, The api project will be packaged as a library; that is, it won’t have its own main application class.
+Unfortunately, Spring Initializr doesn’t support the creation of library projects. Instead, a library
+project has to be created manually from scratch. 
+```bash
+spring init \
+--boot-version=3.5.0 \
+--type=gradle-project \
+--java-version=24 \
+--packaging=jar \
+--name=api \
+--package-name=se.magnus.microservices.api \
+--groupId=se.magnus.microservices.api \
+--dependencies=webflux \
+--version=1.0.0-SNAPSHOT \
+api
+```
+2. The structure of a library project is the same as for an application project, except that we no longer
+have the main application class, as well as some minor differences in the build.gradle file. The
+org.springframework.boot Gradle plugin is replaced with an implementation platform section:
+```grovvy
+ext {
+springBootVersion = '3.5.0'
+}
+dependencies {
+implementation platform("org.springframework.boot:spring-boot-dependencies:${springBootVersion}")
+```
+This allows us to retain Spring Boot dependency management while we are replacing the construction of a fat JAR in the build step with the creation of a normal JAR file that only contains the project’s own classes and property files.
+
+The Java files in the api project for our three core microservices are as follows:
+```
+core
+    product
+        Product.java
+        ProductService.java
+    recommendation
+        Recommendation.java
+        RecommendationService.java
+    review
+        Review.java
+        ReviewService.java
+```
+First, we will look at the ProductService.java Java interface, as shown in the following code:
+```java
+package se.magnus.api.core.product;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+
+public interface ProductService {
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/product/1".
+   *
+   * @param productId Id of the product
+   * @return the product, if found, else null
+   */
+  @GetMapping(
+    value = "/product/{productId}",
+    produces = "application/json")
+  Product getProduct(@PathVariable int productId);
+}
+```
+The Java interface declaration works as follows:
+- The product service only exposes one API method, `getProduct()` (we will extend the API later in next labs).
+- To map the method to an HTTP GET request, we use the `@GetMapping` Spring annotation,
+where we specify what URL path the method will be mapped to (`/product/{productId}`)
+and what format the response will be in, in this case, JSON.
+- The `{productId}` part of the path maps to a path variable named `productId`.
+- The `productId` method parameter is annotated with `@PathVariable`, which will map
+the value that’s passed in the HTTP request to the parameter. For example, an HTTP GET
+request to `/product/123` will result in the `getProduct()` method being called with the
+productId parameter set to `123`.
+
+The method returns a `Product` object, a plain POJO-based model class with the member variables corresponding to attributes for Product. `Product.java` looks as follows:
+```java
+package se.magnus.api.core.product;
+
+public class Product {
+  private final int productId;
+  private final String name;
+  private final int weight;
+  private final String serviceAddress;
+
+  public Product() {
+    productId = 0;
+    name = null;
+    weight = 0;
+    serviceAddress = null;
+  }
+
+  public Product(int productId, String name, int weight, String serviceAddress) {
+    this.productId = productId;
+    this.name = name;
+    this.weight = weight;
+    this.serviceAddress = serviceAddress;
+  }
+
+  public int getProductId() {
+    return productId;
+  }
+
+  public String getName() {
+    return name;
+  }
+
+  public int getWeight() {
+    return weight;
+  }
+
+  public String getServiceAddress() {
+    return serviceAddress;
+  }
+}
+````
+The API project also contains the InvalidInputException and NotFoundException exception
+classes.
+```java
+package se.magnus.api.exceptions;
+
+public class NotFoundException extends RuntimeException {
+  public NotFoundException() {}
+
+  public NotFoundException(String message) {
+    super(message);
+  }
+
+  public NotFoundException(String message, Throwable cause) {
+    super(message, cause);
+  }
+
+  public NotFoundException(Throwable cause) {
+    super(cause);
+  }
+}
+
+```
+## Adding a util project
+Next, we will create a util project that can hold some helper classes that are shared by our microservices, for example, for handling errors in a uniform way.
+
+The util project will be packaged as a library in the same way as the api project.
+
+```bash
+spring init \
+--boot-version=3.5.0 \
+--type=gradle-project \
+--java-version=24 \
+--packaging=jar \
+--name=util \
+--package-name=se.magnus.microservices.util \
+--groupId=se.magnus.microservices.util \
+--dependencies=webflux \
+--version=1.0.0-SNAPSHOT \
+util
+```
+
+The project contains the following utility classes: GlobalControllerExceptionHandler,
+HttpErrorInfo, and ServiceUtil.
+
+Except for the code in `ServiceUtil.java`, these classes are reusable utility classes that we can
+use to map Java exceptions to proper HTTP status codes, as described in the Adding error handling
+section. 
+
+The main purpose of `ServiceUtil.java` is to find out the hostname, IP address, and port
+used by the microservice. The class exposes a method, `getServiceAddress()`, that can be used
+by the microservices to find their hostname, IP address, and port, as described in the previous
+section, Infrastructure-related information.
+```java
+package se.magnus.util.http;
+
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ServiceUtil {
+  private static final Logger LOG = LoggerFactory.getLogger(ServiceUtil.class);
+
+  private final String port;
+
+  private String serviceAddress = null;
+
+  public ServiceUtil(@Value("${server.port}") String port) {
+
+    this.port = port;
+  }
+
+  public String getServiceAddress() {
+    if (serviceAddress == null) {
+      serviceAddress = findMyHostname() + "/" + findMyIpAddress() + ":" + port;
+    }
+    return serviceAddress;
+  }
+
+  private String findMyHostname() {
+    try {
+      return InetAddress.getLocalHost().getHostName();
+    } catch (UnknownHostException e) {
+      return "unknown host name";
+    }
+  }
+
+  private String findMyIpAddress() {
+    try {
+      return InetAddress.getLocalHost().getHostAddress();
+    } catch (UnknownHostException e) {
+      return "unknown IP address";
+    }
+  }
+}
+```
+## Adding RESTful APIs
+Now that we have projects set up for our microservices, let’s add some RESTful APIs to our three core microservices.
+
+Now we can start to implement our APIs in the core microservices! The implementation looks very similar for the three core microservices.
+
+It could be argued that a separate layer for the business logic should be added when
+implementing the microservices. This should ensure that business logic is separated
+from the protocol-specific code, making it easier both to test and reuse. To avoid
+unnecessary complexity in the examples provided in this book, we have left out a
+separate layer for business logic, so the microservices implement their business logic
+directly in the @RestController components.
+
+1. We need to add the **api** and **util** projects as dependencies to our `build.gradle` file, in the **product-service** project for example:
+```groovy
+dependencies {
+  implementation project(':api')
+  implementation project(':util')
+}
+```
+2. To enable Spring Boot’s autoconfiguration feature to detect Spring beans in the **api** and **util** projects, we also need to add a `@ComponentScan` annotation to the main application class, which includes the packages of the api and util projects:
+```java
+@SpringBootApplication
+@ComponentScan("se.magnus")
+public class ProductServiceApplication {
+}
+```
+3. Next, we create our service implementation file, `ProductServiceImpl.java`, in order to implement the Java interface, `ProductService`, from the **api** project and annotate the
+class with `@RestController` so that Spring will call the methods in this class according
+to the mappings specified in the Interface class:
+```java
+package se.magnus.microservices.core.product.services;
+@RestController
+public class ProductServiceImpl implements ProductService {
+}
+```
+4. To be able to use the `ServiceUtil` class from the **util** project, we will inject it into the
+constructor, as follows:
+```java
+private final ServiceUtil serviceUtil;
+public ProductServiceImpl(ServiceUtil serviceUtil) {
+    this.serviceUtil = serviceUtil;
+}
+```
+5. Now, we can implement the API by overriding the `getProduct()` method from the interface in the **api** project:
+```java
+@Override
+public Product getProduct(int productId) {
+    return new Product(productId, "name-" + productId, 123,
+    serviceUtil.getServiceAddress());
+}
+```
+Since we aren’t currently using a database, we simply return a hardcoded response based
+on the input of productId, along with the service address supplied by the ServiceUtil
+class.
+For the final result, including logging and error handling, see `ProductServiceImpl.java`.
+6. Finally, we also need to set up some runtime properties – what port to use and the desired
+level of logging. This is added to the `application.yml` property file:
+```java
+server.port: 7002
+server.error.include-message: always
+
+logging:
+  level:
+    root: INFO
+    se.magnus: DEBUG
+```
+:::note
+
+Note that the empty application.properties file generated by Spring Initializr
+has been replaced by a YAML file, application.yml. YAML files provide better
+support for grouping related properties compared to .properties files. See
+the log level setting above as an example.
+
+:::
+
+Starting with Spring Boot v2.5.0, two JAR files are created when running the `./gradlew build` command: the ordinary JAR file, plus a plain JAR file containing only
+the class files resulting from compiling the Java files in the Spring Boot application.
+Since we don’t need the new plain JAR file, its creation has been disabled to make it
+possible to refer to the ordinary JAR file using a wildcard when running the Spring
+Boot application, as in this example:
+```console
+java -jar microservices/product-service/build/libs/*.jar
+```
+The creation of the new plain JAR file has been disabled by adding the following
+lines to the build.gradle file for each microservice:
+```groovy
+jar {
+    enabled = false
+}
+```
+We can try out the product service on its own. Build and start the microservice with the following commands:
+```console
+./gradlew build
+java -jar microservices/product-service/build/libs/*.jar &
+```
+Wait until the following is printed in the terminal:
+
+Make a test call to the product service:
+```console
+curl http://localhost:7002/product/123
+```
+It should respond with something similar to the following:
+```console
+2026-04-26T15:25:35.159+03:00  INFO 14097 --- [           main] o.s.b.web.embedded.netty.NettyWebServer  : Netty started on port 7002 (http)
+2026-04-26T15:25:35.180+03:00  INFO 14097 --- [           main] s.m.m.c.p.ProductServiceApplication      : Started ProductServiceApplication in 3.113 seconds (process running for 3.732)
+2026-04-26T15:25:57.186+03:00 DEBUG 14097 --- [or-http-epoll-2] s.m.m.c.p.services.ProductServiceImpl    : /product return the found product for productId=123
+```
+```console
+{"productId":123,"name":"name-123","weight":123,"serviceAddress":"gemy-laptop/127.0.1.1:7002"}[gemy@gemy-laptop product-review-recommendation-microservices]$
+```
+Finally, stop the product service:
+```console
+kill $(jobs -p)
+```
+We have now built, run, and tested our first single microservice
+
+## Adding a composite microservice
+we will implement the **composite microservice** that will use the three core microservices we’ve created so far.
+
+Now, it’s time to tie things together by adding the composite service that will call the three core services!
+
+The implementation of the composite services is divided into two parts: 
+1. an integration component that handles the outgoing HTTP requests to the core services and; 
+2. the composite service implementation itself. 
+
+The main reason for this division of responsibility is that 
+1. it simplifies automated unit and integration testing; we can test the service implementation in isolation by replacing the integration component with a mock.
+2. this division of responsibility will also make it easier to introduce a circuit breaker!
+
+Before we look into the source code of the two components, we need to take a look at the API classes that the **composite microservice**s will use and also learn about how runtime properties are used to hold address information for the core microservices.
+
+The full implementation of both the integration component and the implementation of the composite service can be found in the `se.magnus.microservices.composite.product.services` Java package.
+
+The following are the API classes:
+```
+/api
+└── src/main/java/se/magnus/api/composite
+  └── product
+    ├── ProductAggregate.java
+    ├── ProductCompositeService.java
+    ├── RecommendationSummary.java
+    ├── ReviewSummary.java
+    └── ServiceAddresses.java
+```
+The Java interface class, `ProductCompositeService.java`, follows the same pattern that’s used by the core services and looks as follows:
+```java
+package se.magnus.api.composite.product;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+
+public interface ProductCompositeService {
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/product-composite/1".
+   *
+   * @param productId Id of the product
+   * @return the composite product info, if found, else null
+   */
+  @GetMapping(
+    value = "/product-composite/{productId}",
+    produces = "application/json")
+  ProductAggregate getProduct(@PathVariable int productId);
+}
+```
+The model class, `ProductAggregate.java`, is a bit more complex than the core models since it
+contains fields for lists of recommendations and reviews.
+
+The remaining API classes are plain POJO-based model objects and have the same structure as the model objects for the core APIs.
+<Tabs groupId="code">
+<TabItem value="ProductAggregate" label="ProductAggregate">
+
+```java
+package se.magnus.api.composite.product;
+
+import java.util.List;
+
+public class ProductAggregate {
+  private final int productId;
+  private final String name;
+  private final int weight;
+  private final List<RecommendationSummary> recommendations;
+  private final List<ReviewSummary> reviews;
+  private final ServiceAddresses serviceAddresses;
+
+  public ProductAggregate(
+    int productId,
+    String name,
+    int weight,
+    List<RecommendationSummary> recommendations,
+    List<ReviewSummary> reviews,
+    ServiceAddresses serviceAddresses) {
+
+    this.productId = productId;
+    this.name = name;
+    this.weight = weight;
+    this.recommendations = recommendations;
+    this.reviews = reviews;
+    this.serviceAddresses = serviceAddresses;
+  }
+
+  public int getProductId() {
+    return productId;
+  }
+
+  public String getName() {
+    return name;
+  }
+
+  public int getWeight() {
+    return weight;
+  }
+
+  public List<RecommendationSummary> getRecommendations() {
+    return recommendations;
+  }
+
+  public List<ReviewSummary> getReviews() {
+    return reviews;
+  }
+
+  public ServiceAddresses getServiceAddresses() {
+    return serviceAddresses;
+  }
+}
+```
+
+</TabItem>
+
+<TabItem value="ReviewSummary" label="ReviewSummary">
+
+```java
+package se.magnus.api.composite.product;
+
+public class ReviewSummary {
+
+  private final int reviewId;
+  private final String author;
+  private final String subject;
+
+  public ReviewSummary(int reviewId, String author, String subject) {
+    this.reviewId = reviewId;
+    this.author = author;
+    this.subject = subject;
+  }
+
+  public int getReviewId() {
+    return reviewId;
+  }
+
+  public String getAuthor() {
+    return author;
+  }
+
+  public String getSubject() {
+    return subject;
+  }
+}
+```
+
+</TabItem>
+
+<TabItem value="RecommendationSummary" label="RecommendationSummary">
+
+```java
+package se.magnus.api.composite.product;
+
+public class RecommendationSummary {
+
+  private final int recommendationId;
+  private final String author;
+  private final int rate;
+
+  public RecommendationSummary(int recommendationId, String author, int rate) {
+    this.recommendationId = recommendationId;
+    this.author = author;
+    this.rate = rate;
+  }
+
+  public int getRecommendationId() {
+    return recommendationId;
+  }
+
+  public String getAuthor() {
+    return author;
+  }
+
+  public int getRate() {
+    return rate;
+  }
+}
+```
+
+</TabItem>
+
+<TabItem value="ServiceAddresses" label="ServiceAddresses">
+
+```java
+package se.magnus.api.composite.product;
+
+public class ServiceAddresses {
+  private final String cmp;
+  private final String pro;
+  private final String rev;
+  private final String rec;
+
+  public ServiceAddresses() {
+    cmp = null;
+    pro = null;
+    rev = null;
+    rec = null;
+  }
+
+  public ServiceAddresses(
+    String compositeAddress,
+    String productAddress,
+    String reviewAddress,
+    String recommendationAddress) {
+
+    this.cmp = compositeAddress;
+    this.pro = productAddress;
+    this.rev = reviewAddress;
+    this.rec = recommendationAddress;
+  }
+
+  public String getCmp() {
+    return cmp;
+  }
+
+  public String getPro() {
+    return pro;
+  }
+
+  public String getRev() {
+    return rev;
+  }
+
+  public String getRec() {
+    return rec;
+  }
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+To avoid hardcoding the address information for the core services into the source code of the composite microservice, the latter uses a property file where information on how to find the core services is stored. The property file, `application.yml`, looks as follows:
+```yml
+server.port: 7001
+server.error.include-message: always
+
+app:
+  product-service:
+    host: localhost
+    port: 7002
+  recommendation-service:
+    host: localhost
+    port: 7003
+  review-service:
+    host: localhost
+    port: 7004
+
+logging:
+  level:
+    root: INFO
+    se.magnus: DEBUG
+```
+This configuration will, be replaced by a service discovery mechanism later on.
+
+**The integration component**
+
+Let’s look at the first part of the implementation of the composite microservice, the integration component, `ProductCompositeIntegration.java`. It is declared as a Spring bean using the
+`@Component` annotation and implements the three core services’ APIs:
+```java
+package se.magnus.microservices.composite.product.services;
+
+@Component
+public class ProductCompositeIntegration
+    implements ProductService, RecommendationService, ReviewService {}
+```
+The integration component uses a helper class in the Spring Framework, `RestTemplate`, to perform the actual HTTP requests to the core microservices. Before we can inject it into the integration component, we need to configure it. We do that in the main application class, `ProductCompositeServiceApplication.java`, as follows:
+```java
+@SpringBootApplication
+@ComponentScan("se.magnus")
+public class ProductCompositeServiceApplication {
+
+    @Bean
+    RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+
+    public static void main(String[] args) {
+        SpringApplication.run(ProductCompositeServiceApplication.class, args);
+    }
+}
+```
+A RestTemplate object is highly configurable, but we leave it with its default values for now.
+
+We can now inject RestTemplate, along with a JSON mapper, which is used for accessing error
+messages in case of errors, and the configuration values that we have set up in the property file.
+1. The objects and configuration values are injected into the constructor as follows:
+```java
+private final RestTemplate restTemplate;
+private final ObjectMapper mapper;
+
+private final String productServiceUrl;
+private final String recommendationServiceUrl;
+private final String reviewServiceUrl;
+
+public ProductCompositeIntegration(
+  RestTemplate restTemplate,
+  ObjectMapper mapper,
+  @Value("${app.product-service.host}") String productServiceHost,
+  @Value("${app.product-service.port}") int productServicePort,
+  @Value("${app.recommendation-service.host}") String recommendationServiceHost,
+  @Value("${app.recommendation-service.port}") int recommendationServicePort,
+  @Value("${app.review-service.host}") String reviewServiceHost,
+  @Value("${app.review-service.port}") int reviewServicePort) {
+}
+
+```
+2. The body of the constructor stores the injected objects and builds the URLs based on the injected values, as follows:
+```java
+{
+
+    this.restTemplate = restTemplate;
+    this.mapper = mapper;
+
+    productServiceUrl = "http://" + productServiceHost + ":" + productServicePort + "/product/";
+    recommendationServiceUrl = "http://" + recommendationServiceHost + ":" + recommendationServicePort + "/recommendation?productId=";
+    reviewServiceUrl = "http://" + reviewServiceHost + ":" + reviewServicePort + "/review?productId=";
+  }
+```
+3. Finally, the integration component implements the API methods for the three core services by using `RestTemplate` to make the actual outgoing calls:
+```java
+package se.magnus.microservices.composite.product.services;
+
+import static org.springframework.http.HttpMethod.GET;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestTemplate;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.product.ProductService;
+import se.magnus.api.core.recommendation.Recommendation;
+import se.magnus.api.core.recommendation.RecommendationService;
+import se.magnus.api.core.review.Review;
+import se.magnus.api.core.review.ReviewService;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.api.exceptions.NotFoundException;
+import se.magnus.util.http.HttpErrorInfo;
+
+@Component
+public class ProductCompositeIntegration implements ProductService, RecommendationService, ReviewService {
+
+  private static final Logger LOG = LoggerFactory.getLogger(ProductCompositeIntegration.class);
+
+  private final RestTemplate restTemplate;
+  private final ObjectMapper mapper;
+
+  private final String productServiceUrl;
+  private final String recommendationServiceUrl;
+  private final String reviewServiceUrl;
+
+  public ProductCompositeIntegration(
+    RestTemplate restTemplate,
+    ObjectMapper mapper,
+    @Value("${app.product-service.host}") String productServiceHost,
+    @Value("${app.product-service.port}") int productServicePort,
+    @Value("${app.recommendation-service.host}") String recommendationServiceHost,
+    @Value("${app.recommendation-service.port}") int recommendationServicePort,
+    @Value("${app.review-service.host}") String reviewServiceHost,
+    @Value("${app.review-service.port}") int reviewServicePort) {
+
+    this.restTemplate = restTemplate;
+    this.mapper = mapper;
+
+    productServiceUrl = "http://" + productServiceHost + ":" + productServicePort + "/product/";
+    recommendationServiceUrl = "http://" + recommendationServiceHost + ":" + recommendationServicePort + "/recommendation?productId=";
+    reviewServiceUrl = "http://" + reviewServiceHost + ":" + reviewServicePort + "/review?productId=";
+  }
+
+  public Product getProduct(int productId) {
+
+    try {
+      String url = productServiceUrl + productId;
+      LOG.debug("Will call getProduct API on URL: {}", url);
+
+      Product product = restTemplate.getForObject(url, Product.class);
+      LOG.debug("Found a product with id: {}", product.getProductId());
+
+      return product;
+
+    } catch (HttpClientErrorException ex) {
+
+      switch (HttpStatus.resolve(ex.getStatusCode().value())) {
+        case NOT_FOUND:
+          throw new NotFoundException(getErrorMessage(ex));
+
+        case UNPROCESSABLE_ENTITY:
+          throw new InvalidInputException(getErrorMessage(ex));
+
+        default:
+          LOG.warn("Got an unexpected HTTP error: {}, will rethrow it", ex.getStatusCode());
+          LOG.warn("Error body: {}", ex.getResponseBodyAsString());
+          throw ex;
+      }
+    }
+  }
+
+  private String getErrorMessage(HttpClientErrorException ex) {
+    try {
+      return mapper.readValue(ex.getResponseBodyAsString(), HttpErrorInfo.class).getMessage();
+    } catch (IOException ioex) {
+      return ex.getMessage();
+    }
+  }
+
+  public List<Recommendation> getRecommendations(int productId) {
+
+    try {
+      String url = recommendationServiceUrl + productId;
+
+      LOG.debug("Will call getRecommendations API on URL: {}", url);
+      List<Recommendation> recommendations = restTemplate
+        .exchange(url, GET, null, new ParameterizedTypeReference<List<Recommendation>>() {})
+        .getBody();
+
+      LOG.debug("Found {} recommendations for a product with id: {}", recommendations.size(), productId);
+      return recommendations;
+
+    } catch (Exception ex) {
+      LOG.warn("Got an exception while requesting recommendations, return zero recommendations: {}", ex.getMessage());
+      return new ArrayList<>();
+    }
+  }
+
+  public List<Review> getReviews(int productId) {
+
+    try {
+      String url = reviewServiceUrl + productId;
+
+      LOG.debug("Will call getReviews API on URL: {}", url);
+      List<Review> reviews = restTemplate
+        .exchange(url, GET, null, new ParameterizedTypeReference<List<Review>>() {})
+        .getBody();
+
+      LOG.debug("Found {} reviews for a product with id: {}", reviews.size(), productId);
+      return reviews;
+
+    } catch (Exception ex) {
+      LOG.warn("Got an exception while requesting reviews, return zero reviews: {}", ex.getMessage());
+      return new ArrayList<>();
+    }
+  }
+}
+```
+- For the `getProduct()` implementation, the `getForObject()` method can be used in `RestTemplate`. The expected response is a `Product` object. It can be expressed in the call to `getForObject()` by specifying the `Product.class` class that `RestTemplate` will map the JSON response to.
+- For the calls to `getRecommendations()` and `getReviews()`, a more advanced method,
+`exchange()`, has to be used. The reason for this is the automatic mapping from a JSON
+response to a model class that `RestTemplate` performs. `The getRecommendations()` and
+`getReviews()` methods expect a generic list in the responses, that is, `List<Recommendation>`
+and `List<Review>`. Since generics don’t hold any type of information at runtime, we can’t
+specify that the methods expect a generic list in their responses. Instead, we can use a
+helper class from the Spring Framework, `ParameterizedTypeReference`, which is designed to resolve this problem by holding the type information at runtime. This means
+that `RestTemplate` can figure out what class to map the JSON responses to. To utilize this
+helper class, we have to use the more involved `exchange()` method instead of the simpler
+`getForObject()` method on RestTemplate.
+
+**Composite API implementation**
+
+Finally, we will look at the last piece of the implementation of the composite microservice: the
+`ProductCompositeServiceImpl.java` API implementation class. Let’s go through it step by step:
+1. In the same way that we did for the core services, the composite service implements its API interface, `ProductCompositeService`, and is annotated with @RestController to mark it as a REST service.
+2. The implementation class requires the `ServiceUtil` bean and its own integration component, so they are injected into its constructor.
+3. Finally, the API method is implemented as follows:
+```java
+package se.magnus.microservices.composite.product.services;
+
+import java.util.List;
+import java.util.stream.Collectors;
+import org.springframework.web.bind.annotation.RestController;
+import se.magnus.api.composite.product.*;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.recommendation.Recommendation;
+import se.magnus.api.core.review.Review;
+import se.magnus.api.exceptions.NotFoundException;
+import se.magnus.util.http.ServiceUtil;
+
+@RestController
+public class ProductCompositeServiceImpl implements ProductCompositeService {
+
+  private final ServiceUtil serviceUtil;
+  private ProductCompositeIntegration integration;
+
+  public ProductCompositeServiceImpl(
+    ServiceUtil serviceUtil, ProductCompositeIntegration integration) {
+    
+    this.serviceUtil = serviceUtil;
+    this.integration = integration;
+  }
+
+  @Override
+  public ProductAggregate getProduct(int productId) {
+
+    Product product = integration.getProduct(productId);
+    if (product == null) {
+      throw new NotFoundException("No product found for productId: " + productId);
+    }
+
+    List<Recommendation> recommendations = integration.getRecommendations(productId);
+
+    List<Review> reviews = integration.getReviews(productId);
+
+    return createProductAggregate(product, recommendations, reviews, serviceUtil.getServiceAddress());
+  }
+
+  private ProductAggregate createProductAggregate(
+    Product product,
+    List<Recommendation> recommendations,
+    List<Review> reviews,
+    String serviceAddress) {
+
+    // 1. Setup product info
+    int productId = product.getProductId();
+    String name = product.getName();
+    int weight = product.getWeight();
+
+    // 2. Copy summary recommendation info, if available
+    List<RecommendationSummary> recommendationSummaries =
+      (recommendations == null) ? null : recommendations.stream()
+        .map(r -> new RecommendationSummary(r.getRecommendationId(), r.getAuthor(), r.getRate()))
+        .collect(Collectors.toList());
+
+    // 3. Copy summary review info, if available
+    List<ReviewSummary> reviewSummaries = 
+      (reviews == null) ? null : reviews.stream()
+        .map(r -> new ReviewSummary(r.getReviewId(), r.getAuthor(), r.getSubject()))
+        .collect(Collectors.toList());
+
+    // 4. Create info regarding the involved microservices addresses
+    String productAddress = product.getServiceAddress();
+    String reviewAddress = (reviews != null && reviews.size() > 0) ? reviews.get(0).getServiceAddress() : "";
+    String recommendationAddress = (recommendations != null && recommendations.size() > 0) ? recommendations.get(0).getServiceAddress() : "";
+    ServiceAddresses serviceAddresses = new ServiceAddresses(serviceAddress, productAddress, reviewAddress, recommendationAddress);
+
+    return new ProductAggregate(productId, name, weight, recommendationSummaries, reviewSummaries, serviceAddresses);
+  }
+}
+```
+The integration component is used to call the three core services, and a helper method, `createProductAggregate()`, is used to create a response object of the `ProductAggregate` type based on the responses from the calls to the integration component.
+
+## Adding error handling
+Handling errors in a structured and well-thought-out way is essential in a microservice landscape
+where a large number of microservices communicate with each other using synchronous APIs,
+for example, using HTTP and JSON. It is also important to separate protocol-specific handling of
+errors, such as HTTP status codes, from the business logic.
+
+I have created a set of Java exceptions in the api project that are used by both the API implementations and the API clients, initially `InvalidInputException` and `NotFoundException`.
+
+<Tabs groupId="code">
+<TabItem value="InvalidInputException" label="InvalidInputException">
+
+```java
+package se.magnus.api.exceptions;
+
+public class InvalidInputException extends RuntimeException {
+  public InvalidInputException() {}
+
+  public InvalidInputException(String message) {
+    super(message);
+  }
+
+  public InvalidInputException(String message, Throwable cause) {
+    super(message, cause);
+  }
+
+  public InvalidInputException(Throwable cause) {
+    super(cause);
+  }
+}
+```
+
+</TabItem>
+<TabItem value="NotFoundException" label="NotFoundException">
+
+```java
+package se.magnus.api.exceptions;
+
+public class NotFoundException extends RuntimeException {
+  public NotFoundException() {}
+
+  public NotFoundException(String message) {
+    super(message);
+  }
+
+  public NotFoundException(String message, Throwable cause) {
+    super(message, cause);
+  }
+
+  public NotFoundException(Throwable cause) {
+    super(cause);
+  }
+}
+
+```
+
+</TabItem>
+</Tabs>
+
+**The global REST controller exception handler**
+
+To separate protocol-specific error handling from the business logic in the REST controllers, that
+is, the API implementations, I have created a utility class, `GlobalControllerExceptionHandler`.
+java, in the util project, which is annotated as `@RestControllerAdvice`.
+
+For each Java exception that the API implementations throw, the utility class has an exception
+handler method that maps the Java exception to a proper HTTP response, that is, with a proper
+HTTP status and HTTP response body.
+
+For example, if an API implementation class throws `InvalidInputException`, the utility class
+will map it to an HTTP response with the status code set to 422 (`UNPROCESSABLE_ENTITY`).
+```java
+package se.magnus.util.http;
+
+import org.springframework.http.HttpStatus;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.api.exceptions.NotFoundException;
+
+@RestControllerAdvice
+class GlobalControllerExceptionHandler {
+
+  private static final Logger LOG = LoggerFactory.getLogger(GlobalControllerExceptionHandler.class);
+
+  @ResponseStatus(HttpStatus.NOT_FOUND)
+  @ExceptionHandler(NotFoundException.class)
+  public @ResponseBody HttpErrorInfo handleNotFoundExceptions(
+    ServerHttpRequest request, NotFoundException ex) {
+
+    return createHttpErrorInfo(HttpStatus.NOT_FOUND, request, ex);
+  }
+
+  @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+  @ExceptionHandler(InvalidInputException.class)
+  public @ResponseBody HttpErrorInfo handleInvalidInputException(
+    ServerHttpRequest request, InvalidInputException ex) {
+
+    return createHttpErrorInfo(HttpStatus.UNPROCESSABLE_ENTITY, request, ex);
+  }
+
+  private HttpErrorInfo createHttpErrorInfo(
+    HttpStatus httpStatus, ServerHttpRequest request, Exception ex) {
+
+    final String path = request.getPath().pathWithinApplication().value();
+    final String message = ex.getMessage();
+
+    LOG.debug("Returning HTTP status: {} for path: {}, message: {}", httpStatus, path, message);
+    return new HttpErrorInfo(httpStatus, path, message);
+  }
+}
+```
+In the same way, `NotFoundException` is mapped to a 404 (`NOT_FOUND`) HTTP status code.
+
+Whenever a REST controller throws any of these exceptions, Spring will use the utility class to create an HTTP response.
+
+:::note
+
+Note that Spring itself returns the HTTP status code 400 (`BAD_REQUEST`) when it detects an invalid request, for example, if the request contains a non-numeric `productID` (productId is specified as an integer in the API declaration).
+
+:::
+
+### Error handling in API implementations*
+API implementations use the exceptions in the **util** project to signal errors. They will be reported back to the REST client as HTTPS status codes indicating what went wrong. For example, the Product microservice implementation class, `ProductServiceImpl.java`, uses the `InvalidInputException` exception to return an error that indicates invalid input, as well as the `NotFoundException` exception to tell us that the product that was asked for does not exist. The code looks as follows:
+```java
+    @Override
+    public Product getProduct(int productId) {
+        LOG.debug(
+            "/product return the found product for productId={}",
+            productId
+        );
+
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
+
+        if (productId == 13) {
+            throw new NotFoundException(
+                "No product found for productId: " + productId
+            );
+        }
+```
+### Error handling in the API client
+
+The API client, that is, the integration component of the Composite microservice, does the reverse;it maps the 422 (`UNPROCESSABLE_ENTITY`) HTTP status code to `InvalidInputException` and the
+404 (`NOT_FOUND`) HTTP status code to `NotFoundException`. 
+```java
+    public Product getProduct(int productId) {
+        try {
+            String url = productServiceUrl + productId;
+            LOG.debug("Will call getProduct API on URL: {}", url);
+
+            Product product = restTemplate.getForObject(url, Product.class);
+            LOG.debug("Found a product with id: {}", product.getProductId());
+
+            return product;
+        } catch (HttpClientErrorException ex) {
+            switch (HttpStatus.resolve(ex.getStatusCode().value())) {
+                case NOT_FOUND:
+                    throw new NotFoundException(getErrorMessage(ex));
+                case UNPROCESSABLE_ENTITY:
+                    throw new InvalidInputException(getErrorMessage(ex));
+                default:
+                    LOG.warn(
+                        "Got an unexpected HTTP error: {}, will rethrow it",
+                        ex.getStatusCode()
+                    );
+                    LOG.warn("Error body: {}", ex.getResponseBodyAsString());
+                    throw ex;
+            }
+        }
+    }
+```
+The error handling for `getRecommendations()` and `getReviews()` in the integration component is a bit more relaxed – classed as best-effort, meaning that if it succeeds in getting product information but fails to get either recommendations or reviews, it is still considered to be okay. However, a warning is written to the log.
+
+For details, see `ProductCompositeIntegration.java` above.
+
+## Testing APIs
+### Testing APIs manually
+Let’s try them out by performing the following steps:
+1. Build and start the microservices as background processes.
+    - First, build and start up each microservice as a background process, as follows:
+      ```console
+      ./gradlew build
+      ```
+    - Once the build completes, we can launch our microservices as background processes to the terminal process with the following code:
+      ```console
+      java -jar microservices/product-composite-service/build/libs/*.jar &
+      java -jar microservices/product-service/build/libs/*.jar &
+      java -jar microservices/recommendation-service/build/libs/*.jar &
+      java -jar microservices/review-service/build/libs/*.jar &
+      ```
+    - A lot of log messages will be written to the terminal, but after a few seconds, things will calm down and we will find the following messages written to the log
+      ```console
+      2026-04-26T18:33:44.010+03:00  INFO 19902 --- [           main] o.s.b.web.embedded.netty.NettyWebServer  : Netty started on port 7002 (http)
+      2026-04-26T18:33:44.145+03:00  INFO 19902 --- [           main] s.m.m.c.p.ProductServiceApplication      : Started ProductServiceApplication in 16.186 seconds (process running for 20.427)
+      2026-04-26T18:33:44.448+03:00  INFO 19904 --- [           main] o.s.b.web.embedded.netty.NettyWebServer  : Netty started on port 7004 (http)
+      2026-04-26T18:33:44.504+03:00  INFO 19904 --- [           main] s.m.m.c.review.ReviewServiceApplication  : Started ReviewServiceApplication in 16.52 seconds (process running for 20.787)
+      2026-04-26T18:33:44.805+03:00  INFO 19901 --- [           main] o.s.b.web.embedded.netty.NettyWebServer  : Netty started on port 7001 (http)
+      2026-04-26T18:33:44.895+03:00  INFO 19901 --- [           main] m.c.p.ProductCompositeServiceApplication : Started ProductCompositeServiceApplication in 16.78 seconds (process running for 21.177)
+      ```
+    - This means that they are all ready to receive requests
+2. Use curl to call the composite API.
+    - Try this out with the following code:
+      ```console
+      curl http://localhost:7001/product-composite/1
+      ```
+    - After some log output, we will get a JSON response that looks something like the following:
+      ```console
+      {"productId":1,"name":"name-1","weight":123,"recommendations":[{"recommendationId":1,"author":"Author 1","rate":1},{"recommendationId":2,"author":"Author 2","rate":2},{"recommendationId":3,"author":"Author 3","rate":3}],"reviews":[{"reviewId":1,"author":"Author 1","subject":"Subject 1"},{"reviewId":2,"author":"Author 2","subject":"Subject 2"},{"reviewId":3,"author":"Author 3","subject":"Subject 3"}],"serviceAddresses":{"cmp":"gemy-laptop/127.0.1.1:7001","pro":"gemy-laptop/127.0.1.1:7002","rev":"gemy-laptop/127.0.1.1:7004","rec":"gemy-laptop/127.0.1.1:7003"}}
+      ```
+    - To get the JSON response pretty-printed, you can use the jq tool:
+      ```console
+      curl http://localhost:7001/product-composite/1 -s | jq .
+      ```
+    - If you want to, you can also try out the following commands to verify that the error handling
+    works as expected:
+      ```console
+      # Verify that a 404 (Not Found) error is returned for a non-existing
+      productId (13)
+      curl http://localhost:7001/product-composite/13 -i
+      # Verify that no recommendations are returned for productId 113
+      curl http://localhost:7001/product-composite/113 -s | jq .
+      # Verify that no reviews are returned for productId 213
+      curl http://localhost:7001/product-composite/213 -s | jq .
+      # Verify that a 422 (Unprocessable Entity) error is returned for a
+      productId that is out of range (-1)
+      curl http://localhost:7001/product-composite/-1 -i
+      # Verify that a 400 (Bad Request) error is returned for a productId that
+      is not a number, i.e. invalid format
+      curl http://localhost:7001/product-composite/invalidProductId -i
+      ```
+3. Stop them.
+    - Finally, you can shut down the microservices with the following command:
+      ```console
+      kill $(jobs -p)
+      ```
+
+If you are using an IDE such as Visual Studio Code with Spring Tool Suite, you can use their support
+for Spring Boot Dashboard to start and stop your microservices with one click.
+### semi-automated tests
+Being able to automatically run unit and integration tests for each microservice in isolation using
+plain Java, JUnit, and Gradle is very useful during development, but insufficient when we move
+over to the operation side. In operation, we also need a way to automatically verify that a system
+landscape of cooperating microservices delivers what we expect. Being able to, at any time, run a
+script that verifies that a number of cooperating microservices all work as expected in operation is
+very valuable – the more microservices there are, the higher the value of such a verification script.
+
+For this reason, I have written a simple Bash script that can verify the functionality of a deployed
+system landscape by performing calls to the RESTful APIs exposed by the microservices. It is based
+on the curl commands we learned about and used previously. The script verifies return codes
+and parts of the JSON responses using jq. The script contains two helper functions, assertCurl()
+and assertEqual(), to make the test code compact and easy to read.
+
+For example, making a normal request and expecting 200 as the status code, as well as asserting
+that we get back a JSON response that returns the requested productId along with three recom-
+mendations and three reviews, looks like the following:
+```bash
+# Verify that a normal request works, expect three recommendations and
+three reviews
+assertCurl 200 "curl http://$HOST:${PORT}/product-composite/1 -s"
+assertEqual 1 $(echo $RESPONSE | jq .productId)
+assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+```
+erifying that we get 404 (Not Found) back as an HTTP response code (when we try to look up a
+product that doesn’t exist) looks as follows:
+```bash
+# Verify that a 404 (Not Found) error is returned for a non-existing
+productId (13)
+assertCurl 404 "curl http://$HOST:${PORT}/product-composite/13 -s"
+```
+The test script, `test-em-all.bash`, implements the manual tests that were described in the Testing APIs manually section.
+```bash
+#!/usr/bin/env bash
+#
+# Sample usage:
+#
+#   HOST=localhost PORT=7001 ./test-em-all.bash
+#
+: ${HOST=localhost}
+: ${PORT=7001}
+: ${PROD_ID_REVS_RECS=1}
+: ${PROD_ID_NOT_FOUND=13}
+: ${PROD_ID_NO_RECS=113}
+: ${PROD_ID_NO_REVS=213}
+
+function assertCurl() {
+
+  local expectedHttpCode=$1
+  local curlCmd="$2 -w \"%{http_code}\""
+  local result=$(eval $curlCmd)
+  local httpCode="${result:(-3)}"
+  RESPONSE='' && (( ${#result} > 3 )) && RESPONSE="${result%???}"
+
+  if [ "$httpCode" = "$expectedHttpCode" ]
+  then
+    if [ "$httpCode" = "200" ]
+    then
+      echo "Test OK (HTTP Code: $httpCode)"
+    else
+      echo "Test OK (HTTP Code: $httpCode, $RESPONSE)"
+    fi
+  else
+    echo  "Test FAILED, EXPECTED HTTP Code: $expectedHttpCode, GOT: $httpCode, WILL ABORT!"
+    echo  "- Failing command: $curlCmd"
+    echo  "- Response Body: $RESPONSE"
+    exit 1
+  fi
+}
+
+function assertEqual() {
+
+  local expected=$1
+  local actual=$2
+
+  if [ "$actual" = "$expected" ]
+  then
+    echo "Test OK (actual value: $actual)"
+  else
+    echo "Test FAILED, EXPECTED VALUE: $expected, ACTUAL VALUE: $actual, WILL ABORT"
+    exit 1
+  fi
+}
+
+set -e
+
+echo "HOST=${HOST}"
+echo "PORT=${PORT}"
+
+
+# Verify that a normal request works, expect three recommendations and three reviews
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
+assertEqual $PROD_ID_REVS_RECS $(echo $RESPONSE | jq .productId)
+assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that a 404 (Not Found) error is returned for a non-existing productId ($PROD_ID_NOT_FOUND)
+assertCurl 404 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NOT_FOUND -s"
+assertEqual "No product found for productId: $PROD_ID_NOT_FOUND" "$(echo $RESPONSE | jq -r .message)"
+
+# Verify that no recommendations are returned for productId $PROD_ID_NO_RECS
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NO_RECS -s"
+assertEqual $PROD_ID_NO_RECS $(echo $RESPONSE | jq .productId)
+assertEqual 0 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that no reviews are returned for productId $PROD_ID_NO_REVS
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NO_REVS -s"
+assertEqual $PROD_ID_NO_REVS $(echo $RESPONSE | jq .productId)
+assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 0 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that a 422 (Unprocessable Entity) error is returned for a productId that is out of range (-1)
+assertCurl 422 "curl http://$HOST:$PORT/product-composite/-1 -s"
+assertEqual "\"Invalid productId: -1\"" "$(echo $RESPONSE | jq .message)"
+
+# Verify that a 400 (Bad Request) error error is returned for a productId that is not a number, i.e. invalid format
+assertCurl 400 "curl http://$HOST:$PORT/product-composite/invalidProductId -s"
+assertEqual "\"Type mismatch.\"" "$(echo $RESPONSE | jq .message)"
+
+echo "End, all tests OK:" `date`
+```
+
+:::note
+
+In Monitoring Microservices Lab, we will learn about complementary techniques for automatically keeping an eye on a system landscape in operation. Here,
+we will learn about a monitoring tool that continuously monitors the state of the
+deployed microservices and how alarms can be raised if the collected metrics exceed
+configured thresholds, such as overuse of CPU or memory.
+
+:::
+
+To try out the test script, perform the following steps:
+1. First, start the microservices, as we did previously:
+    ```console
+    java -jar microservices/product-composite-service/build/libs/*.jar &
+    java -jar microservices/product-service/build/libs/*.jar &
+    java -jar microservices/recommendation-service/build/libs/*.jar &
+    java -jar microservices/review-service/build/libs/*.jar &
+    ```
+2. Once they’ve all started up, run the test script:
+    ```console
+    ./test-em-all.bash
+    ```
+3. Wrap this up by shutting down the microservices with the following command:
+      ```console
+      kill $(jobs -p)
+      ```
+## Adding tests
+We don’t have much business logic to test at this time, so we don’t need to write any unit tests.
+Instead, we will focus on testing the APIs that our microservices expose; that is, we will start them
+up in integration tests with their embedded web server and then use a test client to perform HTTP
+requests and validate the responses.
+
+To test the composite product API in isolation, we need to mock its dependencies, that is, the
+requests to the other three microservices that were performed by the integration component,
+ProductCompositeIntegration. We use Mockito to do this.
+```java
+  @MockitoBean private ProductCompositeIntegration compositeIntegration;
+
+  @BeforeEach
+  void setUp() {
+
+    when(compositeIntegration.getProduct(PRODUCT_ID_OK))
+      .thenReturn(new Product(PRODUCT_ID_OK, "name", 1, "mock-address"));
+    when(compositeIntegration.getRecommendations(PRODUCT_ID_OK))
+      .thenReturn(singletonList(new Recommendation(PRODUCT_ID_OK, 1, "author", 1, "content", "mock address")));
+    when(compositeIntegration.getReviews(PRODUCT_ID_OK))
+      .thenReturn(singletonList(new Review(PRODUCT_ID_OK, 1, "author", "subject", "content", "mock address")));
+
+    when(compositeIntegration.getProduct(PRODUCT_ID_NOT_FOUND))
+      .thenThrow(new NotFoundException("NOT FOUND: " + PRODUCT_ID_NOT_FOUND));
+
+    when(compositeIntegration.getProduct(PRODUCT_ID_INVALID))
+      .thenThrow(new InvalidInputException("INVALID: " + PRODUCT_ID_INVALID));
+  }
+```
+The mock implementation works as follows:
+1. First, we declare three constants that are used in the test class: PRODUCT_ID_OK, PRODUCT_
+ID_NOT_FOUND, and PRODUCT_ID_INVALID.
+2. Next, the @MockitoBean annotation is used to configure Mockito to set up a mock for the
+ProductCompositeIntegration interface.
+3. If the getProduct(), getRecommendations(), and getReviews() methods are called on
+the integration component, and productId is set to PRODUCT_ID_OK, the mock will return
+a normal response.
+4. If the getProduct() method is called with productId set to PRODUCT_ID_NOT_FOUND, the
+mock will throw NotFoundException.
+5. If the getProduct() method is called with productId set to PRODUCT_ID_INVALID, the
+mock will throw InvalidInputException.
+
+we test the composite product API by doing the following tests:
+1. Sending in `productId` for an existing product and asserting that we get back `200` as an
+HTTP response code and a JSON response that contains the requested `productId` along
+with one recommendation and one review
+2. Sending in a missing `productId` and asserting that we get back `404` as an HTTP response
+code and a JSON response that contains relevant error information
+
+<Tabs groupId="code">
+<TabItem value="ProductCompositeServiceApplicationTests" label="ProductCompositeServiceApplicationTests">
+```java
+package se.magnus.microservices.composite.product;
+
+import static java.util.Collections.singletonList;
+import static org.mockito.Mockito.when;
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+import static org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.recommendation.Recommendation;
+import se.magnus.api.core.review.Review;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.api.exceptions.NotFoundException;
+import se.magnus.microservices.composite.product.services.ProductCompositeIntegration;
+
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class ProductCompositeServiceApplicationTests {
+
+  private static final int PRODUCT_ID_OK = 1;
+  private static final int PRODUCT_ID_NOT_FOUND = 2;
+  private static final int PRODUCT_ID_INVALID = 3;
+
+  @Autowired private WebTestClient client;
+
+  @MockitoBean private ProductCompositeIntegration compositeIntegration;
+
+  @BeforeEach
+  void setUp() {
+
+    when(compositeIntegration.getProduct(PRODUCT_ID_OK))
+      .thenReturn(new Product(PRODUCT_ID_OK, "name", 1, "mock-address"));
+    when(compositeIntegration.getRecommendations(PRODUCT_ID_OK))
+      .thenReturn(singletonList(new Recommendation(PRODUCT_ID_OK, 1, "author", 1, "content", "mock address")));
+    when(compositeIntegration.getReviews(PRODUCT_ID_OK))
+      .thenReturn(singletonList(new Review(PRODUCT_ID_OK, 1, "author", "subject", "content", "mock address")));
+
+    when(compositeIntegration.getProduct(PRODUCT_ID_NOT_FOUND))
+      .thenThrow(new NotFoundException("NOT FOUND: " + PRODUCT_ID_NOT_FOUND));
+
+    when(compositeIntegration.getProduct(PRODUCT_ID_INVALID))
+      .thenThrow(new InvalidInputException("INVALID: " + PRODUCT_ID_INVALID));
+  }
+
+  @Test
+  void contextLoads() {}
+
+  @Test
+  void getProductById() {
+
+    client.get()
+      .uri("/product-composite/" + PRODUCT_ID_OK)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isOk()
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.productId").isEqualTo(PRODUCT_ID_OK)
+        .jsonPath("$.recommendations.length()").isEqualTo(1)
+        .jsonPath("$.reviews.length()").isEqualTo(1);
+  }
+
+  @Test
+  void getProductNotFound() {
+
+    client.get()
+      .uri("/product-composite/" + PRODUCT_ID_NOT_FOUND)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isNotFound()
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/product-composite/" + PRODUCT_ID_NOT_FOUND)
+        .jsonPath("$.message").isEqualTo("NOT FOUND: " + PRODUCT_ID_NOT_FOUND);
+  }
+
+  @Test
+  void getProductInvalidInput() {
+
+    client.get()
+      .uri("/product-composite/" + PRODUCT_ID_INVALID)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isEqualTo(UNPROCESSABLE_ENTITY)
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/product-composite/" + PRODUCT_ID_INVALID)
+        .jsonPath("$.message").isEqualTo("INVALID: " + PRODUCT_ID_INVALID);
+  }
+}
+```
+
+</TabItem>
+<TabItem value="ProductServiceApplicationTests" label="ProductServiceApplicationTests">
+
+```java
+package se.magnus.microservices.core.product;
+
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.web.reactive.server.WebTestClient;
+
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class ProductServiceApplicationTests {
+
+  @Autowired private WebTestClient client;
+
+  @Test
+  void getProductById() {
+
+    int productId = 1;
+
+    client.get()
+      .uri("/product/" + productId)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isOk()
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.productId").isEqualTo(productId);
+  }
+
+  @Test
+  void getProductInvalidParameterString() {
+
+    client.get()
+      .uri("/product/no-integer")
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isEqualTo(BAD_REQUEST)
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/product/no-integer")
+        .jsonPath("$.message").isEqualTo("Type mismatch.");
+  }
+
+  @Test
+  void getProductNotFound() {
+
+    int productIdNotFound = 13;
+
+    client.get()
+      .uri("/product/" + productIdNotFound)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isNotFound()
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/product/" + productIdNotFound)
+        .jsonPath("$.message").isEqualTo("No product found for productId: " + productIdNotFound);
+  }
+
+  @Test
+  void getProductInvalidParameterNegativeValue() {
+
+    int productIdInvalid = -1;
+
+    client.get()
+      .uri("/product/" + productIdInvalid)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isEqualTo(UNPROCESSABLE_ENTITY)
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/product/" + productIdInvalid)
+        .jsonPath("$.message").isEqualTo("Invalid productId: " + productIdInvalid);
+  }
+}
+
+```
+
+</TabItem>
+
+<TabItem value="RecommendationServiceApplicationTests" label="RecommendationServiceApplicationTests">
+
+```java
+package se.magnus.microservices.core.recommendation;
+
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.web.reactive.server.WebTestClient;
+
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class RecommendationServiceApplicationTests {
+
+  @Autowired private WebTestClient client;
+
+  @Test
+  void getRecommendationsByProductId() {
+
+    int productId = 1;
+
+    client.get()
+      .uri("/recommendation?productId=" + productId)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isOk()
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.length()").isEqualTo(3)
+        .jsonPath("$[0].productId").isEqualTo(productId);
+  }
+
+  @Test
+  void getRecommendationsMissingParameter() {
+
+    client.get()
+      .uri("/recommendation")
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isEqualTo(BAD_REQUEST)
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/recommendation")
+        .jsonPath("$.message").isEqualTo("Required query parameter 'productId' is not present.");
+  }
+
+  @Test
+  void getRecommendationsInvalidParameter() {
+
+    client.get()
+      .uri("/recommendation?productId=no-integer")
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isEqualTo(BAD_REQUEST)
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/recommendation")
+        .jsonPath("$.message").isEqualTo("Type mismatch.");
+  }
+
+  @Test
+  void getRecommendationsNotFound() {
+
+    int productIdNotFound = 113;
+
+    client.get()
+      .uri("/recommendation?productId=" + productIdNotFound)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isOk()
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.length()").isEqualTo(0);
+  }
+
+  @Test
+  void getRecommendationsInvalidParameterNegativeValue() {
+
+    int productIdInvalid = -1;
+
+    client.get()
+      .uri("/recommendation?productId=" + productIdInvalid)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isEqualTo(UNPROCESSABLE_ENTITY)
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/recommendation")
+        .jsonPath("$.message").isEqualTo("Invalid productId: " + productIdInvalid);
+  }
+}
+
+```
+
+</TabItem>
+
+<TabItem value="ReviewServiceApplicationTests" label="ReviewServiceApplicationTests">
+
+```java
+package se.magnus.microservices.core.review;
+
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.web.reactive.server.WebTestClient;
+
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class ReviewServiceApplicationTests {
+
+  @Autowired private WebTestClient client;
+
+  @Test
+  void getReviewsByProductId() {
+
+    int productId = 1;
+
+    client.get()
+      .uri("/review?productId=" + productId)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isOk()
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.length()").isEqualTo(3)
+        .jsonPath("$[0].productId").isEqualTo(productId);
+  }
+
+  @Test
+  void getReviewsMissingParameter() {
+
+    client.get()
+      .uri("/review")
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isEqualTo(BAD_REQUEST)
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/review")
+        .jsonPath("$.message").isEqualTo("Required query parameter 'productId' is not present.");
+  }
+
+  @Test
+  void getReviewsInvalidParameter() {
+
+    client.get()
+      .uri("/review?productId=no-integer")
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isEqualTo(BAD_REQUEST)
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/review")
+        .jsonPath("$.message").isEqualTo("Type mismatch.");
+  }
+
+  @Test
+  void getReviewsNotFound() {
+
+    int productIdNotFound = 213;
+
+    client.get()
+      .uri("/review?productId=" + productIdNotFound)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isOk()
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.length()").isEqualTo(0);
+  }
+
+  @Test
+  void getReviewsInvalidParameterNegativeValue() {
+
+    int productIdInvalid = -1;
+
+    client.get()
+      .uri("/review?productId=" + productIdInvalid)
+      .accept(APPLICATION_JSON)
+      .exchange()
+      .expectStatus().isEqualTo(UNPROCESSABLE_ENTITY)
+      .expectHeader().contentType(APPLICATION_JSON)
+      .expectBody()
+        .jsonPath("$.path").isEqualTo("/review")
+        .jsonPath("$.message").isEqualTo("Invalid productId: " + productIdInvalid);
+  }
+}
+
+```
+
+</TabItem>
+
+</Tabs>
+
+The test code works like this:
+- The test uses the fluent WebTestClient API to set up the URL to call `/product-composite/ + PRODUCT_ID_OK` and specify the accepted response format, JSON.
+- After executing the request using the `exchange()` method, the test verifies that the response status is `OK (200)` and that the response format actually is JSON (as requested).
+- Finally, the test inspects the response body and verifies that it contains the expected information in terms of `productId` and the number of recommendations and reviews.
+
+The negative test(`getProductNotFound()` and `getProductInvalidInput()`) is very similar to the preceding test in terms of its structure; the main difference is that it verifies that it got an error status
+code back, `Not Found (404)`, and that the response body contains the expected error message.
+
+The automated integration tests on the API exposed by the three core microservices are similar,
+but simpler since they don’t need to mock anything! The source code for the tests can be found
+in each microservice’s test folder.
+
+The tests are run automatically by Gradle when performing a build:
+```console
+./gradlew build
+```
+You can, however, specify that you only want to run the tests (and not the rest of the build):
+```console
+./gradlew test
+```
+
+## Summary
+We have now built our first few microservices using Spring Boot. After being introduced to the
+microservice landscape that we will use throughout this example:
+1. we learned how to use Spring Initializr to create skeleton projects for each microservice.
+2. Next, we learned how to add APIs using Spring WebFlux for the three core services and implemented a composite service that uses the three core services’ APIs to create an aggregated view of the information in them. The composite service uses the RestTemplate class in the Spring Framework to perform HTTP requests to APIs that are exposed by the core services. 
+3. After adding logic for error handling to the services, we ran some manual tests on the microservice landscape.
+4. We learned how to add tests for microservices in isolation and when they work together as a system landscape. To provide controlled isolation for the composite service, we mocked its dependencies to the core services using Mockito. 
+5. Testing the whole system landscape is performed by a Bash script that uses curl to perform calls to the API of the
+composite service.
+
+With these skills in place, we are ready to take the next step, entering the world of Docker and containers in the next lab! Among other things, we will learn how to use Docker to fully automate the testing of a system landscape of cooperating microservices.
