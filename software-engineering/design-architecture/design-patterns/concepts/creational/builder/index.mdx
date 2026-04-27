@@ -14,7 +14,15 @@ Or compare Classic vs Fluent Builder in real system design decisions
 Show a hybrid approach (Director + Fluent Builder) used in real frameworks
 Or why Classic Builder often fails in REST API design (very important insight)
 Or  compare Builder vs Factory in backend systems
-give a comparison pseudocode: Builder vs Factory vs Prototype-->
+give a comparison pseudocode: Builder vs Factory vs Prototype
+Show how real libraries (OkHttp, Spring) structure their builders internally
+-How to safely implement a resettable builder (advanced pattern)
+-Or how this feature is used in real libraries like object pools and batch APIs
+-Or pitfalls in multi-threaded environments (very important)
+-Show benchmark comparisons (Builder vs Constructor)
+-Or demonstrate JVM optimizations like escape analysis in action
+-Or design a zero-allocation builder pattern (advanced topic)
+-->
 ## Overview
 
 The **Builder Pattern** is a creational design pattern that separates the construction of a complex object from its representation, allowing the same construction process to create different representations.
@@ -86,7 +94,213 @@ The constructor with lots of parameters has its downside: not all the parameters
 
 In most cases most of the parameters will be unused, making [the constructor calls pretty ugly](/smells/long-parameter-list)- For instance, only a fraction of houses have swimming pools, so the parameters related to swimming pools will be useless nine times out of ten.
 
+Static factories and constructors share a limitation: they do not scale well to large
+numbers of optional parameters. Consider the case of a class representing the
+Nutrition Facts label that appears on packaged foods. These labels have a few
+required fields—serving size, servings per container, and calories per serving—
+and more than twenty optional fields—total fat, saturated fat, trans fat, cholesterol,
+sodium, and so on. Most products have nonzero values for only a few of these
+optional fields.
+
+What sort of constructors or static factories should you write for such a class?
+Traditionally, programmers have used the telescoping constructor pattern, in
+which you provide a constructor with only the required parameters, another with a
+single optional parameter, a third with two optional parameters, and so on, culmi-
+nating in a constructor with all the optional parameters. Here’s how it looks in
+practice. For brevity’s sake, only four optional fields are shown:
+```java
+// Telescoping constructor pattern - does not scale well!
+public class NutritionFacts {
+    private final int servingSize;  // (mL) required
+    private final int servings;     // (per container) required
+    private final int calories;     // (per serving) optional
+    private final int fat;          // (g/serving) optional
+    private final int sodium;       // (mg/serving) optional
+    private final int carbohydrate; // (g/serving) optional
+
+    public NutritionFacts(int servingSize, int servings) {
+        this(servingSize, servings, 0);
+    }
+
+    public NutritionFacts(int servingSize, int servings, int calories) {
+        this(servingSize, servings, calories, 0);
+    }
+
+    public NutritionFacts(int servingSize, int servings, int calories, int fat) {
+        this(servingSize, servings, calories, fat, 0);
+    }
+
+    public NutritionFacts(int servingSize, int servings, int calories, int fat,
+                          int sodium) {
+        this(servingSize, servings, calories, fat, sodium, 0);
+    }
+
+    public NutritionFacts(int servingSize, int servings, int calories, int fat,
+                          int sodium, int carbohydrate) {
+        this.servingSize = servingSize;
+        this.servings = servings;
+        this.calories = calories;
+        this.fat = fat;
+        this.sodium = sodium;
+        this.carbohydrate = carbohydrate;
+    }
+}
+```
+When you want to create an instance, you use the constructor with the shortest
+parameter list containing all the parameters you want to set:
+```java
+NutritionFacts cocaCola =
+new NutritionFacts(240, 8, 100, 0, 35, 27);
+```
+Typically this constructor invocation will require many parameters that you don’t
+want to set, but you’re forced to pass a value for them anyway. In this case, we
+passed a value of 0 for fat. With “only” six parameters this may not seem so bad,
+but it quickly gets out of hand as the number of parameters increases.
+
+In short, **the telescoping constructor pattern works, but it is hard to write
+client code when there are many parameters, and harder still to read it**. The
+reader is left wondering what all those values mean and must carefully count
+parameters to find out. Long sequences of identically typed parameters can cause
+subtle bugs. If the client accidentally reverses two such parameters, the compiler
+won’t complain, but the program will misbehave at runtime (Item 51).
+A second alternative when you’re faced with many optional parameters in a
+constructor is the JavaBeans pattern, in which you call a parameterless construc-
+tor to create the object and then call setter methods to set each required parameter
+and each optional parameter of interest:
+```java
+// JavaBeans Pattern - allows inconsistency, mandates mutability
+public class NutritionFacts {
+// Parameters initialized to default values (if any)
+private int servingSize = -1; // Required; no default value
+private int servings = -1; // Required; no default value
+private int calories = 0;
+private int fat = 0;
+private int sodium = 0;
+private int carbohydrate = 0;
+public NutritionFacts() { }
+// Setters
+public void setServingSize(int val) { servingSize = val; }
+public void setServings(int val) { servings = val; }
+public void setCalories(int val) { calories = val; }
+public void setFat(int val) { fat = val; }
+public void setSodium(int val) { sodium = val; }
+public void setCarbohydrate(int val) { carbohydrate = val; }
+}
+```
+This pattern has none of the disadvantages of the telescoping constructor pattern.
+It is easy, if a bit wordy, to create instances, and easy to read the resulting code:
+```java
+NutritionFacts cocaCola = new NutritionFacts();
+cocaCola.setServingSize(240);
+cocaCola.setServings(8);
+cocaCola.setCalories(100);
+cocaCola.setSodium(35);
+cocaCola.setCarbohydrate(27);
+```
+Unfortunately, the JavaBeans pattern has serious disadvantages of its own.
+- Because construction is split across multiple calls, a JavaBean may be in an
+inconsistent state partway through its construction. The class does not have
+the option of enforcing consistency merely by checking the validity of the
+constructor parameters. Attempting to use an object when it’s in an inconsistent
+state may cause failures that are far removed from the code containing the bug and
+hence difficult to debug. 
+- A related disadvantage is that the JavaBeans pattern
+precludes the possibility of making a class immutable (Item 17) and requires
+added effort on the part of the programmer to ensure thread safety.
+
+It is possible to reduce these disadvantages: 
+- by manually “freezing” the object
+when its construction is complete and not allowing it to be used until frozen, but
+this variant is unwieldy and rarely used in practice. 
+- Moreover, it can cause errors
+at runtime because the compiler cannot ensure that the programmer calls the
+freeze method on an object before using it.
 ## Solution
+Consider a builder when faced with many constructor parameters.
+
+Luckily, there is a third alternative that combines the safety of the telescoping
+constructor pattern with the readability of the JavaBeans pattern. It is a form of the
+Builder pattern. Instead of making the desired object directly, the
+client calls a constructor (or static factory) with all of the required parameters and
+gets a builder object. Then the client calls setter-like methods on the builder object
+to set each optional parameter of interest. Finally, the client calls a parameterless
+build method to generate the object, which is typically immutable. The builder is
+typically a static member class of the class it builds. Here’s how it looks
+in practice:
+```java
+// Builder Pattern
+public class NutritionFacts {
+    private final int servingSize;
+    private final int servings;
+    private final int calories;
+    private final int fat;
+    private final int sodium;
+    private final int carbohydrate;
+
+    public static class Builder {
+        // Required parameters
+        private final int servingSize;
+        private final int servings;
+        // Optional parameters - initialized to default values
+        private int calories = 0;
+        private int fat = 0;
+        private int sodium = 0;
+        private int carbohydrate = 0;
+
+        public Builder(int servingSize, int servings) {
+            this.servingSize = servingSize;
+            this.servings = servings;
+        }
+
+        public Builder calories(int val) {
+            calories = val;
+            return this;
+        }
+
+        public Builder fat(int val) {
+            fat = val;
+            return this;
+        }
+
+        public Builder sodium(int val) {
+            sodium = val;
+            return this;
+        }
+
+        public Builder carbohydrate(int val) {
+            carbohydrate = val;
+            return this;
+        }
+
+        public NutritionFacts build() {
+            return new NutritionFacts(this);
+        }
+    }
+
+    private NutritionFacts(Builder builder) {
+        servingSize = builder.servingSize;
+        servings = builder.servings;
+        calories = builder.calories;
+        fat = builder.fat;
+        sodium = builder.sodium;
+        carbohydrate = builder.carbohydrate;
+    }
+}
+
+```
+The `NutritionFacts` class is immutable, and all parameter default values are
+in one place. The builder’s setter methods return the builder itself so that invocations can be chained, resulting in a fluent API. Here’s how the client code looks:
+```java
+NutritionFacts cocaCola = new NutritionFacts.Builder(240, 8)
+    .calories(100)
+    .sodium(35)
+    .carbohydrate(27)
+    .build();
+```
+This client code is easy to write and, more importantly, easy to read. The Builder
+pattern simulates named optional parameters as found in Python and Scala.
+
+
 Separate the algorithm for interpreting (i.e. reading and parsing) a stored persistence mechanism (e.g. RTF files) from the algorithm for building and representing one of many target products (e.g. ASCII, TeX, text widget). The focus/distinction is on creating complex aggregates.
 
 The Builder pattern suggests that you extract the object construction code out of its own class and move it to separate objects called **builders**.
@@ -121,6 +335,304 @@ The director knows which building steps to execute to get a working product.
 Having a director class in your program isn't strictly necessary- You can always call the building steps in a specific order directly from the client code- However, the director class might be a good place to put various construction routines so you can reuse them across your program.
 
 In addition, the director class completely hides the details of product construction from the client code- The client only needs to associate a builder with a director, launch the construction with the director, and get the result from the builder.
+
+### Validity Check
+Always validate the actual object state, not the source of the data.
+
+1. To detect invalid parameters as soon as possible, check parameter validity in the builder’s constructor and methods.
+```java
+        public Builder(int servingSize, int servings) {
+            // Validate required params early
+            if (servingSize <= 0) {
+                throw new IllegalArgumentException("servingSize must be > 0");
+            }
+            if (servings <= 0) {
+                throw new IllegalArgumentException("servings must be > 0");
+            }
+
+            this.servingSize = servingSize;
+            this.servings = servings;
+        }
+        
+        public Builder calories(int val) {
+            if (val < 0) {
+                throw new IllegalArgumentException("calories cannot be negative");
+            }
+            this.calories = val;
+            return this;
+        }
+```
+2. Check invariants involving multiple parameters in the constructor invoked by the
+build method. To ensure these invariants against attack, do the checks on object
+fields after copying parameters from the builder. If a check fails, throw
+an IllegalArgumentException whose detail message indicates which
+parameters are invalid.
+```java
+private NutritionFacts(Builder builder) {
+    // Copy first (defensive step)
+    this.servingSize = builder.servingSize;
+    this.servings = builder.servings;
+    this.calories = builder.calories;
+    this.fat = builder.fat;
+    this.sodium = builder.sodium;
+    this.carbohydrate = builder.carbohydrate;
+
+    // Validate invariants AFTER copying
+    if (calories < fat * 9) {
+        throw new IllegalArgumentException(
+            "Invalid nutrition: calories (" + calories + ") too low for fat (" + fat + ")");
+    }
+
+    if (carbohydrate + fat > servingSize) {
+        throw new IllegalArgumentException("Invalid nutrition: macronutrients exceed serving size");
+    }
+```
+the final class
+```java
+public class NutritionFacts {
+    private final int servingSize;
+    private final int servings;
+    private final int calories;
+    private final int fat;
+    private final int sodium;
+    private final int carbohydrate;
+
+    public static class Builder {
+        // Required parameters
+        private final int servingSize;
+        private final int servings;
+
+        // Optional parameters - default values
+        private int calories = 0;
+        private int fat = 0;
+        private int sodium = 0;
+        private int carbohydrate = 0;
+
+        public Builder(int servingSize, int servings) {
+            // Validate required params early
+            if (servingSize <= 0) {
+                throw new IllegalArgumentException("servingSize must be > 0");
+            }
+            if (servings <= 0) {
+                throw new IllegalArgumentException("servings must be > 0");
+            }
+
+            this.servingSize = servingSize;
+            this.servings = servings;
+        }
+
+        public Builder calories(int val) {
+            if (val < 0) {
+                throw new IllegalArgumentException("calories cannot be negative");
+            }
+            this.calories = val;
+            return this;
+        }
+
+        public Builder fat(int val) {
+            if (val < 0) {
+                throw new IllegalArgumentException("fat cannot be negative");
+            }
+            this.fat = val;
+            return this;
+        }
+
+        public Builder sodium(int val) {
+            if (val < 0) {
+                throw new IllegalArgumentException("sodium cannot be negative");
+            }
+            this.sodium = val;
+            return this;
+        }
+
+        public Builder carbohydrate(int val) {
+            if (val < 0) {
+                throw new IllegalArgumentException("carbohydrate cannot be negative");
+            }
+            this.carbohydrate = val;
+            return this;
+        }
+
+        public NutritionFacts build() {
+            return new NutritionFacts(this);
+        }
+    }
+
+    private NutritionFacts(Builder builder) {
+        // Copy first (defensive step)
+        this.servingSize = builder.servingSize;
+        this.servings = builder.servings;
+        this.calories = builder.calories;
+        this.fat = builder.fat;
+        this.sodium = builder.sodium;
+        this.carbohydrate = builder.carbohydrate;
+
+        // Validate invariants AFTER copying
+        if (calories < fat * 9) {
+            throw new IllegalArgumentException(
+                "Invalid nutrition: calories (" + calories +
+                ") too low for fat (" + fat + ")"
+            );
+        }
+
+        if (carbohydrate + fat > servingSize) {
+            throw new IllegalArgumentException(
+                "Invalid nutrition: macronutrients exceed serving size"
+            );
+        }
+    }
+}
+```
+What Was Applied (Exactly as Requested)
+1. Early Validation (Builder level)
+if (val < 0) {
+    throw new IllegalArgumentException("...");
+}
+- Detect invalid input immediately
+- Fail fast
+
+2. Late Validation (Constructor / Invariants)
+if (calories < fat * 9)
+- Handles relationships between fields
+- Centralized correctness
+
+3. Defensive Copy Before Validation
+this.calories = builder.calories;
+Then validate:
+if (calories < fat * 9)
+    - Protects against:
+    - subclass attacks 
+    - inconsistent builder state 
+    - mutation edge cases 
+
+4. Meaningful Error Messages
+throw new IllegalArgumentException(
+    "Invalid nutrition: calories (...) too low for fat (...)"
+);
+- Helps debugging
+- Follows best practice
+
+
+Important Design Insight
+- Builder validation → local correctness 
+- Constructor validation → global correctness (invariants) 
+
+Never rely on only one of them.
+
+Example Failure
+```java
+new NutritionFacts.Builder(240, 1)
+        .fat(10)
+        .calories(50) // ❌ invalid: fat*9 = 90 > 50
+        .build();
+```
+Throws:
+IllegalArgumentException: Invalid nutrition: calories (50) too low for fat (10)
+
+**What does “Defensive Copy Before Validation” mean?**
+
+Instead of validating directly from the builder:
+```java
+// ❌ NOT recommended
+if (builder.calories < builder.fat * 9) { ... }
+```
+You first copy values into the final object, then validate:
+// Correct
+```java
+this.calories = builder.calories;
+this.fat = builder.fat;
+if (calories < fat * 9) { ... }
+```
+Why does this matter?
+- Because the builder is not trusted.
+- The only thing that must be correct is the final object.
+
+1. Protection Against Subclass Attacks
+
+Imagine someone subclasses your builder:
+```java
+class EvilBuilder extends NutritionFacts.Builder {
+    public EvilBuilder(int s, int servings) {
+        super(s, servings);
+    }
+    @Override
+    public int getCalories() {
+        return 100; // lie during validation
+    }
+}
+```
+If you validate using builder methods/fields directly, they could:
+- Return fake values during validation 
+- Then store different values afterward 
+
+Result: invalid object slips through
+
+Defensive copy prevents this
+```java
+this.calories = builder.calories;  // actual stored value
+```
+Now:
+- Validation uses the real stored data 
+- No tricking via overridden methods 
+
+2. Inconsistent Builder State
+
+Builders can be in temporary invalid states:
+```java
+builder.fat(10);
+builder.calories(50); // invalid combo
+```
+If you validate directly on the builder:
+- You might read partially updated state 
+- Or inconsistent ordering effects 
+
+Copy first → snapshot
+```java
+this.fat = builder.fat;
+this.calories = builder.calories;
+```
+Now validation runs on a stable snapshot
+
+3. Mutation Edge Cases
+
+Even though your builder isn’t thread-safe, imagine:
+```java
+NutritionFacts nf = builder.build();
+```
+If validation uses builder fields:
+- Another thread (or code) could modify builder during validation 
+
+Copy isolates the object
+
+Once copied:
+```java
+this.calories = builder.calories;
+```
+The object becomes independent of the builder
+
+Think of it like this:
+- Builder = mutable, unsafe, temporary 
+- Final object = immutable, trusted, validated 
+
+You validate the final object state, not the builder
+
+❌ What happens if you don’t do this?
+```java
+// ❌ Wrong order
+if (builder.calories < builder.fat * 9) {
+    throw ...
+}
+this.calories = builder.calories;
+```
+Problems:
+- You validated something that is not guaranteed to be what you store 
+- You may end up storing invalid data anyway
+
+Final Takeaway
+- Validate inputs early 
+- Validate relationships late 
+- Always validate after copying 
+- Always throw clear exceptions
 
 ## Structure
 Key Components
@@ -168,17 +680,76 @@ Director (optional)
 The Builder pattern separates the construction of a complex object from its representation so that the same construction process can create different representations. This pattern is used by fast food restaurants to construct children’s meals. Children’s meals typically consist of a main item, a side item, a drink, and a toy (e.g., a hamburger, fries, Coke, and toy dinosaur). Note that there can be variation in the content of the children’s meal, but the construction process is the same. Whether a customer orders a hamburger, cheeseburger, or chicken, the process is the same. The employee at the counter directs the crew to assemble a main item, side item, and toy. These items are then placed in a bag. The drink is placed in a cup and remains outside of the bag. This same process is used at competing restaurants.
 ![fast food restaurants to construct children's meals.](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/children-meal-builder-example.png)
 ## Variations
-- Classic Builder (with Director)
+### Classic Builder (with Director)
     Director enforces construction order
     Useful in predefined workflows
-- Fluent Builder (Most Common)
+### Fluent Builder (Most Common)
     Method chaining (return this)
     No Director
-- Immutable Builder
+### Immutable Builder
     Final object is immutable
     Builder is mutable
-- Step Builder (Advanced)
-    Enforces order at compile-time using interfaces
+### Step Builder (Advanced)
+Enforces order at compile-time using interfaces
+
+The Step Builder is basically the Builder pattern with compile-time enforced order. It prevents invalid object construction by forcing the client to follow a sequence of steps.
+
+When to Use Step Builder
+Use it when:
+- Construction has a strict sequence 
+- Some steps are mandatory 
+- You want compile-time safety (not runtime validation)
+
+#### Step Builder vs State Machine
+Step Builder
+- Purpose: Enforce correct object construction order
+- Happens at: Compile-time
+- Nature: Linear / predefined flow
+- Example Flow:
+    ```
+    username → email → password → optional → build
+    ```
+
+State Machine
+- Purpose: Model dynamic behavior & transitions
+- Happens at: Runtime
+- Nature: Non-linear / branching / loops
+- Example Flow:
+    ```
+    CREATED → PAID → SHIPPED → DELIVERED
+              ↓
+            CANCELLED
+    ```
+
+**Side-by-Side Comparison**
+| Feature  | Step Builder        | State Machine       |
+| -------- | ------------------- | ------------------- |
+| Goal     | Safe construction   | Model behavior      |
+| Time     | Compile-time        | Runtime             |
+| Flow     | Linear              | Dynamic             |
+| Errors   | Compile-time errors | Runtime transitions |
+| Use case | Object creation     | Business processes  |
+
+**Key Insight **
+- Step Builder = "How do I build this object correctly?" 
+- State Machine = "How does this object behave over time?"
+
+- Step Builder is about construction correctness 
+- State Machine is about behavior correctness 
+- They solve completely different problems, even if they look similar structurally
+
+**When to Use Each**
+
+**Use Step Builder when:**
+- You want safe object construction 
+- Order matters 
+- Fields are mandatory in sequence 
+
+**Use State Machine when:**
+- Modeling workflows (orders, payments, assets) 
+- Transitions depend on conditions 
+- System evolves over time
+
 ## Pseudocode
 ### Classic Builder (with Director)
 ```
@@ -274,6 +845,7 @@ product = new Builder("value1", "value2")
               .build()
 ```
 ### Step Builder (Enforcing Order – Advanced)
+
 ```
 interface Step1
     method setField1(value) : Step2
@@ -962,7 +1534,7 @@ class PostRequestBuilder implements HttpRequestBuilder {
         request.setQueryParams(new HashMap<>());
     }
     public void buildBody() {
-        request.setBody("{\"name\":\"Gamal\"}");
+        request.setBody("{\"name\":\"test\"}");
     }
     public void buildTimeout() {
         request.setTimeout(60);
@@ -1020,7 +1592,7 @@ What Changed Compared to Fluent Builder
 
 3- Trade-offs
 
-    ✅ Pros
+    Pros
     - Enforces strict construction workflow 
     - Good for predefined request types 
     - Centralizes creation logic 
@@ -1202,7 +1774,7 @@ public class Main {
                 .addHeader("Authorization", "Bearer token")
                 .addHeader("Content-Type", "application/json")
                 .addQueryParam("page", "1")
-                .body("{\"name\": \"Gamal\"}")
+                .body("{\"name\": \"test\"}")
                 .timeout(60)
                 .build();
 
@@ -1231,7 +1803,896 @@ This pattern is used heavily in:
 - Libraries like Lombok (@Builder)
 
 ### hybrid approach (Director + Fluent Builder)
+#### Example: Building Children's meals
+<!--how to extend this to combo menus dynamically (hybrid builder)-->
+If you try to scale the classic version (one builder per meal), it quickly becomes unmanageable—every new combo = new class. Real systems avoid that by combining Director + Fluent Builder + dynamic configuration.
+
+This is what I’d call a Hybrid Builder:
+- Director (Cashier) still controls the process 
+- Builder is fluent and configurable 
+- No explosion of concrete builder classes
+
+**Idea of Hybrid Builder**
+
+Instead of:
+- HamburgerMealBuilder
+- ChickenMealBuilder
+- FishMealBuilder
+- ...
+
+You have:
+```java
+MealBuilder builder = new MealBuilder()
+    .main("Burger")
+    .side("Fries")
+    .drink("Coke")
+    .toy("Dinosaur");
+```
+And optionally:
+```java
+cashier.constructStandardMeal(builder);
+```
+**Pseudocode (Hybrid Builder)**
+```
+// Product
+class Meal
+    attribute mainItem
+    attribute sideItem
+    attribute drink
+    attribute toy
+// Fluent Builder (dynamic)
+class MealBuilder
+    private meal : Meal
+    constructor()
+        meal = new Meal()
+    method main(item)
+        meal.mainItem = item
+        return this
+    method side(item)
+        meal.sideItem = item
+        return this
+    method drink(item)
+        meal.drink = item
+        return this
+    method toy(item)
+        meal.toy = item
+        return this
+    method build()
+        return meal
+// Director (optional templates)
+class Cashier
+    method constructKidsMeal(builder)
+        builder.side("Fries")
+        builder.toy("Default Toy")
+    method constructHealthyMeal(builder)
+        builder.side("Salad")
+        builder.drink("Water")
+// Client
+builder = new MealBuilder()
+    .main("Chicken Burger")
+cashier.constructKidsMeal(builder)
+meal = builder
+    .drink("Juice")
+    .build()
+```
+
+**Java Implementation**
+
+Product
+```java
+class Meal {
+    private String mainItem;
+    private String sideItem;
+    private String drink;
+    private String toy;
+    public void setMainItem(String mainItem) { this.mainItem = mainItem; }
+    public void setSideItem(String sideItem) { this.sideItem = sideItem; }
+    public void setDrink(String drink) { this.drink = drink; }
+    public void setToy(String toy) { this.toy = toy; }
+    public void showItems() {
+        System.out.println("Meal:");
+        System.out.println("Main: " + mainItem);
+        System.out.println("Side: " + sideItem);
+        System.out.println("Drink: " + drink);
+        System.out.println("Toy: " + toy);
+    }
+}
+```
+Hybrid Fluent Builder
+```java
+class MealBuilder {
+    private Meal meal;
+    public MealBuilder() {
+        this.meal = new Meal();
+    }
+    public MealBuilder main(String item) {
+        meal.setMainItem(item);
+        return this;
+    }
+    public MealBuilder side(String item) {
+        meal.setSideItem(item);
+        return this;
+    }
+    public MealBuilder drink(String item) {
+        meal.setDrink(item);
+        return this;
+    }
+    public MealBuilder toy(String item) {
+        meal.setToy(item);
+        return this;
+    }
+    public Meal build() {
+        // Optional validation
+        if (meal == null) {
+            throw new IllegalStateException("Meal not initialized");
+        }
+        return meal;
+    }
+}
+```
+
+Director (Templates / Presets)
+
+```java
+
+class Cashier {
+    // Standard kids meal template
+    public void applyKidsMealTemplate(MealBuilder builder) {
+        builder.side("Fries")
+               .toy("Surprise Toy");
+    }
+    // Healthy option template
+    public void applyHealthyTemplate(MealBuilder builder) {
+        builder.side("Salad")
+               .drink("Water");
+    }
+    // Premium combo
+    public void applyPremiumTemplate(MealBuilder builder) {
+        builder.side("Curly Fries")
+               .drink("Milkshake")
+               .toy("Premium Toy");
+    }
+}
+```
+
+Client Usage (Dynamic Combos)
+
+```java
+
+public class Main {
+    public static void main(String[] args) {
+        Cashier cashier = new Cashier();
+        // Custom kids meal
+        Meal kidsMeal = new MealBuilder()
+                .main("Hamburger")
+                .drink("Coke")
+                .build();
+        kidsMeal.showItems();
+        System.out.println();
+        // Using template + customization
+        MealBuilder builder = new MealBuilder()
+                .main("Chicken Burger");
+        cashier.applyKidsMealTemplate(builder);
+        Meal meal2 = builder
+                .drink("Juice") // override
+                .build();
+        meal2.showItems();
+        System.out.println();
+        // Premium combo
+        Meal premiumMeal = new MealBuilder()
+                .main("Double Cheeseburger");
+        cashier.applyPremiumTemplate((MealBuilder) premiumMeal); // incorrect
+    }
+}
+```
+⚠️ That last line would actually be wrong—good catch point:
+You must apply template before build(), not after.
+Correct version:
+MealBuilder premiumBuilder = new MealBuilder()
+        .main("Double Cheeseburger");
+cashier.applyPremiumTemplate(premiumBuilder);
+Meal premiumMeal = premiumBuilder.build();
+premiumMeal.showItems();
+
+**Why This Hybrid Approach Matters**
+
+Advantages
+- No class explosion 
+- Dynamic combinations at runtime 
+- Director provides reusable templates 
+- Fluent API gives flexibility 
+
+❌ Trade-offs
+- Less strict than classic builder 
+- Order is not enforced 
+- Validation becomes important 
+
+
 ### Step Builder (Enforcing Order – Advanced)
+#### Example: Building Children's meals
+Let’s reuse your meal example, but now:
+- You must choose a main item first 
+- Then a side 
+- Then a drink 
+- Then optionally a toy 
+- Only then you can build()
+
+**Step Builder Example (Java)**
+
+Product
+```java
+class Meal {
+    private final String mainItem;
+    private final String sideItem;
+    private final String drink;
+    private final String toy;
+
+    public Meal(String mainItem, String sideItem, String drink, String toy) {
+        this.mainItem = mainItem;
+        this.sideItem = sideItem;
+        this.drink = drink;
+        this.toy = toy;
+    }
+
+    public void showItems() {
+        System.out.println("Meal:");
+        System.out.println("Main: " + mainItem);
+        System.out.println("Side: " + sideItem);
+        System.out.println("Drink: " + drink);
+        System.out.println("Toy: " + toy);
+    }
+}
+```
+**Step Interfaces (Enforcing Order)**
+```java
+interface MainStep {
+    SideStep chooseMain(String main);
+}
+
+interface SideStep {
+    DrinkStep chooseSide(String side);
+}
+
+interface DrinkStep {
+    ToyStep chooseDrink(String drink);
+}
+
+interface ToyStep {
+    BuildStep chooseToy(String toy);
+    BuildStep noToy(); // optional path
+}
+
+interface BuildStep {
+    Meal build();
+}
+```
+**Builder Implementation**
+```java
+class MealStepBuilder implements MainStep, SideStep, DrinkStep, ToyStep, BuildStep {
+
+    private String main;
+    private String side;
+    private String drink;
+    private String toy;
+
+    private MealStepBuilder() {}
+
+    public static MainStep builder() {
+        return new MealStepBuilder();
+    }
+
+    @Override
+    public SideStep chooseMain(String main) {
+        this.main = main;
+        return this;
+    }
+
+    @Override
+    public DrinkStep chooseSide(String side) {
+        this.side = side;
+        return this;
+    }
+
+    @Override
+    public ToyStep chooseDrink(String drink) {
+        this.drink = drink;
+        return this;
+    }
+
+    @Override
+    public BuildStep chooseToy(String toy) {
+        this.toy = toy;
+        return this;
+    }
+
+    @Override
+    public BuildStep noToy() {
+        this.toy = null;
+        return this;
+    }
+
+    @Override
+    public Meal build() {
+        return new Meal(main, side, drink, toy);
+    }
+}
+```
+**Client Usage**
+
+Correct Usage (enforced order)
+```java
+public class Main {
+    public static void main(String[] args) {
+
+        Meal meal = MealStepBuilder.builder()
+                .chooseMain("Hamburger")
+                .chooseSide("Fries")
+                .chooseDrink("Coke")
+                .chooseToy("Dinosaur")
+                .build();
+
+        meal.showItems();
+    }
+}
+```
+
+Without Toy (optional branch)
+```java
+Meal meal = MealStepBuilder.builder()
+        .chooseMain("Chicken Burger")
+        .chooseSide("Salad")
+        .chooseDrink("Juice")
+        .noToy()
+        .build();
+```
+
+❌ Impossible (compile-time error)
+```java
+Meal meal = MealStepBuilder.builder()
+        .chooseDrink("Coke")   // ❌ not allowed before main/side
+        .build();
+```
+Why Step Builder Is Powerful
+
+Advantages
+- Enforces correct order 
+- Prevents invalid states 
+- Guides developer via IDE autocomplete 
+- Great for complex workflows 
+
+❌ Disadvantages
+- More boilerplate (many interfaces) 
+- Harder to maintain 
+- Overkill for simple objects
+
+#### Example: API request validation
+Scenario
+
+You’re building an API for creating a user account:
+
+Requirements:
+- username → required first 
+- email → required 
+- password → required 
+- role → optional 
+- address → optional 
+
+Instead of:
+- messy DTO + runtime validation 
+- or relying only on annotations 
+
+You enforce correctness at compile-time
+
+**Implementation**
+
+Product (Immutable Request Object)
+```java
+class CreateUserRequest {
+    private final String username;
+    private final String email;
+    private final String password;
+    private final String role;
+    private final String address;
+
+    public CreateUserRequest(String username, String email, String password,
+                             String role, String address) {
+        this.username = username;
+        this.email = email;
+        this.password = password;
+        this.role = role;
+        this.address = address;
+    }
+
+    // getters...
+}
+```
+Step Interfaces
+```java
+interface UsernameStep {
+    EmailStep username(String username);
+}
+
+interface EmailStep {
+    PasswordStep email(String email);
+}
+
+interface PasswordStep {
+    OptionalStep password(String password);
+}
+
+interface OptionalStep {
+    OptionalStep role(String role);
+    OptionalStep address(String address);
+    BuildStep done();
+}
+
+interface BuildStep {
+    CreateUserRequest build();
+}
+```
+Builder Implementation
+```java
+class CreateUserRequestBuilder implements
+        UsernameStep, EmailStep, PasswordStep, OptionalStep, BuildStep {
+
+    private String username;
+    private String email;
+    private String password;
+    private String role;
+    private String address;
+
+    private CreateUserRequestBuilder() {}
+
+    public static UsernameStep builder() {
+        return new CreateUserRequestBuilder();
+    }
+
+    @Override
+    public EmailStep username(String username) {
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("Username required");
+        }
+        this.username = username;
+        return this;
+    }
+
+    @Override
+    public PasswordStep email(String email) {
+        if (!email.contains("@")) {
+            throw new IllegalArgumentException("Invalid email");
+        }
+        this.email = email;
+        return this;
+    }
+
+    @Override
+    public OptionalStep password(String password) {
+        if (password.length() < 6) {
+            throw new IllegalArgumentException("Weak password");
+        }
+        this.password = password;
+        return this;
+    }
+
+    @Override
+    public OptionalStep role(String role) {
+        this.role = role;
+        return this;
+    }
+
+    @Override
+    public OptionalStep address(String address) {
+        this.address = address;
+        return this;
+    }
+
+    @Override
+    public BuildStep done() {
+        return this;
+    }
+
+    @Override
+    public CreateUserRequest build() {
+        return new CreateUserRequest(username, email, password, role, address);
+    }
+}
+```
+Usage in Controller / Service
+```java
+CreateUserRequest request = CreateUserRequestBuilder.builder()
+        .username("test")
+        .email("test@example.com")
+        .password("secure123")
+        .role("ADMIN")
+        .done()
+        .build();
+```
+Why This Is Powerful in Backend
+
+Compile-time safety
+
+You literally cannot do:
+```java
+builder.password("123") // ❌ can't call before email
+```
+Validation layered correctly
+- Structural validation → Step Builder 
+- Business validation → Service layer 
+
+Reality Check
+
+This is powerful, but:
+- Not common in REST controllers (too verbose) 
+- More useful in: 
+    - internal APIs 
+    - SDKs 
+    - domain object construction 
+    - complex workflows
+#### Example: SQL Query Builder (Safe Query Construction)
+Let’s do a practical, backend-relevant Step Builder that actually benefits from strict ordering:
+
+**Why this is a good real-world case**
+
+In SQL:
+- You must start with `SELECT`
+- Then `FROM`
+- Then optionally `WHERE`, `GROUP BY`, `ORDER BY`
+
+- **Wrong order = invalid query**  
+- **Step Builder enforces correctness at compile time**
+
+**Product**
+```java
+class SqlQuery {
+    private final String query;
+
+    public SqlQuery(String query) {
+        this.query = query;
+    }
+
+    public String getQuery() {
+        return query;
+    }
+
+    @Override
+    public String toString() {
+        return query;
+    }
+}
+```
+
+**Step Interfaces (Enforcing SQL Order)**
+```java
+interface SelectStep {
+    FromStep select(String columns);
+}
+
+interface FromStep {
+    WhereStep from(String table);
+}
+
+interface WhereStep {
+    WhereStep where(String condition);   // optional, repeatable
+    GroupByStep groupBy(String columns); // optional
+    OrderByStep orderBy(String columns); // optional
+    BuildStep build();                   // allow skipping optional steps
+}
+
+interface GroupByStep {
+    OrderByStep orderBy(String columns);
+    BuildStep build();
+}
+
+interface OrderByStep {
+    BuildStep build();
+}
+
+interface BuildStep {
+    SqlQuery build();
+}
+```
+
+**Builder Implementation**
+```java
+class SqlQueryBuilder implements
+        SelectStep, FromStep, WhereStep, GroupByStep, OrderByStep, BuildStep {
+
+    private String select;
+    private String from;
+    private String where = "";
+    private String groupBy = "";
+    private String orderBy = "";
+
+    private SqlQueryBuilder() {}
+
+    public static SelectStep builder() {
+        return new SqlQueryBuilder();
+    }
+
+    @Override
+    public FromStep select(String columns) {
+        this.select = "SELECT " + columns;
+        return this;
+    }
+
+    @Override
+    public WhereStep from(String table) {
+        this.from = " FROM " + table;
+        return this;
+    }
+
+    @Override
+    public WhereStep where(String condition) {
+        if (where.isEmpty()) {
+            where = " WHERE " + condition;
+        } else {
+            where += " AND " + condition;
+        }
+        return this;
+    }
+
+    @Override
+    public GroupByStep groupBy(String columns) {
+        this.groupBy = " GROUP BY " + columns;
+        return this;
+    }
+
+    @Override
+    public OrderByStep orderBy(String columns) {
+        this.orderBy = " ORDER BY " + columns;
+        return this;
+    }
+
+    @Override
+    public SqlQuery build() {
+        String query = select + from + where + groupBy + orderBy;
+        return new SqlQuery(query);
+    }
+}
+```
+
+**Usage**
+
+**Simple Query**
+```java
+SqlQuery query = SqlQueryBuilder.builder()
+        .select("*")
+        .from("users")
+        .done()
+        .build();
+
+System.out.println(query);
+// Output: SELECT * FROM users
+```
+
+**Query with WHERE**
+```java
+SqlQuery query = SqlQueryBuilder.builder()
+        .select("id, name")
+        .from("users")
+        .where("age > 18")
+        .where("status = 'ACTIVE'")
+        .done()
+        .build();
+```
+
+**Full Query**
+```java
+SqlQuery query = SqlQueryBuilder.builder()
+        .select("department, COUNT(*)")
+        .from("employees")
+        .where("salary > 5000")
+        .groupBy("department")
+        .orderBy("COUNT(*) DESC")
+        .build();
+```
+
+❌ **Invalid (Compile-time Error)**
+```java
+SqlQuery query = SqlQueryBuilder.builder()
+        .from("users")   // ❌ can't call before select
+        .build();
+```
+### Design a production-grade builder API
+Here’s how to design a production-grade Builder API—not just “it works,” but something that’s readable, safe, immutable, and hard to misuse.
+I’ll walk you through:
+1. Design principles (what matters in real systems)
+2. A complete example (HTTP request–style)
+3. Why each decision exists
+
+**Core Design Principles**
+
+**1. Naming (Fluent, intention-revealing)**
+Good builders read like a sentence:
+```java
+Request request = Request.builder()
+        .url("https://api.example.com")
+        .method("POST")
+        .header("Authorization", "Bearer token")
+        .queryParam("page", "1")
+        .timeoutSeconds(30)
+        .build();
+```
+Rules:
+- Use nouns for required fields → `url(...)`
+- Use verbs for actions/collections → `addHeader(...)`, `queryParam(...)`
+- Avoid generic names like `setX` (too JavaBean-like)
+
+**2. Immutability (non-negotiable)**
+The built object must be:
+- final fields
+- no setters
+- defensive copies for collections
+
+**3. Validation Strategy**
+- **Builder methods:** Validate individual values.
+- **build() / constructor:** Validate invariants.
+
+**4. Defensive Copying**
+Never trust mutable inputs:
+`this.headers = Map.copyOf(builder.headers);`
+
+**5. Safe Defaults**
+Optional fields should have:
+- sensible defaults
+- predictable behavior
+
+**Production-Grade Example**
+
+**Product: HttpRequest**
+```java
+import java.net.URI;
+import java.util.*;
+
+public final class HttpRequest {
+    private final URI url;
+    private final String method;
+    private final Map<String, String> headers;
+    private final Map<String, String> queryParams;
+    private final String body;
+    private final int timeoutSeconds;
+
+    private HttpRequest(Builder builder) {
+        // Copy first (defensive)
+        this.url = builder.url;
+        this.method = builder.method;
+        this.headers = Map.copyOf(builder.headers);
+        this.queryParams = Map.copyOf(builder.queryParams);
+        this.body = builder.body;
+        this.timeoutSeconds = builder.timeoutSeconds;
+
+        // Cross-field validation
+        if (method.equals("GET") && body != null) {
+            throw new IllegalArgumentException("GET request cannot have a body");
+        }
+        if (timeoutSeconds <= 0) {
+            throw new IllegalArgumentException("Timeout must be positive");
+        }
+    }
+
+    // Getters only (no setters)
+    public URI getUrl() { return url; }
+    public String getMethod() { return method; }
+    public Map<String, String> getHeaders() { return headers; }
+    public Map<String, String> getQueryParams() { return queryParams; }
+    public String getBody() { return body; }
+    public int getTimeoutSeconds() { return timeoutSeconds; }
+
+    // Entry point
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    // Builder
+    public static final class Builder {
+        private URI url;
+        private String method;
+        private Map<String, String> headers = new LinkedHashMap<>();
+        private Map<String, String> queryParams = new LinkedHashMap<>();
+        private String body;
+        private int timeoutSeconds = 30; // default
+
+        private Builder() {}
+
+        public Builder url(String url) {
+            try {
+                this.url = URI.create(url);
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Invalid URL: " + url);
+            }
+            return this;
+        }
+
+        public Builder method(String method) {
+            if (method == null || method.isBlank()) {
+                throw new IllegalArgumentException("Method cannot be empty");
+            }
+            this.method = method.toUpperCase();
+            return this;
+        }
+
+        public Builder header(String key, String value) {
+            if (key == null || key.isBlank()) {
+                throw new IllegalArgumentException("Header key cannot be empty");
+            }
+            headers.put(key, value);
+            return this;
+        }
+
+        public Builder queryParam(String key, String value) {
+            if (key == null || key.isBlank()) {
+                throw new IllegalArgumentException("Query param key cannot be empty");
+            }
+            queryParams.put(key, value);
+            return this;
+        }
+
+        public Builder body(String body) {
+            if (body != null && body.isBlank()) {
+                throw new IllegalArgumentException("Body cannot be blank");
+            }
+            this.body = body;
+            return this;
+        }
+
+        public Builder timeoutSeconds(int timeout) {
+            if (timeout <= 0) {
+                throw new IllegalArgumentException("Timeout must be > 0");
+            }
+            this.timeoutSeconds = timeout;
+            return this;
+        }
+
+        public HttpRequest build() {
+            // Required fields validation
+            if (url == null) {
+                throw new IllegalStateException("URL is required");
+            }
+            if (method == null) {
+                throw new IllegalStateException("Method is required");
+            }
+            return new HttpRequest(this);
+        }
+    }
+}
+```
+
+**Why This Is Production-Grade**
+
+*   **Readable API:** `HttpRequest.builder().url("...").method("GET").header("Accept", "application/json")` reads like a DSL.
+*   **Immutable Object:** Using `private final Map<String, String> headers` ensures no mutation after creation.
+*   **Safe Collections:** `Map.copyOf(builder.headers)` prevents external modification and shared references.
+*   **Layered Validation:** The Builder handles simple checks (e.g., `key == null`), while the Constructor handles logic like `if (method.equals("GET") && body != null)`.
+*   **Fail-Fast Behavior:** Errors happen as early as possible with clear messages.
+*   **Sensible Defaults:** Core behaviors like `timeoutSeconds = 30` are pre-configured.
+
+**Subtle Production Details Most People Miss**
+
+*   **Use LinkedHashMap:** Preserves insertion order, which is important for debugging and reproducibility.
+*   **Normalize input:** Converting strings like `method.toUpperCase()` makes the API more robust.
+*   **Avoid exposing internals:** Getters return immutable copies, not references.
+*   **Keep Builder static:** Declaring `public static final class Builder` avoids outer instance leaks.
+
+**Optional Advanced Enhancements**
+
+*   **Copy Builder (to modify existing objects):**
+    ```java
+    public Builder toBuilder() {
+        return new Builder()
+            .url(this.url.toString())
+            .method(this.method)
+            .timeoutSeconds(this.timeoutSeconds);
+    }
+    ```
+*   **Predefined shortcuts:** Use `public Builder get(String url) { return url(url).method("GET"); }`.
+*   **Validation hooks:** Provide `protected void validate() { }` for extensibility.
+
+**Final Takeaway**
+A production-grade builder is:
+- **Readable:** uses fluent naming.
+- **Safe:** enforces validation and immutability.
+- **Robust:** utilizes defensive copying.
+- **Flexible:** supports optional and repeated fields.
 
 ## Step-by-Step Execution
 - Client creates a Builder object
@@ -1264,6 +2725,82 @@ This pattern is used heavily in:
 
 - Need for immutable objects
 - Want readable and maintainable creation code
+- **The Builder pattern is well suited to class hierarchies**. 
+    - Use a parallel hierarchy of builders, each nested in the corresponding class. Abstract classes have abstract builders; concrete classes have concrete builders. 
+    - For example, consider an abstract class at the root of a hierarchy representing various kinds of pizza:
+        ```java
+        // Builder pattern for class hierarchies
+        public abstract class Pizza {
+        public enum Topping { HAM, MUSHROOM, ONION, PEPPER, SAUSAGE }
+        final Set<Topping> toppings;
+        abstract static class Builder<T extends Builder<T>> {
+        EnumSet<Topping> toppings = EnumSet.noneOf(Topping.class);
+        public T addTopping(Topping topping) {
+        toppings.add(Objects.requireNonNull(topping));
+        return self();
+        }
+        abstract Pizza build();
+        // Subclasses must override this method to return "this"
+        protected abstract T self();
+        }
+        Pizza(Builder<?> builder) {
+        toppings = builder.toppings.clone(); // See Item 50
+        }
+        }
+        ```
+        Note that `Pizza.Builder` is a generic type with a recursive type parameter. This, along with the abstract self method, allows method chaining to work properly in subclasses, without the need for casts. This workaround for the fact that Java lacks a self type is known as the simulated self-type idiom.
+    - Here are two concrete subclasses of Pizza, one of which represents a standard New-York-style pizza, the other a calzone. The former has a required size parameter, while the latter lets you specify whether sauce should be inside or out:
+        ```java
+        public class NyPizza extends Pizza {
+        public enum Size { SMALL, MEDIUM, LARGE }
+        private final Size size;
+        public static class Builder extends Pizza.Builder<Builder> {
+        private final Size size;
+        public Builder(Size size) {
+        this.size = Objects.requireNonNull(size);
+        }
+        @Override public NyPizza build() {
+        return new NyPizza(this);
+        }
+        @Override protected Builder self() { return this; }
+        }
+        private NyPizza(Builder builder) {
+        super(builder);
+        size = builder.size;
+        }
+        }
+        public class Calzone extends Pizza {
+        private final boolean sauceInside;
+        public static class Builder extends Pizza.Builder<Builder> {
+        private boolean sauceInside = false; // Default
+        public Builder sauceInside() {
+        sauceInside = true;
+        return this;
+        }
+        @Override public Calzone build() {
+        return new Calzone(this);
+        }
+        @Override protected Builder self() { return this; }
+        }
+        private Calzone(Builder builder) {
+        super(builder);
+        sauceInside = builder.sauceInside;
+        }
+        }
+        ```
+    - Note that the build method in each subclass’s builder is declared to return the correct subclass: the build method of `NyPizza.Builder` returns `NyPizza`, while the one in `Calzone.Builder` returns `Calzone`. This technique, wherein a subclass
+    method is declared to return a subtype of the return type declared in the superclass, is known as covariant return typing. It allows clients to use these builders without the need for casting.
+    - The client code for these “hierarchical builders” is essentially identical to the code for the simple `NutritionFacts` builder. The example client code shown next assumes static imports on enum constants for brevity:
+        ```java
+        NyPizza pizza = new NyPizza.Builder(SMALL)
+            .addTopping(SAUSAGE)
+            .addTopping(ONION)
+            .build();
+        Calzone calzone = new Calzone.Builder()
+            .addTopping(HAM)
+            .sauceInside()
+            .build();
+        ```
 ## When NOT to Use
 - Simple objects with few parameters
 - No need for step-by-step construction
@@ -1277,11 +2814,722 @@ This pattern is used heavily in:
 - Supports immutability
 - Fine-grained control over construction
 - Easier to extend
+### builders avoid the limitations of varargs in Java
+A minor advantage of builders over constructors is that builders can have multiple varargs parameters because each parameter is specified in its own method.
+
+In Java, a method or constructor can have only one varargs parameter, and it must be the last one in the parameter list.
+
+**Java Varargs Limitations:**
+*   **Not allowed:** `public Pizza(String... toppings, String... sauces) { }` // compile error
+*   **Awkward:** `public Pizza(String size, String... toppings) { }` // You cannot add another varargs (e.g., sauces, extras, etc.)
+
+**How Builders Solve This:**
+With builders, each parameter is in its own method, allowing you to simulate multiple varargs naturally.
+
+**Example: Multiple “Varargs-like” Inputs**
+```java
+public class Pizza {
+    private final List<String> toppings;
+    private final List<String> sauces;
+
+    public static class Builder {
+        private List<String> toppings = new ArrayList<>();
+        private List<String> sauces = new ArrayList<>();
+
+        public Builder addTopping(String topping) {
+            toppings.add(topping);
+            return this;
+        }
+
+        public Builder addSauce(String sauce) {
+            sauces.add(sauce);
+            return this;
+        }
+
+        public Pizza build() {
+            return new Pizza(this);
+        }
+    }
+
+    private Pizza(Builder builder) {
+        this.toppings = List.copyOf(builder.toppings);
+        this.sauces = List.copyOf(builder.sauces);
+    }
+}
+```
+
+**Usage:**
+```java
+Pizza pizza = new Pizza.Builder()
+        .addTopping("Cheese")
+        .addTopping("Mushrooms")
+        .addSauce("Tomato")
+        .addSauce("BBQ")
+        .build();
+```
+
+This behaves like separate varargs for toppings and sauces but without the technical limitations. Builders can aggregate the parameters passed into multiple calls to a method into a single field.
+
+Instead of:
+`new Pizza("Cheese", "Mushrooms", "Olives");`
+
+You do:
+```java
+builder.addTopping("Cheese");
+builder.addTopping("Mushrooms");
+builder.addTopping("Olives");
+```
+
+Internally, the builder accumulates these into a single collection field: `toppings = ["Cheese", "Mushrooms", "Olives"]`. You can still support varargs within the individual builder methods if desired:
+
+```java
+public Builder addToppings(String... toppings) {
+    this.toppings.addAll(Arrays.asList(toppings));
+    return this;
+}
+```
+
+**Why This Is a “Minor Advantage”:**
+The main benefit of builders is overall readability and flexibility; the ability to handle multiple varargs-like inputs is a useful secondary bonus. This pattern is frequently used in professional libraries such as HTTP clients and query builders.
+
+**1. HTTP Clients (OkHttp-style Request Builder):**
+Libraries like OkHttp use builders to allow multiple headers and query parameters.
+```java
+Request request = new Request.Builder()
+        .url("https://api.example.com/users")
+        .addHeader("Authorization", "Bearer token")
+        .addHeader("Accept", "application/json")
+        .addQueryParameter("page", "1")
+        .addQueryParameter("size", "10")
+        .build();
+```
+A standard constructor for this would be impossible in Java because it would require multiple varargs parameters for headers and query parameters. The builder accumulates these into internal Maps or Lists instead.
+
+**2. SQL / Query Builders (jOOQ, Hibernate Criteria):**
+In a jOOQ-style DSL, each call adds conditions to a collection:
+```java
+create.select(USER.ID, USER.NAME)
+      .from(USER)
+      .where(USER.AGE.gt(18))
+      .and(USER.STATUS.eq("ACTIVE"))
+      .orderBy(USER.NAME)
+      .fetch();
+```
+This effectively creates a `WHERE condition1 AND condition2` structure without the limitations of a single varargs method.
+
+**3. Java Built-in: StringBuilder:**
+This is a primitive builder pattern that aggregates multiple `append()` calls into one internal buffer.
+
+**4. Lombok @Builder:**
+In modern Java projects, Lombok generates this aggregation logic automatically, especially when using the `@Singular` annotation:
+```java
+@Builder
+class Order {
+    @Singular
+    List<String> items;
+}
+
+Order order = Order.builder()
+        .item("Laptop")
+        .item("Mouse")
+        .build();
+```
+
+**5. Spring Framework: UriComponentsBuilder:**
+Spring uses this to build complex URLs incrementally:
+```java
+String uri = UriComponentsBuilder.fromUriString("https://api.example.com")
+        .path("/users")
+        .queryParam("page", 1)
+        .queryParam("size", 10)
+        .build()
+        .toUriString();
+```
+
+**Core Insight:**
+Builders are not just about avoiding "telescoping" constructors; they turn object creation into a controlled, incremental data collection process.
+
+**When This Pattern Is Ideal:**
+*   When you have repeated fields (lists, maps).
+*   When input size is dynamic.
+*   When you want to provide a fluent API.
+
+**When It Is Overkill:**
+*   For simple objects with only 2–3 fields.
+*   When there are no optional parameters or repeated data.
+
+**Final Takeaway:**
+Real-world libraries use the Builder pattern to simulate multiple varargs, accumulate data safely, and provide DSL-like APIs that keep construction code readable and flexible.
+
+### builders are reusable and stateful (in a controlled way)
+**1. Reusing the Same Builder Multiple Times**
+
+The Builder pattern is quite flexible. A single builder can be used repeatedly to build multiple objects. 
+
+Unlike constructors, a builder is an object you keep and reuse.
+
+**Example**
+```java
+NutritionFacts.Builder builder =
+        new NutritionFacts.Builder(240, 1)
+                .calories(100)
+                .sodium(35);
+
+// First object
+NutritionFacts coke = builder.build();
+
+// Modify builder slightly
+NutritionFacts dietCoke = builder
+        .calories(0)
+        .build();
+```
+
+*   **What’s happening?** The builder keeps its internal state between calls. You can tweak a single field and build a new object without having to recreate the entire configuration from scratch.
+*   **Insight:** The Builder acts as a configurable template.
+
+**2. Tweaking Parameters Between Builds**
+
+The parameters of the builder can be tweaked between invocations of the build method to vary the objects that are created.
+
+This is especially useful when objects share most fields and only a few attributes change between instances.
+
+*   **Without Builder:** `new NutritionFacts(240, 1, 100, 0, 35, 27);` followed by `new NutritionFacts(240, 1, 0, 0, 35, 27);` leads to repetition and is highly error-prone.
+*   **With Builder:** `builder.calories(100).build();` followed by `builder.calories(0).build();` results in clean, minimal changes.
+*   **Important Subtlety:** Builders are mutable, but built objects should be immutable. Builder changes affect future builds, while existing objects remain unchanged.
+
+**3. Builders Can Auto-Fill Fields**
+A builder can fill in some fields automatically upon object creation, such as a serial number that increases each time an object is created.
+
+Builders can inject logic into the construction process rather than just holding static values.
+
+**Example: Auto-Increment ID**
+```java
+class Product {
+    private final int id;
+    private final String name;
+
+    public static class Builder {
+        private static int counter = 1;
+        private String name;
+
+        public Builder name(String name) {
+            this.name = name;
+            return this;
+        }
+
+        public Product build() {
+            // Logic injected during construction
+            return new Product(counter++, name); 
+        }
+    }
+
+    private Product(int id, String name) {
+        this.id = id;
+        this.name = name;
+    }
+
+    public void print() {
+        System.out.println(id + " - " + name);
+    }
+}
+```
+
+**Usage**
+```java
+Product.Builder builder = new Product.Builder();
+Product p1 = builder.name("Laptop").build();
+Product p2 = builder.name("Mouse").build();
+p1.print(); // 1 - Laptop
+p2.print(); // 2 - Mouse
+```
+
+*   **What’s happening?** The builder maintains shared state (the counter). Each call to `build()` generates a new ID and produces a unique object.
+*   **Important Caveat:** Reusing builders can be dangerous if misused. If you call `builder.calories(100);` and then call `build()` twice, both objects will have 100 calories because the state is reused implicitly.
+    ```java
+    builder.calories(100);
+    NutritionFacts a = builder.build();
+    
+    NutritionFacts b = builder.build(); // still 100 calories!
+    ```
+*   **Best Practice:** Either reset fields manually after a build or create a new builder when object configurations diverge significantly.
+
+**4. Real-World Use Cases of This Feature**
+
+*   **Object Templates:** Using preconfigured builders that are reused for similar objects.
+*   **Batch Creation:** Generating many objects with slight variations (e.g., test data).
+*   **Auto-generated Fields:** Automatically handling IDs, timestamps, or sequence numbers.
+
+**Deep Insight**
+
+The key idea is that a builder is not just a constructor replacement; it is a stateful object construction engine.
+
+Builder vs Constructor 
+| Feature              | Constructor | Builder |
+| -------------------- | ----------- | ------- |
+| Reusable             | ❌ No        | Yes   |
+| Mutable during setup | ❌ No        | Yes   |
+| Auto-fill logic      | ❌ Hard      | Easy  |
+| Partial reuse        | ❌ No        | Yes   |
+
 ## Disadvantages
 - More code (extra class)
 - Slight overhead for simple objects
 - Can increase complexity unnecessarily
     - The overall complexity of the code increases since the pattern requires creating multiple new classes.
+### Builder is more verbose than telescoping constructors
+The Builder pattern is more verbose than the telescoping constructor pattern,
+so it should be used only if there are enough parameters to make it worthwhile, say
+four or more(This is a rule of thumb, not a strict rule.).
+
+Telescoping constructor:
+```java
+new NutritionFacts(240, 1);
+new NutritionFacts(240, 1, 100);
+new NutritionFacts(240, 1, 100, 0);
+```
+- Short, compact
+- But quickly becomes unreadable and unmanageable
+
+Builder:
+```java
+new NutritionFacts.Builder(240, 1)
+        .calories(100)
+        .fat(0)
+        .build();
+```
+- More lines
+- More code to write (class + builder)
+
+When few parameters (2–3):
+```java
+new Point(10, 20);
+```
+Builder is overkill
+
+When many parameters (4+):
+```java
+new NutritionFacts(240, 1, 100, 0, 35, 27);
+```
+Problems:
+- Hard to read
+- Easy to mix order
+- Hard to extend
+
+Builder becomes clearly better.
+
+**The Hidden Problem: Evolution Over Time**
+
+keep in mind that you may want to add more parameters in the future. 
+
+But if you start out with constructors or static factories and switch to a
+builder when the class evolves to the point where the number of parameters gets
+out of hand, the obsolete constructors or static factories will stick out like a sore
+thumb. Therefore, it’s often better to start with a builder in the first place.
+
+Start simple (constructor):
+```java
+new User("test", "email@example.com");
+```
+Looks fine.
+
+Later, requirements grow:
+```java
+new User("test", "email@example.com", "ADMIN", true, "Egypt", ...);
+```
+Now:
+- Constructor becomes ugly 
+- You introduce a builder 
+
+❌ Now your API looks inconsistent
+```java
+new User("test", "email@example.com");         // old style
+User.builder().role("ADMIN").build();           // new style
+```
+Why this is a real problem
+1. API inconsistency
+
+    Users of your class see:
+    - multiple ways to create objects 
+    - unclear preferred approach 
+
+2. Maintenance burden
+
+    You now must support:
+    - old constructors 
+    - new builder 
+
+3. Technical debt
+
+    Removing old constructors:
+    - may break existing code 
+    - often not possible (backward compatibility)
+
+**Recommended Strategy**
+
+**Start with Builder if:**
+- You expect the class to grow 
+- It represents a domain object / API model 
+- It has optional fields (even if few now) 
+
+**Start with Constructor only if:**
+- Object is very simple 
+- Unlikely to change 
+- Performance-critical
+
+**Key Insight**
+
+The real cost of not using Builder early is future API pollution, not code complexity.
+
+**Design Trade-off**
+| Choice      | Short-term | Long-term        |
+| ----------- | ---------- | ---------------- |
+| Constructor | Simple   | ❌ Becomes messy  |
+| Builder     | ❌ Verbose  | Scales cleanly |
+
+**Practical Guideline**
+
+**Use Builder when:**
+- ≥ 4 parameters OR 
+- Optional fields exist OR 
+- Future growth is likely 
+
+**Use Constructor when:**
+- 2–3 required fields 
+- No optional parameters 
+- Stable class
+
+**Real-World Insight**
+Most modern libraries prefer builders from day one, Because:
+- APIs evolve 
+- backward compatibility matters
+
+So Don’t optimize for today’s simplicity, Optimize for tomorrow’s maintainability.
+
+**a real evolution example (constructor → builder refactor)**
+
+Here’s a realistic evolution story showing how a class grows from a simple constructor into a builder—and why switching late creates problems.
+
+**Phase 1 — Simple Class (Constructor is Fine)**
+
+You start with a small User model:
+```java
+public class User {
+    private final String username;
+    private final String email;
+    public User(String username, String email) {
+        this.username = username;
+        this.email = email;
+    }
+}
+```
+Usage:
+```java
+User user = new User("gamal", "gamal@example.com");
+```
+✔ Clean
+✔ No need for builder
+
+**Phase 2 — Requirements Grow**
+
+Now you add optional fields:
+- role 
+- active flag 
+- country 
+
+❌ Telescoping Constructors Appear
+```java
+public class User {
+    private final String username;
+    private final String email;
+    private final String role;
+    private final boolean active;
+    private final String country;
+    
+    public User(String username, String email) {
+        this(username, email, "USER", true, "UNKNOWN");
+    }
+    public User(String username, String email, String role) {
+        this(username, email, role, true, "UNKNOWN");
+    }
+    public User(String username, String email, String role, boolean active) {
+        this(username, email, role, active, "UNKNOWN");
+    }
+    public User(String username, String email, String role, boolean active, String country) {
+        this.username = username;
+        this.email = email;
+        this.role = role;
+        this.active = active;
+        this.country = country;
+    }
+}
+```
+Usage becomes messy:
+```java
+User user = new User("user", "user@example.com", "ADMIN", true, "Egypt");
+```
+
+Problems:
+- Hard to read 
+- Easy to mix parameters 
+- Constructor explosion 
+
+**Phase 3 — You Introduce Builder (Late)**
+
+You refactor:
+```java
+public static class Builder {
+    private final String username;
+    private final String email;
+    private String role = "USER";
+    private boolean active = true;
+    private String country = "UNKNOWN";
+    
+    public Builder(String username, String email) {
+        this.username = username;
+        this.email = email;
+    }
+    public Builder role(String role) {
+        this.role = role;
+        return this;
+    }
+    public Builder active(boolean active) {
+        this.active = active;
+        return this;
+    }
+    public Builder country(String country) {
+        this.country = country;
+        return this;
+    }
+    public User build() {
+        return new User(this);
+    }
+}
+```
+New usage:
+```java
+User user = new User.Builder("user", "user@example.com")
+        .role("ADMIN")
+        .country("Egypt")
+        .build();
+```
+✔ Much cleaner
+✔ Flexible
+
+**The Problem Now**
+
+You still have old constructors:
+```
+new User(...)
+```
+AND
+```
+new User.Builder(...).build()
+```
+❌ Mixed API (Bad Design)
+```java
+User u1 = new User("user", "email@example.com");  // old
+User u2 = new User.Builder("user", "email@example.com").build(); // new
+```
+**Why You Can’t Just Remove Constructors**
+
+Because:
+- Existing code depends on them 
+- Public API → breaking change 
+- Libraries must maintain backward compatibility 
+
+**Phase 4 — Real-World Outcome**
+
+You end up with:
+```java
+@Deprecated
+public User(String username, String email) { ... }
+```
+
+Now your class has:
+- deprecated constructors 
+- builder 
+- confusing API 
+
+**What You SHOULD Have Done**
+
+Start with builder from day one:
+
+```java
+User user = User.builder()
+        .username("gamal")
+        .email("gamal@example.com")
+        .build();
+```
+Even if only 2 fields exist initially.
+
+**Key Insight**
+
+The cost of switching late is not technical—it’s API design damage.
+
+⚖️ Before vs After
+| Stage                | Code Quality       |
+| -------------------- | ------------------ |
+| Early constructor    | Simple           |
+| Growing constructors | ❌ Messy            |
+| Late builder         | ❌ Inconsistent     |
+| Early builder        | Clean + scalable |
+
+**Real-World Parallel**
+
+This exact evolution happened in:
+- Java APIs (pre-builder era) 
+- Many older libraries 
+- Internal enterprise systems 
+
+Modern libraries: start with builders immediately.
+
+**Final Takeaway**
+- Constructors optimize for today 
+- Builders optimize for evolution 
+
+If a class is likely to grow, start with a builder
+
+<!--- Show how to deprecate constructors safely without breaking users 
+- Or design a migration strategy from constructor → builder (used in real libraries) 
+- Or compare with Lombok @Builder and its trade-offs-->
+### Performance Overhead
+In order to create an object, you must first create its builder. While the cost of creating this builder is unlikely to be noticeable in practice, it could be a problem in performance-critical situations.
+
+With a constructor:
+```java
+NutritionFacts nf = new NutritionFacts(240, 1, 100, 0, 35, 27);
+```
+1 object created
+
+With a builder:
+```java
+NutritionFacts nf = new NutritionFacts.Builder(240, 1)
+        .calories(100)
+        .sodium(35)
+        .build();
+```
+2 objects created
+1. Builder
+2. NutritionFacts
+
+Where the cost comes from
+1. Extra object allocation
+
+    new Builder(...)
+    - Allocates memory 
+    - Initializes fields 
+
+2. Method chaining overhead
+
+    builder.calories(...).sodium(...)
+    - Multiple method calls 
+    - Slight overhead vs direct assignment 
+
+3. Temporary lifecycle
+
+    The builder:
+    - Lives briefly 
+    - Then gets garbage collected
+
+Why this is usually NOT a problem
+
+Modern JVMs are extremely optimized:
+- Escape Analysis
+    - Short-lived objects (like builders) may be allocated on the stack 
+    - Or even optimized away completely 
+- Fast allocation
+    - Object creation in JVM is very cheap (pointer bump) 
+- Efficient GC
+    - Short-lived objects are cleaned quickly (young generation) 
+
+In most applications, this cost is negligible
+
+When it CAN become a problem? This matters in high-performance or tight-loop scenarios.
+
+Example: Hot Loop
+```java
+for (int i = 0; i < 1_000_000; i++) {
+    NutritionFacts nf = new NutritionFacts.Builder(240, 1)
+            .calories(i)
+            .build();
+}
+```
+Now you create:
+- 1,000,000 builders 
+- 1,000,000 objects 
+
+This can:
+- Increase GC pressure 
+- Affect latency
+
+**Optimization Strategies**
+1. Reuse the Builder
+```java
+NutritionFacts.Builder builder =
+        new NutritionFacts.Builder(240, 1);
+for (int i = 0; i < 1_000_000; i++) {
+    builder.calories(i);
+    NutritionFacts nf = builder.build();
+}
+```
+Cuts allocations in half
+
+2. Use Constructor in Hot Paths
+
+If performance is critical:
+```java
+new NutritionFacts(240, 1, i, 0, 35, 27);
+```
+No builder overhead
+
+3. Hybrid Approach (Common in Real Systems)
+- Use Builder for readability 
+- Use constructor internally in hot loops 
+
+4. Object Pooling (Rare, advanced)
+
+Reuse builders from a pool:
+```java
+Builder builder = pool.acquire();
+...
+pool.release(builder);
+```
+Only for extreme cases (can introduce complexity)
+
+Trade-off Summary
+| Aspect      | Builder           | Constructor |
+| ----------- | ----------------- | ----------- |
+| Readability | High            | ❌ Low       |
+| Flexibility | High            | ❌ Low       |
+| Safety      | High            | ❌ Low       |
+| Performance | ❌ Slight overhead | Faster    |
+
+Builders optimize developer productivity, not raw performance.
+
+Rule of Thumb
+- Use Builder for: 
+    - complex objects 
+    - many optional fields 
+    - APIs 
+- Use constructors for: 
+    - simple objects 
+    - performance-critical paths
+
+**Common Mistake**
+
+Over-optimizing too early: “Builders are slow, I’ll avoid them everywhere”
+
+This usually makes code worse without measurable benefit.
+
+**Final Takeaway**
+Yes, builders have a cost:
+- Extra object 
+- Extra method calls 
+
+But:
+- Usually negligible 
+- Only matters in tight, high-frequency execution paths 
+
 
 ## Relations with Other Patterns
 - Many designs start by using Factory Method (less complicated and more customizable via subclasses) and evolve toward Abstract Factory, Prototype, or Builder (more flexible, but more complicated).
@@ -1289,7 +3537,10 @@ This pattern is used heavily in:
 - You can use Builder when creating complex Composite trees because you can program its construction steps to work recursively.
 - You can combine Builder with Bridge: the director class plays the role of the abstraction, while different builders act as implementations.
 - Abstract Factories, Builders and Prototypes can all be implemented as Singletons.
-
+- Sometimes creational patterns are complementary: Builder can use one of the other patterns to implement which components get built. Abstract Factory, Builder, and Prototype can use Singleton in their implementations. 
+- Builder focuses on constructing a complex object step by step. Abstract Factory emphasizes a family of product objects (either simple or complex). Builder returns the product as a final step, but as far as the Abstract Factory is concerned, the product gets returned immediately. 
+- Builder often builds a Composite. 
+- Often, designs start out using Factory Method (less complicated, more customizable, subclasses proliferate) and evolve toward Abstract Factory, Prototype, or Builder (more flexible, more complex) as the designer discovers where more flexibility is needed.
 ## Comparison with Other Patterns
 Affords finer control over the construction process. Unlike creational patterns that construct products in one shot, the Builder pattern constructs the product step by step under the control of the "director".
 
@@ -1299,6 +3550,86 @@ Affords finer control over the construction process. Unlike creational patterns 
 | Abstract Factory | Creates families of objects |
 | Builder          | Step-by-step construction   |
 | Prototype        | Clones existing objects     |
+
+## Builder vs Constructor
+the Builder pattern is a good choice when designing classes
+whose constructors or static factories would have more than a handful of
+parameters, especially if many of the parameters are optional or of identical type.
+Client code is much easier to read and write with builders than with telescoping
+constructors, and builders are much safer than JavaBeans.
+### Builder vs Constructor — Decision Tree
+Here’s a practical decision tree you can actually use when designing APIs. It’s not theoretical—it reflects how experienced engineers make the call.
+
+**Step 1: How many parameters?**
+- ≤ 3 parameters → go to Step 2 
+- ≥ 4 parameters → Use Builder 
+
+Reason: readability and ordering errors explode after ~4 params
+
+**Step 2: Are there optional parameters?**
+- No (all required) → go to Step 3 
+- Yes (some optional/defaulted) → Use Builder 
+
+Constructors don’t handle optional fields cleanly
+
+**Step 3: Are parameters of the same type?**
+
+Example:
+```java
+new Color(int r, int g, int b)
+```
+- Yes (same/similar types) → Use Builder 
+- No (clearly different types) → go to Step 4 
+
+Same-type params are easy to mix up
+
+**Step 4: Will this class likely evolve?**
+
+Ask:
+- Will we add fields later? 
+- Is this part of a public API? 
+- Yes → Use Builder 
+- No (stable, simple class) → go to Step 5 
+
+**Step 5: Is this performance-critical code?**
+- Yes (hot loops, millions of objects) → Use Constructor 
+- No → go to Step 6 
+
+**Step 6: Do you need validation or invariants?**
+- Simple validation → Constructor is fine 
+- Complex validation (cross-field rules) → Use Builder 
+
+**Step 7: Do you need readability / DSL-like API?**
+
+Example:
+```java
+request()
+    .url(...)
+    .header(...)
+    .timeout(...)
+```
+- Yes → Use Builder 
+- No → Constructor is fine 
+
+
+![Builder vs Constructor — Decision Tree](/docs/assets/software-engineering/software-architecture/design-patterns/concepts/creational/builder/Builder-vs-Constructor-decision-tree.png)
+**Final Decision Summary**
+
+Use Builder when:
+- Many parameters (4+) 
+- Optional fields exist 
+- Same-type parameters (risk of mix-up) 
+- Object will evolve over time 
+- Complex validation required 
+- You want a fluent / readable API 
+
+Use Constructor when:
+- Few parameters (≤ 3) 
+- All required 
+- Simple, stable class 
+- Performance-critical 
+- No ambiguity in parameter order
+
 
 ## Common Pitfalls
 - Forgetting validation in build() 
