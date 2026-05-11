@@ -1,0 +1,350 @@
+---
+id: software-engineering-implementation-coding-practices-class-design-noninstantiability
+title: Noninstantiability
+sidebar_position: 1
+---
+
+## Enforce noninstantiability with a private constructor
+The rule — “Enforce noninstantiability with a private constructor” — is a very important design technique in Java and fits directly into software engineering principles and several design patterns.
+
+It is not a full design pattern by itself, but rather a supporting idiom used inside patterns like **Singleton**, **Utility Class Pattern**, and **Factory-related designs**.
+
+## Intent
+
+Prevent a class from being instantiated when it is meant to:
+
+* Provide only static methods
+* Represent a utility/helper class
+* Control instance creation via another mechanism (factory/singleton) 
+
+## Problem (Motivation)
+
+Sometimes a class is **not supposed to represent objects**, but:
+* Some programming languages automatically provides a default public constructor
+* Other developers can accidentally do:
+
+```java
+MathUtils obj = new MathUtils(); // ❌ should NOT be allowed
+```
+
+This leads to:
+
+* Misuse of API
+* Confusing design
+* Unnecessary object creation
+* Violating intent of utility classes 
+
+utility classes were not designed to be instantiated: an instance would be
+nonsensical. In the absence of explicit constructors, however, in Java, the compiler provides a public, parameterless default constructor. To a user, this constructor is
+indistinguishable from any other. It is not uncommon to see unintentionally
+instantiable classes in published APIs.
+## Solution
+To enforce noninstantiability class must actively prevent both:
+- instantiation
+- inheritance
+
+Make constructor private
+
+```java
+public class MathUtils {
+
+    // Prevent instantiation
+    private MathUtils() {
+        throw new AssertionError("Cannot instantiate utility class");
+    }
+
+    public static int add(int a, int b) {
+        return a + b;
+    }
+}
+``` 
+in Java automatically generates a constructor if you do not write one.
+
+Example:
+
+```java id="xmxjlwm"
+public class MathUtils {
+
+    public static int add(int a, int b) {
+        return a + b;
+    }
+}
+```
+
+Even though you never wrote a constructor, Java secretly generates:
+
+```java id="4oj8bp"
+public MathUtils() {
+}
+```
+
+So users can do:
+
+```java id="3g4mxg"
+MathUtils utils = new MathUtils(); // ❌ meaningless
+```
+
+Although The class was intended to:
+
+* group static methods
+* act as a namespace
+* never represent an object
+
+But Java accidentally allows:
+
+```java id="0j9t5v"
+new MathUtils()
+```
+
+This creates:
+
+* meaningless objects
+* API confusion
+* misuse of the class
+
+the Proper Solution
+
+```java id="0o5p7w"
+public final class MathUtils {
+
+    private MathUtils() {
+        throw new AssertionError("No instances allowed");
+    }
+
+    public static int add(int a, int b) {
+        return a + b;
+    }
+}
+```
+
+Now:
+
+* no one can instantiate it
+* API intent is explicit
+* misuse is prevented
+
+
+Attempting to enforce noninstantiability by making a class abstract does
+not work. 
+1. The class can be subclassed and the subclass instantiated.
+
+Example
+```java
+public abstract class MathUtils {
+
+    public static int add(int a, int b) {
+        return a + b;
+    }
+}
+```
+Now someone can do:
+
+```java
+public class MyUtils extends MathUtils {
+}
+
+MyUtils utils = new MyUtils(); // ❌ still possible
+```
+So:
+- the utility class becomes indirectly instantiable
+- the design intent is broken
+
+2.  Furthermore, it misleads the user into thinking the class was designed for inheritance, But utility classes are NOT designed for extension That violates a major OO design principle: Design intent should match API structure.
+
+There is, however, a simple idiom to ensure noninstantiability. A default constructor is generated only if a class contains no explicit constructors(Explicit constructor suppresses default constructor), so a class can be made noninstantiable by including a private constructor:
+```java
+// Noninstantiable utility class
+public class UtilityClass {
+    // Suppress default constructor for noninstantiability
+    private UtilityClass() {
+        throw new AssertionError();
+    }
+    ... // Remainder omitted
+}
+```
+Because the explicit constructor is private, it is inaccessible outside the class.
+The `AssertionError` isn’t strictly required, but it provides insurance in case the
+constructor is accidentally invoked from within the class(defensive programming). It guarantees the class
+will never be instantiated under any circumstances. This idiom is mildly counterintuitive because the constructor is provided expressly so that it cannot be invoked. It is therefore wise to include a comment, as shown earlier.
+
+Why `AssertionError` Specifically? Because:
+- this situation should NEVER happen
+- it represents programmer error
+- not a recoverable business exception
+
+As a side effect, this idiom also prevents the class from being subclassed. All
+constructors must invoke a superclass constructor, explicitly or implicitly, and a
+subclass would have no accessible superclass constructor to invoke.
+
+Why subclassing becomes impossible
+Every subclass constructor must call:
+```java
+super();
+```
+either:
+- explicitly 
+- or automatically 
+
+But superclass constructor is private:
+```java
+private UtilityClass()
+```
+So subclass cannot access it.
+
+Result
+```java
+public class MyUtils extends UtilityClass {
+}
+```
+❌ Compilation error
+
+**This idiom simultaneously prevents:**
+
+| Problem       | Prevented By                        |
+| ------------- | ----------------------------------- |
+| Instantiation | Private constructor                 |
+| Inheritance   | Inaccessible superclass constructor |
+
+**Why This Matters Architecturally**
+
+Utility classes are meant to represent:
+
+> behavior without identity
+
+Allowing inheritance implies:
+
+* polymorphism
+* extension points
+* subtype relationships
+
+which utility classes fundamentally do NOT represent.
+
+## How It Works
+
+* `private constructor` → no external class can call `new`
+* `final class` (optional) → prevents subclassing
+* `static methods` → class is used as a namespace
+
+Even reflection becomes harder if you throw exception inside constructor. 
+
+## Real-World Analogy
+
+Think of it like:
+
+> A **toolbox in a factory** that is not meant to be “owned” or duplicated — you just use the tools inside it.
+
+You don’t “create a new toolbox”, you just use what’s inside. 
+
+## Where It Appears in Design Patterns
+
+### 1. Utility Class Pattern (most common)
+
+Used in:
+
+* `java.lang.Math`
+* `java.util.Collections`
+* `java.util.Arrays`
+
+These classes:
+
+* Have only static methods
+* Are not meant to be instantiated 
+
+### 2. Singleton Pattern
+
+Private constructor is **core requirement**:
+
+```java
+public class DatabaseConnection {
+
+    private static final DatabaseConnection INSTANCE = new DatabaseConnection();
+
+    private DatabaseConnection() {
+    }
+
+    public static DatabaseConnection getInstance() {
+        return INSTANCE;
+    }
+}
+```
+
+Without private constructor → Singleton breaks. 
+
+### 3. Factory Pattern (supporting role)
+
+Factories control object creation:
+
+```java
+public class ConnectionFactory {
+
+    private ConnectionFactory() {}
+
+    public static Connection create() {
+        return new ConnectionImpl();
+    }
+}
+```
+
+Here, the class is just an **entry point for creation logic**. 
+
+## Design Principles Behind It
+
+This rule is rooted in:
+
+- Encapsulation:vYou hide object creation when it's not meaningful.
+- Intentional API Design: You explicitly communicate: “This class is not meant to be instantiated”
+- Prevent misuse: Reduces accidental object creation. 
+
+## Common Variants
+
+### Simple version
+
+```java
+private ClassName() {}
+```
+
+### Defensive version (recommended)
+
+```java
+private ClassName() {
+    throw new AssertionError("No instances allowed");
+}
+``` 
+
+## 9. When to Use It
+
+Use private constructor when:
+
+- Class has only static methods
+- Class is a pure utility/helper
+- Class is a constants holder
+- You are implementing Singleton
+- You are creating a Factory entry class 
+
+## 10. When NOT to Use It
+
+❌ If the class represents real domain objects:
+
+```java
+User user = new User(); // valid case
+```
+
+❌ If polymorphism is needed 
+
+## Design Pattern Connection Summary
+
+| Pattern / Concept | Role of Private Constructor |
+| ----------------- | --------------------------- |
+| Utility Class     | Prevent instantiation       |
+| Singleton         | Control single instance     |
+| Factory Pattern   | Hide construction logic     |
+| API Design        | Enforce intended usage      | 
+
+## ## Related Patterns
+- Singleton
+- Static Factory
+
+## Key Insight
+
+> This rule is not about “blocking object creation” — it is about **expressing design intent through code structure**. 
+

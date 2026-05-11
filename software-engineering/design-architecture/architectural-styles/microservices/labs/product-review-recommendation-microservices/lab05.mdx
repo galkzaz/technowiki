@@ -1,0 +1,116 @@
+---
+id: software-engineering-design-architecture-architectural-styles-microservices-labs-product-review-recommendation-microservices-lab05
+title: "Lab05: Developing Reactive Microservices"
+sidebar_position: 6
+---
+
+one major concern was identified in previous lab. Updating (creating or deleting) a
+composite entity—an entity whose parts are stored in a number of microservices—using synchronous APIs can lead to inconsistencies if not all involved microservices are updated successfully.
+This is, in general, not acceptable. This leads us into this lab, where we will look into
+why and how to build reactive microservices, that is, microservices that are scalable and robust.
+
+## Choosing between non-blocking synchronous APIs and event-driven asynchronous services
+For the system landscape in this sample, we will use the following:
+- The `create`, `read`, and `delete` services exposed by the product composite microservice
+will be based on non-blocking synchronous APIs. The composite microservice is assumed
+to have clients on both web and mobile platforms, as well as clients coming from other
+organizations rather than the ones that operate the system landscape. Therefore, synchronous APIs seem like a natural match.
+- The `read` services provided by the core microservices will also be developed as non-blocking synchronous APIs since there is an end user waiting for their responses.
+- The `create` and `delete` services provided by the core microservices will be developed as
+event-driven asynchronous services, meaning that they will listen for create and delete
+events on topics dedicated to each microservice.
+- The synchronous APIs provided by the composite microservices to `create` and `delete` aggregated product information will publish `create` and `delete` events on these topics. If
+the publish operation succeeds, it will return with a `202` (Accepted) response; otherwise,
+an error response will be returned. The `202` response differs from a normal `200` (OK) response – it indicates that the request has been accepted but not fully processed. Instead,
+the processing will be completed asynchronously and independently of the `202` response.
+
+This is illustrated by the following diagram:
+![Reactive Microservice Landscape](/docs/assets/software-engineering/software-architecture/architecture-styles/microservice/laps/product-review-recommendation-microservices/lab05-reactive-microservice-landscape.png)
+## Developing non-blocking synchronous REST APIs
+In this section, we will develop non-blocking versions of the read APIs. 
+- The composite service will make reactive (that is, non-blocking) calls in parallel to the three core services.
+- When the composite service has received responses from all of the core services, it will create a composite response and send it back to the caller. 
+
+This is illustrated in the following diagram:
+![The getCompositeProduct part of the landscape](/docs/assets/software-engineering/software-architecture/architecture-styles/microservice/laps/product-review-recommendation-microservices/lab05-getCompositeProduct-reactive-read-api.png)
+
+### Non-blocking persistence using Spring Data for MongoDB
+Making the MongoDB-based repositories for the product and recommendation services reactive
+is very simple:
+- Change the base class for the repositories to ReactiveCrudRepository
+- Change the custom finder methods to return either a Mono or a Flux object
+
+<Tabs groupId="code">
+
+<TabItem value="ProductRepository(Before)" label="ProductRepository(Before)">
+
+```java
+package se.magnus.microservices.core.product.persistence;
+
+import java.util.Optional;
+import org.springframework.data.repository.CrudRepository;
+import org.springframework.data.repository.PagingAndSortingRepository;
+
+public interface ProductRepository
+        extends PagingAndSortingRepository<ProductEntity, String>, CrudRepository<ProductEntity, String> {
+    Optional<ProductEntity> findByProductId(int productId);
+}
+```
+
+</TabItem>
+
+<TabItem value="ProductRepository(After)" label="ProductRepository(After)">
+
+```java
+package se.magnus.microservices.core.product.persistence;
+
+import org.springframework.data.repository.reactive.ReactiveCrudRepository;
+import reactor.core.publisher.Mono;
+
+public interface ProductRepository extends ReactiveCrudRepository<ProductEntity, String> {
+    Mono<ProductEntity> findByProductId(int productId);
+}
+```
+
+</TabItem>
+
+<TabItem value="RecommendationRepository(Before)" label="RecommendationRepository(Before)">
+
+```java
+package se.magnus.microservices.core.recommendation.persistence;
+
+import java.util.List;
+import org.springframework.data.repository.CrudRepository;
+
+public interface RecommendationRepository extends CrudRepository<RecommendationEntity, String> {
+    List<RecommendationEntity> findByProductId(int productId);
+}
+```
+
+</TabItem>
+
+<TabItem value="RecommendationRepository(After)" label="RecommendationRepository(After)">
+
+```java
+package se.magnus.microservices.core.recommendation.persistence;
+
+import org.springframework.data.repository.reactive.ReactiveCrudRepository;
+import reactor.core.publisher.Flux;
+
+public interface RecommendationRepository extends ReactiveCrudRepository<RecommendationEntity, String> {
+    Flux<RecommendationEntity> findByProductId(int productId);
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+No changes are applied to the persistence code for the review service; it will remain blocking using the JPA repository.
+### Non-blocking REST APIs in the core services
+including how to handle blocking code for
+the JPA-based persistence layer
+### Non-blocking REST APIs in the composite service
+## Developing event-driven asynchronous services
+## Running manual tests of the reactive microservice landscape
+## Running automated tests of the reactive microservice landscape

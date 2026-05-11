@@ -5,3 +5,621 @@ sidebar_position: 1
 ---
 
 The `@SpringBootTest` annotation will initialize our application in the same way that `@SpringBootApplication` does when running the application; that is, the Spring application context will be set up before the tests are executed using component scanning and auto-configuration
+
+## Spring Testing
+
+Automated tests are paramount to producing high-quality software. One of the goals
+for adopting a cloud native approach is speed. It’s impossible to move quickly if the
+code is not adequately tested in an automated fashion, let alone to implement a continuous delivery process.
+
+As a developer, you’ll usually implement a feature, deliver it, and then move on to
+a new one, possibly refactoring the existing code. Refactoring code is risky, since you
+might break some existing functionality. Automated tests reduce the risk and encourage refactoring, because you know that a test will fail, should you break something.
+
+You shouldn’t aim to reach maximum test coverage
+but rather to write meaningful tests. For example, writing tests for standard getters
+and setters doesn’t make sense.
+
+Automated tests assert that new features work as intended and that you haven’t
+broken any existing functionality. This means that automated tests work as regression
+tests. You should write tests to protect your colleagues and yourself from making mistakes. What to test and how in-depth to test is driven by the risk associated with a specific piece of code. 
+
+One way of classifying software tests is defined by the Agile Testing Quadrants
+model. The quadrants classify software tests based on whether they are technology or
+business-facing and whether they support development teams or are used to critique
+the product.
+
+![The Agile Testing Quadrants model is helpful in planning a software testing strategy](11-development/02-spring/07-testing/Agile Testing Quadrants model.png)
+
+Following continuous delivery practices, we should aim at achieving fully automated
+tests in three out of four quadrants,
+
+## Test-driven development (TDD)
+An essential practice of continuous delivery is test-driven development (TDD), which
+helps achieve the goal of delivering software quickly, reliably, and safely. The idea is to
+drive software development by writing tests before implementing the production
+code. 
+
+With TDD, there’s a toolkit for the different ways to write our tests:
+* Given-When-Then (GWT)
++
+The Given is setting the stage, such as where everything’s at before the action
+starts. Then you hit the When stage, the main event that gets things rolling. And
+you wrap up with Then, where you spell out what you expect to happen after the
+dust settles. It’s like telling a story of what your code will carry out.
+* Arrange-Act-Assert (AAA)
++
+This is similar to GWT. But GWT tends to be more narrative and user-centric,
+making it ideal for collaboration among developers, testers, and nontechnical
+stakeholders. AAA, on the other hand, is more about the technical execution of
+the test itself.
+* Setup-Exercise-Verify-Teardown (SEVT)
++
+This is your go-to when you’re in the trenches of integration and systems testing.
+You start with Setup, where you prep your testing ground. Then, you jump into
+Exercise, where you run your system through its paces. After this, you go to Ver‐
+ify, which is where you play detective to confirm everything worked out. And
+don’t forget the Teardown. This is the cleanup step that’s essential to keeping
+everything neat for next time
+
+## Testing APIs manually
+### Testing locally
+we can test API manually by performing the following steps:
+
+1. Build and start the microservices as background processes.
+
+       cd $BOOK_HOME/Chapter03/2-basic-rest-services/
+       ./gradlew build
+
+   Once the build completes, we can launch our microservices as background processes to the Terminal
+   process with the following code:
+
+   gradle
+
+       java -jar microservices/product-composite-service/build/libs/*.jar &
+       java -jar microservices/product-service/build/libs/*.jar &
+       java -jar microservices/recommendation-service/build/libs/*.jar &
+       java -jar microservices/review-service/build/libs/*.jar &
+
+   maven
+
+2. Use curl to call the composite API.
+    curl http://localhost:7000/product-composite/1 -s | jq .
+
+   ```console
+   # Verify that a 404 (Not Found) error is returned for a non-existing productId
+   (13)
+   curl http://localhost:7000/product-composite/13 -i
+   # Verify that no recommendations are returned for productId 113
+   curl http://localhost:7000/product-composite/113 -s | jq .
+   # Verify that no reviews are returned for productId 213
+   curl http://localhost:7000/product-composite/213 -s | jq .
+   # Verify that a 422 (Unprocessable Entity) error is returned for a productId
+   that is out of range (-1)
+   curl http://localhost:7000/product-composite/-1 -i
+   # Verify that a 400 (Bad Request) error is returned for a productId that is not
+   a number, i.e. invalid format
+   curl http://localhost:7000/product-composite/invalidProductId -i
+   ```
+
+3. Stop the microservices.
+
+   Finally, you can shut down the microservices with the following command:
+       kill $(jobs -p)
+
+   If you are using an IDE such as Visual Studio Code with Spring Tool Suite, you can use their support
+   for the Spring Boot Dashboard to start and stop your microservices with one click.
+
+### Testing using Docker compose
+**Microservices with Spring Boot 3 and Spring Cloud**
+
+  Now, we have everything in place to test the microservices together. We will build new Docker images 
+  and start up the system landscape using Docker Compose based on the Docker images. Next, we will 
+  use the Swagger UI viewer to run some manual tests. Finally, we will use the database CLI tools to see 
+  what data was inserted into the databases.
+  Build and start the system landscape with the following command:
+  ```console
+  cd $BOOK_HOME/Chapter06
+  ./gradlew build && docker-compose build && docker-compose up
+  ```
+  Open Swagger UI in a web browser, http://localhost:8080/openapi/swagger-ui.html, and perform 
+  the following steps on the web page:
+
+  1. Click on the ProductComposite service and the POST method to expand them.
+  2. Click on the Try it out button and go down to the body field.
+  3. Replace the default value, 0, of the productId field with 123456.
+  4. Scroll down to the Execute button and click on it.
+  5. Verify that the returned response code is 200.
+
+     We can also use the database CLI tools to see the actual content in the different databases.
+     Look up the content in the product service, that is, the products collection in MongoDB, with the 
+     following command:
+     ```console
+     docker-compose exec mongodb mongosh product-db --quiet --eval "db.products.find()"
+     ```
+     Look up the content in the recommendation service, that is, the recommendations collection in MongoDB, with the following command:
+     ```console
+     docker-compose exec mongodb mongosh recommendation-db --quiet --eval "db.recommendations.find()"
+     ```
+     Look up the content in the review service, that is, the reviews table in MySQL, with the following 
+     command:
+     ```console
+     docker-compose exec mysql mysql -uuser -p review-db -e "select * from reviews"
+     ```
+     The mysql CLI tool will prompt you for a password; you can find it in the docker-compose.yml file. 
+
+
+## Adding semi-automated tests of a microservice landscape
+Being able to automatically run unit and integration tests for each microservice in isolation using
+plain Java, JUnit, and Gradle is very useful during development, but insufficient when we move over
+to the operation side. In operation, we also need a way to automatically verify that a system landscape of
+cooperating microservices delivers what we expect. Being able to, at any time, run a script that verifies
+that a number of cooperating microservices all work as expected in operation is very valuable – the
+more microservices there are, the higher the value of such a verification script.
+
+We can create a simple bash script that can verify the functionality of a deployed system
+landscape by performing calls to the RESTful APIs exposed by the microservices. It is based on the
+curl commands we learned about and used above. The script verifies return codes and parts of the
+JSON responses using jq. The script contains two helper functions, assertCurl() and assertEqual(),
+to make the test code compact and easy to read.
+
+```bash
+#!/usr/bin/env bash
+#
+# Sample usage:
+#
+#   HOST=localhost PORT=7000 ./test-em-all.bash
+#
+: ${HOST=localhost}
+: ${PORT=8080}
+: ${PROD_ID_REVS_RECS=1}
+: ${PROD_ID_NOT_FOUND=13}
+: ${PROD_ID_NO_RECS=113}
+: ${PROD_ID_NO_REVS=213}
+
+function assertCurl() {
+
+  local expectedHttpCode=$1
+  local curlCmd="$2 -w \"%{http_code}\""
+  local result=$(eval $curlCmd)
+  local httpCode="${result:(-3)}"
+  RESPONSE='' && (( ${#result} > 3 )) && RESPONSE="${result%???}"
+
+  if [ "$httpCode" = "$expectedHttpCode" ]
+  then
+    if [ "$httpCode" = "200" ]
+    then
+      echo "Test OK (HTTP Code: $httpCode)"
+    else
+      echo "Test OK (HTTP Code: $httpCode, $RESPONSE)"
+    fi
+  else
+    echo  "Test FAILED, EXPECTED HTTP Code: $expectedHttpCode, GOT: $httpCode, WILL ABORT!"
+    echo  "- Failing command: $curlCmd"
+    echo  "- Response Body: $RESPONSE"
+    exit 1
+  fi
+}
+
+function assertEqual() {
+
+  local expected=$1
+  local actual=$2
+
+  if [ "$actual" = "$expected" ]
+  then
+    echo "Test OK (actual value: $actual)"
+  else
+    echo "Test FAILED, EXPECTED VALUE: $expected, ACTUAL VALUE: $actual, WILL ABORT"
+    exit 1
+  fi
+}
+
+function testUrl() {
+  url=$@
+  if $url -ks -f -o /dev/null
+  then
+    return 0
+  else
+    return 1
+  fi;
+}
+
+function waitForService() {
+  url=$@
+  echo -n "Wait for: $url... "
+  n=0
+  until testUrl $url
+  do
+    n=$((n + 1))
+    if [[ $n == 100 ]]
+    then
+      echo " Give up"
+      exit 1
+    else
+      sleep 3
+      echo -n ", retry #$n "
+    fi
+  done
+  echo "DONE, continues..."
+}
+
+function testCompositeCreated() {
+
+    # Expect that the Product Composite for productId $PROD_ID_REVS_RECS has been created with three recommendations and three reviews
+    if ! assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
+    then
+        echo -n "FAIL"
+        return 1
+    fi
+
+    set +e
+    assertEqual "$PROD_ID_REVS_RECS" $(echo $RESPONSE | jq .productId)
+    if [ "$?" -eq "1" ] ; then return 1; fi
+
+    assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+    if [ "$?" -eq "1" ] ; then return 1; fi
+
+    assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+    if [ "$?" -eq "1" ] ; then return 1; fi
+
+    set -e
+}
+
+function waitForMessageProcessing() {
+    echo "Wait for messages to be processed... "
+
+    # Give background processing some time to complete...
+    sleep 1
+
+    n=0
+    until testCompositeCreated
+    do
+        n=$((n + 1))
+        if [[ $n == 40 ]]
+        then
+            echo " Give up"
+            exit 1
+        else
+            sleep 6
+            echo -n ", retry #$n "
+        fi
+    done
+    echo "All messages are now processed!"
+}
+
+function recreateComposite() {
+  local productId=$1
+  local composite=$2
+
+  assertCurl 202 "curl -X DELETE http://$HOST:$PORT/product-composite/${productId} -s"
+  assertEqual 202 $(curl -X POST -s http://$HOST:$PORT/product-composite -H "Content-Type: application/json" --data "$composite" -w "%{http_code}")
+}
+
+function setupTestdata() {
+
+  body="{\"productId\":$PROD_ID_NO_RECS"
+  body+=\
+',"name":"product name A","weight":100, "reviews":[
+  {"reviewId":1,"author":"author 1","subject":"subject 1","content":"content 1"},
+  {"reviewId":2,"author":"author 2","subject":"subject 2","content":"content 2"},
+  {"reviewId":3,"author":"author 3","subject":"subject 3","content":"content 3"}
+]}'
+  recreateComposite "$PROD_ID_NO_RECS" "$body"
+
+  body="{\"productId\":$PROD_ID_NO_REVS"
+  body+=\
+',"name":"product name B","weight":200, "recommendations":[
+  {"recommendationId":1,"author":"author 1","rate":1,"content":"content 1"},
+  {"recommendationId":2,"author":"author 2","rate":2,"content":"content 2"},
+  {"recommendationId":3,"author":"author 3","rate":3,"content":"content 3"}
+]}'
+  recreateComposite "$PROD_ID_NO_REVS" "$body"
+
+
+  body="{\"productId\":$PROD_ID_REVS_RECS"
+  body+=\
+',"name":"product name C","weight":300, "recommendations":[
+      {"recommendationId":1,"author":"author 1","rate":1,"content":"content 1"},
+      {"recommendationId":2,"author":"author 2","rate":2,"content":"content 2"},
+      {"recommendationId":3,"author":"author 3","rate":3,"content":"content 3"}
+  ], "reviews":[
+      {"reviewId":1,"author":"author 1","subject":"subject 1","content":"content 1"},
+      {"reviewId":2,"author":"author 2","subject":"subject 2","content":"content 2"},
+      {"reviewId":3,"author":"author 3","subject":"subject 3","content":"content 3"}
+  ]}'
+  recreateComposite "$PROD_ID_REVS_RECS" "$body"
+
+}
+
+set -e
+
+echo "Start Tests:" `date`
+
+echo "HOST=${HOST}"
+echo "PORT=${PORT}"
+
+if [[ $@ == *"start"* ]]
+then
+  echo "Restarting the test environment..."
+  echo "$ docker compose down --remove-orphans"
+  docker compose down --remove-orphans
+  echo "$ docker compose up -d"
+  docker compose up -d
+fi
+
+waitForService curl http://$HOST:$PORT/actuator/health
+setupTestdata
+
+waitForMessageProcessing
+
+# Verify that a normal request works, expect three recommendations and three reviews
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
+assertEqual $PROD_ID_REVS_RECS $(echo $RESPONSE | jq .productId)
+assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that a 404 (Not Found) error is returned for a non-existing productId ($PROD_ID_NOT_FOUND)
+assertCurl 404 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NOT_FOUND -s"
+assertEqual "No product found for productId: $PROD_ID_NOT_FOUND" "$(echo $RESPONSE | jq -r .message)"
+
+# Verify that no recommendations are returned for productId $PROD_ID_NO_RECS
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NO_RECS -s"
+assertEqual $PROD_ID_NO_RECS $(echo $RESPONSE | jq .productId)
+assertEqual 0 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that no reviews are returned for productId $PROD_ID_NO_REVS
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NO_REVS -s"
+assertEqual $PROD_ID_NO_REVS $(echo $RESPONSE | jq .productId)
+assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 0 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that a 422 (Unprocessable Entity) error is returned for a productId that is out of range (-1)
+assertCurl 422 "curl http://$HOST:$PORT/product-composite/-1 -s"
+assertEqual "\"Invalid productId: -1\"" "$(echo $RESPONSE | jq .message)"
+
+# Verify that a 400 (Bad Request) error error is returned for a productId that is not a number, i.e. invalid format
+assertCurl 400 "curl http://$HOST:$PORT/product-composite/invalidProductId -s"
+assertEqual "\"Type mismatch.\"" "$(echo $RESPONSE | jq .message)"
+
+# Verify access to Swagger and OpenAPI URLs
+echo "Swagger/OpenAPI tests"
+assertCurl 302 "curl -s  http://$HOST:$PORT/openapi/swagger-ui.html"
+assertCurl 200 "curl -sL http://$HOST:$PORT/openapi/swagger-ui.html"
+assertCurl 200 "curl -s  http://$HOST:$PORT/openapi/webjars/swagger-ui/index.html?configUrl=/v3/api-docs/swagger-config"
+assertCurl 200 "curl -s  http://$HOST:$PORT/openapi/v3/api-docs"
+assertEqual "3.0.1" "$(echo $RESPONSE | jq -r .openapi)"
+assertEqual "http://$HOST:$PORT" "$(echo $RESPONSE | jq -r '.servers[0].url')"
+assertCurl 200 "curl -s  http://$HOST:$PORT/openapi/v3/api-docs.yaml"
+
+if [[ $@ == *"stop"* ]]
+then
+    echo "We are done, stopping the test environment..."
+    echo "$ docker compose down"
+    docker compose down
+fi
+
+echo "End, all tests OK:" `date`
+```
+
+Finally, you can shut down the microservices with the following command:
+```bash
+kill $(jobs -p)
+``` 
+
+## Automating tests of cooperating microservices
+
+Docker Compose is really helpful when it comes to manually managing a group of microservices.
+In this section, we will take this one step further and integrate Docker Compose into our test script,
+test-em-all.bash. The test script will automatically start up the microservice landscape, run all the
+required tests to verify that the microservice landscape works as expected, and finally, tear it down,
+leaving no traces behind.
+
+Before the test script runs the test suite, it will check for the presence of a start argument in the
+invocation of the test script. If found, it will restart the containers with the following code:
+```bash
+if [[ $@ == *"start"* ]]
+then
+  echo "Restarting the test environment..."
+  echo "$ docker compose down --remove-orphans"
+  docker compose down --remove-orphans
+  echo "$ docker compose up -d"
+  docker compose up -d
+fi
+```
+After that, the test script will wait for the product-composite service to respond with OK:
+```bash
+waitForService http://$HOST:${PORT}/product-composite/1
+```
+The waitForService function sends HTTP requests to the supplied URL using curl. Requests are sent
+repeatedly until curl responds that it got a successful response back from the request. The function
+waits 3 seconds between each attempt and gives up after 100 attempts, stopping the script with a failure.
+
+Next, all the tests are executed as they were previously. Afterward, the script will tear down the landscape if it finds the stop argument in the invocation parameters:
+
+The test script has also changed the default port from 7000, which we used when we ran the microservices without Docker, to 8080, which is used by our Docker containers.
+
+The automated tests of the microservice landscape, test-em-all.bash, need to be updated so that 
+they ensure that the database of each microservice has a known state before it runs the tests.
+The script is extended with a setup function, setupTestdata(), which uses the composite create and 
+delete APIs to set up test data used by the tests.
+
+It uses a helper function, recreateComposite(), to perform the actual requests to the delete and 
+create APIs:
+The setupTestdata function is called directly after the waitForService function:
+  waitForService curl -X DELETE http://$HOST:$PORT/product-composite/13
+  setupTestdata
+The main purpose of the waitForService function is to verify that all microservices are up and running. 
+```
+#!/usr/bin/env bash
+#
+# Sample usage:
+#
+#   HOST=localhost PORT=7000 ./test-em-all.bash
+#
+: ${HOST=localhost}
+: ${PORT=8080}
+: ${PROD_ID_REVS_RECS=1}
+: ${PROD_ID_NOT_FOUND=13}
+: ${PROD_ID_NO_RECS=113}
+: ${PROD_ID_NO_REVS=213}
+
+function assertCurl() {
+
+    local expectedHttpCode=$1
+    local curlCmd="$2 -w \"%{http_code}\""
+    local result=$(eval $curlCmd)
+    local httpCode="${result:(-3)}"
+    RESPONSE='' && (( ${#result} > 3 )) && RESPONSE="${result%???}"
+
+    if [ "$httpCode" = "$expectedHttpCode" ]
+    then
+      if [ "$httpCode" = "200" ]
+      then
+        echo "Test OK (HTTP Code: $httpCode)"
+      else
+        echo "Test OK (HTTP Code: $httpCode, $RESPONSE)"
+      fi
+    else
+      echo  "Test FAILED, EXPECTED HTTP Code: $expectedHttpCode, GOT: $httpCode, WILL ABORT!"
+      echo  "- Failing command: $curlCmd"
+      echo  "- Response Body: $RESPONSE"
+      exit 1
+    fi
+}
+
+function assertEqual() {
+
+    local expected=$1
+    local actual=$2
+
+    if [ "$actual" = "$expected" ]
+    then
+      echo "Test OK (actual value: $actual)"
+    else
+      echo "Test FAILED, EXPECTED VALUE: $expected, ACTUAL VALUE: $actual, WILL ABORT"
+      exit 1
+    fi
+}
+
+function testUrl() {
+  url=$@
+  if $url -ks -f -o /dev/null
+  then
+    return 0
+  else
+    return 1
+  fi;
+}
+
+function waitForService() {
+  url=$@
+  echo -n "Wait for: $url... "
+  n=0
+  until testUrl $url
+  do
+    n=$((n + 1))
+    if [[ $n == 100 ]]
+    then
+      echo " Give up"
+      exit 1
+    else
+      sleep 3
+      echo -n ", retry #$n "
+    fi
+  done
+  echo "DONE, continues..."
+}
+
+set -e
+
+echo "Start Tests:" `date`
+
+echo "HOST=${HOST}"
+echo "PORT=${PORT}"
+
+if [[ $@ == **"start"** ]]
+then
+  echo "Restarting the test environment..."
+  echo "$ docker compose down --remove-orphans"
+  docker compose down --remove-orphans
+  echo "$ docker compose up -d"
+  docker compose up -d
+fi
+
+waitForService curl http://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS
+
+# Verify that a normal request works, expect three recommendations and three reviews
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
+assertEqual $PROD_ID_REVS_RECS $(echo $RESPONSE | jq .productId)
+assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that a 404 (Not Found) error is returned for a non-existing productId ($PROD_ID_NOT_FOUND)
+assertCurl 404 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NOT_FOUND -s"
+assertEqual "No product found for productId: $PROD_ID_NOT_FOUND" "$(echo $RESPONSE | jq -r .message)"
+
+# Verify that no recommendations are returned for productId $PROD_ID_NO_RECS
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NO_RECS -s"
+assertEqual $PROD_ID_NO_RECS $(echo $RESPONSE | jq .productId)
+assertEqual 0 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that no reviews are returned for productId $PROD_ID_NO_REVS
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NO_REVS -s"
+assertEqual $PROD_ID_NO_REVS $(echo $RESPONSE | jq .productId)
+assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 0 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that a 422 (Unprocessable Entity) error is returned for a productId that is out of range (-1)
+assertCurl 422 "curl http://$HOST:$PORT/product-composite/-1 -s"
+assertEqual "\"Invalid productId: -1\"" "$(echo $RESPONSE | jq .message)"
+
+# Verify that a 400 (Bad Request) error error is returned for a productId that is not a number, i.e. invalid format
+assertCurl 400 "curl http://$HOST:$PORT/product-composite/invalidProductId -s"
+assertEqual "\"Type mismatch.\"" "$(echo $RESPONSE | jq .message)"
+
+if [[ $@ == **"stop"** ]]
+then
+    echo "We are done, stopping the test environment..."
+    echo "$ docker compose down"
+    docker compose down
+fi
+
+echo "End, all tests OK:" `date`
+```
+
+After running these tests, we can move on to see how to troubleshoot tests that fail.
+
+1. First, check the status of the running microservices with the following command:
+
+       docker-compose ps
+
+   If all the microservices are up and running and healthy, the status will be running
+2. If any of the microservices do not have a status of Up, check their log output for any errors by
+using the docker-compose logs command. For example, you would use the following command if you wanted to check the log output for the product service:
+
+       docker-compose logs product
+
+   If required, you can restart a failed container with the docker-compose restart command.
+   For example, you would use the following command if you wanted to restart the product microservice:
+
+       docker-compose restart product
+
+   If a container is missing, for example, due to a crash, you start it up with the docker-compose
+   up -d --scale command. For example, you would use the following command for the product
+   microservice:
+
+       docker-compose up -d --scale product=1
+
+   If errors in the log output indicate that Docker is running out of disk space, parts of it can be
+   reclaimed with the following command:
+
+       docker system prune -f --volumes
+
+3. Once all the microservices are up and running and healthy, run the test script again, but without starting the microservices:
+
+       ./test-em-all.bash
+
+   The tests should now run fine!

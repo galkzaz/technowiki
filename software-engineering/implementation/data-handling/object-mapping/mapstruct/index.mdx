@@ -1,0 +1,437 @@
+---
+id: implementation-data-handling-object-mapping-mapstruct-basics
+title: MapStruct Basics
+sidebar_position: 1
+---
+In this chapter, we will learn how to use MapStruct to perform object mapping in Java applications. MapStruct is a code generator that simplifies the implementation of mappings between Java bean types based on a convention-over-configuration approach. It generates mapping code at compile time, which is fast and type-safe compared to reflection-based mapping frameworks.    
+
+MapStruct is a Java library that automatically generates type-safe mappers at compile time. It’s mainly used to convert between different object models—typically DTOs ↔ Entities—without writing repetitive boilerplate code.
+
+**MapStruct** is a Java library that **automatically generates type-safe mappers at compile time**. It’s mainly used to convert between different object models—typically **DTOs ↔ Entities**—without writing repetitive boilerplate code.
+
+MapStruct is part of the "anti-corruption layer" between boundaries, It helps enforce:
+- Separation of concerns
+- Clean boundaries between layers
+
+## Adding MapStruct to a Java project
+To use MapStruct in a Java project, you need to add the MapStruct dependency to your build configuration. For example, if you are using Maven, you can add the following dependency to your.
+start by defining a variable holding the version informa-
+tion in the build file for each core microservice, build.gradle:
+```groovy
+ext {
+mapstructVersion = "1.6.3.Final"
+}
+```
+Next, we declare a dependency on MapStruct.
+```groovy
+implementation 'org.mapstruct:mapstruct:${mapstructVersion}'
+```
+Since MapStruct generates the implementation of the bean mappings at compile time by processing
+MapStruct annotations, we need to add an annotationProcessor and testAnnotationProcessor
+dependency:
+```groovy
+annotationProcessor 'org.mapstruct:mapstruct-processor:${mapstructVersion}'
+testAnnotationProcessor "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+```
+To make the compile-time generation work in popular IDEs such as IntelliJ IDEA, we also need
+to add the following dependency:
+```groovy
+compileOnly "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+```
+
+:::note
+
+If you are using IntelliJ IDEA, you also need to ensure that support for annotation
+processing is enabled. Open Preferences and navigate to Build, Execute, Deploy-
+ment | Compiler | Annotations Processors. Verify that the checkbox named Enable
+annotation processing is selected.
+
+:::
+
+<Tabs groupId="code">
+<TabItem value="maven" label="Maven">
+```maven
+<properties>
+    <mapstruct.version>1.6.3.Final</mapstruct.version>
+</properties>
+<dependencies>
+    <dependency>
+        <groupId>org.mapstruct</groupId>        
+        <artifactId>mapstruct</artifactId>
+        <version>${mapstruct.version}</version>
+    </dependency>
+    <dependency>
+        <groupId>org.mapstruct</groupId>
+        <artifactId>mapstruct-processor</artifactId>
+        <version>${mapstruct.version}</version>
+        <scope>provided</scope>
+    </dependency>
+</dependencies>
+<build>
+    <plugins>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-compiler-plugin</artifactId>
+            <version>3.8.1</version>
+            <configuration>
+                <annotationProcessorPaths>
+                    <path>
+                        <groupId>org.mapstruct</groupId>
+                        <artifactId>mapstruct-processor</artifactId>
+                        <version>${mapstruct.version}</version>
+                    </path>
+                </annotationProcessorPaths>
+            </configuration>
+        </plugin>
+    </plugins>
+</build>
+```
+</TabItem>
+<TabItem value="gradle" label="Gradle">
+```groovy
+ext {
+    mapstructVersion = "1.6.3.Final"
+}     
+dependencies {
+    implementation "org.mapstruct:mapstruct:${mapstructVersion}"
+    annotationProcessor "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+    testAnnotationProcessor "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+    compileOnly "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+}  
+```
+
+</TabItem>
+</Tabs>
+`pom.xml` file:
+```xml
+
+<dependency>
+    <groupId>org.mapstruct</groupId>        
+    <artifactId>mapstruct</artifactId>
+    <version>${mapstructVersion}</version>
+</dependency>
+```
+## Defining a Mapper Interface
+To define a mapper interface, you need to create an interface and annotate it with `@Mapper`. This interface will contain methods that define the mapping between source and target types. For example:
+```     
+@Mapper
+public interface UserMapper {
+    UserDTO userToUserDTO(User user);
+    User userDTOToUser(UserDTO userDTO);
+}
+```
+In this example, we have defined a `UserMapper` interface with two methods: `userToUserDTO` and `userDTOToUser`. These methods specify the mapping between the `User entity` and the `UserDTO` data transfer object. MapStruct will generate the implementation of this interface at compile time, which will perform the actual mapping between the two types.
+## Customizing Mappings
+MapStruct provides various options for customizing the mapping behavior. You can use annotations to specify how fields should be mapped, handle nested mappings, and define custom mapping logic. For example, you can use the `@Mapping` annotation to specify how individual fields should be mapped:
+```java
+@Mapper
+public interface UserMapper {       
+    @Mapping(source = "firstName", target = "name")
+    UserDTO userToUserDTO(User user);
+}
+```
+In this example, we have specified that the `firstName` field in the `User` entity should be mapped to the `name` field in the `UserDTO`. MapStruct will generate the mapping code accordingly, ensuring that the correct fields are mapped between the two types.  
+
+
+## Why MapStruct exists (the real problem)
+
+In layered architectures, you constantly convert:
+* Database entities → domain models
+* Domain models → DTOs (API layer)
+* DTOs → commands / requests
+
+Manual mapping looks like this:
+
+```java
+UserDto dto = new UserDto();
+dto.setId(user.getId());
+dto.setName(user.getName());
+dto.setEmail(user.getEmail());
+```
+
+Problems:
+* Repetitive and error-prone
+* Hard to maintain when models evolve
+* No compile-time safety for missing mappings
+
+## Core Idea of MapStruct
+
+You **define an interface**, and MapStruct **generates the implementation at compile time**.
+
+## Example
+
+```java
+@Mapper
+public interface UserMapper {
+    UserDto toDto(User user);
+    User toEntity(UserDto dto);
+}
+```
+
+MapStruct generates something like:
+
+```java
+public class UserMapperImpl implements UserMapper {
+    @Override
+    public UserDto toDto(User user) {
+        if (user == null) return null;
+
+        UserDto dto = new UserDto();
+        dto.setId(user.getId());
+        dto.setName(user.getName());
+        dto.setEmail(user.getEmail());
+        return dto;
+    }
+}
+```
+- No reflection
+- No runtime cost
+- Pure Java code generated
+
+Think of MapStruct as:
+
+> **"A compile-time code generator for object transformations"**
+
+Not:
+
+* Not a serializer
+* Not a reflection mapper
+* Not runtime magic
+## Key Features
+
+### Automatic Field Mapping
+
+If fields have the same name → mapped automatically.
+
+```java
+class User {
+    String name;
+}
+
+class UserDto {
+    String name;
+}
+```
+
+No configuration needed.
+
+### Custom Field Mapping
+When names differ:
+```java
+@Mapper
+public interface UserMapper {
+
+    @Mapping(source = "email", target = "emailAddress")
+    UserDto toDto(User user);
+}
+```
+
+### Nested Mapping
+
+```java
+class Order {
+    User user;
+}
+
+class OrderDto {
+    UserDto user;
+}
+```
+
+MapStruct automatically calls another mapper if available.
+
+### Multiple Source Parameters
+
+```java
+@Mapping(source = "user.name", target = "username")
+@Mapping(source = "order.id", target = "orderId")
+OrderDto map(User user, Order order);
+```
+
+### Expression Mapping (custom logic)
+
+```java
+@Mapping(target = "fullName",
+         expression = "java(user.getFirstName() + \" \" + user.getLastName())")
+UserDto toDto(User user);
+```
+
+### Default Methods (custom logic inside mapper)
+
+```java
+default String mapStatus(int code) {
+    return code == 1 ? "ACTIVE" : "INACTIVE";
+}
+```
+
+### Mapping Collections
+
+```java
+List<UserDto> toDtos(List<User> users);
+```
+Automatically iterates and maps each element.
+
+### Update Existing Object (@MappingTarget)
+
+```java
+void updateUserFromDto(UserDto dto, @MappingTarget User entity);
+```
+
+Important for:
+* JPA entities
+* Partial updates (PATCH)
+
+### Ignore Fields
+
+```java
+@Mapping(target = "password", ignore = true)
+UserDto toDto(User user);
+```
+
+### Null Handling Strategies
+
+```java
+@Mapper(nullValueCheckStrategy = NullValueCheckStrategy.ALWAYS)
+```
+Controls how nulls are treated.
+
+## Framework Integrations
+### Integration with Spring
+
+```java
+@Mapper(componentModel = "spring")
+public interface UserMapper {
+}
+```
+
+Then you can:
+
+```java
+@Autowired
+private UserMapper userMapper;
+```
+
+MapStruct becomes a Spring Bean.
+
+## Compile-Time vs Runtime Mappers
+
+| Feature     | MapStruct               | ModelMapper / Dozer |
+| ----------- | ----------------------- | ------------------- |
+| Performance | 🔥 Fast (no reflection) | Slower              |
+| Type Safety | ✔ Compile-time          | ❌ Runtime           |
+| Debugging   | ✔ Easy (generated code) | ❌ Hard              |
+| Boilerplate | Low                     | Very Low            |
+
+MapStruct is preferred in **production systems**
+
+## How MapStruct Works Internally
+
+MapStruct is based on:
+
+* **Annotation Processing (JSR 269)**
+* Runs during compilation
+* Generates `.java` classes in:
+
+  ```
+  target/generated-sources/annotations
+  ```
+
+So:
+```
+Your Interface → MapStruct → Generated Java Code → Compiled
+```
+
+## Where MapStruct Fits in Architecture
+
+In **Hexagonal Architecture / Clean Architecture**:
+```
+Controller (DTO)
+      ↓
+Mapper (MapStruct)
+      ↓
+Application / Domain Model
+      ↓
+Persistence (Entity)
+```
+**Best placement:**
+* **Adapter Layer (Inbound/Outbound)**
+* Not inside core domain
+
+## Real Production Use Cases
+
+#### REST APIs
+
+DTO ↔ Entity conversion
+
+#### Microservices
+
+API contracts mapping between services
+
+#### CQRS
+
+Command ↔ Domain mapping
+
+#### Event-driven systems
+
+Event payload ↔ domain model
+
+## Advanced Patterns with MapStruct
+
+### Mapper Composition
+
+```java
+@Mapper(uses = {AddressMapper.class})
+```
+
+### Inheritance
+
+```java
+@Mapper
+public interface BaseMapper<D, E> {
+    D toDto(E entity);
+    E toEntity(D dto);
+}
+```
+
+### Decorators (custom override)
+
+```java
+@DecoratedWith(UserMapperDecorator.class)
+```
+
+Allows injecting custom logic after mapping.
+
+## Common Pitfalls
+
+### ❌ Forgetting annotation processor
+
+MapStruct won’t generate code
+
+### ❌ Lombok + MapStruct conflicts
+
+Need:
+
+```gradle
+annotationProcessor "org.projectlombok:lombok"
+annotationProcessor "org.mapstruct:mapstruct-processor"
+```
+
+### ❌ Circular dependencies in mappers
+
+Break using `uses = {}`
+
+### ❌ Overusing expressions
+
+Leads to unreadable mapping
+
+## When NOT to Use MapStruct
+
+Avoid if:
+
+* Mapping is extremely dynamic (runtime rules)
+* You need reflection-based flexibility
+* Very small project (manual mapping is fine)
+
+
+## Conclusion
+MapStruct is a powerful tool for simplifying object mapping in Java applications. By defining mapper interfaces and using annotations to customize the mapping behavior, you can easily convert between different Java bean types without writing boilerplate code. MapStruct's compile-time code generation ensures that the mapping is efficient and type-safe, making it a great choice for handling object mapping in Java projects.    

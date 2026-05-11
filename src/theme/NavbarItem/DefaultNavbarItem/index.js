@@ -1,19 +1,20 @@
 import React from "react";
 import DefaultNavbarItem from "@theme-original/NavbarItem/DefaultNavbarItem";
 import { useLocation } from "@docusaurus/router";
+import useBaseUrl from '@docusaurus/useBaseUrl';
 
 export default function DefaultNavbarItemWrapper(props) {
   const { pathname } = useLocation();
   const className = props.className || "";
 
   // 1. Identify Section State
-  const isMath = pathname.startsWith("/mathematics");
-  const isHardware = pathname.startsWith("/hardware-design");
-  const isEmbedded = pathname.startsWith("/embedded-systems");
+  const isMath = pathname.startsWith(useBaseUrl("/mathematics"));
+  const isHardware = pathname.startsWith(useBaseUrl("/hardware-design"));
+  const isEmbedded = pathname.startsWith(useBaseUrl("/embedded-systems"));
 
   // Logical separation for your two software plugins
-  const isSoftEng = pathname.startsWith("/software-engineering");
-  const isSoftSystems = pathname.startsWith("/software-systems");
+  const isSoftEng = pathname.startsWith(useBaseUrl("/software-engineering"));
+  const isSoftSystems = pathname.startsWith(useBaseUrl("/software-systems"));
 
   const isAnySection =
     isMath || isHardware || isEmbedded || isSoftEng || isSoftSystems;

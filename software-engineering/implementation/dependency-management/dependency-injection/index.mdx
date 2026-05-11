@@ -4,6 +4,1279 @@ title: Dependency Injection
 sidebar_position: 1
 ---
 
-# Dependency Injection
+**Dependency Injection** is a design technique where an object receives the things it depends on from the outside instead of creating them itself.
 
-> Expand this section with detailed explanations, diagrams, and real-world examples.
+A **dependency** is simply another object or service a class needs to do its work.
+
+
+## Problem/Solution
+Hardcoded dependencies create tight coupling.
+
+Many classes depend on one or more underlying resources. For example, a spell
+checker depends on a dictionary. It is not uncommon to see such classes imple-
+mented as static utility classes (link to static utility class):
+```java
+// Inappropriate use of static utility - inflexible & untestable!
+public class SpellChecker {
+    private static final Lexicon dictionary = ...;
+    private SpellChecker() {} // Noninstantiable
+    public static boolean isValid(String word) { ... }
+    public static List<String> suggestions(String typo) { ... }
+}
+```
+Problem: `SpellChecker` permanently tied to one dictionary, This creates hardcoded dependency.
+
+Similarly, it’s not uncommon to see them implemented as singletons (link to singletons):
+// Inappropriate use of singleton - inflexible & untestable!
+```java
+public class SpellChecker {
+    private final Lexicon dictionary = ...;
+    private SpellChecker(...) {}
+    public static INSTANCE = new SpellChecker(...);
+    public boolean isValid(String word) { ... }
+    public List<String> suggestions(String typo) { ... }
+}
+```
+Singleton Version Is Also Bad
+```
+public static INSTANCE = new SpellChecker(...);
+```
+Still: One global fixed dependency
+
+Singleton changes lifetime management, but not coupling.
+
+The problem remains:
+- resource is internally chosen
+- implementation fixed globally
+
+Neither of these approaches is satisfactory, because 
+- they assume that there is
+only one dictionary worth using. In practice, each language has its own dictionary,
+and special dictionaries are used for special vocabularies. 
+- Also, it may be
+desirable to use a special dictionary for testing. 
+- It is wishful thinking to assume
+that a single dictionary will suffice for all time
+
+Suppose you need:
+| Situation     | Needed Dictionary    |
+| ------------- | -------------------- |
+| English       | English dictionary   |
+| Arabic        | Arabic dictionary    |
+| Medical terms | Medical dictionary   |
+| Testing       | Fake test dictionary |
+
+The static design cannot adapt easily.
+
+The Main Architectural Problem is that The class controls:
+- dependency selection
+- dependency creation
+- dependency lifetime
+
+instead of focusing only on spell-checking behavior. This violates separation of concerns.
+
+You could try to have `SpellChecker` support multiple dictionaries by 
+- making the dictionary field nonfinal and 
+- adding a method to change the dictionary in an existing spell checker. 
+
+```java
+private static Lexicon dictionary;
+
+public static void setDictionary(Lexicon d) {
+    dictionary = d;
+}
+```
+but this would be awkward, error-prone, and unworkable in a concurrent setting. 
+
+This introduces major problems:
+
+**A. Global Mutable State**
+
+Now the entire application shares mutable state.
+
+One component can unexpectedly affect another.
+
+**B. Thread Safety Problems**
+
+Imagine:
+```
+Thread A changes dictionary
+Thread B simultaneously uses spell checker
+```
+Possible inconsistent behavior.
+
+Concurrent systems become dangerous.
+
+**C. Testing Problems**
+
+Tests interfere with each other.
+
+Example:
+```
+Test 1 sets English dictionary
+Test 2 sets Arabic dictionary
+```
+Parallel tests break unpredictably.
+
+**D. Hidden Runtime Behavior**
+
+Behavior changes dynamically through global mutation.
+
+Harder to reason about.
+
+**Static utility classes and singletons are inappropriate for classes whose behavior is parameterized by an underlying resource**
+
+**Classes whose behavior depends on external resources should not hardcode those resources internally.**
+
+In the example:
+
+private static final Lexicon dictionary = ...;
+
+the dictionary is the underlying resource.
+
+Examples of underlying resources:
+
+- dictionaries
+- databases
+- file systems
+- APIs
+- caches
+- configuration
+- message brokers
+- loggers
+
+These are external collaborators the class depends on.
+
+What is required is the ability to support multiple instances of the class (in our
+example, `SpellChecker`), each of which uses the resource desired by the client (in
+our example, the dictionary). A simple pattern that satisfies this requirement is to
+pass the resource into the constructor when creating a new instance. This is
+one form of dependency injection: the dictionary is a dependency of the spell
+checker and is injected into the spell checker when it is created
+```java
+// Dependency injection provides flexibility and testability
+public class SpellChecker {
+    private final Lexicon dictionary;
+
+    public SpellChecker(Lexicon dictionary) {
+        this.dictionary = Objects.requireNonNull(dictionary);
+    }
+
+    public boolean isValid(String word) { ... }
+    public List<String> suggestions(String typo) { ... }
+}
+```
+Now:
+- dependency supplied externally
+- immutable after creation
+- each instance independent
+
+While our spell checker example had
+only a single resource (the dictionary), dependency injection works with an
+arbitrary number of resources and arbitrary dependency graphs. It preserves
+immutability (link to immutability), so multiple clients can share dependent objects (assuming
+the clients desire the same underlying resources). 
+
+Dependency injection is equally
+applicable to constructors, static factories (link to static factories), and builders (link to static factories)
+
+Without DI, classes often create their own dependencies directly.
+
+Example without DI:
+
+```java
+class UserService {
+
+    private EmailService emailService = new EmailService();
+
+    public void registerUser() {
+        emailService.sendWelcomeEmail();
+    }
+}
+```
+
+Here:
+
+* `UserService` depends on `EmailService`
+* but it also **creates** it
+
+This causes tight coupling.
+
+`UserService` is now strongly tied to:
+
+* a specific implementation
+* object creation details
+* lifecycle management
+
+This makes testing, replacement, and maintenance harder.
+
+
+**Solution**
+
+Inject dependencies from outside the class.
+
+Instead of creating dependencies internally, provide them externally.
+
+```java
+class UserService {
+
+    private EmailService emailService;
+
+    public UserService(EmailService emailService) {
+        this.emailService = emailService;
+    }
+
+    public void registerUser() {
+        emailService.sendWelcomeEmail();
+    }
+}
+```
+
+Now:
+
+* `UserService` only uses `EmailService`
+* someone else creates and provides it
+
+This is dependency injection.
+
+## Key Idea
+
+The class says:
+
+> “I need this dependency”
+
+instead of:
+
+> “I will create this dependency myself”
+
+## Benefits
+Prefer Dependency Injection to Hardwiring Resources.
+
+DI improves:
+
+| Benefit                | Explanation                                                        |
+| ---------------------- | ------------------------------------------------------------------ |
+| Loose Coupling(Decoupling)        | Classes depend on abstractions instead of concrete implementations |
+| Testability            | Easy to inject mocks/fakes                                         |
+| Flexibility            | Swap implementations easily                                        |
+| Maintainability        | Centralized object creation                                        |
+| Reusability            | Components become more independent                                 |
+| Separation of Concerns | Business logic separated from construction logic                   |
+
+## Types of Dependency Injection
+### Constructor Injection (Most Recommended)
+
+Dependencies provided through constructor.
+
+```java
+class Service {
+
+    private final Repository repository;
+
+    public Service(Repository repository) {
+        this.repository = repository;
+    }
+}
+```
+
+Advantages:
+
+* immutable dependencies
+* guarantees required dependencies exist
+* easier testing
+* clearer design
+
+This is generally the preferred approach.
+### Setter Injection
+
+Dependencies provided through setters.
+
+```java
+class Service {
+
+    private Repository repository;
+
+    public void setRepository(Repository repository) {
+        this.repository = repository;
+    }
+}
+```
+
+Useful for:
+
+* optional dependencies
+* reconfiguration
+
+Drawback:
+
+* object may exist in invalid state temporarily
+
+### Field Injection
+
+Framework injects directly into fields.
+
+```java
+class Service {
+
+    @Inject
+    private Repository repository;
+}
+```
+
+Common in frameworks like:
+
+* Spring Framework
+* Jakarta CDI
+
+Drawbacks:
+
+* hidden dependencies
+* harder testing
+* breaks immutability
+* harder to reason about
+
+Generally discouraged in modern design.
+### interface-injection
+
+## Dependency Inversion Principle Connection
+
+DI is strongly related to the SOLID principle:
+
+### Dependency Inversion Principle (DIP)
+
+High-level modules should not depend on low-level modules.
+
+Both should depend on abstractions.
+
+Example:
+
+```java
+interface NotificationService {
+    void send();
+}
+```
+
+```java
+class EmailService implements NotificationService {
+}
+```
+
+```java
+class UserService {
+
+    private NotificationService service;
+
+    public UserService(NotificationService service) {
+        this.service = service;
+    }
+}
+```
+
+`UserService` depends on abstraction, not implementation.
+
+DI helps implement DIP.
+
+---
+Dependency Injection ≠ Dependency Inversion Principle
+
+| Dependency Injection          | Dependency Inversion Principle        |
+| ----------------------------- | ------------------------------------- |
+| Technique/mechanism           | Design principle                      |
+| How dependencies are provided | How dependencies should be structured |
+| Operational                   | Architectural                         |
+| Can exist without DIP         | DIP often uses DI                     |
+
+## Inversion of Control (IoC)
+
+DI is a form of **Inversion of Control**.
+
+Normally:
+
+* object controls its dependencies
+
+With IoC:
+
+* external system controls dependency wiring
+
+DI is the mechanism that achieves this.
+
+## dependency-lifecycle
+## testing-with-di
+## avoiding-service-locator
+
+## Dependency Injection Containers
+
+In large applications, manually wiring dependencies becomes difficult.
+
+A **DI Container** automates:
+
+* object creation
+* lifecycle management
+* dependency resolution
+* configuration
+
+Examples:
+
+* Spring Framework
+* Google Guice
+* Dagger
+* NestJS
+* ASP.NET Core
+
+**Example with a DI Container (Spring)**
+
+```java
+@Service
+class UserService {
+
+    private final EmailService emailService;
+
+    public UserService(EmailService emailService) {
+        this.emailService = emailService;
+    }
+}
+```
+
+The container:
+
+* creates `EmailService`
+* creates `UserService`
+* injects dependency automatically
+
+## Manual DI vs Framework DI
+
+### Manual DI
+
+```java
+EmailService emailService = new EmailService();
+UserService userService = new UserService(emailService);
+```
+
+Good for:
+
+* small apps
+* learning
+* simple systems
+
+---
+
+### Framework DI
+
+Container handles everything.
+
+Good for:
+
+* enterprise systems
+* large applications
+* complex dependency graphs
+
+## Common Misconceptions
+
+### DI Is Not a Framework
+
+DI is a design principle/pattern.
+
+Frameworks only automate it.
+
+---
+
+### DI Is Not Just Annotations
+
+Annotations like `@Autowired` are framework features.
+
+DI itself is broader and language-independent.
+
+---
+
+## DI Does Not Mean “Everything Must Be Injectable”
+
+Overusing DI can create unnecessary complexity.
+
+Simple value objects often do not need injection.
+
+---
+
+## When DI Is Most Valuable
+
+DI becomes increasingly useful when systems have:
+
+* many components
+* layered architecture
+* testing requirements
+* interchangeable implementations
+* external resources
+* configuration complexity
+
+Examples:
+
+* repositories
+* APIs
+* databases
+* messaging systems
+* logging systems
+* payment providers
+
+## Dependency Injection vs Object Creation
+**Without DI**
+```java
+class Car {
+    private Engine engine = new DieselEngine();
+}
+```
+`Car` controls dependency creation.
+
+---
+
+**With DI**
+
+```java
+class Car {
+
+    private Engine engine;
+
+    public Car(Engine engine) {
+        this.engine = engine;
+    }
+}
+```
+
+Now the engine is injected.
+
+Possible engines:
+
+```java
+new Car(new DieselEngine());
+new Car(new ElectricEngine());
+new Car(new MockEngine());
+```
+Much more flexible.
+
+## Real-World Analogy
+
+Imagine a restaurant chef.
+
+Without DI:
+
+* the chef builds his own oven
+* grows vegetables
+* manufactures knives
+
+With DI:
+
+* suppliers provide everything
+* chef focuses only on cooking
+
+DI separates: **using something** from **creating something**
+
+## Relationship to Software Engineering Concepts
+
+Dependency Injection connects to many areas:
+
+| Area            | Relation                                         |
+| --------------- | ------------------------------------------------ |
+| SOLID           | Implements Dependency Inversion Principle        |
+| OOP             | Uses interfaces and composition                  |
+| Design Patterns | Used with Factory, Strategy, Repository, Adapter |
+| Architecture    | Core part of Hexagonal/Clean Architecture        |
+| Testing         | Enables mocking and isolation                    |
+| IoC             | DI is a form of IoC                              |
+| Modularity      | Reduces coupling                                 |
+
+
+Dependency Injection (DI) is not an isolated technique.
+
+It connects deeply with many major software engineering areas.
+
+DI sits at the intersection of:
+
+```text id="bghj74"
+Architecture
+OOP
+Testing
+Modularity
+Frameworks
+Maintainability
+Design Patterns
+```
+
+It is both:
+
+* a low-level coding technique
+  and
+* a high-level architectural enabler
+
+That dual role is why DI became central in modern software engineering.
+
+### SOLID Principles
+DI is most strongly connected to SOLID.
+
+#### A. Dependency Inversion Principle (DIP)
+
+This is the primary relationship.
+
+DIP says:
+
+High-level modules should depend on abstractions, not implementations
+
+DI helps achieve this by injecting implementations externally.
+
+Without DI:
+
+```java id="t4mzv4"
+class UserService {
+    private EmailService service = new EmailService();
+}
+```
+
+High-level logic depends directly on low-level details.
+
+With DI:
+
+```java id="n8y84z"
+class UserService {
+
+    private NotificationService service;
+
+    public UserService(NotificationService service) {
+        this.service = service;
+    }
+}
+```
+
+Now the service depends on abstraction.
+
+---
+
+#### B. Single Responsibility Principle (SRP)
+DI separates: **business logic** from **object construction/wiring**
+
+Without DI: Class responsibilities:
+- business logic
+- creating dependencies
+- configuring dependencies
+
+With DI: Class responsibility:
+- only business logic
+
+Construction is delegated elsewhere.
+
+---
+
+#### C. Open/Closed Principle (OCP)
+DI makes systems extensible without modifying existing code.
+
+Example:
+
+```java id="32edvv"
+interface PaymentProcessor {}
+```
+
+New implementations:
+
+```java id="rmd4mu"
+class StripeProcessor implements PaymentProcessor {}
+class PaypalProcessor implements PaymentProcessor {}
+```
+
+`CheckoutService` remains unchanged.
+
+### Object-Oriented Programming (OOP)
+DI heavily relies on OOP concepts.
+
+#### A. Abstraction
+
+DI works best with interfaces/contracts.
+
+```java id="tb6zy2"
+interface Repository {}
+```
+
+---
+
+#### B. Polymorphism
+Injected implementations can vary dynamically.
+
+```java id="17m3ya"
+Repository repo = new SqlRepository();
+Repository repo = new MongoRepository();
+```
+
+Same interface, different behavior.
+
+---
+
+#### C. Composition Over Inheritance
+DI encourages composition.
+
+Instead of inheriting behavior: `IS-A`
+
+objects receive collaborators: `HAS-A`
+
+Example:
+
+```java id="qzqz0j"
+class OrderService {
+    private PaymentGateway gateway;
+}
+```
+This is composition.
+
+DI strongly promotes composition-based architecture.
+
+---
+
+### Design Patterns
+DI interacts with many classic design patterns.
+
+#### A. Strategy Pattern
+
+DI commonly injects strategies.
+
+```java id="1t2hmf"
+interface SortingStrategy {}
+```
+
+```java id="k2kr56"
+class QuickSortStrategy {}
+class MergeSortStrategy {}
+```
+
+Injected dynamically.
+
+---
+
+#### B. Factory Pattern
+Factories create dependencies.
+
+DI containers are effectively advanced factories.
+
+---
+
+#### C. Repository Pattern
+Repositories are commonly injected.
+
+```java id="d31p7y"
+class ProductService {
+
+    private ProductRepository repository;
+}
+```
+
+---
+
+#### D. Adapter Pattern
+Adapters can be injected to integrate external systems.
+
+---
+
+#### E. Decorator Pattern
+
+Decorators are often assembled using DI containers.
+
+---
+
+### Clean Architecture / Hexagonal Architecture
+
+**In Clean/Hexagonal Architecture**
+
+DI is foundational.
+
+Example:
+
+```text
+Application Layer
+    depends on
+Port (Interface)
+    implemented by
+Infrastructure Adapter
+```
+
+Injection connects layers without tight coupling.
+
+This is heavily used in:
+
+* Clean Architecture
+* Hexagonal Architecture
+* Onion Architecture
+
+#### Dependency Rule
+
+In Clean Architecture:
+
+```text id="z6hz0p"
+Outer layers depend inward
+```
+
+Core business logic should not depend on infrastructure.
+
+DI enables this.
+
+**Example**
+
+Application layer:
+
+```java id="76g92f"
+interface PaymentGateway {}
+```
+
+Infrastructure layer:
+
+```java id="75mclm"
+class StripeGateway implements PaymentGateway {}
+```
+
+Injection connects them externally.
+
+The core remains infrastructure-independent.
+
+---
+
+### Modular Architecture
+
+DI supports modularity.
+
+Modules can:
+
+* evolve independently
+* be replaced independently
+* be tested independently
+
+Without DI: Modules tightly coupled
+
+With DI: Modules communicate through contracts
+
+---
+
+### Testing
+
+DI dramatically improves testability.
+
+This is one of its biggest practical benefits.
+
+**Without DI**
+
+```java id="qk82lb"
+private Database database = new Database();
+```
+
+Hard to isolate.
+
+**With DI**
+
+```java id="90o0qa"
+public Service(Database database)
+```
+
+Now inject:
+
+* mocks
+* stubs
+* fakes
+* spies
+
+Example:
+
+```java id="9lm7ci"
+Database fakeDb = new FakeDatabase();
+Service service = new Service(fakeDb);
+```
+
+Unit testing becomes easy.
+
+### Mocking Frameworks
+
+DI works closely with testing libraries.
+
+Examples:
+
+* Mockito
+* JUnit
+* pytest
+
+These frameworks rely heavily on injectable dependencies.
+
+### Separation of Concerns (SoC)
+
+DI enforces clear boundaries.
+
+**Without DI**
+
+Classes handle:
+
+* business logic
+* configuration
+* creation
+* lifecycle
+
+
+**With DI**
+
+Responsibilities separated:
+
+| Concern           | Owner             |
+| ----------------- | ----------------- |
+| Business behavior | Service           |
+| Object creation   | Container/factory |
+| Configuration     | Config layer      |
+| Lifecycle         | DI framework      |
+
+### Inversion of Control (IoC)
+
+DI is one implementation of IoC.
+
+Traditional flow: Object controls dependencies
+
+With IoC: External system controls wiring
+
+DI achieves this by externalizing dependency creation.
+
+### Configuration Management
+
+DI centralizes configuration.
+
+Example:
+
+```java id="5nkw7o"
+@Bean
+public PaymentGateway gateway() {
+    return new StripeGateway(apiKey);
+}
+```
+
+Benefits:
+
+* environment-specific configs
+* centralized setup
+* easier deployment changes
+
+
+### Framework Design
+
+Modern frameworks heavily rely on DI.
+
+Examples:
+
+* Spring Framework
+* Angular
+* NestJS
+* ASP.NET Core
+
+Framework features often depend on:
+
+* service registration
+* dependency graphs
+* automatic injection
+
+### Microservices Architecture
+
+DI is important in microservices because services often depend on:
+
+* HTTP clients
+* repositories
+* message brokers
+* caches
+* observability tools
+
+Injection simplifies:
+
+* swapping implementations
+* testing services
+* environment configuration
+
+
+### Domain-Driven Design (DDD)
+
+DI helps maintain domain purity.
+
+Domain logic should avoid infrastructure concerns.
+
+DI injects infrastructure externally.
+
+Example:
+
+```text id="5f8k2w"
+Domain Layer
+    depends on
+Domain Interfaces
+
+Infrastructure
+    implements interfaces
+```
+
+### Maintainability
+
+DI reduces ripple effects.
+
+Changing implementation:
+
+```text id="m5slg0"
+Old implementation removed
+New implementation injected
+```
+
+Minimal code modification required.
+
+### Scalability of Codebases
+
+As systems grow:
+
+Without DI:
+
+```text id="lmd6hh"
+dependency chaos
+tight coupling
+hard wiring
+```
+
+With DI:
+
+```text id="jlwm8a"
+structured dependency graphs
+controlled composition
+replaceable components
+```
+
+Large enterprise systems rely heavily on this.
+
+### Compile-Time vs Runtime Architecture
+
+DI introduces distinction between:
+
+| Phase        | Concern                |
+| ------------ | ---------------------- |
+| Compile-time | abstractions/contracts |
+| Runtime      | actual implementations |
+
+Example:
+
+Compile-time:
+
+```java id="frln8l"
+NotificationService
+```
+
+Runtime:
+
+```java id="f5r4e8"
+EmailService
+SmsService
+PushNotificationService
+```
+
+This flexibility is extremely powerful.
+
+### Enterprise Application Development
+
+Enterprise systems typically require:
+
+* transactional boundaries
+* multiple environments
+* infrastructure abstraction
+* testing isolation
+* modular services
+
+DI became one of the foundational enterprise development techniques because it addresses these needs directly.
+
+
+## Relationship Between DIP, IoC, and DI
+
+### Dependency Inversion Principle (DIP)
+
+DIP is an **architectural design principle** from SOLID.
+
+It answers:
+
+> “How should dependencies between modules be structured?”
+
+Core idea: Depend on abstractions, not concrete implementations
+
+Focus:
+
+* dependency direction
+* architecture
+* coupling
+* abstractions/interfaces
+
+---
+
+### Inversion of Control (IoC)
+
+IoC is a **broader design concept/pattern family**.
+
+It answers:
+
+> “Who controls object creation and workflow?”
+
+Traditional control: Application code controls everything
+
+IoC: External framework/container controls parts of the system
+
+Examples of IoC:
+
+* Dependency Injection
+* Event systems
+* Template Method pattern
+* Callbacks
+* Plugin architectures
+
+So IoC is a large umbrella concept.
+
+---
+
+### Dependency Injection (DI)
+
+DI is a **specific technique** used to implement IoC.
+
+It answers:
+
+> “How are dependencies provided?”
+
+Instead of:
+
+```java id="z8kmj3"
+new EmailService()
+```
+
+dependencies are injected externally.
+
+---
+
+### Their Actual Relationship
+
+```text id="3nh89l"
+IoC (broad concept)
+    └── DI (specific technique)
+
+DIP (architectural principle)
+    └── often implemented using DI
+```
+
+---
+
+### Important Distinction
+
+#### DIP and IoC are orthogonal concepts
+
+They interact, but one is not contained inside the other.
+
+| Concept | Type                     | Main Focus                      |
+| ------- | ------------------------ | ------------------------------- |
+| DIP     | Design principle         | Dependency structure            |
+| IoC     | Control principle        | Who controls execution/creation |
+| DI      | Implementation technique | How dependencies are supplied   |
+
+---
+
+### Example Showing the Difference
+
+**You can use DI without fully applying DIP**
+
+```java id="sz4ggo"
+class UserService {
+
+    private EmailService emailService;
+
+    public UserService(EmailService emailService) {
+        this.emailService = emailService;
+    }
+}
+```
+
+This uses DI.
+
+But it still depends on concrete `EmailService`.
+
+So DIP is not fully achieved.
+
+---
+
+**DIP with DI**
+
+```java id="ehgo6z"
+interface NotificationService {
+}
+```
+
+```java id="w2o1t6"
+class EmailService implements NotificationService {
+}
+```
+
+```java id="0x9vwq"
+class UserService {
+
+    private NotificationService service;
+
+    public UserService(NotificationService service) {
+        this.service = service;
+    }
+}
+```
+
+Now:
+
+* DI is used
+* DIP is satisfied
+* IoC may be involved if container manages wiring
+
+---
+
+**Better Structural View**
+
+```text id="vghr2q"
+                 IoC
+                  |
+         -----------------
+         |               |
+        DI         Other IoC Forms
+
+
+                 DIP
+                  |
+      Often implemented using
+                  |
+                  DI
+```
+
+---
+
+**Why People Confuse Them**
+
+Frameworks like:
+
+* Spring Framework
+* ASP.NET Core
+
+often combine:
+
+* IoC containers
+* DI mechanisms
+* DIP-friendly architecture
+
+So the concepts appear together constantly.
+
+But conceptually they are separate.
+
+## Anti-Patterns
+- Direct instantiation
+- Static dependencies
+
+## Simple Mental Model
+
+**Without DI**
+
+```text
+Class creates everything it needs
+```
+
+**With DI**
+
+```text
+Class receives everything it needs
+```
+
+That single change greatly improves system flexibility and maintainability.
+
+## Related Topics
+- Dependency Inversion Principle
+- Spring Dependency Injection

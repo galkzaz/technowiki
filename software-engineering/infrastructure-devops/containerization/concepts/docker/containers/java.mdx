@@ -1,0 +1,98 @@
+---
+id: infrastructure-devops-containerization-docker-containers-java
+title: Containerizing Java Apps
+sidebar_position: 2
+---
+
+Previously, the official Docker image for Java came from the **OpenJDK** project: https://hub.
+docker.com/_/openjdk/. Since July 2022, no Docker images are published in this registry. We will
+use an alternative Docker image from the **Eclipse Temurin** project. It contains the same binaries
+from the OpenJDK project and provides variants of the Docker images that meet our needs better
+than the Docker images from the OpenJDK project.
+
+Earlier versions of Java have not been very good at honoring the quotas
+specified for a Docker container using Linux cgroups; they simply ignored these settings. So, in-
+stead of allocating memory inside the JVM in relation to the memory available in the container,
+Java allocated memory as if it had access to all the memory in the Docker host. When trying to
+allocate more memory than allowed, the Java container was killed by the host with an “out of
+memory” error message. In the same way, Java allocated CPU-related resources such as thread
+pools in relation to the total number of available CPU cores in the Docker host, instead of the
+number of CPU cores that were made available for the container JVM was running in.
+
+## Limiting available CPUs
+To find out how many available processors (that is, CPU cores) Java sees without
+applying any constraints. We can do this by sending the Java statement `Runtime.getRuntime().availableprocessors()` to the Java CLI tool jshell.
+```bash
+echo 'Runtime.getRuntime().availableProcessors()' | docker run --rm -i eclipse-temurin:24 jshell -q
+```
+This command will send the string `Runtime.getRuntime().availableProcessors()` to the
+Docker container, which will process the string using jshell.
+
+Th response will depened on how many cores the Docker host is configured use.
+
+To restrict the Docker container to only be allowed to use three CPU cores using
+the `--cpus 3` Docker option, then ask the JVM about how many available processors it sees:
+```bash
+echo 'Runtime.getRuntime().availableProcessors()' | docker run --rm -i eclipse-temurin:24 jshell -q
+```
+The JVM now responds with `$1 ==> 3`; that is, Java SE 24 honors the settings in the container
+and will, therefore, be able to configure CPU-related resources such as thread pools correctly!
+
+## Limiting available memory
+In terms of the amount of available memory, let’s ask the JVM for the maximum size that it thinks
+it can allocate for the heap. We can achieve this by asking the JVM for extra runtime information
+using the `-XX:+PrintFlagsFinal` Java option and then using the **grep** command to filter out the
+`MaxHeapSize` parameter, like so:
+```bash
+docker run -it --rm eclipse-temurin:24 java -XX:+PrintFlagsFinal | grep "size_t MaxHeapSize"
+```
+With 16 GB of memory allocated to the Docker host, we will get the following response
+```console
+size_t MaxHeapSize                              = 4188012544                                {product} {ergonomic}
+```
+With no JVM memory constraints (that is, not using the JVM parameter `-Xmx`), Java will allocate
+`one-quarter` of the memory available to the container for its heap. So, we expect it to allocate up to
+`4 GB` to its heap. From the preceding commanad, we can see that the response was `4,188,012,544`
+bytes. That equals `4,188,012,544 / 1024 / 1024 = 3,994 MB`, which is close to the expected `4 GB`.
+
+If we constrain the Docker container to only use up to `1 GB` of memory using the Docker option
+`-m=1024M`, we expect to see a lower max memory allocation. Run the following command:
+```bash
+docker run -it --rm -m=1024M eclipse-temurin:24 java -XX:+PrintFlagsFinal | grep "size_t MaxHeapSize"
+```
+This will result in the response 268,435,456 bytes, which equals `268,435,456 / 1024 / 1024 = 256`
+MB. `256 MB` is one-quarter of `1 GB`, so again, this is as expected.
+
+We can, as usual, set the max heap size on the JVM ourselves. For example, if we want to allow
+the JVM to use `600 MB` of the total `1 GB` we have for its heap, we can specify that using the JVM
+option `-Xmx600m` like so:
+```bash
+docker run -it --rm -m=1024M eclipse-temurin:24 java -Xmx600m
+-XX:+PrintFlagsFinal -version | grep "size_t MaxHeapSize"
+```
+The JVM will respond with `629,145,600 bytes = 629,145,600 / 1024 / 1024 = 600 MB`, again as
+expected.
+
+Let’s conclude with an “out of memory” test to ensure that this really works!
+We’ll allocate some memory using jshell in a JVM that runs in a container that has been given
+`1 GB` of memory; that is, it has a max heap size of `256 MB`.
+First, try to allocate a byte array of 100 MB:
+```bash
+echo 'new byte[100_000_000]' | docker run -i --rm -m=1024M eclipse-temurin:24 jshell -q
+```
+The command will respond with $1 ==>, meaning that it worked fine!
+
+Now, let’s try to allocate a byte array that is larger than the max heap size, for example, 500 MB:
+```bash
+echo 'new byte[500_000_000]' | docker run -i --rm -m=1024M eclipse-temurin:24 jshell -q
+```
+The JVM sees that it can’t perform the action since it honors the container settings of max memory
+and responds immediately with Exception java.lang.OutOfMemoryError: Java heap space.
+
+:::note
+
+JShell behaves differently from normal Java programs:
+- It runs user code in a separate execution engine (remote JVM process) 
+- When that process crashes (like OOM) → it just says: State engine terminated.
+- No detailed error unless you run interactively
+:::

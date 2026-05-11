@@ -1,0 +1,195 @@
+---
+id: design-architecture-architectural-styles-microservices-deployment-containerization-docker-spring-boot-exams
+title: Containerize Spring Boot Using Docker
+sidebar_position: 1
+---
+
+
+<QandA>
+<Question>
+
+How can we make a Spring-based application run as a Docker container without requiring modifications of its source code?
+
+</Question>
+<Answer>
+
+You can containerize a Spring application **without changing its source code at all** by treating it as a *packaged artifact* (usually a JAR/WAR) and controlling everything from the Docker layer: runtime, JVM flags, and configuration injection.
+
+The key idea is: Don’t modify the app—wrap it with the right runtime environment.
+
+---
+
+**Build the application normally**
+
+From Spring Boot (via Spring Boot), you already get an executable JAR:
+
+```bash
+./mvnw clean package
+```
+
+You end up with something like:
+
+```
+target/app.jar
+```
+
+No source changes required.
+
+---
+
+**Create a Docker image (minimal approach)**
+
+Use a plain JRE image:
+
+```dockerfile
+FROM eclipse-temurin:17-jre
+
+WORKDIR /app
+
+COPY target/app.jar app.jar
+
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+This already runs your Spring app inside a container.
+
+---
+
+**Pass configuration externally (no code changes)**
+
+Spring Boot is designed for external configuration via:
+* environment variables
+* system properties
+* mounted config files
+
+---
+
+**Option A: Environment variables (most common)**
+
+```bash
+docker run \
+  -e SERVER_PORT=8081 \
+  -e SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/mydb \
+  my-spring-app
+```
+
+Spring automatically maps:
+
+```
+SPRING_DATASOURCE_URL → spring.datasource.url
+```
+
+---
+
+**Option B: Application properties file**
+
+```bash
+docker run \
+  -v $(pwd)/application-prod.properties:/app/config/application.properties \
+  my-spring-app
+```
+
+Spring Boot will pick it up automatically.
+
+---
+
+**Option C: JVM system properties**
+
+```bash
+docker run my-spring-app \
+  java -jar app.jar \
+  -Dspring.profiles.active=prod
+```
+
+---
+
+**Handle memory & CPU correctly**
+
+Even without code changes, you MUST tune the JVM:
+
+```dockerfile
+ENTRYPOINT ["java",
+  "-XX:MaxRAMPercentage=75",
+  "-Dspring.profiles.active=prod",
+  "-jar",
+  "app.jar"
+]
+```
+
+This ensures it respects container limits (important with cgroups used by Docker).
+
+---
+
+**Production-grade improvement**
+
+Instead of raw JAR execution, use a layered Spring Boot image:
+
+```dockerfile
+FROM eclipse-temurin:17-jre as runtime
+
+WORKDIR /app
+COPY target/app.jar app.jar
+
+ENTRYPOINT ["java","-jar","app.jar"]
+```
+
+Or better: Spring Boot layered JAR optimization (faster startup, caching).
+
+---
+
+**Why this works without source changes**
+
+Spring Boot already supports:
+
+* Externalized configuration (12-factor app style)
+* Environment variable binding
+* Profile switching
+* Auto-detection of runtime environment
+
+So Docker is just a **deployment wrapper**, not a code dependency.
+
+---
+
+**Mental model**
+
+Think of it like this:
+
+* Your Spring app = 🎁 “sealed application package”
+* Docker = 📦 “delivery box”
+* JVM + config = ⚙️ “runtime environment you attach externally”
+
+---
+
+**Typical real-world setup**
+
+In production with Kubernetes:
+
+* Image contains only JAR + JRE
+* Config comes from:
+
+  * ConfigMaps
+  * Environment variables
+  * Secrets
+* No rebuild needed per environment
+
+---
+
+**✅ Summary**
+
+You don’t need to modify Spring code because:
+
+✔ Spring Boot supports external configuration
+✔ Docker just provides runtime isolation
+✔ JVM runs the JAR directly
+✔ Everything configurable is injected externally
+
+---
+
+If you want, I can show:
+
+* A **production-ready Dockerfile (multi-stage, slim, secure)**
+* Or how Spring Boot + Docker behaves inside Kubernetes deployments step-by-step
+
+
+</Answer>
+</QandA>

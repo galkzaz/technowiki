@@ -1,0 +1,372 @@
+---
+id: frameworks-platforms-backend-frameworks-spring-boot-spring-data-jdbc
+title: Spring Data JDBC
+sidebar_position: 2
+---
+
+Spring Data JDBC encourages working with immutable entities. Using Java records to
+model entities is an excellent choice, since they’re immutable by design and expose
+an all-args constructor that the framework can use to populate objects.
+
+## Enabling and configuring JDBC 
+1. Add dependencies
+
+   ```gradle
+     dependencies {
+     ...
+     implementation 'org.springframework.boot:spring-boot-starter-data-jdbc'
+     runtimeOnly 'org.postgresql:postgresql'
+     }
+
+   ```
+
+   ```xml
+     <dependency>
+       <groupId>org.springframework.boot</groupId>
+       <artifactId>spring-boot-starter-data-jdbc</artifactId>
+     </dependency>
+     <dependency>
+       <groupId>org.postgresql</groupId>
+       <artifactId>postgresql</artifactId>
+       <scope>runtime</scope>
+     </dependency>
+   ```
+2. Configuring the connection to a database using JDBC
+
+   ```yml
+     spring:
+       datasource:
+         username: user
+         password: password
+         url: jdbc:postgresql://localhost:5432/polardb_catalog
+         hikari:
+           # The maximum time (ms) to spend waiting to get a connection from the pool
+           connection-timeout: 2000 #ms
+           # The maximum number of connections HikariCP will keep in the pool
+           maximum-pool-size: 5
+
+   ```
+
+## Defining persistent entities with Spring Data
+Depending on the business domain and its complexity, you might
+want to distinguish the domain entity from the persistent entity, making the domain
+layer utterly independent of the persistence layer. If you’d like to explore how to
+model that scenario, I recommend referring to domain-driven design and hexagonal
+architecture principles.
+
+Spring Data JDBC encourages working with immutable entities. Using Java records to
+model entities is an excellent choice, since they’re immutable by design and expose
+an all-args constructor that the framework can use to populate objects.
+
+A persistent entity must have a field that acts as the identifier for the object, which
+will translate to the primary key in the database. You can mark a field as an identifier
+with the @Id annotation (from the org.springframework.data.annotation package). The database is responsible for generating a unique identifier for each created
+object automatically.
+
+Some domaind like books are uniquely identified by an ISBN, which we can call a natural
+key (or business key) for the domain entity. We could decide to use it also as the
+primary key or introduce a technical key (or surrogate key). There are pros and
+cons to both approaches. We can chose to use a technical key to make it easier to
+manage and to decouple domain concerns from persistence implementation
+details.
+
+```java
+import java.time.Instant;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
+
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.annotation.Version;
+
+public record Book(
+
+        @Id Long id,
+
+        @NotBlank(message = "The book ISBN must be defined.") @Pattern(regexp = "^([0-9]{10}|[0-9]{13})$", message = "The ISBN format must be valid.") String isbn,
+
+        @NotBlank(message = "The book title must be defined.") String title,
+
+        @NotBlank(message = "The book author must be defined.") String author,
+
+        @NotNull(message = "The book price must be defined.") @Positive(message = "The book price must be greater than zero.") Double price,
+
+        String publisher,
+
+        @CreatedDate Instant createdDate,
+
+        @LastModifiedDate Instant lastModifiedDate,
+
+        @Version int version
+
+) {
+    // For convenience, let’s add a static factory method to the Book record for
+    // building an object by passing only the business fields.
+
+    public static Book of(String isbn, String title, String author, Double price, String publisher) {
+        return new Book(null, isbn, title, author, price, publisher, null, null, 0);
+    }
+
+}
+```
+As a persistent entity, the Book record will be automatically mapped to relational
+resources. Class and field names are transformed into lowercase, and the camel case is
+translated into words joined by underscores. The Book record will result in the book
+table, the title field will result in the title column, the price field will result in theprice column, and so on. 
+
+image::11-development/02-spring/02-data/spring-data-jdbc/mapping between the Java object and the relational table.png[Java classes marked as persistent entities are automatically mapped by Spring Data JDBC to 
+relational resources in the database.]
+
+## Optimistic locking
+It’s also OK when a single user updates an existing Entity object in isolation. But what happens if the same entity
+is updated by multiple users concurrently? Spring Data JDBC supports optimistic locking
+to address that concern. Users can read data concurrently. When a user attempts an
+update operation, the application checks if there has been any change since the last
+read. If there was, the operation is not performed, and an exception is thrown. The
+check is based on a numeric field that starts counting from 0 and automatically
+increases at every update operation. You can mark such a field with the @Version
+annotation (from the org.springframework.data.annotation package).
+
+When the @Id field is null and the @Version field is 0, Spring Data JDBC assumes
+it’s a new object. Consequently, it relies on the database to generate an identifier
+when inserting the new row in the table. When values are provided, it expects to find
+the object in the database already and to update it.
+== CREATING THE DATABASE SCHEMA
+The database must have a table defined in DB for the mapping to
+work. Spring Data offers a feature to initialize a data source at startup time. By default,
+you can use a schema.sql file to create a schema and a data.sql file to insert data in the
+newly created tables. Such files should be placed in the src/main/resources folder.
+
+That is a convenient feature, and it’s useful for demos and experiments. However, it’s
+too limited for use in production. it’s better to create
+and evolve relational resources with a more sophisticated tool, like Flyway or Liquibase,
+which will let you version-control your database. 
+
+```sql
+DROP TABLE IF EXISTS book; 
+CREATE TABLE book (
+ id BIGSERIAL PRIMARY KEY NOT NULL, 
+ author varchar(255) NOT NULL,
+ isbn varchar(255) UNIQUE NOT NULL, 
+ price float8 NOT NULL,
+ title varchar(255) NOT NULL, 
+ version integer NOT NULL 
+);
+```
+By default, Spring Data loads the schema.sql file only when using an embedded, inmemory database. When using Other DB, we need to enable the functionality
+explicitly. In the application.yml file for your service project, add the following configuration to initialize the database schema from the schema.sql file.
+```yml
+spring:
+ sql:
+ init:
+ mode: always
+
+```
+
+## Enabling and configuring JDBC auditing
+
+When persisting data, it’s useful to know the creation date for each row in a table and
+the date when it was updated last. After securing an application with authentication
+and authorization, you can even register who created each entity and recently updated
+it. All of that is called database auditing.
+
+With Spring Data JDBC, you can enable auditing for all the persistent entities
+using the @EnableJdbcAuditing annotation on a configuration class.
+
+we’ll also define an AuditorAware bean that should return the principal the currently authenticated user.
+
+```java
+import java.util.Optional;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.domain.AuditorAware;
+import org.springframework.data.jdbc.repository.config.EnableJdbcAuditing;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+@Configuration
+/*
+ * With Spring Data JDBC, you can enable auditing for all the persistent
+ * entities
+ * using the @EnableJdbcAuditing annotation on a configuration class.
+ */
+@EnableJdbcAuditing ①
+public class DataConfig {
+    // define an AuditorAware bean that should return the principal cthe currently
+    // authenticated user.
+    // Returns the currently authenticated user for auditing purposes
+    @Bean
+    AuditorAware<String> auditorAware() { ②
+        return () -> Optional
+                // Extracts the SecurityContext object for the currently authenticated user from
+                // SecurityContextHolder
+                .ofNullable(SecurityContextHolder.getContext())
+                // Extracts the Authentication object for the currently authenticated user from
+                // SecurityContext
+                .map(SecurityContext::getAuthentication)
+                // Handles the case where a user is not authenticated, but is manipulating data.
+                // Since we protected all the endpoints, this case should never happen, butwe’ll
+                // include it for completeness.
+                .filter(Authentication::isAuthenticated)
+                // Extracts the username for the currently authenticated user from the
+                // Authentication object
+                .map(Authentication::getName);
+    }
+}
+```
+
+Spring Data provides convenient annotations that we can use on dedicated fields to capture the information from such events (audit
+metadata) and store it in the database as part of the entity.
+
+```java
+import java.time.Instant;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
+
+import org.springframework.data.annotation.CreatedBy;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.LastModifiedBy;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.annotation.Version;
+
+public record Book (
+
+        @Id
+        Long id,
+
+        @NotBlank(message = "The book ISBN must be defined.")
+		@Pattern(regexp = "^([0-9]{10}|[0-9]{13})$", message = "The ISBN format must be valid.")
+        String isbn,
+
+        @NotBlank(message = "The book title must be defined.")
+        String title,
+
+        @NotBlank(message = "The book author must be defined.")
+        String author,
+
+        @NotNull(message = "The book price must be defined.")
+        @Positive(message = "The book price must be greater than zero.")
+        Double price,
+
+        String publisher,
+
+        @CreatedDate
+        Instant createdDate, ①
+
+        @LastModifiedDate
+        Instant lastModifiedDate,<2>
+
+        @CreatedBy
+        String createdBy,<3>
+
+        @LastModifiedBy
+        String lastModifiedBy,<4>
+
+        @Version
+        int version
+
+){
+
+        public static Book of(String isbn, String title, String author, Double price, String publisher) {
+                return new Book(null, isbn, title, author, price, publisher, null, null, null, null, 0);
+        }
+
+}
+```
+```sql
+CREATE TABLE orders (
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    book_isbn varchar(255) NOT NULL,
+    book_name varchar(255),
+    book_price float8,
+    quantity int NOT NULL,
+    status varchar(255) NOT NULL,
+    created_date timestamp NOT NULL,
+    created_by varchar(255),
+    last_modified_date timestamp NOT NULL,
+    last_modified_by varchar(255),
+    version integer NOT NULL
+);
+```
+
+## Data repositories with Spring Data
+
+The repository pattern provides an abstraction for accessing data independently of its
+source.
+
+When using Spring Data repositories, your responsibility is limited to defining an
+interface. At startup time, Spring Data will generate an implementation for your interface on the fly.
+
+## Defining transactional contexts
+
+The repositories provided by Spring Data come configured with transactional contexts for all the operations. For example, all methods in CrudRepository are transactional. That means you can safely call the saveAll() method, knowing that it will be
+executed in a transaction.
+
+When you add your own query methods, it’s up
+to you to define which ones should be part of a transaction. You can rely on the
+declarative transaction management provided by the Spring Framework and use
+the @Transactional annotation (from the org.springframework.transaction.annotation package) on classes or methods to ensure they are executed as part of
+a single unit of work.
+
+```java
+@Modifying
+@Transactional
+@Query("delete from Book where isbn = :isbn")
+void deleteByIsbn(String isbn);
+```
+
+## Usage
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-jdbc</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.postgresql</groupId>
+    <artifactId>postgresql</artifactId>
+    <scope>runtime</scope>
+</dependency>
+```
+
+Domain
+
+```java
+public record Book(
+
+        @Id Long id,
+
+        @NotBlank(message = "The book ISBN must be defined.") @Pattern(regexp = "^([0-9]{10}|[0-9]{13})$", message = "The ISBN format must be valid.") String isbn,
+
+        @NotBlank(message = "The book title must be defined.") String title,
+
+        @NotBlank(message = "The book author must be defined.") String author,
+
+        @NotNull(message = "The book price must be defined.") @Positive(message = "The book price must be greater than zero.") Double price,
+
+        String publisher,
+
+        @CreatedDate Instant createdDate,
+
+        @LastModifiedDate Instant lastModifiedDate,
+
+        @Version int version
+
+) {
+
+    public static Book of(String isbn, String title, String author, Double price, String publisher) {
+        return new Book(null, isbn, title, author, price, publisher, null, null, 0);
+    }
+
+}
+```

@@ -168,7 +168,7 @@ Time complexity is relative to:
 That’s why textbooks say: "Assume priority queue supports insert in O(log n)", They isolate algorithm complexity from implementation complexity.
 
 #### Effect of Abstraction on Performance
-<!--How Bad Abstraction Can Destroy Performance-->
+{/*How Bad Abstraction Can Destroy Performance*/}
 **Example 1: Hidden Linear Cost**
 
 Suppose:
@@ -315,7 +315,7 @@ Notice, The ADT does NOT specify:
 
 It specifies behavior, not implementation.
 
-<!--Algorithm Analysis with ADTs-->
+{/*Algorithm Analysis with ADTs*/}
 When analyzing an algorithm using a stack:
 We assume:
 - push → O(1)
@@ -401,7 +401,7 @@ Also O(1)
 Both satisfy the same ADT.
 
 #### Data Structures Derived from ADTs
-<!--Visual Taxonomy of Data Structures Derived from ADTs-->
+{/*Visual Taxonomy of Data Structures Derived from ADTs*/}
 All major structures come from a few core ADTs.
 
 Below is a conceptual map.
@@ -506,7 +506,7 @@ This makes algorithm analysis:
 your code affected by the bug.
 ### Interface vs Implementation
 ### Encapsulation
-<!--Abstraction vs encapsulation (precise difference)-->
+{/*Abstraction vs encapsulation (precise difference)*/}
 In programming languages:
 - ADT = interface
 - Implementation = hidden private data

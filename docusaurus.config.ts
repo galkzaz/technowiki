@@ -28,7 +28,7 @@ const sharedDocsConfig = {
       rehypeKatex,
       {
         // TODO remove this and fix all issues
-        strict: false, // This will ignore the newLineInDisplayMode warning
+        //strict: false, // This will ignore the newLineInDisplayMode warning
       },
     ],
   ],
@@ -37,12 +37,12 @@ const sharedDocsConfig = {
     extendDefaults: true,
   },
 };
-
+const isDeploying = process.env.NODE_ENV === 'production';
 const config: Config = {
   title: "TechnoWiki",
   tagline: "Computer Science & Engineering Knowledge Base",
   url: "https://galkzaz.github.io",
-  baseUrl: "/technowiki/",
+  baseUrl: isDeploying ? '/technowiki/' : '/', // Use sub-path only for production
   organizationName: 'galkzaz', // Usually your GitHub org/user name.
   projectName: 'technowiki', // Usually your repo name.
   deploymentBranch: 'main',
@@ -60,11 +60,10 @@ const config: Config = {
 
   stylesheets: [
     {
-      href: "https://cdn.jsdelivr.net/npm/katex@0.13.24/dist/katex.min.css",
+      href: "https://cdn.jsdelivr.net/npm/katex@0.16.28/dist/katex.min.css",
       type: "text/css",
-      integrity:
-        "sha384-odtC+0UGitSBRDoLaUI8fTPazskKNwXV6cnzLrdSD/EVDG7nqaG6ELCL9XBaQHzl",
-      crossorigin: "anonymous",
+      //integrity: "sha384-Wsr4Nh3yrvMf2KCebJchRJoVo1gTU6kcP05uRSh5NV3sj9+a8IomuJoQzf3sMq4T",
+      //crossorigin: "anonymous",
     },
   ],
 
@@ -471,9 +470,9 @@ const config: Config = {
               to: "/software-engineering/infrastructure-devops/build-packaging",
             },
             {
-              label: "Docker",
+              label: "Containerization",
               sidebarId: "DockerSidebar",
-              to: "/software-engineering/infrastructure-devops/containerization/docker",
+              to: "/software-engineering/infrastructure-devops/containerization/concepts/docker/basics",
             },
             {
               label: "Kubernetes",
@@ -551,6 +550,7 @@ const config: Config = {
         "cpp",
         "bash",
         "pascal",
+        "docker"
       ],
     },
   },

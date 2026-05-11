@@ -2,9 +2,10 @@
 
 to replace all bullets with bold ****
 
-^(\d+\.\s)([^**].+)\:
-$1**$2**:
+^(\d+\.\s)([^**].+)\ ==> $1**$2**:
 
+
+🔹 (.+) ==> **$1**\n
 ## Arrows
 ↑ ↓ → ← ↔
 ↖ ↗ ↘ ↙
@@ -32,14 +33,21 @@ $1**$2**:
 
 
 <Tabs groupId="code">
+
 <TabItem value="maven" label="Maven">
+
 ```maven
 ```
+
 </TabItem>
+
 <TabItem value="gradle" label="Gradle">
+
 ```groovy
 ```
+
 </TabItem>
+
 </Tabs>
 
 <details>

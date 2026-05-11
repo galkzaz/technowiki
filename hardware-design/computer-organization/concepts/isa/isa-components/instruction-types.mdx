@@ -1,0 +1,4259 @@
+---
+id: computer-organization-isa-isa-components-instruction-types
+title: Instruction Types
+sidebar_position: 2
+---
+
+
+Instruction types categorize the operations supported by the processor.
+
+Broadly, RISC-V instructions fall into these functional categories:
+| Category                     | Description                                 | Examples                                  |
+| ---------------------------- | ------------------------------------------- | ----------------------------------------- |
+| **Arithmetic / Logical**     | Compute values from registers or immediates | `add`, `sub`, `addi`, `and`, `ori`, `sll` |
+| **Data Movement / Transfer** | Move data between registers and memory      | `ld`, `sd`, `lw`, `sw`                    |
+| **Control / Branch / Jump**  | Change program flow                         | `beq`, `bne`, `jal`, `jalr`               |
+| **Other / System**           | System instructions, CSR access, fences     | `ecall`, `csrrw`, `fence`                 |
+
+### Arithmetic instructions
+Every computer must be able to perform arithmetic. For example the RISC-V assembly language notation:
+```nasm
+add a, b, c
+```
+instructs a computer to add the two variables b and c and to put their sum in a.
+
+This notation is rigid in that 
+1. each RISC-V arithmetic instruction performs only one operation and 
+2. must always have exactly three variables. 
+
+Requiring every instruction to have exactly three operands, no more and no less, conforms to the philosophy of keeping the hardware simple: hardware for a variable number of operands is more complicated than hardware for a fixed number. This situation illustrates the first of three underlying principles of hardware design which is `Simplicity favors regularity`.
+
+For example, suppose we want to place the sum of four variables b, c, d, and e into variable a. The following sequence of instructions adds the four variables:
+```nasm
+add a, b, c // The sum of b and c is placed in a
+add a, a, d // The sum of b, c, and d is now in a
+add a, a, e // The sum of b, c, d, and e is now in a
+```
+Thus, it takes three instructions to sum the four variables.
+
+Arithmetic instructions perform numerical computations. Common Operations:
+- Addition
+- Subtraction
+- Multiplication
+- Division
+- Increment / Decrement
+
+These instructions typically operate on registers.
+
+Arithmetic instructions are executed in the ALU (Arithmetic Logic Unit).
+
+Unlike programs in high-level languages, the operands of arithmetic instructions are restricted; they must be from a limited number of special locations built directly in hardware called registers. Registers are primitives used in hardware design that are also visible to the programmer when the computer is completed, so you can think of registers as the bricks of computer construction.
+
+#### Addition
+The natural number of operands for an operation like addition is three: the two numbers being added together and a place to put the sum. 
+<Tabs>
+  <TabItem value="riscv" label="RISC-V" default>
+
+```nasm
+add x1, x2, x3
+```
+
+This computes: `x1 = x2 + x3`
+
+  </TabItem>
+  <TabItem value="x86" label="x86-64">
+
+```nasm
+add rax, rbx
+```
+
+This computes: `rax = rax + rbx`
+
+Note: x86 uses 2-operand format (destination, source)
+
+  </TabItem>
+  <TabItem value="arm" label="ARM">
+
+```nasm
+add r0, r1, r2
+```
+
+This computes: `r0 = r1 + r2`
+
+ARM supports flexible register-to-register operations similar to RISC-V
+
+  </TabItem>
+  <TabItem value="mips" label="MIPS">
+
+```nasm
+add $t0, $t1, $t2
+```
+
+This computes: `$t0 = $t1 + $t2`
+
+MIPS uses 3-operand format like RISC-V, enabling source and destination independence
+
+  </TabItem>
+</Tabs>
+
+#### Addition with Constant or Immediate Operands
+Many times a program will use a constant in an operation—for example,
+incrementing an index to point to the next element of an array. In fact, more than
+half of the RISC-V arithmetic instructions have a constant as an operand when
+running the SPEC CPU2006 benchmarks.
+
+Using only the instructions we have seen so far, we would have to load a constant
+from memory to use one. (The constants would have been placed in memory when
+the program was loaded.) For example, to add the constant 4 to register x22, we
+could use the code
+```nasm
+ld x9, AddrConstant4(x3) // x9 = constant 4
+add x22, x22, x9 // x22 = x22 + x9 (where x9 == 4)
+```
+assuming that `x3 + AddrConstant4` is the memory address of the constant 4.
+
+An alternative that avoids the load instruction is to offer versions of the arithmetic
+instructions in which one operand is a constant. This quick add instruction with
+one constant operand is called add `immediate` or `addi`. 
+
+**addi** stands for: **ADD Immediate**, It **adds a constant (immediate value) to a register and stores the result in another register**.
+To add `4` to register `x22`,
+
+:::note
+
+RISC-V assembly language programmers aren’t forced to use `addi`
+when working with constants. The programmer simply writes add, and the assembler
+generates the proper opcode and the proper instruction format depending on whether
+the operands are all registers (R-type) or if one is a constant (I-type).
+
+:::
+
+:::note
+
+Although RISC-V has both `add` and `sub` instructions, it does not have
+a `subi` counterpart to `addi`. This is because the immediate field represents a two’s
+complement integer, so addi can be used to subtract constants.
+
+:::
+
+**Syntax**
+```nasm
+addi rd, rs1, imm
+```
+| Operand | Meaning                                       |
+| ------- | --------------------------------------------- |
+| `rd`    | Destination register (where result is stored) |
+| `rs1`   | Source register (the value to add to)         |
+| `imm`   | 12-bit signed immediate constant              |
+
+Example instruction:
+```nasm
+addi x5, x6, 10
+```
+Meaning:
+```
+x5 = x6 + 10
+```
+- Reads one register (x6)
+- Adds an immediate (10)
+- Writes the result to a register (x5)
+
+Example
+```nasm
+addi x5, x6, 10   # x5 = x6 + 10
+```
+If x6 = 7, then after execution:
+```
+x5 = 7 + 10 = 17
+```
+**Execution Step**
+1. Read the value in rs1
+2. Sign-extend the 12-bit imm to 64 bits (for RV64)
+3. Add the extended immediate to the value in rs1
+4. Write the result to rd
+
+
+In addi
+- **Immediate is signed**: can add negative numbers.
+    
+    ```nasm
+    addi x5, x6, -3   # subtract 3 from x6
+    ```
+- **Does not access memory**: all operands are registers/immediates
+- **Does not change flags**: unlike x86, RISC-V arithmetic does not set condition flags
+
+
+**Use Cases**
+1. **Incrementing a register**:
+    ```nasm
+    addi x5, x5, 1  # x5 = x5 + 1
+    ```
+2. **Address calculations**:
+    ```nasm
+    addi x5, x6, 64  # compute offset for arrays: x5 = base + 64
+    ```
+3. **Temporary constants**:
+    ```nasm
+    addi x5, x0, 42  # x5 = 42 (x0 is always zero)
+    ```
+
+addi is an I-Type instruction.
+- addi uses one source register and one immediate
+- It writes to a destination register
+- It does not access memory (except for the registers)
+
+Constant operands occur frequently; indeed, `addi` is the most popular
+instruction in most RISC-V programs. By including constants inside arithmetic
+instructions, operations are much faster and use less energy than if constants were
+{/* loaded from memory. */}
+
+### Logical Instructions
+{/* why logical operations exist in instruction sets like RISC-V */}
+Logical Operations with Binary Examples
+| Operation                    | Example Inputs            | Result     | Explanation                                                                    |
+| ---------------------------- | ------------------------- | ---------- | ------------------------------------------------------------------------------ |
+| **Shift left**               | `00110100 << 1`           | `01101000` | All bits move left; rightmost bit becomes `0`. Equivalent to multiplying by 2. |
+| **Shift right (logical)**    | `00110100 >> 1`           | `00011010` | Bits move right; leftmost bit filled with `0`.                                 |
+| **Shift right (arithmetic)** | `10110100 >> 1`           | `11011010` | Bits move right; leftmost bit keeps the **sign bit**.                          |
+| **Bit-by-bit AND**           | `11001010` AND `10101100` | `10001000` | Result bit is `1` **only if both bits are 1**.                                 |
+| **Bit-by-bit OR**            | `11001010` OR `10101100`  | `11101110` | Result bit is `1` **if at least one bit is 1**.                                |
+| **Bit-by-bit XOR**           | `11001010` XOR `10101100` | `01100110` | Result bit is `1` **if bits are different**.                                   |
+| **Bit-by-bit NOT**           | NOT `11001010`            | `00110101` | Every bit is **inverted** (`1 → 0`, `0 → 1`).                                  |
+
+Early computers usually processed entire words (for example 32-bit or 64-bit numbers) at once.
+Example of a 32-bit word:
+```
+10110100 01010111 11001001 00011100
+```
+But many tasks require working with smaller pieces of that word, such as:
+- individual bits
+- groups of bits
+- characters (8-bit bytes)
+
+{/* Example: Characters in a Word */}
+Examining characters within a word, each of which is stored as 8 bits, is one example of such an operation.
+Characters in memory are stored using 8 bits per character. Example:
+| Character | ASCII (Binary) |
+| --------- | -------------- |
+| A         | 01000001       |
+| B         | 01000010       |
+| C         | 01000011       |
+
+If a 32-bit word stores characters, it may contain four characters:
+```
+01000001 01000010 01000011 01000100
+   A        B        C        D
+```
+A program might need to:
+- extract a character
+- change specific bits
+- combine characters into a word
+
+It follows that operations were added to programming languages and instruction set architectures to simplify, among other
+things, the packing and unpacking of bits into words. These instructions are called **logical operations**. 
+<details>
+<summary>Packing and Unpacking Bits</summary>
+
+Two common operations:
+
+**Packing**
+
+Putting smaller pieces of data into a single word.
+
+Example:
+```
+byte1 | byte2 | byte3 | byte4
+```
+combined into one 32-bit word.
+
+**Unpacking**
+
+Extracting parts of a word.
+
+Example: extract byte2 from a 32-bit word
+
+These tasks require bit-level manipulation.
+
+</details>
+
+To support these operations, CPUs provide **logical instructions**.
+
+{/* Why These Instructions Are Important */}
+Logical operations allow programs to:
+- manipulate individual bits
+- extract characters or fields
+- implement flags and masks
+- pack/unpack data efficiently
+- Cryptography
+- Compression
+- Low-level system programming
+
+These operations are fundamental in system programming, networking, compression, and cryptography.
+
+**Logical instructions** allow a CPU to operate on individual bits or groups of bits within a word, enabling tasks like packing/unpacking characters and manipulating data fields.
+
+Logical instructions manipulate bits.
+
+
+| Operation                    | C                 | Java      | RISC-V                                     | x86-64        | ARM   | MIPS                | Bitwise Example                  |                      |
+| ---------------------------- | ----------------- | --------- | ------------------------------------------ | ------------- | ----- | ------------------- | -------------------------------- | -------------------- |
+| **AND**                      | `x & y`           | `x & y`   | `and rd, rs1, rs2` / `andi`                | `and`         | `AND` | `and`               | `10110110 & 11110000 = 10110000` |                      |
+| **OR**                       | `x \| y`          | `x \| y`  | `or rd, rs1, rs2` / `ori`                  | `or`          | `ORR` | `or`                | `10110110                        | 00001111 = 10111111` |
+| **XOR**                      | `x ^ y`           | `x ^ y`   | `xor rd, rs1, rs2` / `xori`                | `xor`         | `EOR` | `xor`               | `10110110 ^ 11001100 = 01111010` |                      |
+| **NOT / Bitwise Complement** | `~x`              | `~x`      | `xori rd, rs1, -1`                         | `not`         | `MVN` | `nor rd, rs, $zero` | `~10110110 = 01001001`           |                      |
+| **Shift Left Logical**       | `x << y`          | `x << y`  | `sll rd, rs1, rs2` / `slli rd, rs1, shamt` | `shl` / `sal` | `LSL` | `sll`               | `00110100 << 2 = 11010000`       |                      |
+| **Shift Right Logical**      | `x >> y`*         | `x >>> y` | `srl rd, rs1, rs2` / `srli rd, rs1, shamt` | `shr`         | `LSR` | `srl`               | `00110100 >> 2 = 00001101`       |                      |
+| **Shift Right Arithmetic**   | `x >> y` (signed) | `x >> y`  | `sra rd, rs1, rs2` / `srai rd, rs1, shamt` | `sar`         | `ASR` | `sra`               | `10110100 >> 2 = 11101101`       |                      |
+
+- RISC-V and MIPS are very similar because both follow RISC design principles.
+- x86-64 often uses shorter instruction names (shl, shr, sar).
+- ARM includes shifts as part of many instructions, not only standalone ones.
+- RISC-V has no dedicated NOT instruction; it is implemented using XOR with all 1s.
+- High-level languages (C and Java) use operators, while processors use instructions.
+- C / Java: High-level operators. Java differentiates signed vs unsigned right shift.
+- RISC-V: R-type or I-type instructions. Shift instructions use 6-bit shift amount in RV64.
+- x86-64: Uses shl, shr, sar for shifts. AND, OR, XOR, NOT instructions are similar.
+- ARM: Logical instructions like AND, ORR, EOR, MVN. Shift instructions are often part of other operations as well.
+- MIPS: R-type instructions with immediate variants for AND, OR, XOR. Shifts: sll, srl, sra.
+- Bitwise Example: Shows the actual bit-level effect of the operation.
+               |
+
+Constants are useful in logical operations as well as in
+arithmetic operations, so RISC-V also provides the instructions and immediate
+(andi), or immediate (ori), and exclusive or immediate (xori).
+
+| Operation | Think of it as                     |
+| --------- | ---------------------------------- |
+| AND       | Mask bits / keep some bits         |
+| OR        | Set bits / combine flags           |
+| XOR       | Toggle bits / difference detection |
+| NOT       | Invert all bits                    |
+| SLL       | Multiply by 2ⁱ                     |
+| SRL       | Divide unsigned by 2ⁱ              |
+| SRA       | Divide signed by 2ⁱ                |
+
+- AND, OR, XOR, NOT → operate bitwise, good for masking, setting, toggling.
+- SLL, SRL, SRA → operate bit positions, good for multiplication/division by powers of 2 and extracting bits.
+- RISC-V provides immediate versions (andi, ori, xori, slli, srli, srai) for efficiency.
+- NOT is implemented using XOR with -1, because there’s no dedicated instruction.
+
+#### Shift left  
+The first class of such operations is called shifts. They move all the bits in a
+doubleword to the left or right, filling the emptied bits with 0s. 
+
+Purpose: Shift bits left, fill 0s on the right.
+
+Equivalent to multiplying by 2ⁱ
+| Field       | Description                                          |
+| ----------- | ---------------------------------------------------- |
+| Instruction | `slli rd, rs1, shamt`          |
+| Operation   | `rd = rs1 << rs2`                                    |
+| Example     | `slli x11, x19, 4` → `x11 = x19 * 16`                |
+| Use Cases   | Fast multiplication by powers of 2, bit manipulation |
+
+For example, if
+register x19 contained
+$$
+00000000 00000000 00000000 00000000 00000000 00000000 00000000 00001001_{2} = 9_{10}
+$$
+and the instruction to shift left by 4 was executed, the new value would be:
+$$
+00000000 00000000 00000000 00000000 00000000 00000000 00000000 10010000_{2} = 144_{10}
+$$
+The actual names of the two RISC-V shift instructions are **shift left logical immediate (slli)** and **shift right logical immediate (srli)**. 
+
+The following instruction performs the operation above, if the original
+value was in register `x19` and the result should go in register `x11`:
+```nasm
+slli x11, x19, 4 // reg x11 = reg x19 << 4 bits
+```
+{/* generate a multi tab for logical shift left instructions for RISC-V instructions,x86-64,ARM,MIPS */}
+<Tabs>
+  <TabItem value="riscv" label="RISC-V" default>
+
+**Instruction:** `slli` (Shift Left Logical Immediate)
+
+**Syntax:**
+```nasm
+slli rd, rs1, shamt
+```
+| Operand | Meaning                                       |
+| ------- | --------------------------------------------- |
+| `rd`    | Destination register                          |
+| `rs1`   | Source register                               |
+| `shamt` | Shift amount (immediate, 5-6 bits for RV32/64)|
+
+**Description:**
+Shifts the value in `rs1` left by `shamt` bits. The vacated low-order bits are filled with zeros. The result is written to `rd`. This operation is equivalent to multiplying by 2<sup>`shamt`</sup>.
+
+**Example:**
+```nasm
+slli x11, x19, 4     # x11 = x19 << 4 (Multiply x19 by 16)
+```
+
+  </TabItem>
+  <TabItem value="x86" label="x86-64">
+
+**Instruction:** `shl` (Shift Left) or `sal` (Shift Arithmetic Left)
+
+**Syntax:**
+```nasm
+shl destination, count
+```
+| Operand     | Meaning                                       |
+| ----------- | --------------------------------------------- |
+| `destination` | Register or memory operand                    |
+| `count`     | Immediate value (1 to 63) or `CL` register    |
+
+**Description:**
+Shifts the bits of the `destination` operand to the left by the number of bits specified in `count`. The most significant bit is shifted into the Carry Flag (CF), and the least significant bit is filled with a zero. `SHL` and `SAL` perform the same operation.
+
+**Example:**
+```nasm
+shl rax, 4             ; rax = rax << 4
+mov cl, 5
+shl rbx, cl            ; rbx = rbx << 5
+```
+
+  </TabItem>
+  <TabItem value="arm" label="ARM AArch64">
+
+**Instruction:** `lsl` (Logical Shift Left)
+
+**Syntax:**
+```nasm
+lsl Rd, Rn, #shamt
+```
+| Operand | Meaning                                       |
+| ------- | --------------------------------------------- |
+| `Rd`    | Destination register                          |
+| `Rn`    | Source register                               |
+| `shamt` | Shift amount (immediate, 0 to 63)             |
+
+**Description:**
+Shifts the value in register `Rn` logically left by `shamt` bits. The vacated low-order bits are filled with zeros. The result is written to `Rd`. ARM also allows `lsl` as a shifted operand in other instructions (e.g., `add x0, x1, x2, lsl #3`).
+
+**Example:**
+```nasm
+lsl x0, x1, #4         ; x0 = x1 << 4
+```
+
+  </TabItem>
+  <TabItem value="mips" label="MIPS">
+
+**Instruction:** `sll` (Shift Left Logical)
+
+**Syntax:**
+```nasm
+sll rd, rt, shamt
+```
+| Operand | Meaning                                       |
+| ------- | --------------------------------------------- |
+| `rd`    | Destination register                          |
+| `rt`    | Source register                               |
+| `shamt` | Shift amount (immediate, 0 to 31)             |
+
+**Description:**
+Shifts the value in register `rt` left by `shamt` bits. The vacated low-order bits are filled with zeros. The result is written to `rd`. This instruction is commonly used for multiplication by powers of 2 and for extracting bit fields.
+
+**Example:**
+```nasm
+sll $t0, $t1, 4        # $t0 = $t1 << 4
+```
+
+  </TabItem>
+</Tabs>
+
+shift-left logical (SLLI) is often used for multiplication by powers of two.
+
+In binary, shifting all bits to the left by 1 position is equivalent to multiplying by 2.
+
+Example:
+- Original value (x19) = 0000 0101  (5 in decimal)
+- Shift left by 1 (\<\<1)  = 0000 1010  (10 in decimal)
+
+Same as 5 × 2 = 10.
+
+General Rule
+$$
+\text{x << i} = x \cdot 2^i
+$$
+where:
+- x = value in register
+- i = number of positions to shift
+
+**Shift-Left Logical (slli) vs Multiplication by Powers of 2**
+
+a table showing shift-left amounts and their equivalent multiplication by powers of 2.
+| Shift Amount `i` | Binary Effect | Equivalent Multiplication | Example: x19 = 3 |
+| ---------------- | ------------- | ------------------------- | ---------------- |
+| 0                | No shift      | × 2⁰ = 1                  | 3 × 1 = 3        |
+| 1                | Shift left 1  | × 2¹ = 2                  | 3 × 2 = 6        |
+| 2                | Shift left 2  | × 2² = 4                  | 3 × 4 = 12       |
+| 3                | Shift left 3  | × 2³ = 8                  | 3 × 8 = 24       |
+| 4                | Shift left 4  | × 2⁴ = 16                 | 3 × 16 = 48      |
+| 5                | Shift left 5  | × 2⁵ = 32                 | 3 × 32 = 96      |
+| 6                | Shift left 6  | × 2⁶ = 64                 | 3 × 64 = 192     |
+| 7                | Shift left 7  | × 2⁷ = 128                | 3 × 128 = 384    |
+| 8                | Shift left 8  | × 2⁸ = 256                | 3 × 256 = 768    |
+
+Each left shift doubles the number.
+
+**Example: slli x11, x19, 4**
+
+Here:
+```
+slli x11, x19, 4
+```
+- Shift amount = 4 → i = 4
+- Operation: x11 = x19 \<\< 4
+
+Equivalent multiplication:
+$$
+x11=x19 \cdot 2^4=x19 \cdot 16
+$$
+
+Numeric Example
+
+If x19 = 3:
+- x19 = 3  → 0000 0011
+- Shift left 4 → 0011 0000  → 48
+- Check multiplication: $3 \cdot 16=48$
+
+**Analogy with Decimal Numbers**
+
+shifting a decimal number by i digits is equivalent to multiplying by $10i$.
+- Decimal left shift = multiply by 10 per digit
+- Binary left shift = multiply by 2 per bit
+
+This Is Useful in Programming
+- slli is much faster than a multiplication instruction for powers of 2.
+- Efficient multiplication by powers of 2 without using mul instruction, which may be slower.
+- Common in:
+        ◦ Array indexing: index * element_size(Example: address = base + index * 8 → slli index, index, 3)
+        ◦ Graphics and bit manipulations: pixel × 4
+        ◦ Optimized loops and embedded systems
+
+#### Shift left(Register)
+Shifts the bits of a register to the left by a specified number of positions.
+
+Purpose: Shift bits left, fill 0s on the right.
+
+| Field       | Description                                          |
+| ----------- | ---------------------------------------------------- |
+| Instruction | `sll rd, rs1, rs2`                                   |
+| Operation   | `rd = rs1 << rs2`                                    |
+| Example     | `slli x11, x19, 4` → `x11 = x19 * 16`                |
+| Use Cases   | Fast multiplication by powers of 2, bit manipulation |
+
+#### Shift right (logical)
+The dual of a shift left is a shift right
+
+Purpose: Shift bits right, fill 0s on the left.
+
+Does not preserve sign
+| Field          | Description                                      |
+| -------------- | ------------------------------------------------ |
+| Instruction    | `srli rd, rs1, shamt`      |
+| Operation      | `rd = rs1 >> rs2` (logical)                      |
+| Example        | `srli x5, x6, 2`                                 |
+| Binary Example | `00110100 >> 1 = 00011010`                       |
+| Use Cases      | Unsigned division by powers of 2, bit extraction |
+
+{/* generate a multi tab for logical shift right instructions for RISC-V instructions,x86-64,ARM,MIPS */}
+#### Shift right (Register)
+Shifts the bits of a register to the right by a specified number of positions.
+
+Purpose: Shift bits right, fill 0s on the left.
+
+Does not preserve sign
+| Field          | Description                                      |
+| -------------- | ------------------------------------------------ |
+| Instruction    | `srl rd, rs1, rs2`     |
+| Operation      | `rd = rs1 >> rs2` (logical)                      |
+| Example        | `srl x5, x6, x9`                                 |
+| Binary Example | `00110100 >> 1 = 00011010`                       |
+| Use Cases      | Unsigned division by powers of 2, bit extraction |
+
+#### Shift right arithmetic
+RISC-V provides a third type of
+shift, shift right arithmetic (srai). This variant is similar to srli, except rather
+than filling the vacated bits on the left with zeros, it fills them with copies of the old
+sign bit.
+
+Purpose: Shift bits right, fill with the original sign bit.
+
+Preserves negative numbers (two’s complement)
+| Field          | Description                                                              |
+| -------------- | ------------------------------------------------------------------------ |
+| Instruction    | `srai rd, rs1, shamt`                              |
+| Operation      | `rd = rs1 >> rs2` (signed)                                               |
+| Example        | `srai x5, x6, 2`                                                         |
+| Binary Example | `10110100 >> 1 = 11011010`                                               |
+| Use Cases      | Signed division by powers of 2, arithmetic operations on signed integers |
+
+#### Shift right arithmetic (Register)
+Shifts the bits of a register to the right by a specified number of positions, filling the vacated bits with copies of the old sign bit.
+
+Purpose: Shift bits right, fill with the original sign bit.
+
+Preserves negative numbers (two’s complement)
+| Field          | Description                                                              |
+| -------------- | ------------------------------------------------------------------------ |
+| Instruction    | `sra rd, rs1, rs2`                            |
+| Operation      | `rd = rs1 >> rs2` (signed)                                               |
+| Example        | `sra x5, x6, x9`                                                         |
+| Binary Example | `10110100 >> 1 = 11011010`                                               |
+| Use Cases      | Signed division by powers of 2, arithmetic operations on signed integers |
+
+
+#### Bit-by-bit AND(Bitwise AND)   
+Another useful operation that isolates fields is **AND**. **AND** is a bit-by-bit operation that leaves a 1 in the result only if both bits of the operands are 1. 
+
+**AND** A logical bit-by-bit operation with two operands that calculates a 1 only if there is a 1 in
+both operands.
+
+Purpose: Keep only the bits that are 1 in both operands.
+| Field          | Description                                          |
+| -------------- | ---------------------------------------------------- |
+| Instruction    | `and rd, rs1, rs2`                                   |
+| Operation      | `rd = rs1 & rs2`                                     |
+| Example        | `and x5, x6, x7`                                     |
+| Binary Example | `11001010 & 10101100 = 10001000`                     |
+| Use Cases      | Masking bits, clearing unwanted bits, checking flags |
+
+For example, if register x11 contains
+```
+00000000 00000000 00000000 00000000 00000000 00000000 00001101 11000000
+```
+and register x10 contains
+```
+00000000 00000000 00000000 00000000 00000000 00000000 00111100 00000000
+```
+then, after executing the RISC-V instruction
+```nasm
+and x9, x10, x11 // reg x9 = reg x10 & reg x11
+```
+the value of register x9 would be
+```
+00000000 00000000 00000000 00000000 00000000 00000000 00001100 00000000
+```
+##### masking with AND
+AND can apply a bit pattern to a set of bits to force 0s where there
+is a 0 in the bit pattern. Such a bit pattern in conjunction with AND is traditionally
+called a mask, since the mask "conceals" some bits.
+
+A mask is a binary pattern that you use to select or hide certain bits in a value.
+- 0 in the mask → the corresponding bit is cleared to 0
+- 1 in the mask → the corresponding bit remains unchanged
+
+This is why it's called a mask: it "hides" some bits and "shows" others.
+
+The AND operation is perfect for masking because:
+```
+0 & anything = 0
+1 & anything = anything
+```
+So ANDing a value with a mask keeps only the bits where the mask has 1 and forces the rest to 0.
+
+Example: Suppose we have an 8-bit register:
+```
+value   = 10110110
+mask    = 11110000
+------------------
+result  = 10110000
+```
+Explanation:
+- Bits in the mask that are 1 → kept from the original value
+- Bits in the mask that are 0 → cleared to 0
+
+Masking works perfectly to isolate high bits.
+
+**Common Uses of Masks**
+1. Extract specific fields from a word
+
+    Example: Get the upper 4 bits of an 8-bit value:
+    ```
+    upper = value & 0xF0;  // mask = 11110000
+    ```
+2. Clear specific bits
+
+    Example: Set last 3 bits to 0:
+    ```
+    value = value & 0xF8;  // mask = 11111000
+    ```
+3. Flag testing
+
+    Example: Check if a specific bit is set:
+    ```
+    if (value & 0x04) { ... }  // mask = 00000100
+    ```
+
+Suppose `x5` contains a value and we want to keep only bits `7–4`:
+```nasm
+li   x6, 0xF0    # load mask 11110000 into x6
+and  x7, x5, x6  # apply mask, result in x7
+```
+- x7 now contains only the bits we wanted
+- All other bits are forced to 0
+
+#### Bit-by-bit Immediate AND(Immediate AND)
+Another useful operation is **AND with an immediate**. **AND with an immediate** is a bit-by-bit operation that leaves a 1 in the result if the bit of the first operand is 1 and the corresponding bit of the immediate is 1.
+| Field          | Description                                          |
+| -------------- | ---------------------------------------------------- |
+| Instruction    | `andi rd, rs1, imm`                                  |
+| Operation      | `rd = rs1 & imm`                                     |
+| Example        | `andi x5, x6, 0x55`                                  |
+| Binary Example | `11001010 & 0x55 = 01001010`                        |
+| Use Cases      | Masking bits, clearing unwanted bits, checking flags |
+
+#### Bit-by-bit OR(Bitwise OR)
+To place a value into one of these seas of 0s, there is the dual to AND, called **OR**.
+It is a bit-by-bit operation that places a 1 in the result if either operand bit is a 1. 
+
+**OR** A logical bit-by-bit operation with two operands that calculates a 1 if there is a 1 in either operand.
+
+Purpose: Set bits that are 1 in either operand.
+| Field          | Description                                          |
+| -------------- | ---------------------------------------------------- |
+| Instruction    | `or rd, rs1, rs2`                                    |
+| Operation      | `rd = rs1 | rs2`                                      |
+| Example        | `or x5, x6, x7`                                      |
+| Binary Example | `11001010 | 10101100 = 11101110`                     |
+| Use Cases      | Combining flags, setting bits, or creating masks    |
+
+For example, if register x11 contains
+```
+00000000 00000000 00000000 00000000 00000000 00000000 00001101 11000000
+```
+and register x10 contains
+```
+00000000 00000000 00000000 00000000 00000000 00000000 00111100 00000000
+```
+then, after executing the RISC-V instruction
+```nasm
+or x9, x10, x11 // reg x9 = reg x10 | reg x11
+```
+the value of register x9 would be
+```
+00000000 00000000 00000000 00000000 00000000 00000000 00111101 11000000
+```
+#### Bit-by-bit Immediate OR(Bitwise Immediate OR)
+
+#### Bit-by-bit XOR(Bitwise Exclusive OR)
+In keeping with the three-operand format, the designers of RISC-V decided to
+include the instruction XOR (exclusive OR) instead of NOT. Since exclusive OR
+creates a 0 when bits are the same and a 1 if they are different, the equivalent to
+NOT is an xor 111…111.
+
+**XOR** A logical bit-by-bit operation with two operands that calculates the exclusive OR of the two operands. That is, it calculates a 1 only if the values are different in the two operands.
+
+Purpose: Set bits that are different between operands.
+
+| Field          | Description                                       |
+| -------------- | ------------------------------------------------- |
+| Instruction    | `xor rd, rs1, rs2`                                |
+| Operation      | `rd = rs1 ^ rs2`                                  |
+| Example        | `xor x5, x6, x7`                                  |
+| Binary Example | `11001010 ^ 10101100 = 01100110`                  |
+| Use Cases      | Toggling bits, parity checking, encryption, masks |
+
+For example, if register x11 contains
+```
+00000000 00000000 00000000 00000000 00000000 00000000 00001101 11000000
+```
+and register x10 contains
+```
+00000000 00000000 00000000 00000000 00000000 00000000 00111100 00000000
+```
+then, after executing the RISC-V instruction
+```nasm
+xor x9, x10, x12 // reg x9 = reg x10 ^ reg x12
+```
+the value of register x9 would be
+```
+00000000 00000000 00000000 00000000 00000000 00000000 00110001 11000000
+```
+
+#### Bit-by-bit Immediate XOR(Immediate XOR)
+
+#### Bit-by-bit NOT(Bitwise NOT)
+**NOT** takes one operand and places a 1
+in the result if one operand bit is a 0, and vice versa. Using our prior notation, it
+calculates $\overline{rs1}$.
+
+**NOT** A logical bit-by-bit operation with one operand that inverts the bits; that is, it replaces every 1 with a 0, and every 0 with a 1.
+
+Purpose: Flip all bits (0 → 1, 1 → 0).
+| Field          | Description                              |
+| -------------- | ---------------------------------------- |
+| Instruction    | RISC-V has **no direct NOT** instruction |
+| Workaround     | `xori rd, rs1, -1` (all 1s in immediate) |
+| Example        | `xori x5, x6, -1`                        |
+| Binary Example | `11001010 → 00110101`                    |
+| Use Cases      | Bitwise inversion, complementing masks   |
+
+<details>
+<summary>C Bit-Fields</summary>
+
+Bit-fields are subsets of bits within a word or doubleword.
+They allow packing multiple small values into a single 64-bit register (or memory word).
+Useful for:
+- Compact storage
+- Hardware interfaces (e.g., registers in I/O devices)
+- Flags and status bits
+
+Example in C:
+```c
+struct Status {
+    unsigned ready  : 1;  // 1 bit
+    unsigned error  : 3;  // 3 bits
+    unsigned mode   : 4;  // 4 bits
+};
+```
+Here, all fields fit within a single 8-bit portion of a doubleword.
+
+C allows bit fields or fields to be defined within doublewords, both
+allowing objects to be packed within a doubleword and to match an externally enforced
+interface such as an I/O device. All fields must fit within a single doubleword. Fields are
+unsigned integers that can be as short as 1 bit. C compilers insert and extract fields
+using logical instructions in RISC-V: andi, ori, slli, and srli.
+
+**Accessing Bit-Fields**
+
+**Extracting a Field**
+
+To read a bit-field:
+1. Shift right so that the field aligns with bit 0.
+2. Mask the lower bits to isolate the field.
+
+Example:
+```c
+uint64_t reg = 0b10111010; // 8-bit example
+uint64_t field = (reg >> 4) & 0xF;  // extract bits 7:4
+```
+This code:
+```c
+uint64_t reg = 0b10111010; // 8-bit example
+```
+- reg is a 64-bit unsigned integer, but here we only care about the lowest 8 bits:
+    ```
+    reg = 0b10111010
+          ^^^^ ^^^^
+          bits 7-0
+    ```
+- field will store the value of a specific field inside reg, in this case bits 7:4.
+
+**Right Shift >> 4**
+```c
+reg >> 4
+```
+- This moves all bits 4 positions to the right.
+- Effectively, bits 7:4 move to bits 3:0, and the upper bits (7-4) are filled with 0s because it's an unsigned shift.
+- **Binary Example:**
+    ```
+    reg       = 10111010
+    reg >> 4  = 00001011
+    ```
+    - Bits 7:4 (1011) have now shifted to bits 3:0
+    - Bits 7-4 of the result are 0, because it's unsigned
+
+**Masking with & 0xF**
+```c
+(reg >> 4) & 0xF
+```
+- 0xF in binary: `00001111`
+- The AND operation keeps only the lower 4 bits (bits 3:0) and clears all others:
+    ```
+        00001011
+    AND 00001111
+    -------------
+        00001011
+    ```
+
+- Result: `00001011` (binary) = `11` (decimal)
+- Now field contains the value of bits 7:4 from reg, extracted as a 4-bit unsigned integer.
+
+RISC-V Implementation:
+```
+srli x5, x6, 4      # shift reg (x6) right 4 bits
+andi x5, x5, 0xF    # mask lower 4 bits → field value
+```
+
+**Setting a Field**
+
+To write to a bit-field:
+1. Clear the bits in the target field using AND + mask.
+2. Shift the new value to the correct position.
+3. OR it into the target.
+
+**Example:**
+```c
+uint64_t reg = 0b10111010; // original
+uint64_t value = 0b0011;   // new mode
+reg = (reg & ~(0xF << 4)) | ((value & 0xF) << 4);
+```
+this code
+```c
+uint64_t reg = 0b10111010;
+```
+reg = 0b10111010 → 8-bit example, representing the original register content:
+```
+bit  7 6 5 4 3 2 1 0
+     1 0 1 1 1 0 1 0
+```
+```c
+uint64_t value = 0b0011;   // new mode
+```
+value = 0b0011 → new 4-bit field we want to insert into bits 7:4 of reg.
+
+**Step 1:Clear the Target Field**
+```c
+reg & ~(0xF << 4)
+```
+1. Shift the mask
+    - `0xF = 0b1111` → represents 4 bits.
+    - `0xF << 4 = 0b1110000` → moves the 4-bit mask into bits 7:4.
+2. Invert the mask
+    - ~(`0xF << 4) = 0b00001111`
+    - This mask has 0s in bits 7:4 and 1s elsewhere.
+3. Apply AND
+```c
+reg & 0b00001111
+```
+```c
+0b10111010 & 0b00001111
+```
+- Keeps bits 3:0 as-is
+- Clears bits 7:4 to zero
+
+Result after clearing:
+```
+reg = 0b00001010
+       ^^^^ cleared bits
+```
+Step 2: Prepare the New Field
+```c
+(value & 0xF) << 4
+```
+1. **value & 0xF → ensures only 4 bits are used**:
+```
+0b0011 & 0b1111 = 0b0011
+```
+2. **`<< 4` → shift to bits 7:4 position**:
+```
+0b0011 << 4 = 0b00110000
+```
+Step 3: Combine with OR
+```c
+(reg & ~(0xF << 4)) | ((value & 0xF) << 4)
+```
+OR combines the cleared original register with the new field:
+- Cleared reg  : 00001010
+- New field    : 00110000
+- OR result    : 00111010
+
+So
+- Bits 7:4 are replaced with the new value 0011.
+- Bits 3:0 are preserved.
+
+Final Value
+```
+reg = 0b00111010
+```
+- Original bits 7:4 (1011) → replaced with 0011
+- Original bits 3:0 (1010) → unchanged
+
+| Step | Operation                               | Mask (binary) | reg (binary) | value (binary) | Explanation                        |
+| ---- | --------------------------------------- | ------------- | ------------ | -------------- | ---------------------------------- |
+| 1    | Initialize variables                    | —             | **10111010** | **0011**       | Initial values                     |
+| 2    | `0xF`                                   | **00001111**  | 10111010     | 0011           | Base mask for 4 bits               |
+| 3    | `0xF << 4`                              | **11110000**  | 10111010     | 0011           | Mask shifted to bits 7–4           |
+| 4    | `~(0xF << 4)`                           | **00001111**  | 10111010     | 0011           | Inverted mask used to clear bits   |
+| 5    | `reg & ~(0xF << 4)`                     | 00001111      | **00001010** | 0011           | Clears bits 7–4 in `reg`           |
+| 6    | `value & 0xF`                           | **00001111**  | 00001010     | **0011**       | Ensures value uses only 4 bits     |
+| 7    | `(value & 0xF) << 4`                    | **11110000**  | 00001010     | **00110000**   | Moves value to target bit position |
+| 8    | `(reg & ~(0xF<<4)) \| ((value&0xF)<<4)` | —             | **00111010** | 00110000       | Insert new field using OR          |
+| 9    | Final result                            | —             | **00111010** | 0011           | `reg` updated                      |
+
+Bit Transformation
+```
+Original reg     1011 1010
+Clear upper bits 0000 1010
+Insert new bits  0011 0000
+--------------------------------
+Final reg        0011 1010
+```
+This is the classic bit-field insert pattern:
+1. **Clear the target bits**: `reg & ~(mask << shift)`
+2. **Mask and align new value**: `(value & mask) << shift`
+3. **Combine using OR**: `|`
+    - Works for any number of bits and any position in the register.
+    - Common in hardware registers, flags, and packed data.
+
+RISC-V Implementation:
+```nasm
+# x6 = original register, x7 = new field value
+andi x7, x7, 0xF      # ensure only 4 bits
+slli x7, x7, 4        # shift new value into position
+li   x8, 0xF0         # mask for clearing field
+not  x8, x8            # invert mask → 0x0F
+and  x6, x6, x8        # clear target field
+or   x6, x6, x7        # set new field
+```
+
+**Logical Instructions Used**
+| Operation             | RISC-V Instruction | Purpose                                  |
+| --------------------- | ------------------ | ---------------------------------------- |
+| **Mask / Clear bits** | `andi`, `and`      | Clear unwanted bits                      |
+| **Set bits**          | `ori`, `or`        | Insert bits into a field                 |
+| **Shift left**        | `slli`             | Align new field bits to correct position |
+| **Shift right**       | `srli`             | Extract field bits from a register       |
+
+C bit-fields are implemented at the hardware level using RISC-V logical instructions:
+- Extracting fields: `srli` + `andi`
+- Inserting fields: `slli` + `andi` + `or`
+
+This shows the power of logical instructions in packing, unpacking, and manipulating bits efficiently.
+
+Why This Works Well
+- Registers are fast, so field operations in registers are efficient.
+- AND, OR, SHIFT are simple, single-cycle instructions on most RISC-V cores.
+- Ensures portable, compact bit-field access, useful in both:
+    - High-level C code
+    - Low-level hardware I/O registers
+
+</details>
+
+#### bit manipulation
+{/* Bit Manipulation Patterns with RISC-V */}
+{/* TODO: expand this to explain every pattern with equav c code,c code explainations, and RISC-V code, example */}
+Assume:
+- x10 → reg
+- x11 → value
+- x12 → temporary register
+- n → bit position
+- high:low → field range
+
+| Operation                        | C Pattern                                       | RISC-V Instructions                                                                                                                                                     | Explanation                                 |
+| -------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| **Test (check) bit n**           | `(reg >> n) & 1`                                | `srli x12, x10, n` <br />`andi x12, x12, 1`                                                                                                                             | Shift target bit to position 0, mask others |
+| **Set bit n**                    | `reg \| (1<<n)`                                 | `li x12, 1`<br />`slli x12, x12, n`<br />`or x10, x10, x12`                                                                                                             | Creates mask and sets the bit               |
+| **Clear bit n**                  | `reg & ~(1<<n)`                                 | `li x12, 1`<br />`slli x12, x12, n`<br />`xori x12, x12, -1`<br />`and x10, x10, x12`                                                                                   | Invert mask then AND                        |
+| **Toggle bit n**                 | `reg ^ (1<<n)`                                  | `li x12, 1`<br />`slli x12, x12, n`<br />`xor x10, x10, x12`                                                                                                            | XOR flips the bit                           |
+| **Extract bit field (high:low)** | `(reg >> low) & mask`                           | `srli x12, x10, low`<br />`andi x12, x12, mask`                                                                                                                         | Align field then isolate                    |
+| **Insert bit field**             | `(reg & ~(mask<<low)) \| ((value & mask)<<low)` | `andi x11, x11, mask`<br />`slli x11, x11, low`<br />`li x12, mask`<br />`slli x12, x12, low`<br />`xori x12, x12, -1`<br />`and x10, x10, x12`<br />`or x10, x10, x11` | Clear field then insert value               |
+| **Clear lower n bits**           | `(reg >> n) << n`                               | `srli x12, x10, n`<br />`slli x10, x12, n`                                                                                                                              | Removes lower bits                          |
+| **Extract lower n bits**         | `(reg << n) >> n`                               | `slli x12, x10, n`<br />`srli x10, x12, n`                                                                                                                              | Keeps only lower bits                       |
+
+**6-Rule Bit Manipulation Toolkit**
+
+Almost all bit-field, masking, packing/unpacking, and instruction decoding problems can be solved by combining these six rules.
+- Test / Set / Clear / Toggle → single bit
+- Extract / Insert → multiple bits
+
+
+| Rule                              | C Expression                           | RISC-V Instructions                                                                   | Use Case                                                                                                                                                                |                                      |
+| --------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| **1. Test a bit**                 | `(reg >> n) & 1`                       | `srli x12, x10, n`<br />`andi x12, x12, 1`                                            | Check if bit `n` is 1                                                                                                                                                   |                                      |
+| **2. Set a bit**                  | `reg                                   | = `(1 << n)`                                                                           | `li x12, 1`<br />`slli x12, x12, n`<br />`or x10, x10, x12`                                                                                                             | Make bit `n` = 1                     |
+| **3. Clear a bit**                | `reg &= ~(1 << n)`                     | `li x12, 1`<br />`slli x12, x12, n`<br />`xori x12, x12, -1`<br />`and x10, x10, x12` | Make bit `n` = 0                                                                                                                                                        |                                      |
+| **4. Toggle a bit**               | `reg ^= (1 << n)`                      | `li x12, 1`<br />`slli x12, x12, n`<br />`xor x10, x10, x12`                          | Flip bit `n`                                                                                                                                                            |                                      |
+| **5. Extract a field (high:low)** | `(reg >> low) & ((1<<(high-low+1))-1)` | `srli x12, x10, low`<br />`andi x12, x12, mask`                                       | Get bits `high:low`                                                                                                                                                     |                                      |
+| **6. Insert a field (high:low)**  | `(reg & ~(mask << low))`                | `((value & mask) << low)`                                                              | `andi x11, x11, mask`<br />`slli x11, x11, low`<br />`li x12, mask`<br />`slli x12, x12, low`<br />`xori x12, x12, -1`<br />`and x10, x10, x12`<br />`or x10, x10, x11` | Replace bits `high:low` with `value` |
+
+Example
+
+Sample Value`
+```
+reg = 10111010  (bits 7..0)
+```
+
+1️⃣ Test Bit (Check bit 3)
+```c
+(reg >> 3) & 1
+```
+RISC-V:
+```
+srli x12, x10, 3
+andi x12, x12, 1
+```
+Visual:
+```
+Original: 10111010
+Shift >>3: 00010111
+Mask &1  : 00000001 → Bit 3 = 1
+```
+2️⃣ Set Bit (Set bit 0)
+```
+reg |= (1 << 0)
+```
+RISC-V:
+```
+li x12, 1
+slli x12, x12, 0
+or x10, x10, x12
+```
+Visual:
+```
+Original: 10111010
+Mask     : 00000001
+OR       : 10111011 → bit 0 set
+```
+3️⃣ Clear Bit (Clear bit 4)
+```
+reg &= ~(1 << 4)
+```
+RISC-V:
+```
+li x12, 1
+slli x12, x12, 4
+xori x12, x12, -1
+and x10, x10, x12
+```
+Visual:
+```
+Original: 10111010
+Mask     : 11101111
+AND      : 10101010 → bit 4 cleared
+```
+4️⃣ Toggle Bit (Flip bit 1)
+```
+reg ^= (1 << 1)
+```
+RISC-V:
+```
+li x12, 1
+slli x12, x12, 1
+xor x10, x10, x12
+```
+Visual:
+```
+Original: 10111010
+Mask     : 00000010
+XOR      : 10111000 → bit 1 flipped
+```
+5️⃣ Extract Field (Bits 7–4)
+```
+field = (reg >> 4) & 0xF
+```
+RISC-V:
+```
+srli x12, x10, 4
+andi x12, x12, 0xF
+```
+Visual:
+```
+Original: 10111010
+Shift >>4: 00001011
+Mask &F  : 00001011 → extracted 1011
+```
+6️⃣ Insert Field (Replace Bits 7–4 with 0011)
+```
+reg = (reg & ~(0xF << 4)) | ((0x3 & 0xF) << 4)
+```
+RISC-V:
+```
+andi x11, x11, 0xF      # value & mask
+slli x11, x11, 4        # shift value into position
+li x12, 0xF
+slli x12, x12, 4
+xori x12, x12, -1
+and x10, x10, x12        # clear old bits
+or x10, x10, x11         # insert new value
+```
+Visual:
+```
+Original: 10111010
+Clear bits 7-4: 00001010
+Insert 0011:   00111010
+```
+### Data Movement(transfer) Instructions
+These instructions transfer data between registers and memory.
+
+Programming languages have simple variables that contain single data elements, but they also have more complex data structures—arrays and structures. These composite data structures can contain many more data elements than there are registers in a computer.
+
+How can a computer represent and access such large structures? The processor can keep only a small amount of data in registers, but computer memory contains billions of data elements. Hence, data structures(arrays and structures) are kept in memory.
+
+Arithmetic operations occur only on registers in RISC-V instructions; thus, RISC-V must include instructions that transfer data between memory and registers. Such instructions are called **data transfer instructions**.
+
+**Data movement instructions** move data between registers, memory, and I/O without changing the data’s value.
+They are fundamental in **load/store** architectures like RISC-V International’s RISC-V, where arithmetic operates only on registers.
+
+:::info
+
+**data transfer instruction** A command that moves data between memory and registers.
+
+:::
+
+**Memory** is just a large, single-dimensional array, with the address acting as the index to that array, starting at 0. For example, in next figure, the address of the third data element is 2, and the value of `memory[2]` is 10
+```
+   --------         ---------
+   |      |   3     |  100  |
+   |      |   2     |  10   |
+   |      |   1     |  101  |
+   |      |   0     |   1   |
+   --------         ---------
+            Address   Data
+  Processor          Memory
+```
+:::info
+
+**Address** is a value used to delineate the location of a specific data element within a memory array.
+
+:::
+
+Examples of data transfer instruction:
+- **Load** (move data from memory to register)
+- **Store** (move data from register to memory)
+- **Register-to-register move**
+
+Purpose of data transfer instruction:
+- Enable access to memory
+- Support variable storage
+- Allow communication between functional units
+
+So Data Movement Instructions:
+- Move data without modifying it
+- Connect memory, registers, stack, and I/O
+- Essential for every computation
+- Often dominate performance cost
+- Core part of load–store architecture
+
+In load/store architectures like RISC-V, only load and store instructions access memory directly.
+
+#### Importannce of Data Movement
+In modern processors:
+- The ALU operates only on registers
+- Memory access is slower than register access
+- Data must be loaded into registers before computation
+- Results must often be stored back to memory
+
+This design is called a **Load–Store Architecture** (used in RISC-V, ARM, MIPS).
+
+#### Load-Store Architecture
+{/* Why RISC architectures force all memory access through load/store instructions (Load-Store Architecture) and how that impacts CPU pipeline design and performance. */}
+A Load-Store architecture means: Only two instructions access memory:
+```
+LOAD (memory → register)
+STORE (register → memory)
+```
+All other operations work only on registers.
+
+Memory access
+```
+Load:   register ← memory
+Store:  memory   ← register
+```
+Arithmetic operations
+```
+register ← register op register
+```
+
+Example in RISC-V
+```nasm
+ld  x5, 64(x22)      load A[8] from memory
+add x20, x21, x5     compute g = h + A[8]
+```
+Step-by-step:
+```
+Memory → Register → ALU → Register
+```
+Memory never interacts directly with the ALU.
+
+**Why RISC Uses Load-Store**
+
+The reason is **pipeline simplicity**. Typical CPU pipeline:
+```
+1 Fetch
+2 Decode
+3 Execute
+4 Memory
+5 Writeback
+```
+In a Load-Store architecture:
+
+**Arithmetic instruction**
+```nasm
+add x3, x4, x5
+```
+Pipeline:
+```
+Fetch
+Decode
+Execute (ALU)
+Writeback
+```
+No memory stage needed.
+
+**Load instruction**
+```nasm
+ld x3, 8(x4)
+```
+Pipeline:
+```
+Fetch
+Decode
+Address calculation
+Memory access
+Writeback
+```
+
+**Store instruction**
+```nasm
+sd x3, 8(x4)
+```
+Pipeline:
+```
+Fetch
+Decode
+Address calculation
+Memory access
+```
+
+Because only loads/stores touch memory, pipeline control becomes much easier.
+
+**Why This Improves Performance**
+
+Memory is much slower than registers. Typical latency:
+| Storage  | Speed       |
+| -------- | ----------- |
+| Register | 1 cycle     |
+| L1 cache | 4 cycles    |
+| RAM      | 100+ cycles |
+
+If every arithmetic instruction could touch memory (like x86), the CPU would constantly wait. Instead RISC does:
+```
+LOAD → compute many times → STORE
+```
+Example:
+```nasm
+ld  x5, 0(x10)
+ld  x6, 8(x10)
+
+add x7, x5, x6
+mul x8, x7, x5
+sub x9, x8, x6
+
+sd  x9, 16(x10)
+```
+Memory accessed only 3 times.
+
+**Hardware Simplification**
+
+Because of load-store rules: The ALU never needs direct memory inputs.
+
+Simpler datapath:
+```
+Registers → ALU → Registers
+           ↑
+        Memory only via Load/Store
+```
+Datapath diagram (simplified):
+```
+        +--------+
+        | Memory |
+        +---+----+
+            ^
+            |
+       +----+----+
+       | Register|
+       |  File   |
+       +----+----+
+            |
+            v
+        +---+---+
+        |  ALU  |
+        +-------+
+```
+This simplicity enables very deep pipelines.
+
+Load-Store architecture separates:
+```
+Memory operations
+COMPUTATION operations
+```
+This leads to:
+- simpler hardware
+- faster pipelines
+- easier instruction decoding
+- predictable performance
+
+One of the most famous design principles in computer architecture "Make the common case fast.", Since most instructions are arithmetic, keeping them register-only makes the CPU faster.
+
+**Impact on Modern CPUs**
+
+Modern processors (even x86 internally) behave like RISC.
+
+Example: The x86 instruction set architecture CPU translates instructions into micro-operations.
+
+Example:
+```nasm
+add rax, [rbx]
+```
+internally becomes:
+```
+uop1: load temp, [rbx]
+uop2: add rax, temp
+```
+Which is basically RISC-style execution.
+
+**How CISC Architectures Do It (x86)**
+
+In x86 instruction set architecture, arithmetic can use memory operands directly.
+Example:
+```nasm
+add rax, [rbx+64]
+```
+Meaning:
+```
+rax = rax + Memory[rbx+64]
+```
+So the CPU must:
+1. fetch memory
+2. send data to ALU
+3. perform arithmetic
+
+All inside one instruction.
+
+**RISC vs CISC Comparison**
+| Feature             | RISC (RISC-V, MIPS, ARM) | CISC (x86)         |
+| ------------------- | ------------------------ | ------------------ |
+| Memory access       | Only load/store          | Many instructions  |
+| Arithmetic          | Registers only           | Registers + memory |
+| Instruction size    | Fixed                    | Variable           |
+| Decode complexity   | Simple                   | Complex            |
+| Pipeline efficiency | High                     | Lower              |
+| Hardware complexity | Low                      | High               |
+
+#### Load instruction
+The data transfer instruction that copies data from memory to a register is traditionally called load. 
+
+The format of the load instruction is 
+1. the name of the operation, followed by 
+2. the register to be loaded, 
+3. then register and a constant used to access memory. The sum of the constant portion of the instruction and the contents of the second register forms the memory address. 
+
+<Tabs>
+  <TabItem value="riscv" label="RISC-V" default>
+
+The real RISC-V name for this instruction is ld, standing for load doubleword.
+
+Format: `ld destination, offset(base)`
+
+```nasm
+ld x1, 0(x2)
+```
+This loads a 64-bit value from memory at address (x2 + 0) into register x1.
+
+  </TabItem>
+  <TabItem value="x86" label="x86-64">
+
+```nasm
+mov rax, [rbx]
+```
+
+This loads a 64-bit value from memory at address rbx into register rax.
+
+Note: x86 uses memory address in brackets. mov is used for both load and store operations.
+
+  </TabItem>
+  <TabItem value="arm" label="ARM">
+
+```nasm
+ldr r0, [r1]
+```
+
+This loads a 32-bit value from memory at address r1 into register r0.
+
+Format: `ldr destination, [base]`
+
+ARM also supports offset modes: `ldr r0, [r1, #4]` loads from address (r1 + 4)
+
+  </TabItem>
+  <TabItem value="mips" label="MIPS">
+
+```nasm
+lw $t0, 0($t1)
+```
+
+This loads a 32-bit word from memory at address ($t1 + 0) into register $t0.
+
+Format: `lw destination, offset(base)`
+
+MIPS also provides: `ld` for 64-bit loads in MIPS64 variant
+
+  </TabItem>
+</Tabs>
+
+##### Registers vs Memory Allocation
+**how compilers bridge high-level data structures and hardware memory systems.**
+
+In addition to associating variables with registers, the compiler allocates data structures like arrays and structures to locations in memory. The compiler can then place the proper starting address into the data transfer instructions, this means:
+- The compiler computes base addresses at compile/link time
+- It encodes offsets directly into load/store instructions
+- It translates high-level indexing into hardware-understandable address arithmetic
+
+1. **Registers**
+
+The compiler:
+- Maps frequently used scalar variables (int, double, loop counters)
+- To architectural registers (e.g., x20, x21 in RISC-V International RISC-V)
+
+Example:
+```
+g → x20
+h → x21
+```
+This minimizes memory access and improves performance.
+
+2. **Memory (Arrays, Structs, Large Data)**
+
+Arrays and structures:
+- Are too large to fit entirely in registers
+- Must reside in memory
+- Get assigned a `base` (starting) address
+
+The compiler:
+    1. Reserves memory space
+    2. Tracks the base address
+    3. Generates load/store instructions using offsets
+
+Example: How the Compiler Handles Arrays
+```
+double A[100];
+```
+Each double = 8 bytes
+
+Total size = 800 bytes
+
+The compiler:
+- Allocates 800 bytes in memory
+- Associates base address with a register (e.g., x22)
+- Generates address arithmetic for indexing
+
+For A[i], Address formula:
+$$
+Address=BaseAddress+(i×ElementSize)
+$$
+This is scaled **indexing**.
+
+for Accessing A[8], Given:
+```
+Base address in x22
+Element size = 8 bytes
+```
+8×8=64
+
+Assembly:
+```
+ld x5, 64(x22)
+```
+Here:
+- 64 = compiler-generated offset
+- x22 = base register
+- ld = data transfer instruction
+
+Where the Base Address Comes From? Depends on storage class:
+| Storage Type             | Where Allocated | Base Address Determined        |
+| ------------------------ | --------------- | ------------------------------ |
+| Global array             | Data segment    | Known at link time             |
+| Local array              | Stack           | Calculated using stack pointer |
+| Dynamic array (`malloc`) | Heap            | Returned pointer in register   |
+
+**Example: Global Array**
+
+The compiler may generate:
+```nasm
+la x22, A
+```
+(la = load address pseudo-instruction)
+
+**Example: Stack-Allocated Array**
+
+If inside a function:
+```c
+double A[100];
+```
+Compiler:
+- Decrements stack pointer
+- Uses offset from sp
+```
+addi sp, sp, -800
+```
+sp=sp−800
+
+It decrements the stack pointer by 800 bytes. So the compiler allocates space on the stack by moving sp downward(RISC-V stack Grows toward lower addresses,Allocation = subtract from sp, Deallocation = add back to sp).
+
+Access:
+```
+ld x5, 64(sp)
+```
+**Structures in Memory**
+
+For:
+```c
+struct S {
+    int x;
+    double y;
+};
+```
+Memory layout includes:
+- Field offsets
+- Possible padding (alignment)
+
+Accessing s.y:
+```
+ld x5, 8(x10)
+```
+Offset 8 is computed by compiler based on structure layout.
+
+So Compilers:
+- Allocate scalars → registers
+- Allocate arrays/structs → memory
+- Compute field/index offsets
+- Generate load/store instructions with base + offset
+- Ensure alignment and correct data size
+
+**What This Means Architecturally**
+
+This demonstrates: Separation of Concerns
+- Compiler: manages memory layout
+- ISA: provides load/store mechanism
+- Hardware: executes address calculation
+
+**Role of Addressing Modes**
+
+RISC architectures (ARM, RISC-V, MIPS):
+- Use base + offset addressing
+- Offset encoded inside instruction
+
+CISC architectures (x86):
+- Support scaled indexing directly:
+    ```
+    mov rax, [rbx + rcx*8]
+    ```
+
+**Performance Implications**
+
+Memory accesses:
+- Higher latency than register access
+- May cause cache misses
+- Can introduce pipeline stalls
+
+Good compilers:
+- Keep frequently used data in registers
+- Minimize loads/stores
+- Exploit spatial locality
+
+##### Example: Compiling an Assignment When an Operand Is in Memory
+<QandA>
+<Question>
+
+Let’s assume that `A` is an array of `100` doublewords and that the compiler has
+associated the variables `g` and `h` with the registers `x20` and `x21`. Let’s
+also assume that the starting address, or base address, of the array is in `x22`.
+
+Compile this C assignment statement:
+```
+g = h + A[8];
+```
+
+</Question>
+<Answer>
+
+**Given**
+- `A` = array of `100` doublewords
+- Doubleword = `8 bytes` (64 bits)
+- Base address of `A` → `x22`
+- `g` → `x20`
+- `h` → `x21`
+- C statement:
+    ```c
+    g = h + A[8];
+    ```
+
+Although there is a single operation in this assignment statement, one of the operands is in memory, so we must first transfer `A[8]` to a register. 
+
+The address of this array element is the sum of the base of the array `A`, found in register `x22`, plus the number to select element `8`. The data should be placed in a temporary register for use in the next instruction. 
+
+```nasm
+ld x9, 8(x22) // Temporary reg x9 gets A[8]
+```
+The register added to form the address (`x22`) is called the **base register**, and the constant in a data transfer instruction (8) is called the offset.
+
+The following instruction can operate on the value in `x9` (which equals `A[8]`) since it is in a register. The instruction must add `h` (contained in `x21`) to `A[8]` (contained in `x9`) and put the sum in the register corresponding to `g` (associated with `x20`):
+```nasm
+add x20, x21, x9 // g = h + A[8]
+```
+
+</Answer>
+</QandA>
+
+#### Register-to-register move
+Move data between CPU registers.
+
+Example (generic):
+```
+MOV R1, R2    ; R1 ← R2
+```
+Used for:
+- Copying values
+- Saving temporary data
+- Reordering operands
+
+#### Store(Register → Memory (STORE)) 
+The instruction complementary to load is traditionally called store; it copies data
+from a register to memory. The format of a store is similar to that of a load: the
+name of the operation, followed by the register to be stored, then the base register,
+and finally the offset to select the array element
+
+store writes register data to memory. So it does the opposite of a load instruction.
+| Instruction | Direction         |
+| ----------- | ----------------- |
+| Load        | Memory → Register |
+| Store       | Register → Memory |
+
+Used for:
+- Saving results
+- Updating variables
+- Writing to stack
+
+{/* Why Stores Exist */}
+Registers are limited (e.g., 32 registers). So we must move data:
+```
+Register → Memory
+```
+to:
+- save variables
+- store arrays
+- save function results
+- store stack frames
+
+Example (RISC-V):
+```nasm
+sd x5, 0(x10)      Memory[x10 + 0] ← x5
+```
+In RISC-V, the store doubleword instruction is:
+```nasm
+sd rs2, offset(rs1)
+```
+Meaning:
+```
+Memory[ rs1 + offset ] = rs2
+```
+Where:
+| Field    | Meaning                                |
+| -------- | -------------------------------------- |
+| `rs2`    | register containing the value to store |
+| `rs1`    | base address register                  |
+| `offset` | constant displacement                  |
+
+Arrays are stored sequentially in memory.
+Example array:
+```
+A[0]
+A[1]
+A[2]
+A[3]
+...
+```
+If the base address of `A` is stored in `x22`, then:
+```
+A[i] address = base + (i × element_size)
+```
+For doublewords (8 bytes):
+```
+A[i] address = x22 + 8i
+```
+Example:
+```
+sd x5, 64(x22)
+```
+stores into
+```
+A[8]
+```
+because
+```
+8 × 8 = 64
+```
+
+**Example Program**
+
+C code:
+```c
+A[8] = g;
+```
+Assume:
+- g in x20
+- A base address in x22
+
+RISC-V:
+```nasm
+sd x20, 64(x22)
+```
+Meaning:
+```
+Memory[x22 + 64] = x20
+```
+
+##### Store instruction variants
+Store instructions transfer data from registers to memory. Different sizes and addressing modes are supported across architectures.
+
+<Tabs>
+  <TabItem value="riscv" label="RISC-V" default>
+
+RISC-V provides multiple store instructions for different data sizes:
+
+**Store Byte (SB)**
+```nasm
+sb x5, 0(x10)      Memory[x10 + 0] ← x5[7:0]
+```
+Stores the lower 8 bits of register x5 into memory at address (x10 + 0).
+
+**Store Halfword (SH)**
+```nasm
+sh x5, 0(x10)      Memory[x10 + 0] ← x5[15:0]
+```
+Stores the lower 16 bits of register x5 into memory. Address must be halfword-aligned.
+
+**Store Word (SW)**
+```nasm
+sw x5, 0(x10)      Memory[x10 + 0] ← x5[31:0]
+```
+Stores the lower 32 bits of register x5 into memory. Used for 32-bit integers.
+
+**Store Doubleword (SD)**
+```nasm
+sd x5, 0(x10)      Memory[x10 + 0] ← x5[63:0]
+```
+Stores all 64 bits of register x5 into memory. Used for 64-bit integers and pointers in RV64.
+
+**Format: `sd destination, offset(base)`**
+- `destination` = source register to write
+- `offset` = immediate displacement (12-bit signed)
+- `base` = base address register
+
+All RISC-V stores follow S-type format with split immediate fields.
+
+  </TabItem>
+  <TabItem value="x86" label="x86-64">
+
+x86-64 uses the `mov` instruction for both load and store operations.
+
+**Store Byte (MOV)**
+```nasm
+mov byte ptr [rax], bl       Memory[rax] ← bl (8 bits)
+```
+Stores the lower 8 bits from register bl into memory at address rax.
+
+**Store Word (16-bit)**
+```nasm
+mov word ptr [rax], bx       Memory[rax] ← bx (16 bits)
+```
+Stores the lower 16 bits from register bx into memory.
+
+**Store Doubleword (32-bit)**
+```nasm
+mov dword ptr [rax], eax     Memory[rax] ← eax (32 bits)
+```
+Stores the lower 32 bits from register eax into memory. This is the most common 32-bit store.
+
+**Store Quadword (64-bit)**
+```nasm
+mov qword ptr [rax], rax     Memory[rax] ← rax (64 bits)
+```
+Stores all 64 bits from register rax into memory. Used for 64-bit values.
+
+**Alternative Syntax (Intel/AT&T)**
+```nasm
+ Intel Syntax
+mov qword ptr [rax], rbx
+
+ AT&T Syntax
+movq %rbx, (%rax)
+```
+
+**Advanced Addressing Modes**
+```nasm
+mov qword ptr [rax + 8], rbx         Offset addressing
+mov qword ptr [rax + rcx*8], rbx     Scaled index
+mov qword ptr [rbp - 16], rax        Stack relative
+```
+
+x86-64 supports complex addressing: `[base + index*scale + displacement]`
+
+  </TabItem>
+  <TabItem value="arm" label="ARM AArch64">
+
+ARM provides separate store instructions for each data size:
+
+**Store Byte (STRB)**
+```nasm
+strb w5, [x10]               Memory[x10] ← w5[7:0]
+```
+Stores the lower 8 bits from register w5 (32-bit view) into memory.
+
+**Store Halfword (STRH)**
+```nasm
+strh w5, [x10]               Memory[x10] ← w5[15:0]
+```
+Stores the lower 16 bits from w5 into memory. Address should be halfword-aligned.
+
+**Store Word (STR - 32-bit)**
+```nasm
+str w5, [x10]                Memory[x10] ← w5[31:0]
+```
+Stores 32 bits from w5 (32-bit register view) into memory.
+
+**Store Doubleword (STR - 64-bit)**
+```nasm
+str x5, [x10]                Memory[x10] ← x5[63:0]
+```
+Stores 64 bits from x5 (64-bit register) into memory. Used for 64-bit data.
+
+**Format: `str destination, [base]` or `str destination, [base, offset]`**
+- `destination` = source register
+- `base` = base address register
+- `offset` = optional displacement or register
+
+**Addressing Modes**
+```nasm
+str x5, [x10]                Direct
+str x5, [x10, #8]            Offset immediate
+str x5, [x10, x11]           Register offset
+str x5, [x10, x11, lsl #3]   Scaled register
+str x5, [x10], #8            Post-indexed
+str x5, [x10, #8]!           Pre-indexed
+```
+
+ARM supports flexible addressing with automatic index updates.
+
+  </TabItem>
+  <TabItem value="mips" label="MIPS">
+
+MIPS provides store instructions for different data widths:
+
+**Store Byte (SB)**
+```nasm
+sb $t0, 0($t1)               Memory[$t1 + 0] ← $t0[7:0]
+```
+Stores the lower 8 bits from register $t0 into memory at address ($t1 + 0).
+
+**Store Halfword (SH)**
+```nasm
+sh $t0, 0($t1)               Memory[$t1 + 0] ← $t0[15:0]
+```
+Stores the lower 16 bits from $t0 into memory. Address should be halfword-aligned.
+
+**Store Word (SW)**
+```nasm
+sw $t0, 0($t1)               Memory[$t1 + 0] ← $t0[31:0]
+```
+Stores the lower 32 bits from $t0 into memory. Most common store for 32-bit MIPS.
+
+**Store Doubleword (SD) - MIPS64 only**
+```nasm
+sd $t0, 0($t1)               Memory[$t1 + 0] ← $t0[63:0]
+```
+Stores all 64 bits from register $t0 into memory (MIPS64 variant).
+
+**Format: `sw destination, offset($base)`**
+- `destination` = source register to write
+- `offset` = 16-bit signed immediate displacement
+- `base` = base address register in parentheses
+
+**Addressing Modes**
+```nasm
+sw $t0, 0($t1)               Zero offset
+sw $t0, 100($t1)             Positive offset
+sw $t0, -100($t1)            Negative offset (sign-extended)
+```
+
+MIPS uses only base + offset addressing (no scaled indexing in base ISA).
+
+**Delay Slot (Classic MIPS)**
+```nasm
+sw $t0, 0($t1)               Store instruction
+nop                          Delay slot (must be filled)
+```
+
+Classic MIPS has a branch delay slot; stores do not.
+
+  </TabItem>
+</Tabs>
+
+**Store Instruction Size Comparison**
+| Data Size      | RISC-V | x86-64          | ARM      | MIPS |
+| -------------- | ------ | --------------- | -------- | ---- |
+| Byte (8-bit)   | `sb`   | `mov byte ptr`  | `strb`   | `sb` |
+| Halfword (16)  | `sh`   | `mov word ptr`  | `strh`   | `sh` |
+| Word (32-bit)  | `sw`   | `mov dword ptr` | `str w`  | `sw` |
+| Doubleword (64)| `sd`   | `mov qword ptr` | `str x`  | `sd` |
+
+**Hardware Implementation Comparison**
+| Aspect                 | RISC-V | x86-64       | ARM      | MIPS       |
+| ---------------------- | ------ | ------------ | -------- | ---------- |
+| Memory write path      | Simple | Complex      | Simple   | Simple     |
+| Addressing flexibility | Limited| Very rich    | Rich     | Limited    |
+| Instruction encoding   | S-type | ModRM format | Multiple | I-type     |
+| Auto-increment         | No     | No           | Yes      | No         |
+
+**Performance Considerations**
+
+Store instructions:
+- Write to memory (slower than registers)
+- May cause cache misses
+- Can create write-after-read hazards
+- May require write-back stage in pipeline
+
+Modern CPUs use:
+- Write buffers
+- Store forwarding
+- Write combining
+- Memory disambiguation
+
+**Real-World Example: Storing Array Results**
+
+C code:
+```c
+int arr[100];
+arr[8] = value;
+```
+
+RISC-V:
+```nasm
+la x10, arr          Load array address
+li x11, 32           8 * 4 bytes (word size)
+add x10, x10, x11    Calculate address
+sw x5, 0(x10)        Store 32-bit value
+```
+
+x86-64:
+```nasm
+lea rax, [rel arr]    Load address
+mov [rax + 32], r8d   Store directly with offset
+```
+
+ARM:
+```nasm
+adrp x10, arr         Load page address
+add x10, x10, :lo12:arr
+str w5, [x10, #32]    Store with offset
+```
+
+**Important Notes on Store Instructions**
+
+1. **Alignment**: Accesses should respect data width alignment
+2. **Endianness**: Multi-byte stores follow architecture endianness rules
+3. **Sign Extension**: Stores truncate upper bits (no sign extension needed)
+4. **Memory Protection**: Stores may trap on read-only memory
+5. **Cache Effects**: Store instructions interact with cache coherence protocols
+
+<QandA>
+<Question>
+
+Assume variable `h` is associated with register `x21` and the base address of the
+array `A` is in `x22`. What is the RISC-V assembly code for the C assignment
+statement below?
+```c
+A[12] = h + A[8];
+```
+</Question>
+<Answer>
+
+Assumptions:
+- h  → x21
+- A  → base address in x22
+- A elements = doubleword (8 bytes)
+
+So the byte offsets are:
+```
+A[8]  = 8 × 8  = 64
+A[12] = 12 × 8 = 96
+```
+The computation required is:
+```
+temp = A[8]
+temp = h + temp
+A[12] = temp
+```
+So every architecture must do three operations:
+1. load A[8]
+2. add h
+3. store result into A[12]
+
+Although there is a single operation in the C statement, now two of the
+operands are in memory, so we need even more RISC-V instructions. The first
+two instructions are the same as in the prior example, except this time we use
+the proper offset for byte addressing in the load register instruction to select
+`A[8]`, and the add instruction places the sum in `x9`:
+```nasm
+ld x9, 64(x22) // Temporary reg x9 gets A[8]
+add x9, x21, x9 // Temporary reg x9 gets h + A[8]
+```
+The final instruction stores the sum into `A[12]`, using `96 (8 × 12)` as the
+offset and register `x22` as the base register.
+```nasm
+sd x9, 96(x22) // Stores h + A[8] back into A[12]
+```
+Load doubleword and store doubleword are the instructions that copy
+doublewords between memory and registers in the RISC-V architecture. Some
+brands of computers use other instructions along with load and store to transfer
+data. 
+
+Now let's write the complete assembly code for all architectures.
+
+{/* Assume variable h is associated with register x21 and the base address of the array A is in x22. What is the RISC-V assembly code for the C assignment statement below? A[12] = h + A[8]; write store instruction for RISC-V,x86-64,ARM,MIPS in markdown tabs,provide comments and description for all commands
+
+TODO: 
+If you'd like, I can also show something very useful for exams:
+
+How this same statement is compiled when the array elements are bytes, integers, floats, and structures — which reveals how compilers calculate offsets and scaling automatically. */}
+<Tabs>
+  <TabItem value="riscv" label="RISC-V" default>
+
+```nasm
+ RISC-V Assembly for: A[12] = h + A[8]
+ Given:
+   h is in x21
+   A base address is in x22
+   A is an array of doublewords (8 bytes each)
+
+ Step 1: Load A[8] into a temporary register
+ld x5, 64(x22)         Load A[8] from memory
+                       offset = 8 * 8 = 64 bytes
+                       x5 now contains A[8]
+
+ Step 2: Add h (x21) to A[8] (x5), store in x5
+add x5, x21, x5        x5 = h + A[8]
+                       x21 contains h
+                       x5 already contains A[8]
+                       Result goes into x5
+
+ Step 3: Store the result into A[12]
+sd x5, 96(x22)         Store result into A[12]
+                       offset = 12 * 8 = 96 bytes
+                       Memory[x22 + 96] = x5
+                       Now A[12] = h + A[8]
+```
+
+**RISC-V Explanation:**
+- `ld` (load doubleword): Copies 64-bit value from memory to register
+- `add`: Adds two registers, stores result in destination register
+- `sd` (store doubleword): Copies 64-bit register value to memory
+- Offsets are computed at compile time: element index × element size
+- All arithmetic happens in registers; memory is only accessed for load/store
+
+| Instruction       | Meaning                                                        |
+| ----------------- | -------------------------------------------------------------- |
+| `ld x5, 64(x22)`  | Load doubleword from memory address `x22 + 64` → register `x5` |
+| `add x5, x21, x5` | Add `h` (`x21`) and `A[8]` (`x5`)                              |
+| `sd x5, 96(x22)`  | Store result to memory location `A[12]`                        |
+
+  </TabItem>
+  <TabItem value="x86" label="x86-64">
+
+```nasm
+; x86-64 Assembly for: A[12] = h + A[8]
+; Given:
+;   h is in r13 (or any general-purpose register)
+;   A base address is in rbx (or any general-purpose register)
+;   A is an array of 64-bit values (8 bytes each)
+;
+; Assumption: h → r13, A base → rbx
+
+; Step 1: Load A[8] into a register
+mov rax, [rbx + 64]   ; Load A[8] from memory
+                      ; offset = 8 * 8 = 64 bytes
+                      ; rax now contains A[8]
+                      ; [rbx + 64] means Memory[rbx + 64]
+
+; Step 2: Add h (r13) to A[8] (rax)
+add rax, r13          ; rax = rax + r13
+                      ; rax = A[8] + h
+                      ; Result stays in rax
+                      ; Note: x86 memory operands allowed, but not used here
+
+; Step 3: Store the result into A[12]
+mov [rbx + 96], rax   ; Store result into A[12]
+                      ; offset = 12 * 8 = 96 bytes
+                      ; Memory[rbx + 96] = rax
+                      ; Now A[12] = h + A[8]
+```
+
+**x86-64 Explanation:**
+- `mov rax, [mem]`: Load from memory into register (CISC allows this)
+- `add rax, reg`: Add register to register (or memory operand)
+- `mov [mem], rax`: Store register value to memory
+- x86 uses **memory-to-register** and **register-to-memory** directly
+- Fewer instructions than RISC because memory operands are allowed in ALU ops
+- Brackets `[ ]` denote memory address; `+` denotes offset calculation
+
+| Instruction         | Meaning                                |
+| ------------------- | -------------------------------------- |
+| `mov rax, [r22+64]` | Load memory value `A[8]` into register |
+| `add rax, r21`      | Add `h`                                |
+| `mov [r22+96], rax` | Store result to `A[12]`                |
+
+  </TabItem>
+  <TabItem value="arm" label="ARM AArch64">
+
+```nasm
+; ARM AArch64 Assembly for: A[12] = h + A[8]
+; Given:
+;   h is in x21
+;   A base address is in x22
+;   A is an array of 64-bit values (8 bytes each)
+
+; Step 1: Load A[8] into a temporary register
+ldr x5, [x22, #64]    ; Load A[8] from memory
+                      ; offset = 8 * 8 = 64 bytes
+                      ; x5 now contains A[8]
+                      ; [x22, #64] means Memory[x22 + 64]
+                      ;  denotes immediate constant
+
+; Step 2: Add h (x21) to A[8] (x5), store in x5
+add x5, x21, x5       ; x5 = x21 + x5
+                      ; x21 contains h
+                      ; x5 contains A[8]
+                      ; Result stored in x5
+
+; Step 3: Store the result into A[12]
+str x5, [x22, #96]    ; Store result into A[12]
+                      ; offset = 12 * 8 = 96 bytes
+                      ; Memory[x22 + 96] = x5
+                      ; Now A[12] = h + A[8]
+```
+
+**ARM AArch64 Explanation:**
+- `ldr` (load register): Load from memory into register
+- `add`: Register-to-register arithmetic (no memory operands allowed)
+- `str` (store register): Store register value to memory
+- ARM uses strict **load-store architecture** like RISC-V
+- Addressing mode: `[base, #offset]` or `[base, index]`
+- `#` indicates an immediate constant value
+- All arithmetic restricted to registers; memory accessed only via load/store
+
+| Instruction         | Meaning                       |
+| ------------------- | ----------------------------- |
+| `ldr x5, [x22,#64]` | Load 64-bit value from `A[8]` |
+| `add x5, x21, x5`   | Add register values           |
+| `str x5, [x22,#96]` | Store result to `A[12]`       |
+
+  </TabItem>
+  <TabItem value="mips" label="MIPS">
+
+```nasm
+ MIPS Assembly for: A[12] = h + A[8]
+ Given:
+   h is in $s5 (saved register, maps to MIPS register)
+   A base address is in $s6
+   A is an array of 64-bit values (8 bytes each, MIPS64)
+
+ Step 1: Load A[8] into a temporary register
+ld $t0, 64($s6)        Load A[8] from memory
+                       offset = 8 * 8 = 64 bytes
+                       $t0 now contains A[8]
+                       64($s6) means Memory[$s6 + 64]
+                       ld = load doubleword (MIPS64 only)
+
+ Step 2: Add h ($s5) to A[8] ($t0), store in $t0
+add $t0, $s5, $t0      $t0 = $s5 + $t0
+                       $s5 contains h
+                       $t0 contains A[8]
+                       Result stored in $t0
+
+ Step 3: Store the result into A[12]
+sd $t0, 96($s6)        Store result into A[12]
+                       offset = 12 * 8 = 96 bytes
+                       Memory[$s6 + 96] = $t0
+                       Now A[12] = h + A[8]
+                       sd = store doubleword (MIPS64 only)
+```
+
+**MIPS Explanation:**
+- `ld` (load doubleword): Load 64-bit value from memory to register (MIPS64)
+- `add`: Three-operand format: destination source1 source2
+- `sd` (store doubleword): Store 64-bit register to memory (MIPS64)
+- MIPS register names use `$` prefix (e.g., `$t0`, `$s5`)
+- Addressing mode: `offset($register)` calculates Memory[register + offset]
+- Strict load-store architecture; all arithmetic on registers only
+- MIPS32 uses `lw`/`sw` for 32-bit; MIPS64 uses `ld`/`sd` for 64-bit
+- Classic MIPS has branch delay slot, but not for ordinary load/store
+
+| Instruction       | Meaning            |
+| ----------------- | ------------------ |
+| `ld $t0,64($22)`  | Load array element |
+| `add $t0,$21,$t0` | Perform addition   |
+| `sd $t0,96($22)`  | Store result       |
+
+  </TabItem>
+</Tabs>
+
+**Summary Comparison Table**
+
+| Aspect                  | RISC-V       | x86-64                 | ARM          | MIPS         |
+| ----------------------- | ------------ | ---------------------- | ------------ | ------------ |
+| **Load instruction**    | `ld`         | `mov`                  | `ldr`        | `ld`         |
+| **Store instruction**   | `sd`         | `mov`                  | `str`        | `sd`         |
+| **Add instruction**     | `add`        | `add`                  | `add`        | `add`        |
+| **Total instructions**  | 3            | **3**                  | 3            | 3            |
+| **Load-store model**    | Strict       | Flexible (CISC)        | Strict       | Strict       |
+| **Memory in ALU ops**   | No           | **Yes**                | No           | No           |
+| **Register width**      | 64-bit (RV64)| 64-bit                 | 64-bit       | 64-bit (MIPS64) |
+| **Addressing format**   | `offset(reg)`| `[reg + offset]`       | `[reg, #off]`| `offset($reg)`|
+
+**Key Insights**
+
+1. **Load-Store vs CISC**:
+   - RISC-V, ARM, MIPS enforce load-store discipline
+   - x86-64 allows memory operands in arithmetic instructions
+   - This makes x86 more code-dense but harder to pipeline
+
+2. **Operand Count**:
+   - All four architectures need the same three high-level operations
+   - x86 achieves it in fewer instruction encodings due to memory operands
+   - RISC architectures require more instructions but are simpler
+
+3. **Hardware Complexity**:
+   - RISC (RISC-V, ARM, MIPS) have simple, regular decoders
+   - x86 has complex decoding but internally translates to RISC-like micro-ops
+   - Modern x86 CPUs internally execute RISC-style load-store operations
+
+4. **Register Allocation**:
+   - RISC-V and ARM: x21, x22 are general-purpose registers
+   - MIPS: Uses register names like $s5, $s6 (saved registers)
+   - x86: Uses more specialized register names (rax, rbx, r13)
+</Answer>
+</QandA>
+
+##### Instruction Format
+Store instructions use S-type format in RISC-V.
+Fields:
+```
+imm[11:5] | rs2 | rs1 | funct3 | imm[4:0] | opcode
+```
+Where:
+- rs2 = value to store
+- rs1 = base address
+- imm = offset
+
+**Why store uses S-Type encoding**
+
+Store instructions like:
+```nasm
+sd x20, 64(x22)
+```
+mean:
+```nasm
+Memory[x22 + 64] = x20
+```
+So the instruction must encode three things:
+1. Source register (data to store) → rs2
+2. Base register (address base) → rs1
+3. Offset → immediate
+
+Unlike loads, there is no destination register because the data goes to memory.
+
+**Problem**: RISC-V instruction format normally expects a destination register field (rd).
+But stores do not need rd.
+
+**Solution**: RISC-V designers reused that space to hold part of the immediate.
+Thus the immediate is split into two pieces.
+
+S-Type Layout (32 bits)
+```
+31      25 | 24   20 | 19   15 | 14 12  | 11     7 | 6      0
+imm[11:5]  |  rs2    |  rs1    | funct3 | imm[4:0] | opcode
+```
+Immediate is split:
+```
+imm = imm[11:5] + imm[4:0]
+```
+This allows:
+- rs1
+- rs2
+- 12-bit offset
+
+to fit into a 32-bit instruction.
+
+**Full Binary Encoding Example**
+
+Instruction:
+```nasm
+sd x20, 64(x22)
+```
+Meaning:
+```
+Memory[x22 + 64] = x20
+```
+Step 1 — Fields
+| Field     | Value     |
+| --------- | --------- |
+| opcode    | `0100011` |
+| funct3    | `011`     |
+| rs1       | `x22`     |
+| rs2       | `x20`     |
+| immediate | `64`      |
+
+Step 2 — Convert registers to binary
+| Register | Number | Binary  |
+| -------- | ------ | ------- |
+| x22      | 22     | `10110` |
+| x20      | 20     | `10100` |
+
+Step 3 — Immediate (64)
+```
+64 = 000001000000 (12 bits)
+```
+Split:
+```
+imm[11:5] = 0000010
+imm[4:0]  = 00000
+```
+
+Step 4 — Place into S-Type format
+```
+imm[11:5] rs2   rs1   funct3 imm[4:0] opcode
+0000010   10100 10110 011    00000    0100011
+```
+Final 32-bit binary
+```
+0000010 10100 10110 011 00000 0100011
+```
+Grouped:
+
+```
+00000101010010110011000000100011
+```
+Hex form (what appears in machine code)
+```
+0x054B3023
+```
+This is the actual machine instruction executed by the CPU.
+
+##### How Compilers Generate Loads/Stores for Arrays
+Consider C code:
+```
+g = h + A[8];
+```
+Assume
+```
+g → x20
+h → x21
+A base → x22
+```
+Step 1 — Compute element address
+
+Array elements are doublewords (8 bytes).
+```
+A[8] offset = 8 × 8 = 64
+```
+Step 2 — Load array element
+```nasm
+ld x5, 64(x22)
+```
+Meaning:
+```
+x5 = A[8]
+```
+Step 3 — Add
+```nasm
+add x20, x21, x5
+```
+Meaning:
+```
+g = h + A[8]
+```
+Full compiler output
+```nasm
+ld   x5, 64(x22)
+add  x20, x21, x5
+```
+
+**Why Arrays Use Base + Offset Addressing**
+
+Instead of computing address every time:
+```
+address = base + index * element_size
+```
+Compilers precompute the offset.
+
+Example:
+```
+A[0]  → 0(x22)
+A[1]  → 8(x22)
+A[2]  → 16(x22)
+A[8]  → 64(x22)
+```
+This makes instructions very simple and fast.
+
+##### How Stores Work With the Stack Pointer
+The stack pointer (sp = x2) points to the top of the stack. Stacks grow downward in memory. Typical function prologue:
+```
+addi sp, sp, -32
+```
+Meaning:
+```
+allocate 32 bytes on stack
+```
+Now registers can be saved.
+
+Example
+```
+sd x1, 24(sp)
+sd x20, 16(sp)
+sd x21, 8(sp)
+```
+Meaning:
+```
+Memory[sp+24] = return address
+Memory[sp+16] = saved x20
+Memory[sp+8]  = saved x21
+```
+Stack layout:
+```
+High Address
++------------------+
+| saved x1 (ra)    | sp+24
++------------------+
+| saved x20        | sp+16
++------------------+
+| saved x21        | sp+8
++------------------+
+| local variables  |
++------------------+
+sp →
+Low Address
+```
+Stores are used to save registers before a function runs.
+
+Later they are restored:
+```
+ld x1, 24(sp)
+ld x20, 16(sp)
+ld x21, 8(sp)
+addi sp, sp, 32
+ret
+```
+##### Summary
+| Concept           | Explanation                                |
+| ----------------- | ------------------------------------------ |
+| Store instruction | Moves data **from register → memory**      |
+| RISC-V store      | `sd rs2, offset(rs1)`                      |
+| Encoding type     | **S-Type**                                 |
+| Immediate         | split into two parts                       |
+| Stack usage       | saves registers and local variables        |
+| Array access      | compiler uses **base + offset addressing** |
+
+##### Comparison with Load
+Load example:
+```nasm
+ld x5, 64(x22)
+```
+Meaning:
+```
+x5 = Memory[x22 + 64]
+```
+
+Store example:
+```nasm
+sd x5, 64(x22)
+```
+Meaning:
+```
+Memory[x22 + 64] = x5
+```
+So they are mirror operations.
+
+#### Load constant
+D) Immediate → Register
+Load a constant value into a register.
+Example:
+```
+li x5, 100
+```
+Used for:
+- Initializing variables
+- Loop counters
+- Constants in arithmetic
+
+#### Stack Operations
+Move data between registers and stack memory.
+Typical operations:
+PUSH R1
+POP  R1
+In RISC-V (implemented using store/load + stack pointer adjustment):
+addi sp, sp, -8
+sd   x5, 0(sp)
+Used for:
+- Function calls
+- Saving return addresses
+- Saving registers
+
+#### I/O Data Transfer
+Move data between CPU and peripherals.
+Examples:
+- Memory-mapped I/O loads/stores
+- Special instructions (in some architectures)
+
+#### Addressing Modes in Data Transfer
+Data movement instructions depend heavily on addressing modes.
+
+Common modes:
+| Addressing Mode | Example          | Meaning                  |
+| --------------- | ---------------- | ------------------------ |
+| **Immediate**       | `li x1, 5`       | Constant value           |
+| **Register**        | `add x1, x2, x3` | Operand in register      |
+| **Base + Offset**   | `ld x1, 8(x2)`   | Memory`[x2 + 8]`           |
+| **PC-relative**     | Used for jumps   | Based on program counter |
+
+#### byte addressing and endianness
+Since 8-bit bytes are useful in many programs, virtually all architectures today address individual bytes. Therefore, the address of a `doubleword` matches the address of one of the `8 bytes` within the `doubleword`, and addresses of sequential `doublewords` differ by `8`.
+
+Modern processors (including RISC-V International RISC-V) use **byte-addressable memory**.
+This means:
+- Every `8-bit` byte has its own unique address.
+- Memory addresses increase by `1 per byte`.
+
+Example:
+| Address | Byte   |
+| ------- | ------ |
+| 1000    | Byte 0 |
+| 1001    | Byte 1 |
+| 1002    | Byte 2 |
+| 1003    | Byte 3 |
+| 1004    | Byte 4 |
+| 1005    | Byte 5 |
+| 1006    | Byte 6 |
+| 1007    | Byte 7 |
+
+##### Doubleword Addressing
+A **doubleword** = `64 bits` = `8 bytes`
+
+If a **doubleword** starts at address `1000`:
+- It occupies addresses `1000–1007`.
+- The next doubleword starts at 1008.
+
+So:
+$$
+Address difference=8 bytes
+$$
+That’s why: Addresses of sequential doublewords differ by 8.
+
+**Alignment and Addressing**
+
+Since doublewords are 8 bytes:
+Aligned doubleword addresses are multiples of 8:
+```
+... 0, 8, 16, 24, 32 ...
+```
+RISC architectures (including RISC-V):
+- Prefer aligned accesses
+- May trap on misaligned doubleword loads
+
+``` [title="Actual RISC-V memory addresses and contents of memory for those doublewords,Since RISC-V addresses each byte, doubleword addresses are multiples of 8: there are 8 bytes in a doubleword"]
+   --------             ---------
+   |      |      24     |  100  |
+   |      |      16     |  10   |
+   |      |       8     |  101  |
+   |      |       0     |   1   |
+   --------             ---------
+                Address   Data
+   Processor        Memory
+```
+##### Endianness
+**Endianness** determines Which byte is stored at the lowest memory address, It only matters for multi-byte data (2, 4, 8 bytes).
+
+Computers divide into: 
+1. **Big-Endian**: those that use the address of the leftmost or "big end" byte as the doubleword address 
+2. **little-endian**: versus those that use the rightmost or "little end" byte. RISC-V belongs to the latter this, referred to as little-endian. 
+
+##### Big-Endian (Most Significant Byte first)
+
+Suppose we store this 64-bit value:
+```
+0x1122334455667788
+```
+Lowest address contains the most significant byte (MSB).
+| Address | Stored Byte |
+| ------- | ----------- |
+| 1000    | 11          |
+| 1001    | 22          |
+| 1002    | 33          |
+| 1003    | 44          |
+| 1004    | 55          |
+| 1005    | 66          |
+| 1006    | 77          |
+| 1007    | 88          |
+
+```
+Low Address → 11 22 33 44 55 66 77 88
+```
+"Big end" stored first.
+
+**Little-Endian (Least Significant Byte first)**
+
+Lowest address contains the least significant byte (LSB).
+| Address | Stored Byte |
+| ------- | ----------- |
+| 1000    | 88          |
+| 1001    | 77          |
+| 1002    | 66          |
+| 1003    | 55          |
+| 1004    | 44          |
+| 1005    | 33          |
+| 1006    | 22          |
+| 1007    | 11          |
+```
+Low Address → 88 77 66 55 44 33 22 11
+```
+"Little end" stored first.
+
+**Little-Endian** Is Popular, because:
+- Easier variable-size arithmetic
+- Low byte remains at same address when size increases
+
+Historically adopted by Intel → ecosystem dominance
+
+**RISC-V** is little-endian.
+So:
+- Lowest address = least significant byte
+- Most PCs today are little-endian
+
+Examples of little-endian systems:
+- x86
+- ARM (usually)
+- RISC-V
+
+**Why Endianness Usually Doesn’t Matter**
+
+Since the order matters only if you access the identical data both as a doubleword and as eight individual bytes, few need to be aware of the "endianness."
+
+If you always access data consistently:
+- Load/store doublewords → fine
+- Load/store bytes → fine
+
+It only matters when:
+- You reinterpret the same memory in different sizes
+- You send binary data over a network
+- You read binary files across architectures
+
+Example problem:
+```c
+uint64_t x = 0x1122334455667788;
+uint8_t *p = (uint8_t*)&x;
+```
+p[0]:
+- Big-endian → 0x11
+- Little-endian → 0x88
+
+That’s when it matters.
+
+#### Data Size Variants
+Data transfer instructions vary by data width:
+| Size       | Example (RISC-V) | Bits |
+| ---------- | ---------------- | ---- |
+| Byte       | `lb`, `sb`       | 8    |
+| Halfword   | `lh`, `sh`       | 16   |
+| Word       | `lw`, `sw`       | 32   |
+| Doubleword | `ld`, `sd`       | 64   |
+
+Important concept:
+- Sign extension (lb, lh)
+- Zero extension (lbu, lhu)
+
+#### Performance Considerations
+Memory access is expensive
+
+CPU time:
+```
+CPU Time = Instruction Count × CPI × Clock Cycle Time
+```
+Load/store instructions:
+- Often have higher CPI
+- May cause cache misses
+- Can stall pipeline
+
+Good compilers:
+- Minimize memory access
+- Reuse registers
+- Optimize register allocation
+
+#### Data Movement in Hardware
+Data transfer involves:
+- Register File
+- Data Memory
+- Address Generation Unit (AGU)
+- Buses
+- Control signals
+
+In a single-cycle datapath:
+- Load instruction uses memory read path
+- Store instruction uses memory write path
+
+In pipelined CPUs:
+- Loads may cause load-use hazards
+- Requires forwarding or stalls
+
+#### RISC vs CISC Comparison
+| Feature                | RISC (e.g., RISC-V) | CISC (e.g., x86) |
+| ---------------------- | ------------------- | ---------------- |
+| Memory in arithmetic   | Not allowed         | Allowed          |
+| Explicit load/store    | Yes                 | Not always       |
+| Instruction simplicity | Simple              | Complex          |
+
+#### Pipeline & Data Movement Impact
+| Feature              | x86       | ARM      | RISC-V | MIPS |
+| -------------------- | --------- | -------- | ------ | ---- |
+| Load-Use Hazard      | Yes       | Yes      | Yes    | Yes  |
+| Forwarding Required  | Yes       | Yes      | Yes    | Yes  |
+| Decode Complexity    | Very high | Moderate | Low    | Low  |
+| Micro-Op Translation | Yes       | No       | No     | No   |
+
+#### x86 vs ARM vs RISC-V vs MIPS Comparison
+| Feature                   | x86              | ARM               | RISC-V                    | MIPS                |
+| ------------------------- | ---------------- | ----------------- | ------------------------- | ------------------- |
+| Register ↔ Register       | `MOV RAX, RBX`   | `MOV X0, X1`      | `ADD x1, x2, x0` (pseudo) | `ADD $t0,$t1,$zero` |
+| Load Instruction          | `MOV RAX, [RBX]` | `LDR X0, [X1]`    | `LD x5, 0(x10)`           | `LW $t0, 0($t1)`    |
+| Store Instruction         | `MOV [RBX], RAX` | `STR X0, [X1]`    | `SD x5, 0(x10)`           | `SW $t0, 0($t1)`    |
+| Memory-to-Memory Move     | ✅ Allowed        | ❌                 | ❌                         | ❌                   |
+| Auto Increment Addressing | Yes              | Yes               | No (explicit ADDI)        | No                  |
+| PC-relative Loads         | Yes              | Yes               | Yes                       | Yes                 |
+| Unaligned Access          | Usually allowed  | Sometimes trapped | Usually trapped           | Usually trapped     |
+
+#### Examples
+##### Simple C Code → Data Movement
+C code:
+```c
+int a = b + c;
+```
+RISC-V equivalent:
+```nasm
+lw x5, 0(x10)     load b
+lw x6, 0(x11)     load c
+add x7, x5, x6    compute
+sw x7, 0(x12)     store result a
+```
+Notice:
+- Two loads
+- One arithmetic
+- One store
+
+Data movement often dominates instruction count.
+
+##### Example Sum of Integers C function
+```c
+int sum(int *a, int *b, int *c)
+{
+    *a = *b + *c;
+    return *a;
+}
+```
+Assumptions:
+- 64-bit systems except MIPS (32-bit example)
+- Arguments passed in registers
+- No optimization tricks
+
+
+<Tabs>
+  <TabItem value="riscv" label="RISC-V (RV64)" default>
+
+```nasm
+; a in a0
+; b in a1
+; c in a2
+
+sum:
+    lw      t0, 0(a1)      load *b
+    lw      t1, 0(a2)      load *c
+    add     t0, t0, t1     add
+    sw      t0, 0(a0)      store
+    mv      a0, t0         return value
+    ret
+```
+Key Observations (RISC-V)
+- Pure load–store
+- Very simple encoding
+- No flags register
+- Compare + branch model (not used here)
+
+</TabItem>
+  <TabItem value="x86" label="x86-64 (System V ABI)">
+
+(Used by Linux, GCC, Clang on Intel/AMD CPUs)
+```nasm
+; a in RDI
+; b in RSI
+; c in RDX
+
+sum:
+    mov     eax, DWORD PTR [rsi]    ; load *b
+    add     eax, DWORD PTR [rdx]    ; eax += *c (memory operand allowed!)
+    mov     DWORD PTR [rdi], eax    ; store result into *a
+    ret
+```
+Key Observations (x86)
+- Memory operand allowed inside add
+- Fewer instructions
+- Uses implicit flags
+- CISC flexibility
+
+</TabItem>
+  <TabItem value="arm" label="ARM AArch64">
+
+(Modern ARM 64-bit)
+```nasm
+; a in x0
+; b in x1
+; c in x2
+
+sum:
+    ldr     w3, [x1]      ; load *b
+    ldr     w4, [x2]      ; load *c
+    add     w3, w3, w4    ; register-only arithmetic
+    str     w3, [x0]      ; store into *a
+    mov     w0, w3        ; return value
+    ret
+```
+Key Observations (ARM)
+- Strict load–store
+- Arithmetic only on registers
+- Separate load instructions required
+- Very clean pipeline-friendly design
+
+
+</TabItem>
+  <TabItem value="mips" label="MIPS (Classic 32-bit)">
+
+```nasm
+ a in $a0
+ b in $a1
+ c in $a2
+
+sum:
+    lw      $t0, 0($a1)    load *b
+    lw      $t1, 0($a2)    load *c
+    add     $t0, $t0, $t1
+    sw      $t0, 0($a0)
+    move    $v0, $t0       return value
+    jr      $ra
+    nop                    delay slot (classic MIPS)
+```
+Key Observations (MIPS)
+- Very textbook RISC
+- Explicit delay slot
+- Strict load–store
+- Very clean 5-stage pipeline design
+
+</TabItem>
+</Tabs>
+
+**Instruction Count Comparison**
+| ISA    | Loads | ALU Ops | Stores | Extra            | Total |
+| ------ | ----- | ------- | ------ | ---------------- | ----- |
+| x86    | 1     | 1       | 1      | 0                | **3** |
+| ARM    | 2     | 1       | 1      | 1 (mov)          | 5     |
+| RISC-V | 2     | 1       | 1      | 1 (mv)           | 5     |
+| MIPS   | 2     | 1       | 1      | 2 (move + delay) | 6     |
+x86 needs fewer instructions because memory operands are allowed.
+
+**Architectural Differences Visible Here**
+| Feature                      | x86   | ARM   | RISC-V | MIPS     |
+| ---------------------------- | ----- | ----- | ------ | -------- |
+| Memory inside ADD            | ✅ Yes | ❌     | ❌      | ❌        |
+| Dedicated return instruction | `ret` | `ret` | `ret`  | `jr $ra` |
+| Delay Slot                   | ❌     | ❌     | ❌      | ✅        |
+| Flags Register               | Yes   | Yes   | No     | No       |
+| Load–Store Model             | No    | Yes   | Yes    | Yes      |
+
+**Architecture Insights**
+
+CISC vs RISC
+- x86 reduces instruction count
+- RISC increases instruction count but simplifies hardware
+
+Pipeline Impact
+
+RISC:
+- Easier decode
+- More predictable timing
+- Simpler forwarding logic
+
+x86:
+- Complex decode
+- Internally translated to micro-ops
+- Hardware complexity higher
+
+Compiler Impact
+
+Compilers for RISC:
+- Must manage registers carefully
+- Generate explicit loads/stores
+
+Compilers for x86:
+- Can exploit complex addressing modes
+
+
+Even though x86 uses fewer instructions,
+modern CPUs internally convert x86 instructions into RISC-like micro-ops.
+
+So at the hardware execution level: Most modern CPUs behave like load–store machines.
+
+
+### Control Flow Instructions(Instructions for Making Decisions)
+What distinguishes a computer from a simple calculator is its ability to make
+decisions. Based on the input data and the values created during computation,
+different instructions execute.
+
+Control flow instructions are what allow a program to make decisions and change execution order, instead of just running instructions sequentially (top → bottom). They are the foundation of if-statements, loops, and function calls.
+
+These instructions alter the execution sequence.
+
+Normally, the CPU executes instructions like this:
+```
+PC → Instruction 1 → Instruction 2 → Instruction 3 → ...
+```
+Control flow instructions **modify the Program Counter (PC)** so execution can:
+- **Skip instructions**
+- **Repeat instructions (loops)**
+- **Jump to another part of the program**
+
+In short: Control flow = who runs next?
+
+Types
+- Conditional branch (if equal, if less than)
+- Unconditional jump
+- Function call
+- Return
+
+They enable:
+- Loops
+- Conditionals
+- Function abstraction
+- Program modularity
+
+Control instructions heavily influence pipeline and branch prediction design.
+
+#### Conditional branch (Conditional Control Flow (Decisions))
+These instructions compare values and decide whether to jump.
+
+Decision making is commonly represented in
+programming languages using the if statement, sometimes combined with go to
+statements and labels. 
+
+**conditional branch** An
+instruction that tests a
+value and that allows for
+a subsequent transfer of
+control to a new address
+in the program based on
+the outcome of the test.
+
+The test for equality or inequality is probably the most popular test, but there are
+many other relationships between two numbers. For example, a for loop may want
+to test to see if the index variable is less than `0`. The full set of comparisons is less
+than (`<`), less than or equal (`≤`), greater than (`>`), greater than or equal (`≥`), equal
+(`=`), and not equal (`≠`).
+
+But in RISC-V, we don’t have all of these directly. Instead, we build them using a small set of branch instructions.
+
+RISC-V Branch Instructions for Comparisons
+1. Equality
+    ```assembly
+    beq  rs1, rs2, label   # ==
+    bne  rs1, rs2, label   # !=
+    ```
+2. Signed comparisons (two’s complement)
+    ```assembly
+    blt  rs1, rs2, label   # rs1 < rs2
+    bge  rs1, rs2, label   # rs1 ≥ rs2
+    ```
+    These treat numbers as signed integers
+
+3. Unsigned comparisons
+    ```assembly
+    bltu rs1, rs2, label   # rs1 < rs2 (unsigned)
+    bgeu rs1, rs2, label   # rs1 ≥ rs2 (unsigned)
+    ```
+    These treat numbers as unsigned integers
+
+
+RISC-V assembly language includes two decision-making instructions, similar to an if statement with a go to.
+1. branch if equal(beq)
+2. branch if not equal(bne)
+
+Both `beq` and `bne` rely on the same hardware:
+- Comparator → result (equal / not equal)
+- Control unit → decide branch
+
+Difference is just:
+- `beq` → branch if result = `TRUE`
+- `bne` → branch if result = `FALSE`
+
+You can build ALL comparisons using these instructions.
+
+1. Less than or equal (`≤`)
+    ```
+    a ≤ b  ⇔  !(a > b)
+    ```
+    - RISC-V: bgt a, b → not available directly
+    - → use: blt b, a → same as (`a > b`)
+2. Greater than (`>`)
+    ```
+    a > b  ⇔  b < a
+    ```
+    - RISC-V: blt rs2, rs1, label
+3. Greater than or equal (`≥`)
+    ```
+    bge rs1, rs2, label
+    ```
+4. Less than (`\<`)
+    ```
+    blt rs1, rs2, label
+    ```
+
+RISC-V Uses This Design, Instead of many instructions, RISC-V uses: few instructions + flexibility, Saves hardware cost and simplifies decoding.
+
+Comparison of bit patterns must also deal with the dichotomy between signed and unsigned numbers. 
+1. Sometimes a bit pattern with a 1 in the most significant bit represents a negative number and, of course, is less than any positive number, which must have a 0 in the most significant bit.
+2. With unsigned integers, on the other hand, a 1 in the most significant bit represents a number that is larger than any that begins
+
+Example:
+```
+x1 = 0xFFFFFFFF
+x2 = 1
+```
+Signed:
+```
+x1 = -1
+-1 < 1 → TRUE
+```
+blt x1, x2 → branch taken
+
+Unsigned:
+```
+x1 = 4294967295
+4294967295 < 1 → FALSE
+```
+bltu x1, x2 → NOT taken
+
+RISC-V provides separate branch instructions for signed and unsigned comparisons because the same bit pattern can represent very different values depending on interpretation.
+| Instruction | Meaning | Type     |
+| ----------- | ------- | -------- |
+| beq         | `==`      | exact    |
+| bne         | `!=`      | exact    |
+| blt         | `<`       | signed   |
+| bge         | `≥`       | signed   |
+| bltu        | `<`       | unsigned |
+| bgeu        | `≥`       | unsigned |
+
+##### decisions (comparisons + branching) Approach
+There are three different ways ISAs implement decisions (comparisons + branching).These are three design philosophies:
+
+- RISC-V philosophy: Explicit + simple instructions
+- MIPS philosophy: Break operations into smaller steps
+- ARM philosophy: Use implicit processor state (flags)
+
+This affects:
+- Instruction count 
+- Performance 
+- Hardware complexity 
+- Compiler design
+
+###### RISC-V uses direct branch instructions:
+```
+beq, bne, blt, bge, bltu, bgeu
+```
+Each instruction:
+- compares registers
+- decides to branch in one step
+
+Example:
+```nasm
+blt x5, x6, label
+```
+Hardware does: compare + branch decision together
+
+Pros
+- Fewer instructions 
+- Simple to read 
+Cons
+- Slightly more complex hardware (comparison logic inside branch) 
+
+###### MIPS Approach (Set + Branch)
+An alternative to providing these additional branch instructions is to set a
+register based upon the result of the comparison, then branch on the value in that
+temporary register with the beq or bne instructions. This approach, used by the
+MIPS instruction set, can make the processor datapath slightly simpler, but it takes
+more instructions to express a program.
+
+Instead of branching directly on comparison, MIPS does:
+- Compute comparison → store result (0 or 1)
+- Branch based on that result
+
+Example
+
+C:
+```c
+if (a < b)
+```
+MIPS-style:
+```nasm
+slt t0, a, b     # t0 = (a < b) ? 1 : 0
+bne t0, x0, label
+```
+Key Idea: Comparison is separated from branching
+
+Pros
+- Simpler datapath (no comparison logic inside branch) 
+- Reusable comparison result 
+
+Cons
+- More instructions → slower / larger code
+
+###### ARM Approach (Condition Flags)
+Yet another alternative, used by ARM’s instruction sets, is to keep extra bits that
+record what occurred during an instruction. These additional bits, called condition
+codes or flags, indicate, for example, if the result of an arithmetic operation was
+negative, or zero, or resulted in overflow.
+
+Conditional branches then use combinations of these condition codes to
+perform the desired test.
+
+One downside to condition codes is that if many instructions always set them, it will
+create dependencies that will make it difficult for pipelined execution
+
+ARM uses flags (condition codes) stored in special bits.
+
+After an operation:
+```nasm
+cmp x1, x2
+```
+CPU sets flags:
+- Z = 1 → equal
+- N = 1 → negative
+- V = overflow
+- C = carry
+
+Then branch:
+```nasm
+beq label   # if Z == 1
+bne label   # if Z == 0
+bge label   # depends on N and V
+```
+Key Idea:
+- Arithmetic → sets flags → branch reads flags
+
+Pros
+- Very compact code 
+- Flexible (many conditions available) 
+Cons
+- Hidden state (flags) → harder to reason about 
+- More complex control logic 
+
+**Same Example in All 3**
+
+C:
+```c
+if (a < b)
+```
+RISC-V
+```nasm
+blt x1, x2, label
+```
+MIPS
+```nasm
+slt t0, x1, x2
+bne t0, x0, label
+```
+ARM
+```nasm
+cmp x1, x2
+blt label
+```
+**Side-by-Side Comparison**
+| Feature             | RISC-V        | MIPS                 | ARM         |
+| ------------------- | ------------- | -------------------- | ----------- |
+| Comparison          | Inside branch | Separate instruction | Sets flags  |
+| Instructions needed | 1             | 2                    | 2           |
+| Hardware complexity | Medium        | Simple               | Complex     |
+| Hidden state        | No            | No                   | Yes (flags) |
+
+ISAs differ in how they implement decisions: RISC-V combines comparison and branching, MIPS separates them into two instructions, and ARM uses condition flags to guide branching.
+
+{/* If you want next level, I can:
+
+🔬 Show how flags (Z, N, V, C) actually work in detail
+⚡ Compare performance (instruction count vs pipeline impact)
+🧠 Give exam-style tricky questions on these three models */}
+##### branch if equal(beq)
+beq compares two registers and conditionally changes the PC using a relative offset.
+```nasm
+beq rs1, rs2, L1
+```
+This instruction means go to the statement labeled `L1` if the value in register `rs1`
+equals the value in register `rs2`. 
+
+Otherwise , continue to the next instruction.
+
+**Precise Behavior (PC Level)**
+```
+if (rs1 == rs2)
+    PC = PC + offset
+else
+    PC = PC + 4
+```
+- PC = Program Counter
+- offset = distance to the label (not a full address!)
+
+###### Example (Step-by-Step)
+Code:
+```nasm
+beq x5, x6, target
+addi x7, x0, 1
+addi x7, x0, 2
+target:
+addi x7, x0, 3
+```
+Case 1: `x5 == x6` (branch taken)
+
+Execution:
+- beq → jump to target
+- (skip next two instructions)
+- x7 = 3
+
+Case 2: `x5 != x6` (not taken)
+
+Execution:
+- beq → continue
+- x7 = 1
+- x7 = 2
+- x7 = 3
+
+Notice: control flow completely changes.
+
+###### How the Offset Works
+RISC-V does NOT store full addresses in `beq`.
+Instead:
+```
+target address = PC + immediate_offset
+```
+- Offset is signed (can go forward or backward)
+- Used for:
+    - Loops (backward jump)
+    - If-statements (forward jump)
+
+Example:
+```nasm
+loop:
+beq x1, x2, end
+addi x1, x1, 1
+j loop
+end:
+```
+Here:
+- `beq` jumps forward
+- `j loop` jumps backward
+
+###### Hardware Execution (Inside CPU)
+Step-by-step:
+1. Read registers
+    - `value1 = Reg[rs1]`
+    - `value2 = Reg[rs2]`
+2. Compare using ALU
+    - `result = (value1 == value2)`
+3. Branch decision
+    - `if result == true` → take branch
+    - `else` → continue
+4. PC update
+    - Taken → `PC + offset`
+    - Not taken → `PC + 4`
+
+###### Machine-Level Encoding (B-Type Instruction)
+beq uses B-type format:
+```
+| imm[12] | imm[10:5] | rs2 | rs1 | funct3 | imm[4:1] | imm[11] | opcode |
+```
+Important Details:
+- `opcode` = identifies branch instruction
+- `funct3`:
+    - `000` → means `BEQ`
+- Immediate is split across fields
+
+###### Common Patterns Using beq
+Pattern 1: If (equal)
+```nasm
+bne x1, x2, skip
+# code if equal
+skip:
+```
+Use bne to skip if NOT equal
+
+Pattern 2: If (not equal)
+```nasm
+beq x1, x2, skip
+# code if not equal
+skip:
+```
+Pattern 3: Loop termination
+```nasm
+loop:
+beq x1, x2, end
+# loop body
+j loop
+end:
+```
+##### branch if not equal(bne)
+bne compares two registers and branches when they are different, using PC-relative addressing.
+###### Syntax
+```nasm
+bne rs1, rs2, label
+```
+Meaning:
+- If `rs1 != rs2` → jump to label
+- Otherwise → continue sequentially
+
+`bne` is simply the opposite of `beq`:
+- `beq` → branch if equal
+- `bne` → branch if NOT equal
+
+**Exact Behavior (PC Level)**
+```
+if (rs1 != rs2)
+    PC = PC + offset
+else
+    PC = PC + 4
+```
+- Taken branch → jump to label
+- Not taken → fall-through to next instruction
+
+###### Step-by-Step Example
+```nasm
+bne x5, x6, target
+addi x7, x0, 1
+addi x7, x0, 2
+target:
+addi x7, x0, 3
+```
+Case 1: `x5 != x6` (branch taken)
+- bne → jump to target
+- (skip next two instructions)
+- x7 = 3
+
+Case 2: `x5 == x6` (not taken)
+- bne → continue
+- x7 = 1
+- x7 = 2
+- x7 = 3
+- Final value = 3 (because of fall-through)
+
+###### Hardware Execution
+Inside the CPU:
+1. **Read registers**:
+- `A = Reg[rs1]`
+- `B = Reg[rs2]`
+2. **Compare**:
+- `A == B ?`
+3. **Decision**:
+- if false → branch (bne)
+- if true  → continue
+
+Notice:
+- Hardware usually checks equality
+- bne just inverts the result
+
+###### Immediate / Offset
+Same as beq:
+```
+target = PC + offset
+```
+- Offset is signed
+- Supports forward and backward jumps
+- Used for:
+    - loops
+    - skipping code
+
+###### Machine Encoding (B-type)
+bne uses the same format as beq:
+```
+| imm[12] | imm[10:5] | rs2 | rs1 | funct3 | imm[4:1] | imm[11] | opcode |
+```
+Key difference: Instruction	funct3
+- beq	000
+- bne	001
+
+Only funct3 changes
+
+###### Common Patterns Using bne
+
+Pattern 1: If (equal)
+```nasm
+bne x1, x2, skip   # skip if NOT equal
+# executes only if equal
+skip:
+```
+Very common trick: Use bne to protect code that requires equality
+
+Pattern 2: If (not equal)
+```nasm
+beq x1, x2, skip
+# executes only if NOT equal
+skip:
+```
+beq and bne are interchangeable via inversion
+
+Pattern 3: Loop (countdown)
+```nasm
+loop:
+addi x1, x1, -1
+bne x1, x0, loop
+```
+Loop continues until `x1 == 0`
+
+Pattern 4: Compare against zero
+
+Very common:
+```nasm
+bne x5, x0, label   # if (x5 != 0)
+```
+Used for:
+- booleans
+- pointers
+- loop conditions
+
+###### Compiler Strategy with bne
+Compilers LOVE bne because it helps with: Early exit / short-circuit
+
+Example: AND condition
+
+C:
+```c
+if (a == b && c == d)
+```
+RISC-V:
+```nasm
+bne x1, x2, skip
+bne x3, x4, skip
+
+# both conditions true
+```
+If any condition fails → exit early
+
+Example: Loop
+
+C:
+```c
+while (i != 0)
+```
+RISC-V:
+```nasm
+loop:
+bne x1, x0, body
+j end
+body:
+# work
+addi x1, x1, -1
+j loop
+end:
+```
+
+**This pattern is universal:**
+```nasm
+bne condition → else
+# if block
+j end
+else:
+# else block
+end:
+```
+
+Compilers frequently create branches and labels where they do not appear in
+the programming language. Avoiding the burden of writing explicit labels and
+branches is one benefit of writing in high-level programming languages and is a
+reason coding is faster at that level.
+
+##### branch if less than (blt)
+The **branch if less than (blt)** instruction compares
+the values in registers rs1 and rs2 and takes the branch if the value in rs1 is smaller,
+when they are treated as two’s complement numbers.
+
+###### Syntax
+```assembly
+blt rs1, rs2, label
+```
+Meaning:
+```
+If rs1 < rs2 → branch to label
+Else → continue to next instruction
+```
+blt uses SIGNED comparison
+
+So:
+| rs1 | rs2 | Result |
+| --- | --- | ------ |
+| -1  | 1   | TRUE   |
+| 5   | -3  | FALSE  |
+
+If you want unsigned:
+```
+bltu rs1, rs2, label
+```
+###### Exact Behavior (PC Level)
+```
+if (rs1 < rs2)
+    PC = PC + offset
+else
+    PC = PC + 4
+Taken → jump
+```
+Not taken → fall-through
+
+###### Example
+```assembly
+blt x5, x6, target
+addi x7, x0, 1
+target:
+addi x7, x0, 2
+```
+1. **Case**: `x5 < x6`
+    - branch taken → jump to target
+    - x7 = 2
+2. **Case**: `x5 >= x6`
+    - fall-through
+    - x7 = 1
+    - x7 = 2
+
+Final = 2 (fall-through continues!)
+
+###### Hardware Execution
+How Hardware Executes blt
+
+Inside CPU:
+
+1. **Read registers**:
+    - `A = rs1`
+    - `B = rs2`
+2. **ALU does**:
+    - `A - B`
+3. **Check sign of result**:
+    - if (`A < B`) → negative result → branch
+
+###### Machine Encoding (B-type)
+
+Same format as beq / bne:
+```
+| imm[12] | imm[10:5] | rs2 | rs1 | funct3 | imm[4:1] | imm[11] | opcode |
+```
+Key difference:
+| Instruction | funct3  |
+| ----------- | ------- |
+| beq         | 000     |
+| bne         | 001     |
+| **blt**     | **100** |
+
+let’s encode a blt instruction fully into 32-bit machine code, step by step
+
+Example Instruction
+```assembly
+blt x5, x6, +16
+```
+Branch forward 16 bytes if `x5 < x6` (signed)
+
+1. **Step 1**: Fill Basic Fields
+    - `rs1 = x5` → `00101`
+    - `rs2 = x6` → `00110`
+    - `opcode` (branch) → `1100011`
+    - `funct3 (blt)` → `100`
+2. **Step 2**: Immediate Encoding
+    - Offset = +16 bytes
+    - Convert:
+    - 16 (decimal) = 10000 (binary)
+    - 13-bit representation: 0000000010000
+    - Extract fields:
+    
+    | Field     | Value  |
+    | --------- | ------ |
+    | imm[12]   | 0      |
+    | imm[10:5] | 000000 |
+    | imm[4:1]  | 1000   |
+    | imm[11]   | 0      |
+
+3. **Step 3**: Assemble Fields
+    - imm[12]   = 0
+    - imm[10:5] = 000000
+    - rs2       = 00110
+    - rs1       = 00101
+    - funct3    = 100   ← (blt)
+    - imm[4:1]  = 1000
+    - imm[11]   = 0
+    - opcode    = 1100011
+4. **Step 4**: Final 32-bit Binary
+    ```
+    0 000000 00110 00101 100 1000 0 1100011
+    ```
+    Grouped:
+    ```
+    0000000 00110 00101 100 1000 01100011
+    ```
+5. **Step 5**: Convert to Hex
+    ```
+    0x0062C863
+    ```
+
+Comparison with Other Branches
+| Instruction | funct3  | Hex            |
+| ----------- | ------- | -------------- |
+| beq         | 000     | 0x0062A863     |
+| bne         | 001     | 0x00629863     |
+| **blt**     | **100** | **0x0062C863** |
+
+Only funct3 changes → comparison type changes
+{/* {/* 🔬 Encode bltu, bge, bgeu for full mastery
+🧠 Give you a “decode binary → instruction” exam challenge
+⚡ Show negative offset encoding (backward loops, VERY important) */} */}
+###### Common Patterns Using blt
+**Pattern 1: If (a < b)**
+
+C:
+```
+if (a < b)
+    x = 1;
+```
+RISC-V:
+```assembly
+bge x1, x2, skip   # invert condition
+li x3, 1
+skip:
+```
+OR directly:
+```assembly
+blt x1, x2, then
+j end
+then:
+li x3, 1
+end:
+```
+
+**Pattern 2: While Loop**
+
+C:
+```c
+while (i < 10)
+```
+RISC-V:
+```assembly
+loop:
+bge x1, x2, end   # if i >= 10 → exit
+# body
+j loop
+end:
+```
+Compilers usually use opposite condition (bge)
+
+**Pattern 3: Loop with blt**
+```assembly
+loop:
+# body
+addi x1, x1, 1
+blt x1, x2, loop
+```
+Condition checked at end (do-while style)
+
+{/* {/* 🧠 Show tricky mixed signed/unsigned exam problems
+⚡ Show how compilers eliminate branches using arithmetic tricks
+Give tricky exam questions mixing blt vs bltu
+🧠 Show how compilers optimize comparisons
+⚡ Show how overflow affects signed comparisons
+ */} */}
+
+##### Branch if greater than or equal (bge)
+**Branch if greater than or equal (bge)** takes the branch in the opposite case, that is, if the value in rs1 is at least the value in rs2.
+
+###### Syntax
+```assembly
+bge rs1, rs2, label
+```
+Meaning:
+```
+If rs1 ≥ rs2 → branch to label
+Else → continue to next instruction
+```
+
+bge uses SIGNED comparison (two’s complement)
+
+Example:
+| rs1 | rs2 | Result |
+| --- | --- | ------ |
+| 5   | 3   | TRUE   |
+| 3   | 3   | TRUE   |
+| -1  | 1   | FALSE  |
+
+Unsigned version:
+```assembly
+bgeu rs1, rs2, label
+```
+
+**Relationship with blt**
+```
+bge rs1, rs2  ⇔  !(rs1 < rs2)
+```
+Complement:
+```
+blt rs1, rs2   ↔   bge rs1, rs2
+```
+###### Exact Behavior (PC Level)
+```
+if (rs1 >= rs2)
+    PC = PC + offset
+else
+    PC = PC + 4
+```
+- Taken → jump 
+- Not taken → fall-through 
+
+###### Example
+```assembly
+bge x5, x6, target
+addi x7, x0, 1
+target:
+addi x7, x0, 2
+```
+1. **Case**: `x5 ≥ x6`
+- branch taken → jump to target
+- x7 = 2
+2. **Case**: `x5 < x6`
+- fall-through
+- x7 = 1
+- x7 = 2
+- Final = 2 (because execution continues)
+
+###### Hardware Execution
+Inside CPU:
+1. **Read registers**: 
+- A = rs1
+- B = rs2
+2. **Compute**: 
+```
+A - B
+```
+3. **Decision**: 
+```
+if (A >= B) → branch
+```
+###### Machine Encoding (B-type)
+Same structure as all branches:
+```
+| imm[12] | imm[10:5] | rs2 | rs1 | funct3 | imm[4:1] | imm[11] | opcode |
+```
+Key field:
+| Instruction | funct3  |
+| ----------- | ------- |
+| beq         | 000     |
+| bne         | 001     |
+| blt         | 100     |
+| **bge**     | **101** |
+
+###### Common Usage Patterns
+
+**Pattern 1: If (a ≥ b)**
+
+C:
+```c
+if (a >= b)
+    x = 1;
+```
+RISC-V:
+```assembly
+blt x1, x2, skip   # if a < b → skip
+li x3, 1
+skip:
+```
+Compilers often use opposite condition
+
+**Pattern 2: While loop**
+
+C:
+```c
+while (i >= 0)
+```
+RISC-V:
+```assembly
+loop:
+blt x1, x0, end   # if i < 0 → exit
+# body
+j loop
+end:
+```
+
+**Pattern 3: Loop boundary check**
+```assembly
+bge x1, x2, end   # if i >= limit → exit
+```
+Very common in for loops
+
+{/* Encode bge into full binary
+🧠 Show tricky signed vs unsigned exam traps
+⚡ Show how compilers rewrite conditions using bge */}
+##### Branch if less than, unsigned (bltu)
+Branch if less than, unsigned (bltu) takes the branch if the value in rs1 is
+smaller than the value in rs2 when the values are treated as unsigned numbers. 
+
+{/* Explain Branch if less than, unsigned (bltu) */}
+##### branch if greater than or equal, unsigned (bgeu)
+branch if greater than or equal, unsigned (bgeu) takes the branch in the opposite case.
+
+{/* Explain branch if greater than or equal, unsigned (bgeu) */}
+#### Loops
+Decisions are important both for choosing between two alternatives—found in if
+statements—and for iterating a computation—found in loops. The same assembly
+instructions are the building blocks for both cases.
+
+Loops in an ISA (like RISC-V) are not special constructs—they are built from control flow instructions:
+```
+compare + conditional branch + backward jump
+```
+That’s it. Everything (`while`, `for`, `do-while`) reduces to this pattern.
+
+A loop is simply:
+```
+[check condition] → [execute body] → [jump back]
+```
+Loops in ISA are implemented using conditional branches to exit and unconditional jumps to repeat.
+
+At ISA level:
+```
+loop:
+    # check condition
+    branch to end if false
+    # body
+    jump to loop
+end:
+```
+Backward Branch
+```
+j loop
+```
+- This creates repetition
+- Without it → no loop
+
+Hardware doesn’t know “loop”. It only knows:
+- Compare registers
+- Branch (beq/bne/...)
+- Jump
+
+Loop = illusion created by control flow
+##### While Loop
+How it works
+- Check condition first
+- If false → exit
+- If true → run body
+- Jump back
+
+This is the canonical loop form in ISA.
+
+C:
+```c
+while (i < 10) {
+    i++;
+}
+```
+**Using bge**
+
+```nasm
+loop:
+bge x1, x2, end    # if (i >= 10) exit
+addi x1, x1, 1     # i++
+j loop
+end:
+```
+
+**Using bne**
+```c
+while (i != 0) {
+    i--;
+}
+```
+```nasm
+loop:
+beq x1, x0, end    # if (i == 0) exit
+addi x1, x1, -1    # i--
+j loop
+end:
+```
+or equivalently:
+```nasm
+loop:
+bne x1, x0, body
+j end
+
+body:
+addi x1, x1, -1
+j loop
+
+end:
+```
+##### For Loop
+for loop = initialization + while loop + increment
+```c
+for (i = 0; i < 10; i++) {
+    // body
+}
+```
+RISC-V:
+```nasm
+li x1, 0           # i = 0
+
+loop:
+bge x1, x2, end    # if i >= 10 → exit
+# body
+addi x1, x1, 1     # i++
+j loop
+
+end:
+```
+##### Do-While Loop
+```c
+do {
+    i++;
+} while (i < 10);
+
+RISC-V:
+```nasm
+loop:
+addi x1, x1, 1     # body first
+blt x1, x2, loop   # if (i < 10) repeat
+```
+Difference from while
+| Loop Type | Condition Position |
+| --------- | ------------------ |
+| while     | before body        |
+| do-while  | after body         |
+
+#### Unconditional jump
+#### Function call
+#### Return
+
+#### How Compilers Translate Complex Conditions
+Compilers reduce everything to: `compare + branch`
+
+**Key Compiler Strategy**
+- Break condition into pieces: Each comparison → one branch
+- Use early exits: Skip work as soon as possible
+- Prefer fall-through: Most common path = no jump
+
+**Universal Pattern**
+
+Every condition becomes:
+```
+if (NOT condition)
+    jump away
+# do work
+```
+
+Compilers don’t think in “if” — they think in: control flow graph (CFG)
+Where:
+- Nodes = basic blocks
+- Edges = branches (beq, bne, etc.)
+
+**Example 1: Simple condition**
+
+C:
+```c
+if (a == b)
+    x = 1;
+```
+RISC-V:
+```nasm
+bne x1, x2, skip   # invert condition
+li x3, 1
+skip:
+```
+Compilers often use `opposite condition + skip`
+
+**Example 2: AND condition**
+
+C:
+```c
+if (a == b && c == d)
+    x = 1;
+```
+RISC-V:
+```nasm
+bne x1, x2, skip
+bne x3, x4, skip
+li x5, 1
+skip:
+```
+Short-circuit evaluation:
+
+If first fails → skip immediately
+
+**Example 3: OR condition**
+
+C:
+```c
+if (a == b || c == d)
+    x = 1;
+```
+RISC-V:
+```nasm
+beq x1, x2, set
+beq x3, x4, set
+j skip
+set:
+li x5, 1
+skip:
+```
+Jump as soon as one is true
+
+**Example 4: Relational condition**
+
+C:
+```c
+if (a < b)
+    x = 1;
+```
+RISC-V:
+```nasm
+bge x1, x2, skip   # invert condition
+li x3, 1
+skip:
+```
+Compiler flips condition to simplify control flow
+
+**Example 5: Complex condition**
+
+C:
+```nasm
+if ((a < b && c != d) || e == f)
+    x = 1;
+```
+RISC-V (typical translation):
+```nasm
+bge x1, x2, check_e   # !(a < b)
+beq x3, x4, check_e   # !(c != d)
+j set
+
+check_e:
+bne x5, x6, skip
+
+set:
+li x7, 1
+
+skip:
+```
+
+#### How Control Structures Are Built Using beq / bne
+
+Compilers reduce everything to: **compare + branch + jump**
+
+**1. while Loop**
+
+C:
+```c
+while (i != 0) {
+    i--;
+}
+```
+RISC-V
+```nasm
+loop:
+beq x1, x0, end    # if (i == 0) exit
+addi x1, x1, -1    # i--
+j loop
+end:
+```
+Pattern: check → exit if false → body → jump back
+
+**2. for Loop**
+```c
+C:
+for (i = 0; i != 10; i++) {
+    // body
+}
+```
+RISC-V
+```nasm
+li x1, 0           # i = 0
+
+loop:
+beq x1, x2, end    # if i == 10 → exit
+# body
+addi x1, x1, 1     # i++
+j loop
+
+end:
+```
+A for loop is just: init → while(condition) → increment
+
+**3. if Statement**
+```c
+C:
+if (a != b)
+    x = 1;
+```
+RISC-V
+```nasm
+beq x1, x2, skip   # skip if equal
+li x3, 1
+skip:
+🔹 4) if-else
+C:
+if (a != b)
+    x = 1;
+else
+    x = 2;
+```
+RISC-V
+```nasm
+beq x1, x2, else   # if equal → else
+li x3, 1
+j end
+
+else:
+li x3, 2
+
+end:
+```
+🔹 5) switch Statement
+C:
+```c
+switch (x) {
+    case 1: y = 10; break;
+    case 2: y = 20; break;
+    default: y = 0;
+}
+```
+🔸 Simple compiler version (chain of comparisons)
+```nasm
+li x2, 1
+beq x1, x2, case1
+
+li x2, 2
+beq x1, x2, case2
+
+j default
+
+case1:
+li x3, 10
+j end
+
+case2:
+li x3, 20
+j end
+
+default:
+li x3, 0
+
+end:
+```
+🔥 Optimized version (jump table idea)
+
+For large switches, compiler uses:
+
+index calculation
+
+indirect jump (not just beq/bne)

@@ -1,0 +1,504 @@
+---
+id: software-engineering-design-architecture-architectural-styles-microservices-labs-product-review-recommendation-microservices-lab2
+title: "Lab2: Deploying Our Microservices Using Docker"
+sidebar_position: 3
+---
+
+In this Lab, we will start using Docker and put our microservices into containers!
+
+By the end of this Lab:
+- we will have run fully automated tests of our microservice landscape that start all our microservices as Docker containers, requiring no infrastructure other than a Docker engine. 
+- We will also have run a number of tests to verify that the microservices work together as expected, and finally, shut down all the microservices, leaving no traces of the tests we executed.
+
+Before we can run our microservice as a Docker container, we need to package
+it in a Docker image. To build a Docker image, we need a Dockerfile, so we will start with that.
+
+Next, we need a Docker-specific configuration for our microservice. Since a microservice that
+runs in a container is isolated from other microservices – it has its own IP address, hostname,
+and ports – it needs a different configuration compared to when it’s running on the same host
+with other microservices.
+
+For example, since the other microservices no longer run on the same host, no port conflicts will
+occur. When running in Docker, we can use the default port `8080` for all our microservices without
+any risk of port conflicts. On the other hand, if we need to talk to the other microservices, we can
+no longer use localhost like we could when we ran them on the same host.
+
+To handle the different configurations that are required when running locally without Docker and
+when running the microservices as Docker containers, we will use Spring profiles.
+
+Since Lab 1, Creating a Set of Cooperating Microservices, we have been using the default Spring profile for
+running locally without Docker. Now, we will create a new Spring profile named `docker` to be
+used when we run our microservices as containers in Docker.
+
+## Update Microservices Configuration
+We will start with the product microservice, which can be found in the source code at `$PROJET_HOME/microservices/product-service/`. In the next section, we will apply this to the
+other microservices as well.
+
+First, we add the Spring profile for Docker at the end of the property file, application.yml:
+```yml
+---
+spring.config.activate.on-profile: docker
+server.port: 8080
+```
+The only parameter we change for now is the port that’s being used; we will use the default port
+`8080` when running the microservice in a container.
+## Containerizing Spring Boot with Dockerfiles
+
+```dockerfile
+FROM eclipse-temurin:24_36-jre-noble AS builder
+WORKDIR extracted
+ADD ./build/libs/*.jar app.jar
+RUN java -Djarmode=layertools -jar app.jar extract
+FROM eclipse-temurin:24_36-jre-noble
+WORKDIR application
+COPY --from=builder extracted/dependencies/ ./
+COPY --from=builder extracted/spring-boot-loader/ ./
+COPY --from=builder extracted/snapshot-dependencies/ ./
+COPY --from=builder extracted/application/ ./
+EXPOSE 8080
+ENTRYPOINT [“java”, “org.springframework.boot.loader.launch.JarLauncher”]
+```
+## Building a Docker image
+To build the Docker image, we first need to build our deployment artifact (that is, the fat JAR file) for product-service:
+```bash
+./gradlew :microservices:product-service:build
+```
+
+:::note
+
+Since we only want to build product-service and the projects it depends on (the `api` and `util` projects), we don’t use the normal build command, which builds all the microservices. Instead, we use a variant that tells Gradle to only build the
+`product-service project: :microservices:product-service:build.`
+
+:::
+
+We can find the fat JAR file in the Gradle build library, build/libs. The `ls -l microservices/product-service/build/libs` command
+
+you can view it by using the `unzip -l microservices/product-service/build/lib/product-service-1.0.0-SNAPSHOT.jar` command
+
+Next, we will build the Docker image and name it product-service, as follows:
+```bash
+cd microservices/product-service
+docker build -t product-service .
+```
+Verify that we got a Docker image, as expected, by using the following command:
+
+```bash
+docker images | grep product-service
+```
+The expected output is as follows:
+```
+product-service:latest            ec755844b735        485MB          130MB      
+```
+So, now that we have built the image, let’s see how we can start the service.
+## Starting up the service
+Let’s start up the product microservice as a container by using the following command:
+```bash
+docker run --rm -p8080:8080 -e "SPRING_PROFILES_ACTIVE=docker" product-service
+```
+This is what we can infer from the command:
+1. `docker run`: The docker run command will start the container and display log output in
+the Terminal. The Terminal will be locked as long as the container runs.
+2. We have seen the --rm option already; it will tell Docker to clean up the container once
+we stop the execution from the Terminal using `Ctrl + C`.
+3. The `-p8080:8080` option maps port `8080` in the container to port `8080` in the Docker host,
+which makes it possible to call it from the outside. In the case of Docker Desktop for Mac,
+which runs Docker in a local Linux virtual machine, the port will also be port-forwarded
+to macOS, which is made available on localhost. Remember that we can only have one
+container mapping to a specific port in the Docker host!
+4. With the -e option, we can specify environment variables for the container, which, in this
+case, is `SPRING_PROFILES_ACTIVE=docker`. The `SPRING_PROFILES_ACTIVE` environment
+variable is used to tell Spring what profiles to use. In our case, we want Spring to use the
+docker profile.
+5. Finally, we have product-service, which is the name of the Docker image we just built
+and which Docker will use to start the container.
+
+From the preceding command output, we can see the following:
+- The profile that’s used by Spring is docker. Look for `The following profiles are active: docker` in the output to verify this.
+- The port that’s allocated by the container is `8080`. Look for `Netty started on port8080` in the output to verify this.
+- The microservice is ready to accept requests once the log message `Started
+ProductServiceApplication` has been written!
+
+We can use port 8080 on localhost to communicate with the microservice, as explained previ-
+ously. Try out the following command in another Terminal window:
+```bash
+curl localhost:8080/product/3
+```
+This is similar to the output we received from the previous chapter, but with one major difference:
+we now have the content of "service Address":"9dc086e4a88b/172.17.0.2:8080", the port
+is 8080, as expected, and the IP address, 172.17.0.2, is the IP address that’s been allocated to
+the container from an internal network in Docker – but where did the hostname, 9dc086e4a88b,
+come from?
+Ask Docker for all the running containers:
+```bash
+docker ps
+```
+The hostname is equivalent to the ID of the container,
+which is good to know if you want to understand which container actually responded to your
+request!
+## Running the container in detached mode
+if we don’t want to lock the Terminal from where we started the container, start the container as detached – running the container without locking the Terminal!
+
+We can do this by 
+1. adding the `-d` option and, at the same time, 
+2. giving it a name using the `--name` option. Giving it a name is optional, and Docker will generate a name if we don’t, but it makes it easier to send commands to the detached container using a name that we have decided. 
+3. The `--rm` option is no longer required since we will stop and remove the container explicitly when we are done with it
+
+```bash
+docker run -d -p8080:8080 -e "SPRING_PROFILES_ACTIVE=docker" --name my-prd-srv product-service
+```
+If we run the `docker ps` command again, we will see our new container, called  `my-prd-srv`
+
+To get the log output from our container
+```bash
+docker logs my-prd-srv -f
+```
+Wrap this up by stopping and removing the container:
+```bash
+docker rm -f my-prd-srv
+```
+## Managing a landscape of microservices using Docker Compose
+To be able to use Docker Compose:
+1. we need to create a configuration file, docker-compose.yml, that describes the microservices Docker Compose will manage for us. 
+2. We also need to set up Dockerfiles for the remaining microservices and 
+3. add a Docker-specific Spring profile to each of them.
+
+All four microservices have their own Dockerfile, but they all look the same as the preceding one.
+
+When it comes to the Spring profiles, the three core services, `product-`, `recommendation-`, and `review-service`, have the same docker profile, which only specifies that the default port `8080` should be used when running as a container.
+
+For product-composite-service, things are a bit more complicated since it needs to know where
+to find the core services. When we ran all the services on localhost, it was configured to use lo-
+calhost and individual port numbers, 7002-7004, for each core service. When running in Docker,
+each service will have its own hostname but will be accessible on the same port number, 8080.
+Here, the docker profile for product-composite-service looks as follows:
+```yml
+server.port: 7001
+server.error.include-message: always
+
+app:
+  product-service:
+    host: localhost
+    port: 7002
+  recommendation-service:
+    host: localhost
+    port: 7003
+  review-service:
+    host: localhost
+    port: 7004
+
+logging:
+  level:
+    root: INFO
+    se.magnus: DEBUG
+
+---
+spring.config.activate.on-profile: docker
+
+server.port: 8080
+
+app:
+  product-service:
+    host: product
+    port: 8080
+  recommendation-service:
+    host: recommendation
+    port: 8080
+  review-service:
+    host: review
+    port: 8080
+```
+the hostnames product, recommendation, and review come from the docker-compose.yml file, which is located in the root of the project.
+```yml
+services:
+  product:
+    build: microservices/product-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+
+  recommendation:
+    build: microservices/recommendation-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+
+  review:
+    build: microservices/review-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+
+  product-composite:
+    build: microservices/product-composite-service
+    mem_limit: 512m
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+```
+For each microservice, we specify the following:
+- The name of the microservice. This will also be the hostname of the container in the dinternal Docker network.
+- A build directive that specifies where to find the Dockerfile that was used to build the Docker image.
+- A memory limit of 512 MB. 512 MB should be sufficient for all our microservices for the scope of this example. For this lab, it could be set to a lower value, but as we add more capabilities in the microservices in the coming chapters, their memory requirements will increase.
+- The environment variables that will be set up for the container. In our case, we used these to specify which Spring profile to use.
+- For the product-composite service, we will also specify port mappings – we will expose its port so it can be reached from outside Docker. The other microservices will not be accessible from the outside.
+
+## Starting up the microservice landscape
+With all the necessary code changes in place, we can build our Docker images, start up the mi-
+croservice landscape, and run some tests to verify that it works as expected. For this, we need to
+do the following:
+1. First, we build our deployment artifacts with Gradle and then the Docker images with Docker Compose:
+```bash
+./gradlew build
+docker compose build
+```
+2. Then, we need to verify that we can see our Docker images, as follows:
+```bash
+docker images | grep product-review-recommendation-microservices
+```
+3. We should see the following output:
+```bash
+product-review-recommendation-microservices-product-composite:latest   a0b2e234bf4a        485MB          130MB        
+product-review-recommendation-microservices-product:latest             16b0fa331dc7        485MB          130MB        
+product-review-recommendation-microservices-recommendation:latest      62d87de97e8f        485MB          130MB        
+product-review-recommendation-microservices-review:latest              32dff96cf1c5        485MB          130MB 
+```
+4. Start up the microservices landscape with the following command:
+```bash
+docker compose up -d
+```
+The `-d` option will make Docker Compose run the containers in detached mode, the same as for Docker.
+5. We can follow the startup by monitoring the output that’s written to each container log
+with the following command:
+```bash
+docker compose logs -f
+```
+6. When all four microservices have reported that they have started up, we are ready to try
+out the microservices landscape. 
+
+Now, we are ready to run some tests to verify that this works as expected. The port number is the
+only change we need to make when calling the composite service in Docker compared to when
+we ran it directly on the localhost, as we did in the previous chapter. We now use port 8080:
+```bash
+curl localhost:8080/product-composite/123 -s | jq .
+```
+We’re done; now only one step is left:
+```bash
+docker compose down
+```
+The preceding command will shut down the microservices landscape.
+## Automating tests of cooperating microservices
+Docker Compose is really helpful when it comes to manually managing a group of microservices.
+In this section, we will take this one step further and integrate Docker Compose into our test
+script, test-em-all.bash. The test script will automatically start up the microservice landscape,
+run all the required tests to verify that the microservice landscape works as expected, and finally,
+tear it down, leaving no traces behind.
+
+The test script can be found at `test-em-all-docker.bash`
+```bash
+#!/usr/bin/env bash
+#
+# Sample usage:
+#
+#   HOST=localhost PORT=7001 ./test-em-all.bash
+#
+: ${HOST=localhost}
+: ${PORT=8080}
+: ${PROD_ID_REVS_RECS=1}
+: ${PROD_ID_NOT_FOUND=13}
+: ${PROD_ID_NO_RECS=113}
+: ${PROD_ID_NO_REVS=213}
+
+function assertCurl() {
+
+  local expectedHttpCode=$1
+  local curlCmd="$2 -w \"%{http_code}\""
+  local result=$(eval $curlCmd)
+  local httpCode="${result:(-3)}"
+  RESPONSE='' && (( ${#result} > 3 )) && RESPONSE="${result%???}"
+
+  if [ "$httpCode" = "$expectedHttpCode" ]
+  then
+    if [ "$httpCode" = "200" ]
+    then
+      echo "Test OK (HTTP Code: $httpCode)"
+    else
+      echo "Test OK (HTTP Code: $httpCode, $RESPONSE)"
+    fi
+  else
+    echo  "Test FAILED, EXPECTED HTTP Code: $expectedHttpCode, GOT: $httpCode, WILL ABORT!"
+    echo  "- Failing command: $curlCmd"
+    echo  "- Response Body: $RESPONSE"
+    exit 1
+  fi
+}
+
+function assertEqual() {
+
+  local expected=$1
+  local actual=$2
+
+  if [ "$actual" = "$expected" ]
+  then
+    echo "Test OK (actual value: $actual)"
+  else
+    echo "Test FAILED, EXPECTED VALUE: $expected, ACTUAL VALUE: $actual, WILL ABORT"
+    exit 1
+  fi
+}
+
+function testUrl() {
+  url=$@
+  if $url -ks -f -o /dev/null
+  then
+    return 0
+  else
+    return 1
+  fi;
+}
+
+function waitForService() {
+  url=$@
+  echo -n "Wait for: $url... "
+  n=0
+  until testUrl $url
+  do
+    n=$((n + 1))
+    if [[ $n == 100 ]]
+    then
+      echo " Give up"
+      exit 1
+    else
+      sleep 3
+      echo -n ", retry #$n "
+    fi
+  done
+  echo "DONE, continues..."
+}
+
+set -e
+
+echo "Start Tests:" `date`
+
+echo "HOST=${HOST}"
+echo "PORT=${PORT}"
+
+if [[ $@ == *"start"* ]]
+then
+  echo "Restarting the test environment..."
+  echo "$ docker compose down --remove-orphans"
+  docker compose down --remove-orphans
+  echo "$ docker compose up -d"
+  docker compose up -d
+fi
+
+waitForService curl http://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS
+
+# Verify that a normal request works, expect three recommendations and three reviews
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
+assertEqual $PROD_ID_REVS_RECS $(echo $RESPONSE | jq .productId)
+assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that a 404 (Not Found) error is returned for a non-existing productId ($PROD_ID_NOT_FOUND)
+assertCurl 404 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NOT_FOUND -s"
+assertEqual "No product found for productId: $PROD_ID_NOT_FOUND" "$(echo $RESPONSE | jq -r .message)"
+
+# Verify that no recommendations are returned for productId $PROD_ID_NO_RECS
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NO_RECS -s"
+assertEqual $PROD_ID_NO_RECS $(echo $RESPONSE | jq .productId)
+assertEqual 0 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 3 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that no reviews are returned for productId $PROD_ID_NO_REVS
+assertCurl 200 "curl http://$HOST:$PORT/product-composite/$PROD_ID_NO_REVS -s"
+assertEqual $PROD_ID_NO_REVS $(echo $RESPONSE | jq .productId)
+assertEqual 3 $(echo $RESPONSE | jq ".recommendations | length")
+assertEqual 0 $(echo $RESPONSE | jq ".reviews | length")
+
+# Verify that a 422 (Unprocessable Entity) error is returned for a productId that is out of range (-1)
+assertCurl 422 "curl http://$HOST:$PORT/product-composite/-1 -s"
+assertEqual "\"Invalid productId: -1\"" "$(echo $RESPONSE | jq .message)"
+
+# Verify that a 400 (Bad Request) error error is returned for a productId that is not a number, i.e. invalid format
+assertCurl 400 "curl http://$HOST:$PORT/product-composite/invalidProductId -s"
+assertEqual "\"Type mismatch.\"" "$(echo $RESPONSE | jq .message)"
+
+if [[ $@ == *"stop"* ]]
+then
+    echo "We are done, stopping the test environment..."
+    echo "$ docker compose down"
+    docker compose down
+fi
+
+echo "End, all tests OK:" `date`
+```
+Before the test script runs the test suite, it will check for the presence of a start argument in
+the invocation of the test script. If found, it will restart the containers
+with the following code:
+```bash
+if [[ $@ == *"start"* ]]
+```
+After that, the test script will wait for the `product-composite` service to respond with OK:
+```bash
+waitForService http://$HOST:${PORT}/product-composite/1
+```
+The `waitForService` function sends HTTP requests to the supplied URL using curl. Requests
+are sent repeatedly until curl responds that it got a successful response back from the request.
+The function waits `3` seconds between each attempt and gives up after `100` attempts, stopping
+the script with a failure
+
+Next, all the tests are executed as they were previously. Afterward, the script will tear down the
+landscape if it finds the stop argument in the invocation parameters:
+```bash
+if [[ $@ == *"stop"* ]]
+```
+Let’s try it out! To start the landscape, run the tests, and tear it down afterward, run this command:
+```bash
+./test-em-all-docker.bash start stop
+```
+The following is some sample output from a test run focusing on the startup and shutdown phases.
+Output from the actual tests have been removed 
+```
+[product-review-recommendation-microservices]$ ./test-em-all-docker.bash start stop
+Start Tests: Wed Apr 29 12:52:30 AM EEST 2026
+HOST=localhost
+PORT=8080
+Restarting the test environment...
+$ docker compose down --remove-orphans
+$ docker compose up -d
+[+] up 5/5
+ ✔ Network product-review-recommendation-microservices_default               Created                                                               0.1s
+ ✔ Container product-review-recommendation-microservices-product-1           Started                                                               1.3s
+ ✔ Container product-review-recommendation-microservices-recommendation-1    Started                                                               1.0s
+ ✔ Container product-review-recommendation-microservices-review-1            Started                                                               1.2s
+ ✔ Container product-review-recommendation-microservices-product-composite-1 Started                                                               1.2s
+Wait for: curl http://localhost:8080/product-composite/1... , retry #1 , retry #2 , retry #3 , retry #4 , retry #5 , retry #6 , retry #7 DONE, continues...
+Test OK (HTTP Code: 200)
+Test OK (actual value: 1)
+Test OK (actual value: 3)
+Test OK (actual value: 3)
+Test OK (HTTP Code: 404, {"timestamp":"2026-04-28T21:52:55.203340254Z","path":"/product-composite/13","message":"No product found for productId: 13","status":404,"error":"Not Found"})
+Test OK (actual value: No product found for productId: 13)
+Test OK (HTTP Code: 200)
+Test OK (actual value: 113)
+Test OK (actual value: 0)
+Test OK (actual value: 3)
+Test OK (HTTP Code: 200)
+Test OK (actual value: 213)
+Test OK (actual value: 3)
+Test OK (actual value: 0)
+Test OK (HTTP Code: 422, {"timestamp":"2026-04-28T21:52:55.423766868Z","path":"/product-composite/-1","message":"Invalid productId: -1","status":422,"error":"Unprocessable Entity"})
+Test OK (actual value: "Invalid productId: -1")
+Test OK (HTTP Code: 400, {"timestamp":"2026-04-28T21:52:55.481+00:00","path":"/product-composite/invalidProductId","status":400,"error":"Bad Request","requestId":"cdec46a1-7","message":"Type mismatch."})
+Test OK (actual value: "Type mismatch.")
+We are done, stopping the test environment...
+$ docker compose down
+```
+
+a combined command that builds runtime artifacts and
+Docker images from the source and then executes all tests in Docker:
+```bash
+./gradlew clean build && docker compose build && ./
+test-em-all.bash start stop
+```

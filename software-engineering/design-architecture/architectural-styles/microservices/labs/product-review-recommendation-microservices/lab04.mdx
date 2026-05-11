@@ -1,0 +1,2777 @@
+---
+id: software-engineering-design-architecture-architectural-styles-microservices-labs-product-review-recommendation-microservices-lab04
+title: "Lab04: Adding Persistence"
+sidebar_position: 5
+---
+
+Now, what about bringing some life to our microservices by adding persistence – that is, the capability to save those microservices’ data in a database? To do this, we will need to add some more APIs so that we can create and delete the information that’s handled by the microservices.
+
+In this Lab, we will use the Spring Data project to persist data to **MongoDB** and **MySQL** databases.
+- The **product** and **recommendation** microservices will use Spring Data for **MongoDB** and the
+**review** microservice will use Spring Data for the Java Persistence API (JPA) to access a **MySQL**
+database. 
+- We will add operations to the RESTful APIs to be able to create and delete data in the
+databases. 
+- The existing APIs for reading data will be updated to access the databases. We will
+run the databases as Docker containers, managed by Docker Compose, that is, in the same way
+as we run our microservices.
+
+By the end of this Lab, we will have layers inside our microservices that look like the following:
+!(The microservice landscape we’re aiming for)[/docs/assets/software-engineering/design-architecture/architectural-styles/microservices/labs/product-review-recommendation-microservices/lab04-microservices-landscape.png]
+- The Protocol layer handles protocol-specific logic. It is very thin, only consisting of the `RestController` annotations in the **api** project and the common `GlobalControllerException` Handler in the **util** project. 
+- The main functionality of each microservice resides in each Service layer. 
+- The **product-composite service** contains an Integration layer used to handle the communication with the three core microservices. 
+- The core microservices will all have a Persistence layer used for communicating with their databases.
+## Technical requirements
+-To access the databases manually, we will use the CLI tools provided in the Docker images used to
+run the databases. 
+- We will also expose the standard ports used for each database in Docker Compose, `3306` for MySQL, and `27017` for MongoDB. 
+- This will enable us to use our favorite database tools for accessing the databases in the same way as if they were running locally on our computers.
+
+The code examples in this chapter all come from the source code in branch `Lab04: Adding Persistence`
+## Adding a persistence layer to the core microservices
+Let’s start with adding a persistence layer to the core microservices. Besides using Spring Data,
+we will also use a Java bean mapping tool, **MapStruct**, which makes it easy to transform between
+Spring Data entity objects and the API model classes. 
+1. First, we need to add dependencies to **MapStruct**, **Spring Data**, and the **JDBC drivers** for the
+databases we intend to use. 
+2. After that, we can define our Spring Data entity classes and repositories. 
+3. The Spring Data entity classes and repositories will be placed in their own Java package, persistence. For example, for the product microservice, they will be placed in the `se.magnus.microservices.core.product.persistence` Java package.
+
+### Adding dependencies
+We will use MapStruct v1.6.3, so we will start by defining a variable holding the version informa-
+tion in the build file for each core microservice, build.gradle:
+```groovy
+ext {
+    mapstructVersion = "1.6.3.Final"
+}
+```
+Next, we declare a dependency on MapStruct:
+```groovy
+implementation "org.mapstruct:mapstruct:${mapstructVersion}"
+```
+Since MapStruct generates the implementation of the bean mappings at compile time by processing
+MapStruct annotations, we need to add an annotationProcessor and testAnnotationProcessor
+dependency:
+```groovy
+annotationProcessor "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+testAnnotationProcessor "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+```
+To make the compile-time generation work in popular IDEs such as IntelliJ IDEA, we also need
+to add the following dependency:
+```groovy
+compileOnly "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+```
+For the product and recommendation microservices, we declare the following dependencies to
+Spring Data for MongoDB:
+```groovy
+implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
+```
+
+For the review microservice, we declare a dependency on Spring Data for JPA and a JDBC driver
+for MySQL like this:
+```groovy
+implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+implementation 'mysql:mysql-connector-java'
+```
+To enable the use of MongoDB and MySQL when running automated integration tests, we will
+use Testcontainers and its support for JUnit 5, MongoDB, and MySQL. For the product and
+recommendation microservices, we declare the following test dependencies:
+```groovy
+testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+testImplementation 'org.testcontainers:junit-jupiter'
+testImplementation 'org.testcontainers:mongodb'
+```
+For the review microservices, we declare the following test dependencies:
+```groovy
+testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+testImplementation 'org.testcontainers:junit-jupiter'
+testImplementation 'org.testcontainers:mysql'
+```
+### Storing data with entity classes
+The entity classes are similar to the corresponding API model classes in terms of what fields they
+contain; see the `se.magnus.api.core` Java package in the **api** project. We will add two fields, `id`
+and `version`, in the entity classes compared to the API model classes.
+1. **id**
+        - The `id` field is used to hold the database identity of each stored entity, corresponding to the
+        primary key when using a relational database. 
+        - We will delegate the responsibility of generating unique values for the `id` field to Spring Data. Depending on the database used, Spring Data can delegate this responsibility to the database engine or handle it on its own. In either case, the
+        application code does not need to consider how a unique database id value is set. 
+        - The `id` field is not exposed in the API, as a best practice from a security perspective. 
+        - The fields in the model classes that identify an entity will be assigned a unique index in the corresponding entity class,
+        to ensure consistency in the database from a business perspective.
+2. **version**
+        - The `version` field is used to implement **optimistic locking**, allowing Spring Data to verify that
+        updates of an entity in the database do not overwrite a concurrent update. 
+        - If the value of the
+        `version` field stored in the database is higher than the value of the `version` field in an update
+        request, this indicates that the update is performed on stale data—the information to be updated
+        has been updated by someone else since it was read from the database.
+        - Attempts to perform updates based on stale data will be prevented by Spring Data.
+        - Since we only implement APIs for create, read, and delete operations, we will, however, not expose the version field in the API.
+
+The most interesting parts of the `product` entity class, used for storing entities in **MongoDB**, look
+like this:
+```java
+package se.magnus.microservices.core.product.persistence;
+
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
+
+@Document(collection = "products")
+public class ProductEntity {
+
+  @Id private String id;
+
+  @Version private Integer version;
+
+  @Indexed(unique = true)
+  private int productId;
+
+  private String name;
+  private int weight;
+}
+```
+Here are some observations from the preceding code:
+- The `@Document(collection = "products")` annotation is used to mark the class as an entity class used for **MongoDB**, that is, mapped to a collection in **MongoDB** with the name products
+- The `@Id` and `@Version` annotations are used to mark the id and version fields to be used by Spring Data.
+- The `@Indexed(unique = true)` annotation is used to get a unique index created for the business key, `productId`
+
+The most interesting parts of the Recommendation entity class, also used for storing entities in
+**MongoDB**, look like this:
+```java
+package se.magnus.microservices.core.recommendation.persistence;
+
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.mapping.Document;
+
+@Document(collection = "recommendations")
+@CompoundIndex(name = "prod-rec-id", unique = true, def = "{'productId': 1, 'recommendationId' : 1}")
+public class RecommendationEntity {
+
+    @Id
+    private String id;
+
+    @Version
+    private Integer version;
+
+    private int productId;
+    private int recommendationId;
+    private String author;
+    private int rating;
+    private String content;
+}
+```
+We can see how a unique compound index is created using the `@CompoundIndex` annotation for
+the compound business key based on the `productId` and `recommendationId` fields.
+
+Finally, the most interesting parts of the Review entity class, used for storing entities in a SQL
+database such as MySQL, look like this:
+```java
+import jakarta.persistence.*;
+
+@Entity
+@Table(name = "reviews", indexes = {
+        @Index(name = "reviews_unique_idx", unique = true, columnList = "productId,reviewId") })
+public class ReviewEntity {
+
+    @Id
+    @GeneratedValue
+    private int id;
+
+    @Version
+    private int version;
+
+    private int productId;
+    private int reviewId;
+    private String author;
+    private String subject;
+    private String content;
+}
+```
+The following are notes on the preceding code:
+- The `@Entity` and `@Table` annotations are used to mark the class as an entity class used
+for JPA—mapped to a table in a SQL database with the name reviews.
+- The `@Table` annotation is also used to specify that a unique compound index will be created
+for the compound business key based on the productId and reviewId fields.
+- The `@Id` and `@Version` annotations are used to mark the id and version fields to be used by
+Spring Data, as explained previously. To direct Spring Data to JPA in order to automatically
+generate unique id values for the id field, we are using the `@GeneratedValue` annotation.
+
+### Defining repositories in Spring Data
+We will use the `CrudRepository` interface as the base for the **Recommendation** and **Review** repositories and also the `PagingAndSortingRepository` interface as the base for the **Product** repository. 
+
+We will also add a few extra query methods to our repositories for looking up entities using the business key, `productId`.
+
+The `Product` repository class looks like this:
+```java
+package se.magnus.microservices.core.product.persistence;
+
+import java.util.Optional;
+import org.springframework.data.repository.CrudRepository;
+import org.springframework.data.repository.PagingAndSortingRepository;
+
+public interface ProductRepository
+        extends PagingAndSortingRepository<ProductEntity, String>, CrudRepository<ProductEntity, String> {
+    Optional<ProductEntity> findByProductId(int productId);
+}
+```
+Since the `findByProductId` method might return zero or one product entity, the return value is
+marked as optional by wrapping it in an `Optional` object.
+The `Recommendation` repository class looks like this:
+```java
+package se.magnus.microservices.core.recommendation.persistence;
+
+import java.util.List;
+import org.springframework.data.repository.CrudRepository;
+
+public interface RecommendationRepository extends CrudRepository<RecommendationEntity, String> {
+    List<RecommendationEntity> findByProductId(int productId);
+}
+```
+In this case, the `findByProductId` method will return zero or more recommendation entities, so
+the return value is defined as a list.
+
+Finally, the Review repository class looks like this:
+```java
+package se.magnus.microservices.core.review.persistence;
+
+import java.util.List;
+import org.springframework.data.repository.CrudRepository;
+import org.springframework.transaction.annotation.Transactional;
+
+public interface ReviewRepository extends CrudRepository<ReviewEntity, Integer> {
+
+    @Transactional(readOnly = true)
+    List<ReviewEntity> findByProductId(int productId);
+}
+```
+Since SQL databases are transactional, we have to specify the default transaction type—read-only
+in our case—for the query method, `findByProductId()`.
+That’s it—this is all it takes to establish a persistence layer for our core microservices.
+
+For the full source code of the repository classes, see the persistence package in each of the core microservice projects.
+
+## Writing automated tests that focus on persistence
+To handle the startup and teardown of databases during the execution of the integration tests,
+we will use Testcontainers.
+
+By default, Spring Boot configures the tests to roll back updates to the SQL database
+to minimize the risk of negative side effects on other tests. In our case, this behavior
+will cause some of the tests to fail. Therefore, automatic rollback is disabled with
+the `@Transactional(propagation = NOT_SUPPORTED)` class-level annotation.
+
+### Using Testcontainers
+
+
+Following Single Container pattern, a base class is used to launch a single Docker container for
+MySQL. The base class, `MySqlTestBase`, used in the `Review` microservice looks like this:
+```java
+package se.magnus.microservices.core.review;
+
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.testcontainers.containers.JdbcDatabaseContainer;
+import org.testcontainers.containers.MySQLContainer;
+
+public abstract class MySqlTestBase {
+
+    // Extend startup timeout since a MySQLContainer with MySQL 8 starts very slow
+    // on Win10/WSL2
+    @ServiceConnection
+    static final JdbcDatabaseContainer database = new MySQLContainer("mysql:9.2.0").withStartupTimeoutSeconds(300);
+
+    static {
+        database.start();
+    }
+
+}
+```
+The test classes use the base class as follows:
+```java
+class PersistenceTests extends MySqlTestBase {
+class ReviewServiceApplicationTests extends MySqlTestBase {
+}
+```
+For the **product** and **review** microservices, which use **MongoDB**, a corresponding base class, `MongoDbTestBase`, has been added.
+```java
+package se.magnus.microservices.core.product;
+
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.testcontainers.containers.MongoDBContainer;
+
+public abstract class MongoDbTestBase {
+
+    @ServiceConnection
+    private static MongoDBContainer database = new MongoDBContainer("mongo:8.0.5");
+
+    static {
+        database.start();
+    }
+
+}
+```
+
+A Logback configuration file can be placed in the `src/test/resource` folder to limit the amount of log output. 
+The configuration file used in this lab is named `src/test/resources/logback-test.xml` and looks like this:
+```xml
+<?xml version="1.0" encoding="UTF-8" ?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+    </root>
+</configuration>
+```
+The config file limits log output to the INFO log level, discarding the DEBUG and TRACE log
+records emitted by the Testcontainers library.
+
+### Writing persistence tests
+The persistence tests for the three core microservices are similar to each other, so we will only go
+through the persistence tests for the product microservice.
+
+The test class, **PersistenceTests**, declares a method, `setupDb()`, annotated with `@BeforeEach`,
+which is executed before each test method. The setup method removes any entities from previous
+tests in the database and inserts an entity that the test methods can use as the base for their tests.
+
+Next come the various test methods. First is a create test: This test creates a new entity, verifies that it can be found using the `findById` method, and wraps
+up by asserting that there are two entities stored in the database, the one created by the setup
+method and the one created by the test itself.
+
+The update test updates the entity created by the setup method, reads it again from the database using the standard `findById()` method, and asserts that it contains expected values for some of its fields. Note that, when an entity is created, its `version` field is set to `0` by Spring Data, so we expect it to be `1` after the update.
+
+The delete test deletes the entity created by the setup method and verifies that it no longer exists in the database.
+
+The read test uses the `findByProductId()` method to get the entity created by the setup method, verifies that it was found, and then uses the local helper method, `assertEqualsProduct()`, to verify that the entity returned by `findByProductId()` looks the same as the entity stored by the
+setup method.
+
+Next are two test methods that verify alternative flows for handling error conditions. First is a
+test that verifies that duplicates are handled correctly:
+1. `duplicateError()`: The first test tries to store an entity with the same business key as used by the entity created by the
+setup method. The test will fail if the save operation succeeds, or if the save fails with an exception
+other than the expected `DuplicateKeyException`.
+2. `optimisticLockError()`: The other negative test is, in my opinion, the most interesting test in the test class. It is a test that
+verifies correct error handling in the case of updates of stale data—it verifies that the optimistic
+locking mechanism works. 
+
+The following is observed from the code:
+- First, the test reads the same entity twice and stores it in two different variables, `entity1`
+and `entity2`.
+- Next, it uses one of the variables, `entity1`, to update the entity. The update of the entity
+in the database will cause the version field of the entity to be increased automatically
+by Spring Data. The other variable, `entity2`, now contains stale data, manifested by its
+version field, which holds a lower value than the corresponding value in the database.
+- When the test tries to update the entity using the `entity2` variable, which contains stale
+data, it is expected to fail by throwing an `OptimisticLockingFailureException` exception.
+- The test wraps up by asserting that the entity in the database reflects the first update, that
+is, contains the name "n1", and that the version field has the value 1; only one update
+has been performed on the entity in the database.
+
+Finally, the product service contains a test that demonstrates the usage of built-in support for sorting and paging in Spring Data.
+
+The following is an explanation of the preceding code:
+- The test starts by removing any existing data, then inserts `10` entities with the `productId`
+field ranging from `1001` to `1010`.
+- Next, it creates `PageRequest`, requesting a page count of `4` entities per page and a sort
+order based on `ProductId` in ascending order.
+- Finally, it uses a helper method, `testNextPage`, to read the expected three pages, verifying
+the expected product IDs on each page and verifying that Spring Data correctly reports
+back whether more pages exist or not
+
+The helper method uses the page request object, `nextPage`, to get the next page from the repository
+method, `findAll()`. Based on the result, it extracts the product IDs from the returned entities
+into a string and compares it to the expected list of product IDs. Finally, it returns the next page.
+
+<Tabs groupId="code">
+<TabItem value="ProductEntity" label="ProductEntity">
+
+```java
+package se.magnus.microservices.core.product.persistence;
+
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
+
+@Document(collection = "products")
+public class ProductEntity {
+
+  @Id private String id;
+
+  @Version private Integer version;
+
+  @Indexed(unique = true)
+  private int productId;
+
+  private String name;
+  private int weight;
+
+  public ProductEntity() {}
+
+  public ProductEntity(int productId, String name, int weight) {
+    this.productId = productId;
+    this.name = name;
+    this.weight = weight;
+  }
+
+  public String getId() {
+    return id;
+  }
+
+  public void setId(String id) {
+    this.id = id;
+  }
+
+  public Integer getVersion() {
+    return version;
+  }
+
+  public void setVersion(Integer version) {
+    this.version = version;
+  }
+
+  public int getProductId() {
+    return productId;
+  }
+
+  public void setProductId(int productId) {
+    this.productId = productId;
+  }
+
+  public String getName() {
+    return name;
+  }
+
+  public void setName(String name) {
+    this.name = name;
+  }
+
+  public int getWeight() {
+    return weight;
+  }
+
+  public void setWeight(int weight) {
+    this.weight = weight;
+  }
+}
+```
+
+</TabItem>
+
+<TabItem value="MongoDbTestBase" label="MongoDbTestBase">
+
+```java
+package se.magnus.microservices.core.product;
+
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.testcontainers.containers.MongoDBContainer;
+
+public abstract class MongoDbTestBase {
+
+    @ServiceConnection
+    private static MongoDBContainer database = new MongoDBContainer("mongo:8.0.5");
+
+    static {
+        database.start();
+    }
+
+}
+```
+
+</TabItem>
+
+<TabItem value="PersistenceTests" label="PersistenceTests">
+
+```java
+package se.magnus.microservices.core.product;
+
+import static java.util.stream.IntStream.rangeClosed;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.data.domain.Sort.Direction.ASC;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.data.mongo.DataMongoTest;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import se.magnus.microservices.core.product.persistence.ProductEntity;
+import se.magnus.microservices.core.product.persistence.ProductRepository;
+
+@DataMongoTest
+class PersistenceTests extends MongoDbTestBase {
+    @Autowired
+    private ProductRepository repository;
+    private ProductEntity savedEntity;
+
+    @BeforeEach
+    void setupDb() {
+        System.setProperty("api.version", "1.44");
+        repository.deleteAll();
+        ProductEntity entity = new ProductEntity(1, "n", 1);
+        savedEntity = repository.save(entity);
+        assertEqualsProduct(entity, savedEntity);
+    }
+
+    @Test
+    void create() {
+        ProductEntity newEntity = new ProductEntity(2, "n", 2);
+        repository.save(newEntity);
+        ProductEntity foundEntity = repository.findById(
+                newEntity.getId()).get();
+        assertEqualsProduct(newEntity, foundEntity);
+        assertEquals(2, repository.count());
+    }
+
+    @Test
+    void update() {
+        savedEntity.setName("n2");
+        repository.save(savedEntity);
+        ProductEntity foundEntity = repository.findById(savedEntity.getId()).get();
+        assertEquals(1, (long) foundEntity.getVersion());
+        assertEquals("n2", foundEntity.getName());
+    }
+
+    @Test
+    void delete() {
+        repository.delete(savedEntity);
+        assertFalse(repository.existsById(savedEntity.getId()));
+    }
+
+    @Test
+    void getByProductId() {
+        Optional<ProductEntity> entity = repository.findByProductId(
+                savedEntity.getProductId());
+        assertTrue(entity.isPresent());
+        assertEqualsProduct(savedEntity, entity.get());
+    }
+
+    @Test
+    void duplicateError() {
+        assertThrows(DuplicateKeyException.class, () -> {
+            ProductEntity entity = new ProductEntity(savedEntity.getProductId(),
+                    "n", 1);
+            repository.save(entity);
+        });
+    }
+
+    @Test
+    void optimisticLockError() {
+
+        // Store the saved entity in two separate entity objects
+        ProductEntity entity1 = repository.findById(savedEntity.getId()).get();
+        ProductEntity entity2 = repository.findById(savedEntity.getId()).get();
+
+        // Update the entity using the first entity object
+        entity1.setName("n1");
+        repository.save(entity1);
+
+        // Update the entity using the second entity object.
+        // This should fail since the second entity now holds an old version number,
+        // i.e. an Optimistic Lock Error
+        assertThrows(OptimisticLockingFailureException.class, () -> {
+            entity2.setName("n2");
+            repository.save(entity2);
+        });
+
+        // Get the updated entity from the database and verify its new sate
+        ProductEntity updatedEntity = repository.findById(savedEntity.getId()).get();
+        assertEquals(1, (int) updatedEntity.getVersion());
+        assertEquals("n1", updatedEntity.getName());
+    }
+
+    @Test
+    void paging() {
+
+        repository.deleteAll();
+
+        List<ProductEntity> newProducts = rangeClosed(1001, 1010)
+                .mapToObj(i -> new ProductEntity(i, "name " + i, i))
+                .collect(Collectors.toList());
+        repository.saveAll(newProducts);
+
+        Pageable nextPage = PageRequest.of(0, 4, ASC, "productId");
+        nextPage = testNextPage(nextPage, "[1001, 1002, 1003, 1004]", true);
+        nextPage = testNextPage(nextPage, "[1005, 1006, 1007, 1008]", true);
+        nextPage = testNextPage(nextPage, "[1009, 1010]", false);
+    }
+
+    private Pageable testNextPage(Pageable nextPage, String expectedProductIds, boolean expectsNextPage) {
+        Page<ProductEntity> productPage = repository.findAll(nextPage);
+        assertEquals(expectedProductIds,
+                productPage.getContent().stream().map(p -> p.getProductId()).collect(Collectors.toList()).toString());
+        assertEquals(expectsNextPage, productPage.hasNext());
+        return productPage.nextPageable();
+    }
+
+    private void assertEqualsProduct(ProductEntity expectedEntity, ProductEntity actualEntity) {
+        assertEquals(expectedEntity.getId(), actualEntity.getId());
+        assertEquals(expectedEntity.getVersion(), actualEntity.getVersion());
+        assertEquals(expectedEntity.getProductId(), actualEntity.getProductId());
+        assertEquals(expectedEntity.getName(), actualEntity.getName());
+        assertEquals(expectedEntity.getWeight(), actualEntity.getWeight());
+    }
+}
+```
+</TabItem>
+</Tabs>
+
+The persistence tests in the product microservice can be executed using Gradle with a command
+like this:
+```bash
+./gradlew microservices:product-service:test --tests PersistenceTests
+```
+## Using the persistence layer in the service layer
+With a persistence layer in place, we can update the service layer in our core microservices to use the persistence layer.
+
+In this section, we will learn how to use the persistence layer in the service layer to store and
+retrieve data from a database. We will go through the following steps:
+### Logging the database connection URL
+When scaling up the number of microservices where each microservice connects to its own data-
+base, it can be hard to keep track of what database each microservice actually uses. To avoid this
+confusion, a good practice is to add a LOG statement directly after the startup of a microservice
+that logs connection information that is used to connect to the database.
+For example, the startup code for the product service looks like this:
+<Tabs groupId="code">
+<TabItem value="ProductServiceApplication" label="ProductServiceApplication">
+
+```java
+@SpringBootApplication
+@ComponentScan("se.magnus")
+public class ProductServiceApplication {
+
+	private static final Logger LOG = LoggerFactory.getLogger(ProductServiceApplication.class);
+
+	public static void main(String[] args) {
+		ConfigurableApplicationContext ctx = SpringApplication.run(ProductServiceApplication.class, args);
+
+		String mongodDbHost = ctx.getEnvironment().getProperty("spring.data.mongodb.host");
+		String mongodDbPort = ctx.getEnvironment().getProperty("spring.data.mongodb.port");
+		LOG.info("Connected to MongoDb: " + mongodDbHost + ":" + mongodDbPort);
+	}
+}
+```
+
+</TabItem>
+
+<TabItem value="ProductEntity" label="ProductEntity">
+
+```java
+package se.magnus.microservices.core.review;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.annotation.ComponentScan;
+
+@SpringBootApplication
+@ComponentScan("se.magnus")
+public class ReviewServiceApplication {
+
+  private static final Logger LOG = LoggerFactory.getLogger(ReviewServiceApplication.class);
+
+  public static void main(String[] args) {
+    ConfigurableApplicationContext ctx = SpringApplication.run(ReviewServiceApplication.class, args);
+
+    String mysqlUri = ctx.getEnvironment().getProperty("spring.datasource.url");
+    LOG.info("Connected to MySQL: " + mysqlUri);
+  }
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+
+### Adding new APIs
+Before we can use the persistence layer to create and delete information in the database, we need to create the corresponding API operations in our core service APIs.
+
+The API operations for the **recommendation** and **review** entities look similar; however, note that
+when it comes to the delete operation for the recommendation and review entities, it will delete
+all recommendations and reviews for the specified productId.
+
+<Tabs groupId="code">
+<TabItem value="ProductService" label="ProductService">
+
+```java
+package se.magnus.api.core.product;
+
+import org.springframework.web.bind.annotation.*;
+
+public interface ProductService {
+
+  /**
+   * Sample usage, see below.
+   *
+   * curl -X POST $HOST:$PORT/product \
+   * -H "Content-Type: application/json" --data \
+   * '{"productId":123,"name":"product 123","weight":123}'
+   *
+   * @param body A JSON representation of the new product
+   * @return A JSON representation of the newly created product
+   */
+  @PostMapping(value = "/product", consumes = "application/json", produces = "application/json")
+  Product createProduct(@RequestBody Product body);
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/product/1".
+   *
+   * @param productId Id of the product
+   * @return the product, if found, else null
+   */
+  @GetMapping(value = "/product/{productId}", produces = "application/json")
+  Product getProduct(@PathVariable int productId);
+
+  /**
+   * Sample usage: "curl -X DELETE $HOST:$PORT/product/1".
+   *
+   * @param productId Id of the product
+   */
+  @DeleteMapping(value = "/product/{productId}")
+  void deleteProduct(@PathVariable int productId);
+}
+```
+
+</TabItem>
+
+<TabItem value="RecommendationService" label="RecommendationService">
+
+```java
+package se.magnus.api.core.recommendation;
+
+import java.util.List;
+import org.springframework.web.bind.annotation.*;
+
+public interface RecommendationService {
+
+  /**
+   * Sample usage, see below.
+   *
+   * curl -X POST $HOST:$PORT/recommendation \
+   * -H "Content-Type: application/json" --data \
+   * '{"productId":123,"recommendationId":456,"author":"me","rate":5,"content":"yada,
+   * yada, yada"}'
+   *
+   * @param body A JSON representation of the new recommendation
+   * @return A JSON representation of the newly created recommendation
+   */
+  @PostMapping(value = "/recommendation", consumes = "application/json", produces = "application/json")
+  Recommendation createRecommendation(@RequestBody Recommendation body);
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/recommendation?productId=1".
+   *
+   * @param productId Id of the product
+   * @return the recommendations of the product
+   */
+  @GetMapping(value = "/recommendation", produces = "application/json")
+  List<Recommendation> getRecommendations(
+      @RequestParam(value = "productId", required = true) int productId);
+
+  /**
+   * Sample usage: "curl -X DELETE $HOST:$PORT/recommendation?productId=1".
+   *
+   * @param productId Id of the product
+   */
+  @DeleteMapping(value = "/recommendation")
+  void deleteRecommendations(@RequestParam(value = "productId", required = true) int productId);
+}
+```
+
+</TabItem>
+
+<TabItem value="ReviewService" label="ReviewService">
+
+```java
+package se.magnus.api.core.review;
+
+import java.util.List;
+import org.springframework.web.bind.annotation.*;
+
+public interface ReviewService {
+
+  /**
+   * Sample usage, see below.
+   *
+   * curl -X POST $HOST:$PORT/review \
+   * -H "Content-Type: application/json" --data \
+   * '{"productId":123,"reviewId":456,"author":"me","subject":"yada, yada,
+   * yada","content":"yada, yada, yada"}'
+   *
+   * @param body A JSON representation of the new review
+   * @return A JSON representation of the newly created review
+   */
+  @PostMapping(value = "/review", consumes = "application/json", produces = "application/json")
+  Review createReview(@RequestBody Review body);
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/review?productId=1".
+   *
+   * @param productId Id of the product
+   * @return the reviews of the product
+   */
+  @GetMapping(value = "/review", produces = "application/json")
+  List<Review> getReviews(@RequestParam(value = "productId", required = true) int productId);
+
+  /**
+   * Sample usage: "curl -X DELETE $HOST:$PORT/review?productId=1".
+   *
+   * @param productId Id of the product
+   */
+  @DeleteMapping(value = "/review")
+  void deleteReviews(@RequestParam(value = "productId", required = true) int productId);
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+### Declaring a Java bean mapper
+As already mentioned, MapStruct is used to declare our mapper classes. The use of MapStruct is
+similar in all three core microservices.
+
+The following can be noted from the code:
+- The `entityToApi()` method maps entity objects to the API model object. Since the entity
+class does not have a field for serviceAddress, the `entityToApi()` method is annotated
+to ignore the `serviceAddress` field in the API model object.
+- The `apiToEntity()` method maps API model objects to entity objects. In the same way,
+the `apiToEntity()` method is annotated to ignore the `id` and `version` fields that are
+missing in the API model class.
+- Not only does **MapStruct** support mapping fields by name but it can also be directed to map fields
+with different names. In the mapper class for the **recommendation** service, the `rating` entity field
+is mapped to the API model field, `rate`.
+<Tabs>
+<TabItem value="ProductMapper" label="ProductMapper">
+
+```java
+package se.magnus.microservices.core.product.services;
+
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.Mappings;
+import se.magnus.api.core.product.Product;
+import se.magnus.microservices.core.product.persistence.ProductEntity;
+
+@Mapper(componentModel = "spring")
+public interface ProductMapper {
+
+    @Mappings({
+            @Mapping(target = "serviceAddress", ignore = true)
+    })
+    Product entityToApi(ProductEntity entity);
+
+    @Mappings({
+            @Mapping(target = "id", ignore = true), @Mapping(target = "version", ignore = true)
+    })
+    ProductEntity apiToEntity(Product api);
+}
+```
+
+</TabItem>
+
+<TabItem value="RecommendationMapper" label="RecommendationMapper">
+
+```java
+package se.magnus.microservices.core.recommendation.services;
+
+import java.util.List;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.Mappings;
+import se.magnus.api.core.recommendation.Recommendation;
+import se.magnus.microservices.core.recommendation.persistence.RecommendationEntity;
+
+@Mapper(componentModel = "spring")
+public interface RecommendationMapper {
+
+    @Mappings({
+            @Mapping(target = "rate", source = "entity.rating"),
+            @Mapping(target = "serviceAddress", ignore = true)
+    })
+    Recommendation entityToApi(RecommendationEntity entity);
+
+    @Mappings({
+            @Mapping(target = "rating", source = "api.rate"),
+            @Mapping(target = "id", ignore = true),
+            @Mapping(target = "version", ignore = true)
+    })
+    RecommendationEntity apiToEntity(Recommendation api);
+
+    List<Recommendation> entityListToApiList(List<RecommendationEntity> entity);
+
+    List<RecommendationEntity> apiListToEntityList(List<Recommendation> api);
+}
+```
+
+</TabItem>
+
+<TabItem value="ReviewMapper" label="ReviewMapper">
+
+```java
+package se.magnus.microservices.core.review.services;
+
+import java.util.List;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.Mappings;
+import se.magnus.api.core.review.Review;
+import se.magnus.microservices.core.review.persistence.ReviewEntity;
+
+@Mapper(componentModel = "spring")
+public interface ReviewMapper {
+
+    @Mappings({
+            @Mapping(target = "serviceAddress", ignore = true)
+    })
+    Review entityToApi(ReviewEntity entity);
+
+    @Mappings({
+            @Mapping(target = "id", ignore = true),
+            @Mapping(target = "version", ignore = true)
+    })
+    ReviewEntity apiToEntity(Review api);
+
+    List<Review> entityListToApiList(List<ReviewEntity> entity);
+
+    List<ReviewEntity> apiListToEntityList(List<Review> api);
+}
+```
+
+</TabItem>
+</Tabs>
+
+After a successful Gradle build, the generated mapping implementation can be found in the
+`build/classes` folder for each project, for example, `ProductMapperImpl.java` in the **product-service** project.
+### Calling the persistence layer from the service layer
+The source code in the service layer for using the persistence layer is structured in the same way
+for all core microservices.
+
+First, we need to inject the repository class from the persistence layer and a Java bean mapper
+class into the constructor:
+
+The `createProduct` method used the save method in the repository to store a new entity. It should
+be noted that the mapper class is used to convert Java beans between an API model class and an
+entity class using the two mapper methods, `apiToEntity()` and `entityToApi()`. The only error
+we handle for the create method is the `DuplicateKeyException` exception, which we convert
+into an `InvalidInputException` exception.
+
+The getProduct method, After some basic input validation (that is, ensuring that `productId` is not negative), the
+`findByProductId()` method in the repository is used to find the product entity. Since the repository method returns an `Optional` product, we can use the `orElseThrow()` method in the Optional
+class to conveniently throw a `NotFoundException` exception if no product entity is found. Before
+the product information is returned, the `serviceUtil` object is used to fill in the currently used
+address of the microservice.
+
+The delete method also uses the `findByProductId()` method in the repository and uses the
+`ifPresent()` method in the `Optional` class to conveniently delete the entity only if it exists. Note
+that the implementation is **idempotent**; it will not report any failure if the entity is not found.
+
+
+<Tabs>
+
+<TabItem value="ProductServiceImpl" label="ProductServiceImpl">
+
+```java
+package se.magnus.microservices.core.product.services;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.web.bind.annotation.RestController;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.product.ProductService;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.api.exceptions.NotFoundException;
+import se.magnus.microservices.core.product.persistence.ProductEntity;
+import se.magnus.microservices.core.product.persistence.ProductRepository;
+import se.magnus.util.http.ServiceUtil;
+
+@RestController
+public class ProductServiceImpl implements ProductService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ProductServiceImpl.class);
+
+    private final ServiceUtil serviceUtil;
+
+    private final ProductRepository repository;
+
+    private final ProductMapper mapper;
+
+    public ProductServiceImpl(ProductRepository repository, ProductMapper mapper, ServiceUtil serviceUtil) {
+        this.repository = repository;
+        this.mapper = mapper;
+        this.serviceUtil = serviceUtil;
+    }
+
+    @Override
+    public Product createProduct(Product body) {
+        try {
+            ProductEntity entity = mapper.apiToEntity(body);
+            ProductEntity newEntity = repository.save(entity);
+
+            LOG.debug("createProduct: entity created for productId: {}", body.getProductId());
+            return mapper.entityToApi(newEntity);
+
+        } catch (DuplicateKeyException dke) {
+            throw new InvalidInputException("Duplicate key, Product Id: " + body.getProductId());
+        }
+    }
+
+    @Override
+    public Product getProduct(int productId) {
+
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
+
+        ProductEntity entity = repository.findByProductId(productId)
+                .orElseThrow(() -> new NotFoundException("No product found for productId: " + productId));
+
+        Product response = mapper.entityToApi(entity);
+        response.setServiceAddress(serviceUtil.getServiceAddress());
+
+        LOG.debug("getProduct: found productId: {}", response.getProductId());
+
+        return response;
+    }
+
+    @Override
+    public void deleteProduct(int productId) {
+        LOG.debug("deleteProduct: tries to delete an entity with productId: {}", productId);
+        repository.findByProductId(productId).ifPresent(e -> repository.delete(e));
+    }
+}
+```
+
+</TabItem>
+
+<TabItem value="RecommendationServiceImpl" label="RecommendationServiceImpl">
+
+```java
+package se.magnus.microservices.core.recommendation.services;
+
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.web.bind.annotation.RestController;
+import se.magnus.api.core.recommendation.Recommendation;
+import se.magnus.api.core.recommendation.RecommendationService;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.microservices.core.recommendation.persistence.RecommendationEntity;
+import se.magnus.microservices.core.recommendation.persistence.RecommendationRepository;
+import se.magnus.util.http.ServiceUtil;
+
+@RestController
+public class RecommendationServiceImpl implements RecommendationService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(RecommendationServiceImpl.class);
+
+    private final RecommendationRepository repository;
+
+    private final RecommendationMapper mapper;
+
+    private final ServiceUtil serviceUtil;
+
+    public RecommendationServiceImpl(RecommendationRepository repository, RecommendationMapper mapper,
+            ServiceUtil serviceUtil) {
+        this.repository = repository;
+        this.mapper = mapper;
+        this.serviceUtil = serviceUtil;
+    }
+
+    @Override
+    public Recommendation createRecommendation(Recommendation body) {
+        try {
+            RecommendationEntity entity = mapper.apiToEntity(body);
+            RecommendationEntity newEntity = repository.save(entity);
+
+            LOG.debug("createRecommendation: created a recommendation entity: {}/{}", body.getProductId(),
+                    body.getRecommendationId());
+            return mapper.entityToApi(newEntity);
+
+        } catch (DuplicateKeyException dke) {
+            throw new InvalidInputException("Duplicate key, Product Id: " + body.getProductId() + ", Recommendation Id:"
+                    + body.getRecommendationId());
+        }
+    }
+
+    @Override
+    public List<Recommendation> getRecommendations(int productId) {
+
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
+
+        List<RecommendationEntity> entityList = repository.findByProductId(productId);
+        List<Recommendation> list = mapper.entityListToApiList(entityList);
+        list.forEach(e -> e.setServiceAddress(serviceUtil.getServiceAddress()));
+
+        LOG.debug("getRecommendations: response size: {}", list.size());
+
+        return list;
+    }
+
+    @Override
+    public void deleteRecommendations(int productId) {
+        LOG.debug("deleteRecommendations: tries to delete recommendations for the product with productId: {}",
+                productId);
+        repository.deleteAll(repository.findByProductId(productId));
+    }
+}
+```
+
+</TabItem>
+
+<TabItem value="ReviewServiceImpl" label="ReviewServiceImpl">
+
+```java
+package se.magnus.microservices.core.review.services;
+
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.web.bind.annotation.RestController;
+import se.magnus.api.core.review.Review;
+import se.magnus.api.core.review.ReviewService;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.microservices.core.review.persistence.ReviewEntity;
+import se.magnus.microservices.core.review.persistence.ReviewRepository;
+import se.magnus.util.http.ServiceUtil;
+
+@RestController
+public class ReviewServiceImpl implements ReviewService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ReviewServiceImpl.class);
+
+    private final ReviewRepository repository;
+
+    private final ReviewMapper mapper;
+
+    private final ServiceUtil serviceUtil;
+
+    public ReviewServiceImpl(ReviewRepository repository, ReviewMapper mapper, ServiceUtil serviceUtil) {
+        this.repository = repository;
+        this.mapper = mapper;
+        this.serviceUtil = serviceUtil;
+    }
+
+    @Override
+    public Review createReview(Review body) {
+        try {
+            ReviewEntity entity = mapper.apiToEntity(body);
+            ReviewEntity newEntity = repository.save(entity);
+
+            LOG.debug("createReview: created a review entity: {}/{}", body.getProductId(), body.getReviewId());
+            return mapper.entityToApi(newEntity);
+
+        } catch (DataIntegrityViolationException dive) {
+            throw new InvalidInputException(
+                    "Duplicate key, Product Id: " + body.getProductId() + ", Review Id:" + body.getReviewId());
+        }
+    }
+
+    @Override
+    public List<Review> getReviews(int productId) {
+
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
+
+        List<ReviewEntity> entityList = repository.findByProductId(productId);
+        List<Review> list = mapper.entityListToApiList(entityList);
+        list.forEach(e -> e.setServiceAddress(serviceUtil.getServiceAddress()));
+
+        LOG.debug("getReviews: response size: {}", list.size());
+
+        return list;
+    }
+
+    @Override
+    public void deleteReviews(int productId) {
+        LOG.debug("deleteReviews: tries to delete reviews for the product with productId: {}", productId);
+        repository.deleteAll(repository.findByProductId(productId));
+    }
+}
+```
+
+</TabItem>
+
+</Tabs>
+### Updating the service tests
+The tests of the APIs exposed by the core microservices have been updated since the previous
+lab with tests covering the create and delete API operations.
+
+The added tests are similar in all three core microservice.
+
+- To ensure a known state for each test, a setup method, `setupDb()`, is declared and annotated
+with `@BeforeEach`, so it is executed before each test. The setup method removes any previously
+created entities.
+- The test method for the create API verifies that a product entity can be retrieved after it has been
+created and that creating another product entity with the same productId results in an expected
+error, UNPROCESSABLE_ENTITY, in the response to the API request.
+- The test method for the delete API verifies that a product entity can be deleted and that a second
+delete request is idempotent—it also returns the OK status code, even though the entity no longer
+exists in the database
+- To simplify sending the create, read, and delete requests to the API and verify the response status,
+three helper methods have been created:
+        - postAndVerifyProduct()
+        - getAndVerifyProduct()
+        - deleteAndVerifyProduct()
+- The helper method performs the actual HTTP request and verifies the response code and content
+type of the response body. Added to that, the helper method also returns the body of the response
+for further investigations by the caller, if required. The other two helper methods for read and
+delete requests are similar.
+<Tabs>
+<TabItem value="ProductServiceApplicationTests" label="ProductServiceApplicationTests">
+
+```java
+package se.magnus.microservices.core.product;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+import static org.springframework.http.HttpStatus.*;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static reactor.core.publisher.Mono.just;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import se.magnus.api.core.product.Product;
+import se.magnus.microservices.core.product.persistence.ProductRepository;
+
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class ProductServiceApplicationTests extends MongoDbTestBase {
+
+    @Autowired
+    private WebTestClient client;
+
+    @Autowired
+    private ProductRepository repository;
+
+    @BeforeEach
+    void setupDb() {
+        repository.deleteAll();
+    }
+
+    @Test
+    void getProductById() {
+
+        int productId = 1;
+
+        postAndVerifyProduct(productId, OK);
+
+        assertTrue(repository.findByProductId(productId).isPresent());
+
+        getAndVerifyProduct(productId, OK).jsonPath("$.productId").isEqualTo(productId);
+    }
+
+    @Test
+    void duplicateError() {
+
+        int productId = 1;
+
+        postAndVerifyProduct(productId, OK);
+
+        assertTrue(repository.findByProductId(productId).isPresent());
+
+        postAndVerifyProduct(productId, UNPROCESSABLE_ENTITY)
+                .jsonPath("$.path").isEqualTo("/product")
+                .jsonPath("$.message").isEqualTo("Duplicate key, Product Id: " + productId);
+    }
+
+    @Test
+    void deleteProduct() {
+
+        int productId = 1;
+
+        postAndVerifyProduct(productId, OK);
+        assertTrue(repository.findByProductId(productId).isPresent());
+
+        deleteAndVerifyProduct(productId, OK);
+        assertFalse(repository.findByProductId(productId).isPresent());
+
+        deleteAndVerifyProduct(productId, OK);
+    }
+
+    @Test
+    void getProductInvalidParameterString() {
+
+        getAndVerifyProduct("/no-integer", BAD_REQUEST)
+                .jsonPath("$.path").isEqualTo("/product/no-integer")
+                .jsonPath("$.message").isEqualTo("Type mismatch.");
+    }
+
+    @Test
+    void getProductNotFound() {
+
+        int productIdNotFound = 13;
+        getAndVerifyProduct(productIdNotFound, NOT_FOUND)
+                .jsonPath("$.path").isEqualTo("/product/" + productIdNotFound)
+                .jsonPath("$.message").isEqualTo("No product found for productId: " + productIdNotFound);
+    }
+
+    @Test
+    void getProductInvalidParameterNegativeValue() {
+
+        int productIdInvalid = -1;
+
+        getAndVerifyProduct(productIdInvalid, UNPROCESSABLE_ENTITY)
+                .jsonPath("$.path").isEqualTo("/product/" + productIdInvalid)
+                .jsonPath("$.message").isEqualTo("Invalid productId: " + productIdInvalid);
+    }
+
+    private WebTestClient.BodyContentSpec getAndVerifyProduct(int productId, HttpStatus expectedStatus) {
+        return getAndVerifyProduct("/" + productId, expectedStatus);
+    }
+
+    private WebTestClient.BodyContentSpec getAndVerifyProduct(String productIdPath, HttpStatus expectedStatus) {
+        return client.get()
+                .uri("/product" + productIdPath)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectHeader().contentType(APPLICATION_JSON)
+                .expectBody();
+    }
+
+    private WebTestClient.BodyContentSpec postAndVerifyProduct(int productId, HttpStatus expectedStatus) {
+        Product product = new Product(productId, "Name " + productId, productId, "SA");
+        return client.post()
+                .uri("/product")
+                .body(just(product), Product.class)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectHeader().contentType(APPLICATION_JSON)
+                .expectBody();
+    }
+
+    private WebTestClient.BodyContentSpec deleteAndVerifyProduct(int productId, HttpStatus expectedStatus) {
+        return client.delete()
+                .uri("/product/" + productId)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectBody();
+    }
+}
+```
+
+</TabItem>
+
+<TabItem value="RecommendationServiceApplicationTests" label="RecommendationServiceApplicationTests">
+
+```java
+package se.magnus.microservices.core.recommendation;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+import static org.springframework.http.HttpStatus.*;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static reactor.core.publisher.Mono.just;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import se.magnus.api.core.recommendation.Recommendation;
+import se.magnus.microservices.core.recommendation.persistence.RecommendationRepository;
+
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class RecommendationServiceApplicationTests extends MongoDbTestBase {
+
+    @Autowired
+    private WebTestClient client;
+
+    @Autowired
+    private RecommendationRepository repository;
+
+    @BeforeEach
+    void setupDb() {
+        repository.deleteAll();
+    }
+
+    @Test
+    void getRecommendationsByProductId() {
+
+        int productId = 1;
+
+        postAndVerifyRecommendation(productId, 1, OK);
+        postAndVerifyRecommendation(productId, 2, OK);
+        postAndVerifyRecommendation(productId, 3, OK);
+
+        assertEquals(3, repository.findByProductId(productId).size());
+
+        getAndVerifyRecommendationsByProductId(productId, OK)
+                .jsonPath("$.length()").isEqualTo(3)
+                .jsonPath("$[2].productId").isEqualTo(productId)
+                .jsonPath("$[2].recommendationId").isEqualTo(3);
+    }
+
+    @Test
+    void duplicateError() {
+
+        int productId = 1;
+        int recommendationId = 1;
+
+        postAndVerifyRecommendation(productId, recommendationId, OK)
+                .jsonPath("$.productId").isEqualTo(productId)
+                .jsonPath("$.recommendationId").isEqualTo(recommendationId);
+
+        assertEquals(1, repository.count());
+
+        postAndVerifyRecommendation(productId, recommendationId, UNPROCESSABLE_ENTITY)
+                .jsonPath("$.path").isEqualTo("/recommendation")
+                .jsonPath("$.message").isEqualTo("Duplicate key, Product Id: 1, Recommendation Id:1");
+
+        assertEquals(1, repository.count());
+    }
+
+    @Test
+    void deleteRecommendations() {
+
+        int productId = 1;
+        int recommendationId = 1;
+
+        postAndVerifyRecommendation(productId, recommendationId, OK);
+        assertEquals(1, repository.findByProductId(productId).size());
+
+        deleteAndVerifyRecommendationsByProductId(productId, OK);
+        assertEquals(0, repository.findByProductId(productId).size());
+
+        deleteAndVerifyRecommendationsByProductId(productId, OK);
+    }
+
+    @Test
+    void getRecommendationsMissingParameter() {
+
+        getAndVerifyRecommendationsByProductId("", BAD_REQUEST)
+                .jsonPath("$.path").isEqualTo("/recommendation")
+                .jsonPath("$.message").isEqualTo("Required query parameter 'productId' is not present.");
+    }
+
+    @Test
+    void getRecommendationsInvalidParameter() {
+
+        getAndVerifyRecommendationsByProductId("?productId=no-integer", BAD_REQUEST)
+                .jsonPath("$.path").isEqualTo("/recommendation")
+                .jsonPath("$.message").isEqualTo("Type mismatch.");
+    }
+
+    @Test
+    void getRecommendationsNotFound() {
+
+        getAndVerifyRecommendationsByProductId("?productId=113", OK)
+                .jsonPath("$.length()").isEqualTo(0);
+    }
+
+    @Test
+    void getRecommendationsInvalidParameterNegativeValue() {
+
+        int productIdInvalid = -1;
+
+        getAndVerifyRecommendationsByProductId("?productId=" + productIdInvalid, UNPROCESSABLE_ENTITY)
+                .jsonPath("$.path").isEqualTo("/recommendation")
+                .jsonPath("$.message").isEqualTo("Invalid productId: " + productIdInvalid);
+    }
+
+    private WebTestClient.BodyContentSpec getAndVerifyRecommendationsByProductId(int productId,
+            HttpStatus expectedStatus) {
+        return getAndVerifyRecommendationsByProductId("?productId=" + productId, expectedStatus);
+    }
+
+    private WebTestClient.BodyContentSpec getAndVerifyRecommendationsByProductId(String productIdQuery,
+            HttpStatus expectedStatus) {
+        return client.get()
+                .uri("/recommendation" + productIdQuery)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectHeader().contentType(APPLICATION_JSON)
+                .expectBody();
+    }
+
+    private WebTestClient.BodyContentSpec postAndVerifyRecommendation(int productId, int recommendationId,
+            HttpStatus expectedStatus) {
+        Recommendation recommendation = new Recommendation(productId, recommendationId, "Author " + recommendationId,
+                recommendationId, "Content " + recommendationId, "SA");
+        return client.post()
+                .uri("/recommendation")
+                .body(just(recommendation), Recommendation.class)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectHeader().contentType(APPLICATION_JSON)
+                .expectBody();
+    }
+
+    private WebTestClient.BodyContentSpec deleteAndVerifyRecommendationsByProductId(int productId,
+            HttpStatus expectedStatus) {
+        return client.delete()
+                .uri("/recommendation?productId=" + productId)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectBody();
+    }
+
+}
+```
+
+</TabItem>
+
+<TabItem value="ReviewServiceApplicationTests" label="ReviewServiceApplicationTests">
+
+```java
+package se.magnus.microservices.core.review;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+import static org.springframework.http.HttpStatus.*;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static reactor.core.publisher.Mono.just;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import se.magnus.api.core.review.Review;
+import se.magnus.microservices.core.review.persistence.ReviewRepository;
+
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class ReviewServiceApplicationTests extends MySqlTestBase {
+
+    @Autowired
+    private WebTestClient client;
+
+    @Autowired
+    private ReviewRepository repository;
+
+    @BeforeEach
+    void setupDb() {
+        repository.deleteAll();
+    }
+
+    @Test
+    void getReviewsByProductId() {
+
+        int productId = 1;
+
+        assertEquals(0, repository.findByProductId(productId).size());
+
+        postAndVerifyReview(productId, 1, OK);
+        postAndVerifyReview(productId, 2, OK);
+        postAndVerifyReview(productId, 3, OK);
+
+        assertEquals(3, repository.findByProductId(productId).size());
+
+        getAndVerifyReviewsByProductId(productId, OK)
+                .jsonPath("$.length()").isEqualTo(3)
+                .jsonPath("$[2].productId").isEqualTo(productId)
+                .jsonPath("$[2].reviewId").isEqualTo(3);
+    }
+
+    @Test
+    void duplicateError() {
+
+        int productId = 1;
+        int reviewId = 1;
+
+        assertEquals(0, repository.count());
+
+        postAndVerifyReview(productId, reviewId, OK)
+                .jsonPath("$.productId").isEqualTo(productId)
+                .jsonPath("$.reviewId").isEqualTo(reviewId);
+
+        assertEquals(1, repository.count());
+
+        postAndVerifyReview(productId, reviewId, UNPROCESSABLE_ENTITY)
+                .jsonPath("$.path").isEqualTo("/review")
+                .jsonPath("$.message").isEqualTo("Duplicate key, Product Id: 1, Review Id:1");
+
+        assertEquals(1, repository.count());
+    }
+
+    @Test
+    void deleteReviews() {
+
+        int productId = 1;
+        int reviewId = 1;
+
+        postAndVerifyReview(productId, reviewId, OK);
+        assertEquals(1, repository.findByProductId(productId).size());
+
+        deleteAndVerifyReviewsByProductId(productId, OK);
+        assertEquals(0, repository.findByProductId(productId).size());
+
+        deleteAndVerifyReviewsByProductId(productId, OK);
+    }
+
+    @Test
+    void getReviewsMissingParameter() {
+
+        getAndVerifyReviewsByProductId("", BAD_REQUEST)
+                .jsonPath("$.path").isEqualTo("/review")
+                .jsonPath("$.message").isEqualTo("Required query parameter 'productId' is not present.");
+    }
+
+    @Test
+    void getReviewsInvalidParameter() {
+
+        getAndVerifyReviewsByProductId("?productId=no-integer", BAD_REQUEST)
+                .jsonPath("$.path").isEqualTo("/review")
+                .jsonPath("$.message").isEqualTo("Type mismatch.");
+    }
+
+    @Test
+    void getReviewsNotFound() {
+
+        getAndVerifyReviewsByProductId("?productId=213", OK)
+                .jsonPath("$.length()").isEqualTo(0);
+    }
+
+    @Test
+    void getReviewsInvalidParameterNegativeValue() {
+
+        int productIdInvalid = -1;
+
+        getAndVerifyReviewsByProductId("?productId=" + productIdInvalid, UNPROCESSABLE_ENTITY)
+                .jsonPath("$.path").isEqualTo("/review")
+                .jsonPath("$.message").isEqualTo("Invalid productId: " + productIdInvalid);
+    }
+
+    private WebTestClient.BodyContentSpec getAndVerifyReviewsByProductId(int productId, HttpStatus expectedStatus) {
+        return getAndVerifyReviewsByProductId("?productId=" + productId, expectedStatus);
+    }
+
+    private WebTestClient.BodyContentSpec getAndVerifyReviewsByProductId(String productIdQuery,
+            HttpStatus expectedStatus) {
+        return client.get()
+                .uri("/review" + productIdQuery)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectHeader().contentType(APPLICATION_JSON)
+                .expectBody();
+    }
+
+    private WebTestClient.BodyContentSpec postAndVerifyReview(int productId, int reviewId, HttpStatus expectedStatus) {
+        Review review = new Review(productId, reviewId, "Author " + reviewId, "Subject " + reviewId,
+                "Content " + reviewId, "SA");
+        return client.post()
+                .uri("/review")
+                .body(just(review), Review.class)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectHeader().contentType(APPLICATION_JSON)
+                .expectBody();
+    }
+
+    private WebTestClient.BodyContentSpec deleteAndVerifyReviewsByProductId(int productId, HttpStatus expectedStatus) {
+        return client.delete()
+                .uri("/review?productId=" + productId)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectBody();
+    }
+}
+```
+
+</TabItem>
+
+</Tabs>
+## Extending the composite service API
+In this section, we will see how we can extend the composite API with operations for creating
+and deleting composite entities. We will go through the following steps:
+### Adding new operations to the composite service API
+The composite versions of creating and deleting entities and handling aggregated entities are
+similar to the create and delete operations in the core service APIs. The major difference is that
+they have annotations added for OpenAPI-based documentation. 
+
+```java
+package se.magnus.api.composite.product;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.web.bind.annotation.*;
+
+@Tag(name = "ProductComposite", description = "REST API for composite product information.")
+public interface ProductCompositeService {
+
+  /**
+   * Sample usage, see below.
+   *
+   * curl -X POST $HOST:$PORT/product-composite \
+   * -H "Content-Type: application/json" --data \
+   * '{"productId":123,"name":"product 123","weight":123}'
+   *
+   * @param body A JSON representation of the new composite product
+   */
+  @Operation(summary = "${api.product-composite.create-composite-product.description}", description = "${api.product-composite.create-composite-product.notes}")
+  @ApiResponses(value = {
+      @ApiResponse(responseCode = "400", description = "${api.responseCodes.badRequest.description}"),
+      @ApiResponse(responseCode = "422", description = "${api.responseCodes.unprocessableEntity.description}")
+  })
+  @PostMapping(value = "/product-composite", consumes = "application/json")
+  void createProduct(@RequestBody ProductAggregate body);
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/product-composite/1".
+   *
+   * @param productId Id of the product
+   * @return the composite product info, if found, else null
+   */
+  @Operation(summary = "${api.product-composite.get-composite-product.description}", description = "${api.product-composite.get-composite-product.notes}")
+  @ApiResponses(value = {
+      @ApiResponse(responseCode = "200", description = "${api.responseCodes.ok.description}"),
+      @ApiResponse(responseCode = "400", description = "${api.responseCodes.badRequest.description}"),
+      @ApiResponse(responseCode = "404", description = "${api.responseCodes.notFound.description}"),
+      @ApiResponse(responseCode = "422", description = "${api.responseCodes.unprocessableEntity.description}")
+  })
+  @GetMapping(value = "/product-composite/{productId}", produces = "application/json")
+  ProductAggregate getProduct(@PathVariable int productId);
+
+  /**
+   * Sample usage: "curl -X DELETE $HOST:$PORT/product-composite/1".
+   *
+   * @param productId Id of the product
+   */
+  @Operation(summary = "${api.product-composite.delete-composite-product.description}", description = "${api.product-composite.delete-composite-product.notes}")
+  @ApiResponses(value = {
+      @ApiResponse(responseCode = "400", description = "${api.responseCodes.badRequest.description}"),
+      @ApiResponse(responseCode = "422", description = "${api.responseCodes.unprocessableEntity.description}")
+  })
+  @DeleteMapping(value = "/product-composite/{productId}")
+  void deleteProduct(@PathVariable int productId);
+}
+```
+We also need to, as before, add the descriptive text of the API documentation to the property file,
+application.yml, in the product-composite project;
+```yml
+springdoc:
+  swagger-ui.path: /openapi/swagger-ui.html
+  api-docs.path: /openapi/v3/api-docs
+  packagesToScan: se.magnus.microservices.composite.product
+  pathsToMatch: /**
+
+api:
+
+  common:
+    version: 1.0.0
+    title: Sample API
+    description: Description of the API...
+    termsOfService: MY TERMS OF SERVICE
+    license: MY LICENSE
+    licenseUrl: MY LICENSE URL
+
+    externalDocDesc: MY WIKI PAGE
+    externalDocUrl: MY WIKI URL
+    contact:
+      name: NAME OF CONTACT
+      url: URL TO CONTACT
+      email: contact@mail.com
+
+  responseCodes:
+    ok.description: OK
+    badRequest.description: Bad Request, invalid format of the request. See response message for more information
+    notFound.description: Not found, the specified id does not exist
+    unprocessableEntity.description: Unprocessable entity, input parameters caused the processing to fail. See response message for more information
+
+  product-composite:
+
+    get-composite-product:
+      description: Returns a composite view of the specified product id
+      notes: |
+        # Normal response
+        If the requested product id is found the method will return information regarding:
+        1. Product information
+        1. Reviews
+        1. Recommendations
+        1. Service Addresses\n(technical information regarding the addresses of the microservices that created the response)
+
+        # Expected partial and error responses
+        1. If no product information is found, a **404 - Not Found** error will be returned
+        1. In no recommendations or reviews are found for a product, a partial response will be returned
+
+    create-composite-product:
+      description: Creates a composite product
+      notes: |
+        # Normal response
+        The composite product information posted to the API will be split up and stored as separate product-info, recommendation and review entities.
+
+        # Expected error responses
+        1. If a product with the same productId as specified in the posted information already exists,
+           an **422 - Unprocessable Entity** error with a "duplicate key" error message will be returned
+
+    delete-composite-product:
+      description: Deletes a product composite
+      notes: |
+        # Normal response
+        Entities for product information, recommendations and reviews related to the specified productId will be deleted.
+        The implementation of the delete method is idempotent, i.e. it can be called several times with the same response.
+
+        This means that a delete request of a non-existing product will return **200 Ok**.
+
+server.port: 7001
+server.error.include-message: always
+
+app:
+  product-service:
+    host: localhost
+    port: 7002
+  recommendation-service:
+    host: localhost
+    port: 7003
+  review-service:
+    host: localhost
+    port: 7004
+
+logging:
+  level:
+    root: INFO
+    se.magnus: DEBUG
+
+---
+spring.config.activate.on-profile: docker
+
+server.port: 8080
+
+app:
+  product-service:
+    host: product
+    port: 8080
+  recommendation-service:
+    host: recommendation
+    port: 8080
+  review-service:
+    host: review
+    port: 8080
+```
+### Adding methods to the integration layer
+Before we can implement the new create and delete APIs in the composite services, we need to
+extend the integration layer so it can call the underlying create and delete operations in the APIs
+of the core microservices.
+
+The methods in the integration layer for calling the create and delete operations in the three core
+microservices are straightforward and similar to each other.
+
+- The `createProduct()` method simply delegates the responsibility of sending the HTTP request to the `RestTemplate` object
+and delegates error handling to the helper method, `handleHttpClientException`.
+- The deleteProduct() method It is implemented in the same way as for the create method but performs an HTTP delete request
+instead.
+```java
+package se.magnus.microservices.composite.product.services;
+
+import static org.springframework.http.HttpMethod.GET;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestTemplate;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.product.ProductService;
+import se.magnus.api.core.recommendation.Recommendation;
+import se.magnus.api.core.recommendation.RecommendationService;
+import se.magnus.api.core.review.Review;
+import se.magnus.api.core.review.ReviewService;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.api.exceptions.NotFoundException;
+import se.magnus.util.http.HttpErrorInfo;
+
+@Component
+public class ProductCompositeIntegration implements ProductService, RecommendationService, ReviewService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ProductCompositeIntegration.class);
+
+    private final RestTemplate restTemplate;
+    private final ObjectMapper mapper;
+
+    private final String productServiceUrl;
+    private final String recommendationServiceUrl;
+    private final String reviewServiceUrl;
+
+    public ProductCompositeIntegration(
+            RestTemplate restTemplate,
+            ObjectMapper mapper,
+            @Value("${app.product-service.host}") String productServiceHost,
+            @Value("${app.product-service.port}") int productServicePort,
+            @Value("${app.recommendation-service.host}") String recommendationServiceHost,
+            @Value("${app.recommendation-service.port}") int recommendationServicePort,
+            @Value("${app.review-service.host}") String reviewServiceHost,
+            @Value("${app.review-service.port}") int reviewServicePort) {
+
+        this.restTemplate = restTemplate;
+        this.mapper = mapper;
+
+        productServiceUrl = "http://" + productServiceHost + ":" + productServicePort + "/product";
+        recommendationServiceUrl = "http://" + recommendationServiceHost + ":" + recommendationServicePort
+                + "/recommendation";
+        reviewServiceUrl = "http://" + reviewServiceHost + ":" + reviewServicePort + "/review";
+    }
+
+    @Override
+    public Product createProduct(Product body) {
+
+        try {
+            String url = productServiceUrl;
+            LOG.debug("Will post a new product to URL: {}", url);
+
+            Product product = restTemplate.postForObject(url, body, Product.class);
+            LOG.debug("Created a product with id: {}", product.getProductId());
+
+            return product;
+
+        } catch (HttpClientErrorException ex) {
+            throw handleHttpClientException(ex);
+        }
+    }
+
+    @Override
+    public Product getProduct(int productId) {
+
+        try {
+            String url = productServiceUrl + "/" + productId;
+            LOG.debug("Will call the getProduct API on URL: {}", url);
+
+            Product product = restTemplate.getForObject(url, Product.class);
+            LOG.debug("Found a product with id: {}", product.getProductId());
+
+            return product;
+
+        } catch (HttpClientErrorException ex) {
+            throw handleHttpClientException(ex);
+        }
+    }
+
+    @Override
+    public void deleteProduct(int productId) {
+        try {
+            String url = productServiceUrl + "/" + productId;
+            LOG.debug("Will call the deleteProduct API on URL: {}", url);
+
+            restTemplate.delete(url);
+
+        } catch (HttpClientErrorException ex) {
+            throw handleHttpClientException(ex);
+        }
+    }
+
+    @Override
+    public Recommendation createRecommendation(Recommendation body) {
+
+        try {
+            String url = recommendationServiceUrl;
+            LOG.debug("Will post a new recommendation to URL: {}", url);
+
+            Recommendation recommendation = restTemplate.postForObject(url, body, Recommendation.class);
+            LOG.debug("Created a recommendation with id: {}", recommendation.getProductId());
+
+            return recommendation;
+
+        } catch (HttpClientErrorException ex) {
+            throw handleHttpClientException(ex);
+        }
+    }
+
+    @Override
+    public List<Recommendation> getRecommendations(int productId) {
+
+        try {
+            String url = recommendationServiceUrl + "?productId=" + productId;
+
+            LOG.debug("Will call the getRecommendations API on URL: {}", url);
+            List<Recommendation> recommendations = restTemplate
+                    .exchange(url, GET, null, new ParameterizedTypeReference<List<Recommendation>>() {
+                    })
+                    .getBody();
+
+            LOG.debug("Found {} recommendations for a product with id: {}", recommendations.size(), productId);
+            return recommendations;
+
+        } catch (Exception ex) {
+            LOG.warn("Got an exception while requesting recommendations, return zero recommendations: {}",
+                    ex.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    @Override
+    public void deleteRecommendations(int productId) {
+        try {
+            String url = recommendationServiceUrl + "?productId=" + productId;
+            LOG.debug("Will call the deleteRecommendations API on URL: {}", url);
+
+            restTemplate.delete(url);
+
+        } catch (HttpClientErrorException ex) {
+            throw handleHttpClientException(ex);
+        }
+    }
+
+    @Override
+    public Review createReview(Review body) {
+
+        try {
+            String url = reviewServiceUrl;
+            LOG.debug("Will post a new review to URL: {}", url);
+
+            Review review = restTemplate.postForObject(url, body, Review.class);
+            LOG.debug("Created a review with id: {}", review.getProductId());
+
+            return review;
+
+        } catch (HttpClientErrorException ex) {
+            throw handleHttpClientException(ex);
+        }
+    }
+
+    @Override
+    public List<Review> getReviews(int productId) {
+
+        try {
+            String url = reviewServiceUrl + "?productId=" + productId;
+
+            LOG.debug("Will call the getReviews API on URL: {}", url);
+            List<Review> reviews = restTemplate
+                    .exchange(url, GET, null, new ParameterizedTypeReference<List<Review>>() {
+                    })
+                    .getBody();
+
+            LOG.debug("Found {} reviews for a product with id: {}", reviews.size(), productId);
+            return reviews;
+
+        } catch (Exception ex) {
+            LOG.warn("Got an exception while requesting reviews, return zero reviews: {}", ex.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    @Override
+    public void deleteReviews(int productId) {
+        try {
+            String url = reviewServiceUrl + "?productId=" + productId;
+            LOG.debug("Will call the deleteReviews API on URL: {}", url);
+
+            restTemplate.delete(url);
+
+        } catch (HttpClientErrorException ex) {
+            throw handleHttpClientException(ex);
+        }
+    }
+
+    private RuntimeException handleHttpClientException(HttpClientErrorException ex) {
+        switch (HttpStatus.resolve(ex.getStatusCode().value())) {
+
+            case NOT_FOUND:
+                return new NotFoundException(getErrorMessage(ex));
+
+            case UNPROCESSABLE_ENTITY:
+                return new InvalidInputException(getErrorMessage(ex));
+
+            default:
+                LOG.warn("Got an unexpected HTTP error: {}, will rethrow it", ex.getStatusCode());
+                LOG.warn("Error body: {}", ex.getResponseBodyAsString());
+                return ex;
+        }
+    }
+
+    private String getErrorMessage(HttpClientErrorException ex) {
+        try {
+            return mapper.readValue(ex.getResponseBodyAsString(), HttpErrorInfo.class).getMessage();
+        } catch (IOException ioex) {
+            return ex.getMessage();
+        }
+    }
+}
+```
+### Implementing the new composite API operations
+Now, we can implement the composite create and delete methods!
+
+- The composite create method will split up the aggregate product object into discrete objects
+for product, recommendation, and review and call the corresponding create methods in the
+integration layer:
+- The composite delete method simply calls the three delete methods in the integration layer to
+delete the corresponding entities in the underlying databases:
+```java
+package se.magnus.microservices.composite.product.services;
+
+import java.util.List;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.web.bind.annotation.RestController;
+import se.magnus.api.composite.product.*;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.recommendation.Recommendation;
+import se.magnus.api.core.review.Review;
+import se.magnus.api.exceptions.NotFoundException;
+import se.magnus.util.http.ServiceUtil;
+
+@RestController
+public class ProductCompositeServiceImpl implements ProductCompositeService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ProductCompositeServiceImpl.class);
+
+    private final ServiceUtil serviceUtil;
+    private ProductCompositeIntegration integration;
+
+    public ProductCompositeServiceImpl(
+            ServiceUtil serviceUtil, ProductCompositeIntegration integration) {
+
+        this.serviceUtil = serviceUtil;
+        this.integration = integration;
+    }
+
+    @Override
+    public void createProduct(ProductAggregate body) {
+
+        try {
+
+            LOG.debug("createCompositeProduct: creates a new composite entity for productId: {}", body.getProductId());
+
+            Product product = new Product(body.getProductId(), body.getName(), body.getWeight(), null);
+            integration.createProduct(product);
+
+            if (body.getRecommendations() != null) {
+                body.getRecommendations().forEach(r -> {
+                    Recommendation recommendation = new Recommendation(body.getProductId(), r.getRecommendationId(),
+                            r.getAuthor(), r.getRate(), r.getContent(), null);
+                    integration.createRecommendation(recommendation);
+                });
+            }
+
+            if (body.getReviews() != null) {
+                body.getReviews().forEach(r -> {
+                    Review review = new Review(body.getProductId(), r.getReviewId(), r.getAuthor(), r.getSubject(),
+                            r.getContent(), null);
+                    integration.createReview(review);
+                });
+            }
+
+            LOG.debug("createCompositeProduct: composite entities created for productId: {}", body.getProductId());
+
+        } catch (RuntimeException re) {
+            LOG.warn("createCompositeProduct failed", re);
+            throw re;
+        }
+    }
+
+    @Override
+    public ProductAggregate getProduct(int productId) {
+
+        LOG.debug("getCompositeProduct: lookup a product aggregate for productId: {}", productId);
+
+        Product product = integration.getProduct(productId);
+        if (product == null) {
+            throw new NotFoundException("No product found for productId: " + productId);
+        }
+
+        List<Recommendation> recommendations = integration.getRecommendations(productId);
+
+        List<Review> reviews = integration.getReviews(productId);
+
+        LOG.debug("getCompositeProduct: aggregate entity found for productId: {}", productId);
+
+        return createProductAggregate(product, recommendations, reviews, serviceUtil.getServiceAddress());
+    }
+
+    @Override
+    public void deleteProduct(int productId) {
+
+        LOG.debug("deleteCompositeProduct: Deletes a product aggregate for productId: {}", productId);
+
+        integration.deleteProduct(productId);
+
+        integration.deleteRecommendations(productId);
+
+        integration.deleteReviews(productId);
+
+        LOG.debug("deleteCompositeProduct: aggregate entities deleted for productId: {}", productId);
+    }
+
+    private ProductAggregate createProductAggregate(
+            Product product,
+            List<Recommendation> recommendations,
+            List<Review> reviews,
+            String serviceAddress) {
+
+        // 1. Setup product info
+        int productId = product.getProductId();
+        String name = product.getName();
+        int weight = product.getWeight();
+
+        // 2. Copy summary recommendation info, if available
+        List<RecommendationSummary> recommendationSummaries = (recommendations == null) ? null
+                : recommendations.stream()
+                        .map(r -> new RecommendationSummary(r.getRecommendationId(), r.getAuthor(), r.getRate(),
+                                r.getContent()))
+                        .collect(Collectors.toList());
+
+        // 3. Copy summary review info, if available
+        List<ReviewSummary> reviewSummaries = (reviews == null) ? null
+                : reviews.stream()
+                        .map(r -> new ReviewSummary(r.getReviewId(), r.getAuthor(), r.getSubject(), r.getContent()))
+                        .collect(Collectors.toList());
+
+        // 4. Create info regarding the involved microservices addresses
+        String productAddress = product.getServiceAddress();
+        String reviewAddress = (reviews != null && reviews.size() > 0) ? reviews.get(0).getServiceAddress() : "";
+        String recommendationAddress = (recommendations != null && recommendations.size() > 0)
+                ? recommendations.get(0).getServiceAddress()
+                : "";
+        ServiceAddresses serviceAddresses = new ServiceAddresses(serviceAddress, productAddress, reviewAddress,
+                recommendationAddress);
+
+        return new ProductAggregate(productId, name, weight, recommendationSummaries, reviewSummaries,
+                serviceAddresses);
+    }
+}
+```
+For happy-day scenarios, this implementation will work fine, but if we consider various error
+scenarios, we see that this implementation will cause trouble!
+What if, for example, one of the underlying core microservices is temporarily unavailable, for
+instance, due to internal, network, or database problems?
+This might result in partly created or deleted composite products. For the delete operation, this
+can be fixed if the requester simply calls the composite’s delete method until it succeeds. However,
+if the underlying problem remains for a while, the requester will probably give up, resulting in an
+inconsistent state of the composite product—which is not acceptable in most cases!
+### Updating the composite service tests
+Testing composite services, is limited to using
+simple mock components instead of the actual core services. This restricts us from testing more
+complex scenarios, for example, error handling when trying to create duplicates in the underlying
+databases. The tests for the composite create and delete API operations are therefore relatively
+simple:
+```java
+package se.magnus.microservices.composite.product;
+
+import static java.util.Collections.singletonList;
+import static org.mockito.Mockito.when;
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+import static org.springframework.http.HttpStatus.*;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static reactor.core.publisher.Mono.just;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import se.magnus.api.composite.product.ProductAggregate;
+import se.magnus.api.composite.product.RecommendationSummary;
+import se.magnus.api.composite.product.ReviewSummary;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.recommendation.Recommendation;
+import se.magnus.api.core.review.Review;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.api.exceptions.NotFoundException;
+import se.magnus.microservices.composite.product.services.ProductCompositeIntegration;
+
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class ProductCompositeServiceApplicationTests {
+
+    private static final int PRODUCT_ID_OK = 1;
+    private static final int PRODUCT_ID_NOT_FOUND = 2;
+    private static final int PRODUCT_ID_INVALID = 3;
+
+    @Autowired
+    private WebTestClient client;
+
+    @MockitoBean
+    private ProductCompositeIntegration compositeIntegration;
+
+    @BeforeEach
+    void setUp() {
+
+        when(compositeIntegration.getProduct(PRODUCT_ID_OK))
+                .thenReturn(new Product(PRODUCT_ID_OK, "name", 1, "mock-address"));
+        when(compositeIntegration.getRecommendations(PRODUCT_ID_OK))
+                .thenReturn(
+                        singletonList(new Recommendation(PRODUCT_ID_OK, 1, "author", 1, "content", "mock address")));
+        when(compositeIntegration.getReviews(PRODUCT_ID_OK))
+                .thenReturn(
+                        singletonList(new Review(PRODUCT_ID_OK, 1, "author", "subject", "content", "mock address")));
+
+        when(compositeIntegration.getProduct(PRODUCT_ID_NOT_FOUND))
+                .thenThrow(new NotFoundException("NOT FOUND: " + PRODUCT_ID_NOT_FOUND));
+
+        when(compositeIntegration.getProduct(PRODUCT_ID_INVALID))
+                .thenThrow(new InvalidInputException("INVALID: " + PRODUCT_ID_INVALID));
+    }
+
+    @Test
+    void contextLoads() {
+    }
+
+    @Test
+    void createCompositeProduct1() {
+
+        ProductAggregate compositeProduct = new ProductAggregate(1, "name", 1, null, null, null);
+
+        postAndVerifyProduct(compositeProduct, OK);
+    }
+
+    @Test
+    void createCompositeProduct2() {
+        ProductAggregate compositeProduct = new ProductAggregate(1, "name", 1,
+                singletonList(new RecommendationSummary(1, "a", 1, "c")),
+                singletonList(new ReviewSummary(1, "a", "s", "c")), null);
+
+        postAndVerifyProduct(compositeProduct, OK);
+    }
+
+    @Test
+    void deleteCompositeProduct() {
+        ProductAggregate compositeProduct = new ProductAggregate(1, "name", 1,
+                singletonList(new RecommendationSummary(1, "a", 1, "c")),
+                singletonList(new ReviewSummary(1, "a", "s", "c")), null);
+
+        postAndVerifyProduct(compositeProduct, OK);
+
+        deleteAndVerifyProduct(compositeProduct.getProductId(), OK);
+        deleteAndVerifyProduct(compositeProduct.getProductId(), OK);
+    }
+
+    @Test
+    void getProductById() {
+
+        getAndVerifyProduct(PRODUCT_ID_OK, OK)
+                .jsonPath("$.productId").isEqualTo(PRODUCT_ID_OK)
+                .jsonPath("$.recommendations.length()").isEqualTo(1)
+                .jsonPath("$.reviews.length()").isEqualTo(1);
+    }
+
+    @Test
+    void getProductNotFound() {
+
+        getAndVerifyProduct(PRODUCT_ID_NOT_FOUND, NOT_FOUND)
+                .jsonPath("$.path").isEqualTo("/product-composite/" + PRODUCT_ID_NOT_FOUND)
+                .jsonPath("$.message").isEqualTo("NOT FOUND: " + PRODUCT_ID_NOT_FOUND);
+    }
+
+    @Test
+    void getProductInvalidInput() {
+
+        getAndVerifyProduct(PRODUCT_ID_INVALID, UNPROCESSABLE_ENTITY)
+                .jsonPath("$.path").isEqualTo("/product-composite/" + PRODUCT_ID_INVALID)
+                .jsonPath("$.message").isEqualTo("INVALID: " + PRODUCT_ID_INVALID);
+    }
+
+    private WebTestClient.BodyContentSpec getAndVerifyProduct(int productId, HttpStatus expectedStatus) {
+        return client.get()
+                .uri("/product-composite/" + productId)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectHeader().contentType(APPLICATION_JSON)
+                .expectBody();
+    }
+
+    private void postAndVerifyProduct(ProductAggregate compositeProduct, HttpStatus expectedStatus) {
+        client.post()
+                .uri("/product-composite")
+                .body(just(compositeProduct), ProductAggregate.class)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus);
+    }
+
+    private void deleteAndVerifyProduct(int productId, HttpStatus expectedStatus) {
+        client.delete()
+                .uri("/product-composite/" + productId)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus);
+    }
+}
+```
+## Adding databases to the Docker Compose landscape
+### Database connection configuration
+we  need to set up the configuration for the core microservices so
+they know how to connect to their databases. This is set up in each core microservice’s configuration file, application.yml, in the **product-service**, **recommendation-service**, and **review-service** projects.
+
+The configuration for the product and recommendation services are similar, The configuration for the review service, which affects how it connects to its SQL database.
+
+<Tabs groupId="code">
+
+<TabItem value="product-service" label="product-service">
+
+```yml
+server.port: 7002
+server.error.include-message: always
+
+spring.data.mongodb:
+  host: localhost
+  port: 27017
+  database: product-db
+
+logging:
+  level:
+    root: INFO
+    se.magnus: DEBUG
+    org.springframework.data.mongodb.core.MongoTemplate: DEBUG
+
+---
+spring.config.activate.on-profile: docker
+
+server.port: 8080
+
+spring.data.mongodb.host: mongodb
+```
+
+</TabItem>
+
+<TabItem value="recommendation-service" label="recommendation-service">
+
+```yml
+server.port: 7003
+server.error.include-message: always
+
+spring.data.mongodb:
+  host: localhost
+  port: 27017
+  database: recommendation-db
+
+logging:
+  level:
+    root: INFO
+    se.magnus: DEBUG
+    org.springframework.data.mongodb.core.MongoTemplate: DEBUG
+
+---
+spring.config.activate.on-profile: docker
+
+server.port: 8080
+
+spring.data.mongodb.host: mongodb
+```
+
+</TabItem>
+
+<TabItem value="review-service" label="review-service">
+
+```yml
+server.port: 7004
+server.error.include-message: always
+
+# Strongly recommend to set this property to "none" in a production environment!
+spring.jpa.hibernate.ddl-auto: update
+
+spring.datasource:
+  url: jdbc:mysql://localhost/review-db
+  username: user
+  password: pwd
+
+spring.datasource.hikari.initializationFailTimeout: 60000
+
+logging:
+  level:
+    root: INFO
+    se.magnus: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+
+---
+spring.config.activate.on-profile: docker
+
+server.port: 8080
+
+spring.datasource:
+  url: jdbc:mysql://mysql/review-db
+```
+
+</TabItem>
+
+</Tabs>
+
+The following are important parts of the preceding code of The configuration for the product and recommendation services:
+- When running without Docker using the default Spring profile, the database is expected
+to be reachable on `localhost:27017`
+- Setting the log level for `MongoTemplate` to `DEBUG` will allow us to see which MongoDB
+statements are executed in the log
+- When running inside Docker using the Spring profile, docker, the database is expected
+to be reachable on `mongodb:27017
+`
+The following is an explanation of the preceding code of The configuration for the review service:
+- By default, Hibernate will be used by Spring Data JPA as the JPA’s `EntityManager`.
+- The `spring.jpa.hibernate.ddl-auto` property is used to tell Spring Data JPA to create
+new or update existing SQL tables during startup.
+- When running without Docker, using the default Spring profile, the database is expected
+to be reachable on `localhost` using the default port `3306`.
+- By default, **HikariCP** is used by Spring Data JPA as the JDBC connection pool. To
+minimize startup problems on computers with limited hardware resources, the
+initializationFailTimeout parameter is set to `60` seconds. This means that the Spring
+Boot application will wait for up to `60` seconds during startup to establish a database
+connection.
+- The log-level settings for Hibernate will cause Hibernate to print the SQL statements
+used and the actual values used. Please note that when used in a production environment,
+writing the actual values to the log should be avoided for privacy reasons.
+- When running inside Docker using the Spring profile, docker, the database is expected
+to be reachable on the `mysql` hostname using the default port `3306`
+### The Docker Compose configuration
+We will bring MongoDB and MySQL into the system landscape controlled by Docker Compose
+and add configuration to our microservices so that they can find their databases when running.
+
+MongoDB and MySQL are declared as follows in the Docker Compose configuration file, docker-compose.yml:
+```yml
+services:
+  product:
+    build: microservices/product-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  recommendation:
+    build: microservices/recommendation-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  review:
+    build: microservices/review-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  product-composite:
+    build: microservices/product-composite-service
+    mem_limit: 512m
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+
+  mongodb:
+    image: mongo:8.0.5
+    mem_limit: 512m
+    ports:
+      - "27017:27017"
+    command: mongod
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet
+      interval: 5s
+      timeout: 2s
+      retries: 60
+
+  mysql:
+    image: mysql:9.2.0
+    mem_limit: 512m
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpwd
+      - MYSQL_DATABASE=review-db
+      - MYSQL_USER=user
+      - MYSQL_PASSWORD=pwd
+    healthcheck:
+      test: "/usr/bin/mysql --user=user --password=pwd --execute \"SHOW DATABASES;\""
+      interval: 5s
+      timeout: 2s
+      retries: 60
+```
+The following are notes on the preceding code:
+- We will use the official Docker image for `MongoDB v8.0.5` and `MySQL v9.2.0` and forward their default ports, `27017` and `3306`, to the Docker host, also made available on localhost when using Docker Desktop for Mac:
+        - For MySQL, we also declare some environment variables, defining the following:
+        - The root password
+        - The name of the database that will be created on container startup
+        - A username and password for a user that is set up for the database on container startup
+- We also declare a health check that Docker will run to determine the status of the MongoDB and MySQL databases.
+
+To avoid microservices trying to connect to databases before they are up and running, the **product** and **recommendation** services are declared as dependent on the MongoDB database, For the same reason, the review service is declared as dependent on the MySQL database.
+
+This means that Docker Compose will not start up the microservice containers until the database containers are launched and reported as healthy by their health checks.
+
+### The MongoDB and MySQL CLI tools
+To start the MySQL CLI tool, mysql, inside the mysql container and log in to review-db using the user created at startup, run the following command:
+```bash
+docker-compose exec mysql mysql -uuser -p review-db
+```
+The mysql CLI tool will prompt you for a password; you can find it in the `docker-compose.yml` file. Look for the value of the `MYSQL_PASSWORD` environment variable.
+
+
+To start the MongoDB CLI tool, mongo, inside the mongodb container, run the following command:
+```bash
+docker-compose exec mongodb mongosh ––quiet
+```
+Enter exit to leave the mongo CLI.
+
+## Manual testing of the new APIs and the persistence layer
+Now, we have everything in place to test the microservices together. We will build new Docker
+images and start up the system landscape using Docker Compose based on the Docker images.
+Next, we will use the Swagger UI viewer to run some manual tests. Finally, we will use the data-
+base CLI tools to see what data was inserted into the databases.
+Build and start the system landscape with the following command:
+```bash
+./gradlew build && docker compose build && docker compose up
+```
+Open Swagger UI in a web browser, `http://localhost:8080/openapi/swagger-ui.html`, and
+perform the following steps on the web page:
+1. Click on the `ProductComposite` service and the POST method to expand them.
+2. Click on the Try it out button and go down to the body field.
+3. Replace the default value, 0, of the productId field with 123457.
+4. Scroll down to the Execute button and click on it.
+5. Verify that the returned response code is 200.
+
+In the log output from the docker compose up command, we should be able to see output like
+the following (abbreviated for increased readability):
+```
+review-1             | 2026-05-09T13:02:59.109Z DEBUG 1 --- [or-http-epoll-3] org.hibernate.SQL                        : insert into reviews (author,content,product_id,review_id,subject,version,id) values (?,?,?,?,?,?,?)
+review-1             | 2026-05-09T13:02:59.124Z DEBUG 1 --- [or-http-epoll-3] s.m.m.c.r.services.ReviewServiceImpl     : createReview: created a review entity: 123457/1073741824
+product-composite-1  | 2026-05-09T13:02:59.127Z DEBUG 1 --- [or-http-epoll-3] s.m.m.c.p.s.ProductCompositeIntegration  : Created a review with id: 123457
+product-composite-1  | 2026-05-09T13:02:59.127Z DEBUG 1 --- [or-http-epoll-3] s.m.m.c.p.s.ProductCompositeServiceImpl  : createCompositeProduct: composite entities created for productId: 123457
+
+product-composite-1  | 2026-05-09T13:02:59.006Z DEBUG 1 --- [or-http-epoll-3] s.m.m.c.p.s.ProductCompositeServiceImpl  : createCompositeProduct: creates a new composite entity for productId: 123457
+product-composite-1  | 2026-05-09T13:02:59.007Z DEBUG 1 --- [or-http-epoll-3] s.m.m.c.p.s.ProductCompositeIntegration  : Will post a new product to URL: http://product:8080/product
+product-1            | 2026-05-09T13:02:59.019Z DEBUG 1 --- [or-http-epoll-3] o.s.data.mongodb.core.MongoTemplate      : Inserting Document containing fields: [version, productId, name, weight, _class] in collection: products
+product-1            | 2026-05-09T13:02:59.025Z DEBUG 1 --- [or-http-epoll-3] s.m.m.c.p.services.ProductServiceImpl    : createProduct: entity created for productId: 123457
+product-composite-1  | 2026-05-09T13:02:59.033Z DEBUG 1 --- [or-http-epoll-3] s.m.m.c.p.s.ProductCompositeIntegration  : Created a product with id: 123457
+```
+We can also use the database CLI tools to see the actual content in the different databases.
+Look up the content in the product service, that is, the products collection in MongoDB, with
+the following command:
+```bash
+docker compose exec mongodb mongosh product-db --quiet --eval "db.products.find()"
+```
+Expect a response like this:
+```json
+[
+  {
+    _id: ObjectId('69ff2fc097382a20cc1ab9bc'),
+    version: 0,
+    productId: 123456,
+    name: 'string',
+    weight: 1073741824,
+    _class: 'se.magnus.microservices.core.product.persistence.ProductEntity'
+  },
+  {
+    _id: ObjectId('69ff308397382a20cc1ab9bd'),
+    version: 0,
+    productId: 123457,
+    name: 'string',
+    weight: 1073741824,
+    _class: 'se.magnus.microservices.core.product.persistence.ProductEntity'
+  }
+]
+```
+
+Look up the content in the recommendation service, that is, the recommendations collection in
+MongoDB, with the following command:
+```bash
+docker compose exec mongodb mongosh recommendation-db --quiet --eval "db.recommendations.find()"
+```
+Expect a response like this:
+```json
+[
+  {
+    _id: ObjectId('69ff2fc1d6067b5ae4a60374'),
+    version: 0,
+    productId: 123456,
+    recommendationId: 1073741824,
+    author: 'string',
+    rating: 1073741824,
+    content: 'string',
+    _class: 'se.magnus.microservices.core.recommendation.persistence.RecommendationEntity'
+  },
+  {
+    _id: ObjectId('69ff3083d6067b5ae4a60375'),
+    version: 0,
+    productId: 123457,
+    recommendationId: 1073741824,
+    author: 'string',
+    rating: 1073741824,
+    content: 'string',
+    _class: 'se.magnus.microservices.core.recommendation.persistence.RecommendationEntity'
+  }
+]
+```
+Look up the content in the review service, that is, the reviews table in MySQL, with the following
+command:
+```bash
+docker compose exec mysql mysql -uuser -p review-db -e "select * from reviews"
+```
+The mysql CLI tool will prompt you for a password; you can find it in the `docker-compose.yml`
+file. Look for the value of the `MYSQL_PASSWORD` environment variable. Expect a response like the
+following:
+```text
++----+--------+---------+------------+------------+---------+---------+
+| id | author | content | product_id | review_id  | subject | version |
++----+--------+---------+------------+------------+---------+---------+
+|  1 | string | string  |     123456 | 1073741824 | string  |       0 |
+|  2 | string | string  |     123457 | 1073741824 | string  |       0 |
++----+--------+---------+------------+------------+---------+---------+
+```
+Bring down the system landscape by interrupting the docker compose up command with `Ctrl + C`, followed by the `docker compose down` command. 
+## Updating the automated tests of the microservice landscape
+The automated tests of the microservice landscape, `test-em-all.bash`, need to be updated so
+that they ensure that the database of each microservice has a known state before it runs the tests.
+The script is extended with a setup function, `setupTestdata()`, which uses the composite create
+and delete APIs to set up test data used by the tests.
+
+It uses a helper function, `recreateComposite()`, to perform the actual requests to the delete and create APIs.
+
+The `setupTestdata` function is called directly after the `waitForService` function:
+```bash
+waitForService curl -X DELETE http://$HOST:$PORT/product-composite/13
+setupTestdata
+```
+The main purpose of the `waitForService` function is to verify that all microservices are up and
+running. In the previous lab, the get API on the composite product service was used. In this
+chapter, the delete API is used instead. When using the get API, only the product core microservice
+is called if the entity is not found; the recommendation and review services will not be called to
+verify that they are up and running. The call to the delete API will also ensure that the Not Found
+test on productId `13` will succeed. 
+
+In the next lab, we will see how we can define specific APIs for checking the health state of a microservice landscape.
+
+Execute the updated test script with the following command:
+```bash
+./test-em-all-docker.bash start stop
+```
+The execution should end by writing a log message like this:
+```text
+End, all tests OK: Sat May 9 04:15:33 PM EEST 2026
+```

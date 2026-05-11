@@ -55,6 +55,15 @@ The two core concepts of the programming model in Spring Data are **entities*- a
 **Entities*- and **repositories*- generalize how data is stored and accessed from the various types of
 databases. They provide a common abstraction but still support adding database-specific behavior
 to the entities and repositories. 
+* **Entities** represent domain objects and can be stored and retrieved through a repository
+  (Java Database Connectivity API) in imperative/blocking applications or an
+  R2DBC driver in reactive/non-blocking applications. For non-relational databases, each vendor has its own dedicated solution.
+  * Entities—Domain objects that are persisted in a database. They must contain a
+  field to uniquely identify each instance (a primary key) and can use dedicated
+  annotations to configure the mapping between Java objects and database entries.
+* **Repositories—The** abstractions used for data storage and retrieval. Spring Data
+  provides basic implementations, which are further extended by each module to
+  provide features specific to the database in use.
 
 Even though Spring Data provides a common programming model for different types
 of databases, this doesn’t mean that you will be able to write portable source code.
@@ -203,10 +212,13 @@ Cities API::
   ======
 
 ## defining custom queries in Spring Data
-  There are two main options for defining custom queries in Spring Data:
+There are two main options for defining custom queries in **Spring Data**:
 
 ### Automatic Custom Queries
 Defining query methods following a specific naming convention.
+
+**Spring Data** supports defining extra query methods based on naming conventions for the signature of the method. For example, the `findByProductId(int productId)` method signature can be used to direct **Spring Data** to automatically create a query that returns entities from the underlying collection or table. In this case, it will return entities that have the `productId` field set to the value specified in the `productId` parameter.
+
 
 Spring Data JPA provides full support for read and write operations.
 +
@@ -350,7 +362,7 @@ Lastly, you need to create the query and indicate which type of response you wan
 could be a list or one element.
 Chapter 3 Spring Data and Different Types of Persistence
 
-### specifications
+### Specifications
 For JPA, Spring Data offers another possibility to encapsulate all this logic to create 
 the query using classes. The specifications are classes you can create to extend from the 
 Specification interface, which encapsulates the logic of custom queries but does not 
@@ -382,6 +394,1371 @@ You should considering your requirements, and then deciding which module suits t
                 mode: always
   ```
 - Hibernate, the foundation for Spring Data JPA, offers automatically generating schemas from the entities defined in Java.
+
+## Spring Data with SQL vs NoSQL Databases
+
+Spring Data provides a unified programming model for many database types, but the underlying persistence behavior still differs significantly between:
+
+* **SQL databases**
+  Examples:
+
+  * MySQL
+  * PostgreSQL
+  * Oracle Database
+
+* **NoSQL databases**
+  Examples:
+
+  * MongoDB
+  * Apache Cassandra
+  * Redis
+  * Neo4j
+
+Spring Data tries to unify:
+
+* repositories
+* CRUD operations
+* query derivation
+* pagination
+* auditing
+
+But SQL and NoSQL fundamentally differ in:
+
+* data modeling
+* consistency guarantees
+* relationship handling
+* query capabilities
+* transaction semantics
+
+### Spring Data Module
+
+| SQL                     | NoSQL                      |
+| ----------------------- | -------------------------- |
+| Spring Data JPA         | Spring Data MongoDB        |
+| Spring Data JDBC        | Spring Data Cassandra      |
+| Hibernate commonly used | Native drivers more common |
+| ORM-centric             | Aggregate/document-centric |
+
+Examples:
+
+```java
+public interface ProductRepository
+    extends JpaRepository<Product, Long> {
+}
+```
+
+vs
+
+```java
+public interface ProductRepository
+    extends MongoRepository<Product, String> {
+}
+```
+
+### Data Model Philosophy
+
+This is the biggest difference. SQL databases encourage a relational model, while NoSQL databases encourage an aggregate/document model.
+
+#### SQL: Relational Model
+
+Data is normalized into tables.
+
+Example:
+
+```text
+Product
+Review
+Category
+Order
+```
+
+Relations are represented through:
+
+* foreign keys
+* joins
+
+Spring Data SQL solutions encourage:
+
+* entity relationships
+* normalization
+* graph navigation
+
+---
+
+#### NoSQL: Aggregate/Document Model
+
+Data is grouped by access patterns.
+
+Example MongoDB document:
+
+```json
+{
+  "productId": 1,
+  "name": "Phone",
+  "reviews": [
+    { "author": "John", "rating": 5 }
+  ]
+}
+```
+
+NoSQL systems often favor:
+
+* denormalization
+* embedding
+* duplication for read efficiency
+
+Spring Data NoSQL modules usually encourage:
+
+* aggregate roots
+* self-contained documents
+* fewer joins
+
+### Mapping Layer Complexity
+
+#### SQL (ORM-heavy)
+
+Usually involves:
+
+* entity state management
+* persistence context
+* lazy loading
+* dirty checking
+* cascades
+* joins
+
+Example:
+
+```java
+@Entity
+public class Product {
+
+    @OneToMany(mappedBy = "product")
+    private List<Review> reviews;
+}
+```
+
+ORM frameworks translate object graphs into relational structures.
+
+---
+
+#### NoSQL (simpler mapping)
+
+Usually direct object ↔ document mapping.
+
+```java
+@Document
+public class Product {
+
+    private List<Review> reviews;
+}
+```
+
+Less impedance mismatch between:
+
+* object model
+* storage model
+
+### Relationship Handling
+
+| SQL               | NoSQL                |
+| ----------------- | -------------------- |
+| Joins central     | Joins avoided        |
+| Foreign keys      | Embedded data        |
+| Rich associations | Aggregate boundaries |
+| Normalization     | Denormalization      |
+
+---
+
+#### SQL Example
+
+```java
+@ManyToOne
+@JoinColumn(name = "product_id")
+private Product product;
+```
+
+---
+
+#### NoSQL Example
+
+```java
+private ProductSummary product;
+```
+
+or embedded directly.
+
+### Transactions
+
+#### SQL
+
+Transactions are core architecture.
+
+Spring Data SQL commonly uses:
+
+```java
+@Transactional
+```
+
+with:
+
+* ACID guarantees
+* rollback support
+* multi-row consistency
+
+---
+
+#### NoSQL
+
+Transaction support varies greatly.
+
+| Database  | Transactions |
+| --------- | ------------ |
+| MongoDB   | Supported    |
+| Cassandra | Limited      |
+| Redis     | Minimal      |
+| DynamoDB  | Partial      |
+
+NoSQL systems often prefer:
+
+* eventual consistency
+* atomic aggregate updates
+* distributed scalability
+
+Spring Data NoSQL transaction support is usually:
+
+* weaker
+* database-specific
+* less central
+
+### Schema Management
+
+#### SQL
+
+Schema-first design common.
+
+Requires:
+
+* tables
+* columns
+* constraints
+* indexes
+* migrations
+
+Tools:
+
+* Flyway
+* Liquibase
+
+Strong typing enforced by DB.
+
+---
+
+#### NoSQL
+
+Flexible or schema-less.
+
+Documents may differ:
+
+```json
+{ "name": "Phone" }
+```
+
+```json
+{
+  "name": "Phone",
+  "manufacturer": "ABC"
+}
+```
+
+Spring Data NoSQL often relies more on:
+
+* application-level validation
+* conventions
+
+### Query Language
+
+#### SQL
+
+Declarative relational queries.
+
+Examples:
+
+* SQL
+* JPQL
+* Criteria API
+
+```java
+@Query("SELECT p FROM Product p WHERE p.weight > :w")
+```
+
+---
+
+#### NoSQL
+
+Query style depends on DB type.
+
+**MongoDB**: JSON-like queries:
+
+```java
+@Query("{ 'weight': { $gt: ?0 } }")
+```
+
+**Cassandra**: CQL
+
+**Neo4j**: Cypher
+
+**Redis**: Key operations
+
+Spring Data abstraction becomes less uniform across NoSQL families.
+
+### Consistency Model
+
+#### SQL
+
+Usually:
+
+* strong consistency
+* immediate consistency
+
+---
+
+#### NoSQL
+
+May use:
+
+* eventual consistency
+* tunable consistency
+* partition tolerance
+
+Spring Data itself abstracts little here because it is database architecture dependent.
+
+### Identity and IDs
+
+#### SQL
+
+Common:
+
+* auto-increment
+* sequences
+
+```java
+@GeneratedValue
+```
+
+---
+
+#### NoSQL
+
+Common:
+
+* UUID
+* ObjectId
+* application-generated keys
+
+```java
+@Id
+private String id;
+```
+
+### Entity Lifecycle Management
+
+#### SQL ORM
+
+Complex lifecycle states:
+
+* transient
+* managed
+* detached
+* removed
+
+Persistence context tracks entities automatically.
+
+Example:
+
+```java
+product.setName("New");
+```
+
+may auto-update DB later.
+
+---
+
+#### NoSQL
+
+Usually explicit persistence:
+
+```java
+repository.save(product);
+```
+
+No sophisticated persistence context.
+
+### Lazy Loading
+
+#### SQL
+
+Very important.
+
+```java
+@OneToMany(fetch = LAZY)
+```
+
+Used to avoid expensive joins.
+
+Can introduce:
+
+* N+1 problem
+* proxy complexity
+
+---
+
+#### NoSQL
+
+Usually minimal or absent.
+
+Documents are fetched directly.
+
+### Performance Philosophy
+
+#### SQL
+
+Optimized for:
+
+* complex joins
+* consistency
+* relational integrity
+* transactional workloads
+
+---
+
+#### NoSQL
+
+Optimized for:
+
+* horizontal scaling
+* high write throughput
+* distributed systems
+* aggregate retrieval
+
+Spring Data design follows these philosophies.
+
+### Repository Abstraction Similarities
+
+This is where Spring Data unifies both worlds.
+
+Common features:
+
+```java
+save()
+findById()
+delete()
+findAll()
+```
+
+Derived queries:
+
+```java
+findByName()
+findByWeightGreaterThan()
+```
+
+Pagination:
+
+```java
+Page<Product>
+```
+
+Auditing:
+
+```java
+@CreatedDate
+@LastModifiedDate
+```
+
+This consistency is one of Spring Data’s biggest advantages.
+
+### Aggregate-Oriented Design
+
+Spring Data is heavily influenced by: Eric Evans and Domain-Driven Design.
+
+#### SQL + JPA
+
+Developers often model:
+
+* rich object graphs
+* interconnected entities
+
+Sometimes too relational/object-oriented.
+
+---
+
+#### NoSQL
+
+Spring Data NoSQL modules naturally encourage:
+
+* aggregate roots
+* bounded contexts
+* document ownership
+
+This often aligns more closely with DDD aggregates.
+
+### Portability Reality
+
+Spring Data gives partial portability.
+
+Repository APIs look similar:
+
+```java
+repository.save(entity);
+```
+
+But true portability is limited because:
+
+* query languages differ
+* transaction models differ
+* relationships differ
+* consistency differs
+* schema philosophy differs
+
+The deeper your application uses database-specific strengths, the less portable it becomes.
+
+### High-Level Comparison
+
+| Aspect              | SQL + Spring Data          | NoSQL + Spring Data            |
+| ------------------- | -------------------------- | ------------------------------ |
+| Storage model       | Relational                 | Non-relational                 |
+| Main abstraction    | ORM/entities               | Documents/aggregates           |
+| Relationships       | Joins                      | Embedding/references           |
+| Schema              | Strict                     | Flexible                       |
+| Transactions        | Strong ACID                | Varies                         |
+| Query language      | SQL/JPQL                   | DB-specific                    |
+| Lazy loading        | Important                  | Rare                           |
+| Persistence context | Complex                    | Minimal                        |
+| Scaling             | Vertical often             | Horizontal often               |
+| Consistency         | Strong                     | Often eventual                 |
+| Data duplication    | Avoided                    | Common                         |
+| Best for            | Complex relational domains | Distributed/high-scale domains |
+
+### Most Important Architectural Difference
+
+The biggest difference is not syntax or annotations.
+
+It is:
+
+#### SQL mindset
+
+“Store data efficiently and relate it with joins.”
+
+---
+
+#### NoSQL mindset
+
+“Store data the way the application reads and writes it.”
+
+---
+
+That difference affects:
+
+* entity design
+* repository design
+* transaction boundaries
+* query strategy
+* aggregate boundaries
+* scalability architecture
+
+far more than the Spring Data APIs themselves.
+
+## Spring Data with SQL vs NoSQL Persistence Layer
+When using **Spring Data**, the overall programming model stays very similar across databases:
+
+* You define **entities/documents**
+* You create **repository interfaces**
+* Spring generates most CRUD code automatically
+
+But the persistence layer differs because:
+
+* **SQL** is relational (tables, joins, transactions)
+* **NoSQL** is document-oriented (collections, embedded documents)
+
+The SQL entity class uses JPA annotations, for example, the
+@Entity annotation. The NoSQL entity class uses annotations from the
+Spring Data NoSQL modules(like Spring Data MongoDB), for example, `@Document`. Since SQL,
+just like any other relational database, is transactional, custom methods
+that are added to the SQL repository must have annotations describing
+their transactional semantics, for example, using a read-only transaction for
+methods that only read data from the SQL database
+
+The most important differences are usually in these areas:
+
+---
+
+### Entity Mapping Annotations
+
+#### SQL (JPA/Hibernate)
+
+Typically uses **Spring Data JPA** with Jakarta Persistence annotations.
+
+```java
+@Entity
+@Table(name = "products")
+public class ProductEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+    private String name;
+
+    private int weight;
+}
+```
+
+Main annotations:
+
+* `@Entity`
+* `@Table`
+* `@Column`
+* `@OneToMany`
+* `@ManyToOne`
+* `@JoinColumn`
+
+---
+
+#### NoSQL
+
+Uses Spring Data NoSQL annotations.
+
+```java
+@Document(collection = "products")
+public class ProductEntity {
+
+    @Id
+    private String id;
+
+    private String name;
+
+    private int weight;
+}
+```
+
+Main annotations:
+
+* `@Document`
+* `@Field`
+* `@Indexed`
+* `@DBRef` (rarely recommended)
+
+### Relationships
+
+This is one of the biggest conceptual differences.
+
+#### SQL: Relations + Joins
+
+Relational databases normalize data.
+
+Example:
+
+```java
+@Entity
+public class Product {
+
+    @OneToMany(mappedBy = "product")
+    private List<Review> reviews;
+}
+```
+
+The database stores data in separate tables and uses joins.
+
+---
+
+#### NoSQL: Embedded Documents Preferred
+
+NoSQL usually embeds related data.
+
+```java
+@Document
+public class Product {
+
+    private List<Review> reviews;
+}
+```
+
+Instead of joins, documents often contain nested objects.
+
+Example document:
+
+```json
+{
+  "name": "Phone",
+  "reviews": [
+    {
+      "author": "John",
+      "rating": 5
+    }
+  ]
+}
+```
+
+### IDs
+
+#### SQL
+
+Common:
+
+```java
+@GeneratedValue(strategy = IDENTITY)
+private Integer id;
+```
+
+Database auto-generates numeric IDs.
+
+---
+
+#### NoSQL
+
+Usually:
+
+```java
+private String id;
+```
+
+NoSQL generates `ObjectId`.
+
+Could also use:
+
+```java
+private ObjectId id;
+```
+
+### Transactions
+
+#### SQL
+
+Transactions are central and fully supported.
+
+```java
+@Transactional
+public void updateOrder() {
+    ...
+}
+```
+
+ACID transactions are standard.
+
+---
+
+#### NoSQL
+
+Historically limited transactions.
+
+Modern NoSQL supports transactions, but:
+
+* they are heavier
+* less commonly used
+* document design tries to avoid needing them
+
+NoSQL applications often rely on:
+
+* atomic single-document updates
+* denormalized structures
+
+### Query Style
+
+#### SQL / JPA
+
+JPQL or SQL-like thinking.
+
+```java
+@Query("SELECT p FROM ProductEntity p WHERE p.weight > :weight")
+List<ProductEntity> findHeavyProducts(int weight);
+```
+
+---
+
+#### NoSQL
+
+JSON/document-oriented queries.
+
+```java
+@Query("{ 'weight': { $gt: ?0 } }")
+List<ProductEntity> findHeavyProducts(int weight);
+```
+
+Or use `MongoTemplate`.
+
+### Schema Enforcement
+
+#### SQL
+
+Strict schema:
+
+* columns
+* types
+* constraints
+* foreign keys
+
+Changing schema usually requires migrations.
+
+Example:
+
+* Flyway
+* Liquibase
+
+---
+
+#### NoSQL
+
+Flexible schema.
+
+Documents in same collection may differ.
+
+Example:
+
+```json
+{ "name": "Phone" }
+```
+
+and
+
+```json
+{
+  "name": "Phone",
+  "manufacturer": "ABC"
+}
+```
+
+can coexist.
+
+This gives flexibility but can reduce consistency.
+
+### Optimistic Locking
+
+Both support versioning, but annotations differ slightly.
+
+#### JPA
+
+```java
+@Version
+private Integer version;
+```
+
+#### NoSQL
+
+Spring Data NoSQL also supports:
+
+```java
+@Version
+private Integer version;
+```
+
+This part is actually very similar.
+
+### Repository Interfaces
+
+Very similar.
+
+#### JPA
+
+```java
+public interface ProductRepository
+        extends JpaRepository<ProductEntity, Integer> {
+}
+```
+
+#### NoSQL
+
+```java
+public interface ProductRepository
+        extends MongoRepository<ProductEntity, String> {
+}
+```
+
+Main difference:
+
+* repository base interface
+* ID type
+
+### Loading Strategy
+
+#### JPA
+
+Important concepts:
+
+* lazy loading
+* eager loading
+* proxies
+* persistence context
+
+Example:
+
+```java
+@OneToMany(fetch = FetchType.LAZY)
+```
+
+---
+
+#### NoSQL
+
+No ORM session/proxy system like Hibernate.
+
+Data is usually loaded directly as documents.
+
+Less complexity around:
+
+* lazy loading
+* session lifecycle
+* N+1 joins
+
+### Persistence Context / Dirty Checking
+
+#### JPA/Hibernate
+
+Very important feature.
+
+```java
+product.setName("New");
+```
+
+Hibernate automatically detects changes and updates DB.
+
+This is called:
+
+* dirty checking
+* managed entities
+
+---
+
+#### NoSQL
+
+Usually more explicit saves.
+
+```java
+repository.save(product);
+```
+
+No sophisticated ORM persistence context like Hibernate.
+
+### Summary
+
+| Area             | SQL (JPA)     | NoSQL           |
+| ---------------- | --------------- | ----------------- |
+| Storage model    | Tables/rows     | Documents         |
+| Main annotation  | `@Entity`       | `@Document`       |
+| Relationships    | Joins           | Embedded docs     |
+| Schema           | Strict          | Flexible          |
+| IDs              | Numeric common  | ObjectId/String   |
+| Transactions     | Central         | Less emphasized   |
+| Query style      | SQL/JPQL        | JSON-style        |
+| ORM complexity   | High            | Lower             |
+| Lazy loading     | Important       | Minimal           |
+| Dirty checking   | Yes             | No equivalent     |
+| Repository style | `JpaRepository` | `MongoRepository` |
+
+
+### Architectural Insight
+
+Spring Data intentionally keeps the repository programming model similar across databases.
+
+That means:
+
+```java
+repository.save(entity);
+repository.findById(id);
+```
+
+looks nearly identical.
+
+But the **data modeling philosophy** changes significantly:
+
+* JPA/SQL → normalize data and model relationships
+* NoSQL → denormalize and model aggregates/documents
+
+That modeling difference matters much more than annotation syntax differences.
+
+## Optimistic Locking
+**What Is Optimistic Locking?**
+
+Optimistic locking is a concurrency-control mechanism used to prevent **lost updates** when multiple users/processes modify the same data simultaneously.
+
+The idea is:
+
+> “Conflicts are rare, so allow concurrent reads and detect conflicts only during update.”
+
+Instead of locking rows/documents when reading them, the system checks during update whether the data was modified by someone else in the meantime.
+
+**The Problem It Solves**
+
+Suppose two users load the same product:
+
+Initial state:
+
+```text
+Product:
+id = 1
+name = "Phone"
+version = 1
+```
+
+**Timeline**
+
+1. User A reads product
+
+```text
+version = 1
+```
+
+2. User B reads product
+
+```text
+version = 1
+```
+
+3. User A updates product
+
+Database becomes:
+
+```text
+version = 2
+```
+
+4. User B tries to update old copy
+
+Without optimistic locking:
+
+* User B overwrites User A’s changes accidentally.
+
+This is called: lost update problem
+
+
+### How Optimistic Locking Works
+
+Each record/document contains a **version field**.
+
+Example:
+
+```java
+@Version
+private Integer version;
+```
+
+When updating, Spring Data includes the version in the update condition.
+
+Conceptually:
+
+```sql
+UPDATE product
+SET name = 'New Name',
+    version = 2
+WHERE id = 1
+AND version = 1;
+```
+
+If another transaction already changed the row:
+
+* version is no longer `1`
+* update affects `0 rows`
+
+Spring detects this and throws an exception.
+
+### What Is Required to Implement Optimistic Locking in Spring Data?
+
+The requirements are surprisingly small.
+
+#### 1. Add a Version Field
+
+This is the key requirement.
+
+Example:
+
+```java
+@Entity
+public class Product {
+
+    @Id
+    private Long id;
+
+    @Version
+    private Integer version;
+
+    private String name;
+}
+```
+
+For MongoDB:
+
+```java
+@Document
+public class Product {
+
+    @Id
+    private String id;
+
+    @Version
+    private Integer version;
+}
+```
+
+Spring Data automatically manages the version field.
+
+---
+
+#### 2. Use Spring Data Repository Save Operations
+
+Example:
+
+```java
+productRepository.save(product);
+```
+
+Spring Data automatically:
+
+* checks version
+* increments version
+* detects conflicts
+
+No manual SQL usually needed.
+
+---
+
+#### 3. Database Support
+
+The underlying persistence technology must support conditional updates.
+
+Examples:
+
+* MySQL → yes
+* PostgreSQL → yes
+* MongoDB → yes
+
+Spring Data implements optimistic locking differently depending on the database.
+
+---
+
+**What Happens Internally**
+
+**Initial Insert**
+
+```text
+version = 0
+```
+
+(or sometimes `1` depending on implementation)
+
+---
+
+**First Update**
+
+```text
+version: 0 → 1
+```
+
+---
+
+**Second Update**
+
+```text
+version: 1 → 2
+```
+
+and so on.
+
+---
+
+**Conflict Example**
+
+---
+
+**User A loads**
+
+```text
+version = 5
+```
+
+**User B loads**
+
+```text
+version = 5
+```
+
+---
+
+**User A saves**
+
+Database becomes:
+
+```text
+version = 6
+```
+
+---
+
+**User B saves old object**
+
+Spring executes update with:
+
+```text
+WHERE version = 5
+```
+
+No row/document matches.
+
+Spring throws:
+
+```text
+OptimisticLockingFailureException
+```
+
+or provider-specific exceptions like:
+
+* `ObjectOptimisticLockingFailureException`
+* `OptimisticLockException`
+
+---
+
+### Example with Spring Data JPA
+
+```java
+@Entity
+public class Product {
+
+    @Id
+    private Long id;
+
+    @Version
+    private Integer version;
+
+    private String name;
+}
+```
+
+Repository:
+
+```java
+public interface ProductRepository
+        extends JpaRepository<Product, Long> {
+}
+```
+
+Service:
+
+```java
+@Transactional
+public void updateProduct(Long id, String name) {
+
+    Product product = repository.findById(id)
+            .orElseThrow();
+
+    product.setName(name);
+
+    repository.save(product);
+}
+```
+
+Spring/Hibernate handles optimistic locking automatically.
+
+---
+
+### Example with Spring Data MongoDB
+
+```java
+@Document(collection = "products")
+public class Product {
+
+    @Id
+    private String id;
+
+    @Version
+    private Integer version;
+
+    private String name;
+}
+```
+
+Spring Data MongoDB performs conditional document updates internally.
+
+### Advantages of Optimistic Locking
+
+| Advantage                | Explanation                             |
+| ------------------------ | --------------------------------------- |
+| High concurrency         | No long-held locks                      |
+| Better scalability       | Threads don't block each other          |
+| Good for web apps        | Users are disconnected most of the time |
+| Simple programming model | Just add `@Version`                     |
+| Avoids deadlocks         | No database locking chains              |
+
+
+### Disadvantages
+
+| Disadvantage                   | Explanation                            |
+| ------------------------------ | -------------------------------------- |
+| Conflicts detected late        | Only during save                       |
+| Retries may be needed          | User/action may fail                   |
+| Poor for highly contested data | Many concurrent updates cause failures |
+
+### Optimistic vs Pessimistic Locking
+
+| Optimistic                | Pessimistic                 |
+| ------------------------- | --------------------------- |
+| Assume conflicts are rare | Assume conflicts are common |
+| No lock during read       | Lock data immediately       |
+| Better scalability        | More blocking               |
+| Conflict at commit/update | Conflict prevented early    |
+| Uses version field        | Uses DB locks               |
+
+### Typical Use Cases
+
+Optimistic locking is excellent for:
+
+* web applications
+* REST APIs
+* microservices
+* user-editable forms
+* systems with many reads and fewer conflicts
+
+Less ideal for:
+
+* banking ledgers
+* inventory counters with extreme contention
+* highly concurrent financial systems
+
+---
+
+### Important Spring Data Detail
+
+The exact behavior depends on the Spring Data module:
+
+| Spring Data Module    | Support         |
+| --------------------- | --------------- |
+| Spring Data JPA       | Excellent       |
+| Spring Data MongoDB   | Excellent       |
+| Spring Data JDBC      | Supported       |
+| Spring Data Cassandra | Limited/depends |
+| Spring Data Redis     | More limited    |
+
+But the programming model is usually the same:
+
+```java
+@Version
+private Integer version;
+```
+
+### Conceptual Summary
+
+Optimistic locking works by:
+
+1. Reading current version
+2. Modifying entity/document
+3. Updating only if version is unchanged
+4. Incrementing version
+5. Failing if another update already occurred
+
+Core idea:
+
+```text
+UPDATE only if nobody changed this data since I read it
+```
+
+That is the essence of optimistic locking.
 
 ## Connection pooling
 Opening and closing database connections are relatively expensive operations, so you
@@ -598,15 +1975,6 @@ operation occurs.
 ## Summary
 
 - The main elements in Spring Data are database drivers, entities, and repositories.
-  - Entities represent domain objects and can be stored and retrieved through a repository
-  (Java Database Connectivity API) in imperative/blocking applications or an
-  R2DBC driver in reactive/non-blocking applications. For non-relational databases, each vendor has its own dedicated solution.
-  - Entities—Domain objects that are persisted in a database. They must contain a
-  field to uniquely identify each instance (a primary key) and can use dedicated
-  annotations to configure the mapping between Java objects and database entries.
-  - Repositories—The abstractions used for data storage and retrieval. Spring Data
-  provides basic implementations, which are further extended by each module to
-  provide features specific to the database in use.
 - Spring Data JDBC is a framework that supports integrating Spring applications
 with relational databases relying on a JDBC driver.
 - Entities represent domain objects and can be managed by Spring Data JDBC as
@@ -635,3 +2003,8 @@ like H2 or HSQL. But that affects the predictability and robustness of your appl
 Even if all relational databases speak the SQL language and Spring Data JDBC provides
 generic abstractions, each vendor has its own dialect and unique features that make it
 essential to use the same database in production that you use in development and testing. Otherwise, you may not catch errors that might happen only in production.
+
+## References
+See:
+- Data modeling → /design-architecture/data-architecture/data-modeling
+- PostgreSQL → /infrastructure-devops/databases/relational/postgres

@@ -6,7 +6,7 @@ description: Computer Science
 ---
 
 ## Abstraction
-<!--The Deep Computer Science Principle-->
+{/*The Deep Computer Science Principle*/}
 Abstractions let us omit details; they are an interface for reaping the
 functionality of complex things in a simple way. We deliberately hide complexity so we can focus on what matters at our level. 
 

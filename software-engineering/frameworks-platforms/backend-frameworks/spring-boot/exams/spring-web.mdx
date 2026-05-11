@@ -4,6 +4,7 @@ title: Spring Web
 sidebar_position: 2
 ---
 
+## Differences between Spring Web MVC and Spring WebFlux
 
 <QandA>
 <Question>
@@ -248,30 +249,159 @@ springdoc-openapi acts as a bridge between your Spring Boot code and OpenAPI doc
 </Answer>
 </QandA>
 
-
+## 
 <QandA>
 <Question>
 
-Can I put an image in the question? 🖼️
+What are the @PathVariable and @RequestParam annotations used for?
 
 </Question>
 <Answer>
 
-Yes, you absolutely can.
+In Spring Web (Spring MVC / Spring Boot), both @PathVariable and @RequestParam are used to extract data from an HTTP request—but they come from different parts of the URL and serve different design purposes.
+
+**@PathVariable**
+
+✔ Purpose
+Used to extract values from the URI path itself.
+✔ Example URL
+GET /users/42
+✔ Controller
+```java
+@GetMapping("/users/{id}")
+public User getUser(@PathVariable("id") Long id) {
+    return userService.findById(id);
+}
+```
+✔ Key Idea
+- The value (42) is part of the resource path 
+- Represents a specific resource identifier 
+✔ When to use
+- Identifying a resource 
+- RESTful APIs (resource-based URLs) 
+
+**@RequestParam**
+
+✔ Purpose
+Used to extract values from the query string parameters
+✔ Example URL
+GET /users?age=25&active=true
+```java
+@GetMapping("/users
+✔ Controller
+@GetMapping("/users")
+public List<User> getUsers(
+    @RequestParam int age,
+    @RequestParam boolean active
+) {
+    return userService.findByAgeAndActive(age, active);
+}
+```
+✔ Key Idea
+- Values come after ? in the URL 
+- Used for filtering, sorting, pagination, optional inputs 
+
+Core Differences
+| Aspect     | `@PathVariable`   | `@RequestParam`                        |
+| ---------- | ----------------- | -------------------------------------- |
+| Source     | URL path          | Query string                           |
+| Example    | `/users/42`       | `/users?id=42`                         |
+| Purpose    | Identify resource | Filter / modify request                |
+| Required   | Usually required  | Optional by default (`required=false`) |
+| REST style | More RESTful      | Less RESTful                           |
 
 </Answer>
 </QandA>
 
-
+## Error handling
 <QandA>
 <Question>
 
-Can I put an image in the question? 🖼️
+How can you separate protocol-specific error handling from the business logic in an API implementation class?
 
 </Question>
 <Answer>
 
-Yes, you absolutely can.
+You don’t get clean APIs by mixing HTTP concerns (status codes, headers, request formats) directly into your service logic. That leads to tight coupling and makes your business layer unusable outside HTTP (e.g., messaging, batch jobs). The goal is simple: keep business logic protocol-agnostic and push HTTP-specific behavior to the edges.
+Here are the main ways to do that in Spring:
+
+**1. Throw Domain Exceptions from the Business Layer**
+
+Your service layer should not know anything about HTTP.
+✔ Business layer
+```java
+@GetMapping("/users
+public class UserService {
+    public User findById(Long id) {
+        return userRepository.findById(id)
+            .orElseThrow(() -> new UserNotFoundException(id));
+    }
+}
+```
+- No ResponseEntity 
+- No HTTP status codes 
+- Only domain-specific exceptions 
+
+**2. Map Exceptions to HTTP in a Global Handler**
+
+Use @ControllerAdvice to translate exceptions → HTTP responses.
+✔ Exception handler
+```java
+@GetMapping("/users
+@ControllerAdvice
+public class GlobalExceptionHandler {
+    @ExceptionHandler(UserNotFoundException.class)
+    public ResponseEntity<String> handleNotFound(UserNotFoundException ex) {
+        return ResponseEntity.status(404).body(ex.getMessage());
+    }
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<String> handleGeneric(Exception ex) {
+        return ResponseEntity.status(500).body("Internal error");
+    }
+}
+```
+Now:
+- Business layer throws UserNotFoundException 
+- Web layer converts it into 404 Not Found
+
+**3. Keep Controllers Thin**
+
+Controllers should just:
+- Accept HTTP input 
+- Call service 
+- Return result 
+✔ Controller
+```java
+@GetMapping("/users
+@RestController
+@RequestMapping("/users")
+public class UserController {
+    private final UserService userService;
+    @GetMapping("/{id}")
+    public User getUser(@PathVariable Long id) {
+        return userService.findById(id);
+    }
+}
+```
+Notice:
+- No try/catch 
+- No HTTP error logic 
+- Clean and readable 
+
+**4. (Optional) Use Problem Details (Better API Design)**
+
+Spring supports RFC 7807 (ProblemDetail) for structured errors.
+```java
+@GetMapping("/users
+@ExceptionHandler(UserNotFoundException.class)
+public ProblemDetail handleNotFound(UserNotFoundException ex) {
+    ProblemDetail problem = ProblemDetail.forStatus(404);
+    problem.setDetail(ex.getMessage());
+    return problem;
+}
+```
+This gives consistent API error responses.
+
 
 </Answer>
 </QandA>

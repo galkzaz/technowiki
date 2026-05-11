@@ -1,5 +1,5 @@
 ---
-id: history
+id: computer-organization-history
 title: History
 sidebar_position: 2
 ---
