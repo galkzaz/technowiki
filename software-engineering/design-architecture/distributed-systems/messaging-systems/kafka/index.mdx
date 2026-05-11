@@ -1,0 +1,1263 @@
+---
+id: software-engineering-design-architecture-distributed-systems-messaging-systems-kafka
+title: Kafka
+description: Kafka is a distributed streaming platform that allows you to publish and subscribe to streams of records, similar to a message queue or enterprise messaging system. It is designed to handle high volumes of data
+sidebar_position: 1
+---
+
+## overview
+Kafka is a distributed streaming platform. It has three main capabilities:
+- Reading and writing records like a message queue
+- Storing records with fault tolerance
+- Processing streams as they occur
+
+As a generalization, a core piece of Kafka can be thought of as providing the IT equivalent
+of a receiver that sits in a home entertainment system. Figure shows the data flow
+between receivers and end users.
+
+!(Producers, receivers, and data flow overview)[/docs/assets/software-engineering/design-architecture/distributed-systems/messaging-systems/kafka/Producers-receivers-and-data-flow-overview.png]
+
+As figure above shows, digital satellite, cable, and Blu-ray™ players can connect to a
+central receiver. You can think of those individual pieces as regularly sending data in a
+format that they know about. That flow of data can be thought of as nearly constant
+while a movie or CD is playing. The receiver deals with this constant stream of data
+and converts it into a usable format for the external devices attached to the other end
+(the receiver sends the video to your television and the audio to a decoder as well as to
+the speakers).
+
+Kafka includes clients to interface with other systems. One such client type is called
+a producer, which sends multiple data streams to the Kafka brokers. The brokers serve a
+similar function as the receiver in figure above. Kafka also includes consumers, clients that
+can read data from the brokers and process it. Data does not have to be limited to only
+a single destination. The producers and consumers are completely decoupled, allow-
+ing each client to work independently.
+
+Kafka acts like a middle man for data coming into the system (from producers) and out of the system (for consumers or end users). The loose coupling can be achieved by allowing this separation between the producer and the end user of the message. The producer can send whatever message it wants and still have no clue about if anyone is subscribed.
+
+## Kafka usage
+### Kafka for the developer
+{/* This section explains why Kafka matters to software developers, not just infrastructure engineers or data teams. The core idea is that Kafka changes how applications communicate and process data. */}
+This section explains *why Kafka matters to software developers*, not just infrastructure engineers or data teams. The core idea is that Kafka changes how applications communicate and process data.
+
+#### Why Developers Care About Kafka
+
+Traditionally, applications are tightly connected:
+
+* Application A directly calls Application B
+* Services depend on each other synchronously
+* Databases are shared across systems
+* Failures propagate easily
+* Scaling becomes difficult
+* Testing requires many mocks and integrations
+
+Kafka introduces a different model:
+
+> Applications communicate through streams of events instead of direct coupling.
+
+Take, for example, an HR system that employees would use to submit paid vacation
+leaves. If you are used to a create, read, update, and delete (CRUD) system, the submis-
+sion of time off would likely be processed by not only payroll but also project burndown
+charts for forecasting work. Do you tie the two applications together? What if the pay-
+roll system goes down? Should that impact the availability of the forecasting tooling?
+
+Instead of:
+
+```text
+HR App --> Payroll API
+HR App --> Forecasting API
+HR App --> Reporting DB
+```
+
+You get:
+
+```text
+HR App --> Kafka Topic --> Payroll Service
+                        --> Forecasting Service
+                        --> Reporting Service
+                        --> Analytics Service
+```
+
+The producer does not need to know who consumes the data.
+
+---
+
+#### Main Developer Problems Kafka Solves
+
+##### 1. Reducing Coupling Between Applications
+
+One of the biggest motivations.
+
+Without Kafka:
+
+* Services call each other directly
+* Every dependency increases fragility
+* Changing one service may break others
+
+With Kafka:
+
+* Services publish events
+* Other services subscribe independently
+* Systems evolve separately
+
+Example:
+
+```text
+VacationRequested event
+```
+
+Consumers:
+
+* Payroll system
+* Manager approval system
+* Analytics
+* Forecasting
+* Notifications
+
+All can work independently.
+
+---
+
+#### 2. Better Failure Isolation
+
+What if the payroll system goes down?
+
+In synchronous architectures:
+
+```text
+HR App --> Payroll API (fails)
+```
+
+The user request may fail entirely.
+
+With Kafka:
+
+```text
+HR App --> Kafka
+Payroll consumes later
+```
+
+The HR system still works even if payroll is temporarily unavailable.
+
+Kafka acts as a durable buffer between systems.
+
+---
+
+#### 3. Event-Driven Architecture
+
+Kafka encourages thinking in terms of:
+
+```text
+Something happened
+```
+
+instead of:
+
+```text
+Call this function now
+```
+
+Examples:
+
+* OrderCreated
+* PaymentProcessed
+* UserRegistered
+* ItemShipped
+
+This is the foundation of:
+
+* Reactive systems
+* Event-driven systems
+* Streaming architectures
+* Microservices communication
+
+---
+
+#### 4. Kafka as the Central Data Backbone
+
+Your interface to data becomes Kafka instead of numerous APIs and databases.
+
+Meaning: Instead of every system integrating directly with every other system:
+
+```text
+A <--> B
+A <--> C
+B <--> D
+C <--> D
+```
+
+Kafka becomes the shared event hub:
+
+```text
+A --> Kafka
+B --> Kafka
+C --> Kafka
+D --> Kafka
+```
+
+This dramatically simplifies integration complexity.
+
+---
+
+#### 5. Kafka Helps Preserve the “Source of Truth”
+
+Problems with traditional ETL pipelines:
+
+* Data copies become stale
+* Synchronization lag
+* Inconsistent replicas
+* Hard to replay history
+* Difficult debugging
+
+Kafka solves this because events are persisted as an ordered log.
+
+A topic becomes a historical sequence of facts:
+
+```text
+UserCreated
+UserUpdated
+UserDeleted
+```
+
+Consumers can:
+
+* replay history
+* rebuild state
+* recover systems
+* recompute analytics
+
+This is closely related to:
+
+* Event sourcing
+* CQRS
+* Log-based architectures
+
+---
+
+#### 6. Multiple Consumers Can Independently Use the Same Data
+
+One Kafka event can feed many systems simultaneously.
+
+Example:
+
+```text
+OrderPlaced
+```
+
+Consumed by:
+
+* Inventory
+* Shipping
+* Fraud detection
+* Analytics
+* Recommendations
+* Billing
+
+No duplication of producer logic required.
+
+This is one of Kafka’s biggest architectural advantages.
+
+---
+
+#### 7. Kafka Internally Uses Kafka Concepts
+
+Kafka itself uses topics internally.
+
+Examples:
+
+* Consumer offsets stored in internal topics
+* Exactly-once semantics use internal topics
+* Coordination metadata stored as logs
+
+This increases confidence in the architecture because Kafka relies on the same primitives it exposes to developers.
+
+---
+
+#### 8. Learning Core Kafka Matters
+
+Even if you use:
+
+* Kafka Streams
+* ksqlDB
+* Apache Spark Streaming
+* Spring Kafka
+* Flink
+
+you should still understand core Kafka concepts.
+
+Because abstractions hide important distributed-system behavior.
+
+You still need to understand:
+
+* partitions
+* offsets
+* replication
+* consumer groups
+* delivery guarantees
+* rebalancing
+* retention
+* ordering
+
+Otherwise debugging production systems becomes difficult.
+
+---
+
+#### 9. Kafka Is Fundamentally a Distributed Commit Log
+
+This is one of Kafka’s most important concepts.
+
+Kafka topics are append-only logs.
+
+Conceptually:
+
+```text
+Offset 0 -> Event A
+Offset 1 -> Event B
+Offset 2 -> Event C
+```
+
+Consumers track positions (offsets) in the log.
+
+This design enables:
+
+* replayability
+* durability
+* scalability
+* ordering
+* fault tolerance
+
+Distributed commit logs are a major distributed systems concept.
+
+---
+
+#### 10. Kafka Applies Advanced Distributed Systems Concepts
+
+Kafka is interesting because it applies advanced computer science ideas to real production systems.
+
+Examples inside Kafka:
+* Distributed commit logs
+* Hierarchical timing wheels
+* Replicated logs
+* Leader/follower replication
+* Partitioning
+* Consensus-related ideas
+* Zero-copy optimizations
+* Sequential disk I/O
+* Timing wheels for scheduling
+* Backpressure handling
+
+Kafka is therefore valuable both practically and academically.
+
+---
+
+#### 11. Open Source Ecosystem
+
+Kafka being open source gives developers:
+
+* access to source code
+* huge community knowledge
+* examples
+* plugins
+* integrations
+* tooling
+* documentation
+
+This accelerates learning and troubleshooting.
+
+---
+
+#### 12. Kafka/Event Thinking
+
+The most important mindset change is moving from **Traditional CRUD Thinking** where Applications manipulate shared mutable state:
+
+```text
+Read row
+Update row
+Write row
+```
+
+To **Kafka/Event Thinking** mwhere Applications react to immutable events:
+
+```text
+OrderPlaced
+PaymentConfirmed
+ShipmentCreated
+```
+
+State becomes derived from events.
+
+This is a major paradigm shift.
+
+Kafka acts as a bridge between:
+
+* Messaging systems
+* Distributed systems
+* Stream processing
+* Reactive programming
+* Event sourcing
+* Data pipelines
+
+Kafka is not merely a “message queue.”, Kafka is:
+
+* a distributed commit log
+* an event streaming platform
+* a decoupling mechanism
+* a data backbone
+* a replayable event store
+* a foundation for reactive/event-driven systems
+
+That is why developers are increasingly expected to understand it.
+
+This section explains Kafka from a **business and executive perspective**, not only a technical developer perspective.
+
+The authors are answering an important question:
+
+> “Why should organizations invest in Kafka?”
+
+---
+
+### Kafka as a Business Data Backbone
+
+Kafka creates a shared enterprise data backbone. Meaning: All important business events flow through a central streaming platform.
+
+Examples of events:
+
+```text id="6rcfba"
+CustomerCreated
+OrderPlaced
+PaymentProcessed
+ShipmentDelivered
+SensorReadingReceived
+FraudDetected
+```
+
+Instead of data being trapped inside isolated systems, Kafka makes it continuously available to the organization.
+
+---
+
+#### Traditional Enterprise Problem: Data Silos
+
+Most enterprises historically evolved like this:
+
+```text id="tqjv0x"
+CRM Database
+ERP Database
+Billing Database
+Analytics Warehouse
+HR Database
+Marketing Database
+```
+
+Each department owns separate systems.
+
+Problems:
+
+* duplicated data
+* inconsistent data
+* slow integration
+* difficult analytics
+* expensive ETL pipelines
+* organizational silos
+
+Kafka helps unify data flow across the enterprise.
+
+---
+
+#### Kafka Enables Organization-Wide Data Sharing
+
+Kafka make information available to all multiple business areas, Meaning: The same event stream can power many departments simultaneously.
+
+Example:
+
+```text id="3pxu5q"
+OrderPlaced
+```
+
+Can be used by:
+
+* Finance
+* Inventory
+* Shipping
+* Customer support
+* Analytics
+* Fraud detection
+* Marketing
+* Recommendation systems
+
+One event → many consumers.
+
+This creates:
+
+* flexibility
+* openness
+* faster innovation
+* reduced integration cost
+
+---
+
+#### Kafka Enables “Fast Data”
+
+Kfka moves From “Big Data” to “Fast Data”, This is a very important concept.
+
+**Traditional Big Data**
+
+Historically:
+
+```text id="d3z61v"
+Collect huge amounts of data
+Store it
+Analyze later
+```
+
+Often using:
+
+* nightly batch jobs
+* Hadoop jobs
+* ETL pipelines
+* data warehouses
+
+Problem: Insights arrive too late.
+
+Example: Fraud discovered tomorrow instead of immediately.
+
+Kafka Enables “Fast Data”, derive value as it arrives, Meaning: Process data in real time.
+
+Examples:
+
+* real-time fraud detection
+* live recommendation engines
+* instant monitoring alerts
+* live dashboards
+* real-time personalization
+* stream analytics
+
+Instead of:
+
+```text id="bpnv6d"
+Data at 9 AM
+Insight at 2 AM tomorrow
+```
+
+You get:
+
+```text id="lzc6mw"
+Data at 9 AM
+Insight at 9:00:01 AM
+```
+
+This is one of the biggest business reasons Kafka became popular.
+
+---
+
+#### Moving Away from Batch Processing
+
+Traditional enterprise systems often rely on:
+
+```text id="vf42x8"
+Daily batch jobs
+```
+
+Example:
+
+```text id="0oc3w7"
+Run analytics every midnight
+```
+
+Problems:
+
+* stale data
+* delayed reactions
+* operational lag
+* missed opportunities
+
+Kafka supports:
+
+```text id="gn9s2n"
+Continuous stream processing
+```
+
+This enables:
+
+* always-updated systems
+* real-time reactions
+* continuous analytics
+
+---
+
+#### Why Executives Care About This
+
+Executives care less about:
+
+* partitions
+* offsets
+* brokers
+
+and more about:
+
+* business agility
+* faster insights
+* lower operational cost
+* scalability
+* competitive advantage
+
+Kafka helps organizations become:
+
+* more responsive
+* more data-driven
+* more scalable
+
+---
+
+#### JVM and Enterprise Adoption
+
+Kafka runs on the JVM. This matters because many enterprises already heavily use:
+
+* Java
+* Spring
+* JVM tooling
+* JVM operations teams
+
+This reduces adoption friction.
+
+Kafka fits naturally into existing enterprise ecosystems.
+
+---
+
+#### On-Premises + Cloud Flexibility
+
+deployment flexibility. Kafka can run:
+
+* on-premises
+* in private clouds
+* in public clouds
+* as managed services
+
+This matters for:
+
+* regulatory compliance
+* data governance
+* security requirements
+* migration strategies
+
+Many enterprises cannot fully move to public cloud immediately.
+
+Kafka supports hybrid architectures.
+
+---
+
+#### Horizontal Scaling vs Vertical Scaling
+
+This is one of Kafka’s most important infrastructure advantages.
+
+**Vertical Scaling**
+
+Traditional approach:
+
+```text id="l8zcr0"
+Buy bigger server
+```
+
+Problems:
+
+* expensive
+* hardware limits
+* single-machine bottlenecks
+
+**Horizontal Scaling**
+
+Kafka scales by adding more machines.
+
+```text id="v9rvl6"
+Server 1
+Server 2
+Server 3
+Server 4
+```
+
+Benefits:
+
+* cheaper commodity hardware
+* better fault tolerance
+* elastic growth
+* massive throughput
+
+This is core distributed systems thinking.
+
+---
+
+#### Kafka Democratizes Large-Scale Computing
+
+Maybe one of the most important reasons to learn about Kafka is to see how start-
+ups and others in their industry can overcome the once prohibitive cost of computing
+power. Instead of relying on a bigger and beefier server or a mainframe that can cost
+millions of dollars, distributed applications and architectures put competitors quickly
+within reach with, hopefully, less financial outlay.
+
+This is an important economic argument.
+
+Historically, only very large companies could afford:
+
+* massive databases
+* enterprise mainframes
+* huge infrastructure
+
+Modern distributed systems changed this.
+
+Kafka allows startups and smaller companies to build systems that previously required enormous budgets.
+
+Using clusters of commodity servers:
+
+```text id="kdrg5m"
+Many inexpensive machines
+```
+
+instead of:
+
+```text id="9h0dca"
+One giant expensive machine
+```
+
+This is a major shift in computing history.
+
+---
+
+#### Distributed Systems as Competitive Equalizers
+
+startups can compete with established companies. Why? Because distributed software systems scale economically.
+
+Instead of buying:
+
+* million-dollar hardware
+* specialized mainframes
+
+companies can scale incrementally.
+
+Kafka is part of this broader distributed computing movement alongside:
+
+* distributed databases
+* cloud computing
+* container orchestration
+* microservices
+* stream processing
+
+---
+
+#### Core Executive-Level Value Proposition of Kafka
+
+From a business viewpoint, Kafka provides:
+
+| Business Goal      | Kafka Contribution            |
+| ------------------ | ----------------------------- |
+| Faster insights    | Real-time streaming           |
+| Better integration | Shared event backbone         |
+| Scalability        | Horizontal scaling            |
+| Reliability        | Durable distributed logs      |
+| Flexibility        | Decoupled systems             |
+| Cost efficiency    | Commodity hardware            |
+| Innovation speed   | Reusable event streams        |
+| Data accessibility | Enterprise-wide event sharing |
+
+---
+
+#### The Larger Architectural Shift
+
+This really describes the move from: **Old Enterprise Architecture**
+
+```text id="c0m4qf"
+Batch processing
+Centralized systems
+Data silos
+Point-to-point integrations
+Monolithic scaling
+```
+
+to: **Modern Distributed Streaming Architecture**
+
+```text id="mw7t4f"
+Real-time streams
+Distributed systems
+Shared event backbone
+Decoupled services
+Horizontal scalability
+```
+
+Kafka became one of the foundational technologies enabling this transition.
+
+## Kafka vs traditional message brokers
+Kafka is NOT just a traditional message broker with a different name.
+
+Kafka overlaps with message brokers, BUTKafka's model and architecture are fundamentally different
+
+Traditional brokers like RabbitMQ, IBM MQ, ActiveMQ are often designed around:
+
+```text id="n6h8te"
+Producer -> Queue -> Consumer
+```
+
+Usually:
+
+1. Producer sends message
+2. Broker stores temporarily
+3. Consumer receives message
+4. Message gets removed/acknowledged
+
+This is classic queue behavior.
+
+{/* Kafka's Core Difference */}
+
+Kafka behaves more like:
+
+```text id="d6wru0"
+Persistent distributed event log
+```
+
+rather than:
+
+```text id="yz8fvx"
+Temporary delivery queue
+```
+
+That single difference changes many things.
+
+---
+
+### Most Important Kafka Feature #1:
+
+### Message Replay
+
+The text says:
+
+> “The ability to replay messages by default”
+
+This is one of Kafka’s defining features.
+
+---
+
+### Traditional Queue Behavior
+
+In many traditional brokers:
+
+```text id="grngtx"
+Consumer reads message
+Message disappears
+```
+
+or becomes unavailable to other consumers.
+
+The queue’s purpose is usually:
+
+```text id="2zdcwi"
+Deliver once
+Then remove
+```
+
+---
+
+### Kafka Behavior
+
+In Kafka:
+
+```text id="rq4c06"
+Consumer reads message
+Message remains in topic
+```
+
+Kafka stores messages for a retention period.
+
+Example:
+
+```text id="4n8kpn"
+Keep messages for 7 days
+```
+
+or:
+
+```text id="l7z1dj"
+Keep messages forever
+```
+
+Consumers only track their own position (offset).
+
+---
+
+### Offsets Are the Key Idea
+
+Kafka does NOT track:
+
+```text id="km9i3v"
+Was the message consumed globally?
+```
+
+Instead each consumer tracks:
+
+```text id="4cb3r2"
+What position have I reached?
+```
+
+Example:
+
+```text id="u2mujq"
+Topic:
+Offset 0 -> A
+Offset 1 -> B
+Offset 2 -> C
+```
+
+Consumer X:
+
+```text id="rpr6rm"
+Currently at offset 2
+```
+
+Consumer Y:
+
+```text id="mp7m8s"
+Currently at offset 0
+```
+
+Both can independently read the same data.
+
+This is radically different from many traditional queues.
+
+---
+
+### Why Replay Matters
+
+The book gives a realistic example:
+
+> You processed millions of messages and later discovered a bug.
+
+Example:
+
+```text id="mgfjlwm"
+Forgot to use customer_region field
+```
+
+Traditional systems may require:
+
+* backups
+* dead-letter queues
+* duplicate storage
+* complex replay mechanisms
+
+Kafka allows:
+
+```text id="n8ks3f"
+Reset offset -> Reprocess history
+```
+
+This is incredibly powerful.
+
+---
+
+### Kafka Assumes Failure and Bugs
+
+This is a deep distributed-systems philosophy.
+
+The text references:
+
+> programmer mistakes are expected just as much as hardware failures
+
+Meaning:
+
+Systems should be designed assuming:
+
+* developers make mistakes
+* deployments fail
+* consumers crash
+* schemas evolve
+* logic changes
+
+Kafka’s replayability supports recovery from all of these.
+
+---
+
+### Kafka as an Immutable Log
+
+Kafka topics are append-only logs:
+
+```text id="xslqva"
+0 -> Event A
+1 -> Event B
+2 -> Event C
+3 -> Event D
+```
+
+Messages are not removed after reading.
+
+Consumers merely move through the log.
+
+This is much closer to:
+
+* database transaction logs
+* commit logs
+* event sourcing logs
+
+than traditional message queues.
+
+---
+
+### Most Important Kafka Feature #2:
+
+### Parallel Processing
+
+The second standout feature is:
+
+> “Parallel processing of data”
+
+This comes from Kafka partitions + consumer groups.
+
+---
+
+### Traditional Queue Limitation
+
+Some traditional queues focus heavily on:
+
+* guaranteed ordering
+* single-consumer delivery
+* transactional reliability
+
+But scaling consumption can become harder.
+
+---
+
+### Kafka Was Built for Scale
+
+Kafka partitions topics:
+
+```text id="9yftn3"
+Topic Orders:
+Partition 0
+Partition 1
+Partition 2
+Partition 3
+```
+
+Each partition can be consumed independently.
+
+This enables massive parallelism.
+
+---
+
+### Consumer Groups
+
+This is one of Kafka’s most important abstractions.
+
+Example:
+
+```text id="qjlwm6"
+Consumer Group: Analytics Service
+```
+
+Inside the group:
+
+```text id="ywpxlg"
+Consumer A
+Consumer B
+Consumer C
+```
+
+Kafka distributes partitions among them.
+
+Example:
+
+```text id="v09h7m"
+Partition 0 -> Consumer A
+Partition 1 -> Consumer B
+Partition 2 -> Consumer C
+```
+
+Now processing happens in parallel.
+
+---
+
+### Why Consumer Groups Matter
+
+Consumer groups provide:
+
+* load balancing
+* horizontal scalability
+* fault tolerance
+* parallel processing
+
+If one consumer dies:
+
+```text id="o4h8hk"
+Kafka reassigns partitions
+```
+
+This is a core distributed-systems capability.
+
+---
+
+### Multiple Applications Can Consume Independently
+
+This is another huge Kafka distinction.
+
+Example:
+
+```text id="8r4tdr"
+Topic: Orders
+```
+
+Independent consumer groups:
+
+```text id="p9ggu6"
+Fraud Detection Group
+Analytics Group
+Shipping Group
+Inventory Group
+```
+
+Each application consumes independently.
+
+Each tracks its own offsets.
+
+Each scales independently.
+
+---
+
+### Traditional Queue vs Kafka Mentality
+
+#### Traditional Queue
+
+Usually optimized for:
+
+```text id="tch3k6"
+Task distribution
+```
+
+Example:
+
+```text id="tncqvx"
+One message -> One worker
+```
+
+---
+
+#### Kafka
+
+Optimized for:
+
+```text id="7pdha0"
+Event streaming + scalable replayable data distribution
+```
+
+Example:
+
+```text id="ry1tmd"
+One event -> Many independent systems
+```
+
+---
+
+### Why “Kafka Is Just Another Broker” Is Misleading
+
+Because Kafka combines:
+
+| Capability                     | Kafka             |
+| ------------------------------ | ----------------- |
+| Message delivery               | Yes               |
+| Persistent storage             | Yes               |
+| Replayability                  | Strongly built-in |
+| Event streaming                | Core feature      |
+| Distributed log                | Core architecture |
+| Horizontal scalability         | Core feature      |
+| Parallel processing            | Native            |
+| Multiple independent consumers | Native            |
+| Long-term retention            | Native            |
+
+Traditional brokers may support some of these, but Kafka was architected around them from the beginning.
+
+---
+
+### The Real Conceptual Shift
+
+Traditional messaging often thinks:
+
+```text id="ywg06x"
+How do I deliver this message?
+```
+
+Kafka thinks:
+
+```text id="d7e74g"
+How do I continuously stream and preserve events at scale?
+```
+
+That is the deeper distinction the book is trying to explain.
+
+## core-concepts
+### topics
+### partitions
+### offsets
+### brokers
+### producers
+### consumers
+### consumer-groups
+
+## messaging-models
+### pub-sub
+### event-streaming
+### log-based-messaging
+
+## delivery-semantics
+Kafka has various ways that it can deliver messages to fit your business case. Kafka’s message delivery can take at least the following three delivery methods:
+1. **At-least-once semantics**—A message is sent as needed until it is acknowledged.
+2. **At-most-once semantics**—A message is only sent once and not resent on failure.
+3. **Exactly-once semantics**—A message is only seen once by the consumer of the message.
+### at-most-once
+At-most-once semantics is when a producer of messages might send a message once and never retry. In the event of a failure, the producer moves on and
+doesn’t attempt to send it again. 
+!(At-most-once message flow)[/docs/assets/software-engineering/design-architecture/distributed-systems/messaging-systems/kafka/At-most-once.png]
+Why would someone be okay with losing a message? If a popular website is tracking page views for visitors, it might be okay with miss-
+ing a few page view events out of the millions it processes each day. Keeping the
+system performing and not waiting on acknowledgments might outweigh any cost of
+lost data.
+
+### at-least-once
+In this case, Kafka can be configured to allow a producer of messages to
+send the same message more than once and have it written to the brokers. If a message does not receive a guarantee that it was written to the broker, the producer can
+resend the message. For those cases where you can’t miss a message, say that someone has paid an invoice, this guarantee might take some filtering on the consumer
+end, but it is one of the safest delivery methods.
+!(At-least-once message flow)[/docs/assets/software-engineering/design-architecture/distributed-systems/messaging-systems/kafka/At-least-once.png]
+### exactly-once 
+
+Exactly-once semantics, also known as EOS,If a producer sends a message more than once, it will still be delivered only once to the end consumer
+!(Exactly-once message flow)[/docs/assets/software-engineering/design-architecture/distributed-systems/messaging-systems/kafka/Exactly-once.png]
+Exactly-once are ideal for a lot of use cases.
+This seemed
+like a logical guarantee for removing duplicate messages, making them a thing of the
+past. But most developers appreciate sending one message and receiving that same
+message on the consuming side as well
+## ordering-guarantees
+### partition-ordering
+### global-ordering-limitations
+
+## replication-fault-tolerance
+### replication-factor
+### leader-follower
+### ISR
+
+## scalability
+### partitioning-strategies
+### throughput-scaling
+
+## consistency-reliability
+### idempotent-producers
+### transactional-messaging
+### deduplication
+
+## stream-processing
+### kafka-streams
+### event-processing
+### stateful-streams
+
+## operational-concerns
+### retention
+### compaction
+### rebalancing
+
+## integration-patterns
+### event-driven-architecture
+### saga-integration
+### cqrs-integration
