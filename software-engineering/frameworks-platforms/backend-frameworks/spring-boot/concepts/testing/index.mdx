@@ -623,3 +623,788 @@ using the docker-compose logs command. For example, you would use the following 
        ./test-em-all.bash
 
    The tests should now run fine!
+
+## Integerating with Testcontainers
+
+Modern integration usually means:
+
+1. Add **Testcontainers** dependencies
+2. Create containers
+3. Connect Spring Boot to containers
+4. Run integration tests against real infrastructure
+
+Typical examples:
+
+* PostgreSQL
+* MongoDB
+* Kafka
+* Redis
+* RabbitMQ
+
+### Add Dependencies
+
+#### Maven
+
+Example for PostgreSQL + JUnit 5:
+
+```xml id="3v14pw"
+<dependencies>
+
+    <!-- Spring Boot Testing -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+
+    <!-- Testcontainers -->
+    <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>junit-jupiter</artifactId>
+        <scope>test</scope>
+    </dependency>
+
+    <!-- PostgreSQL module -->
+    <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>postgresql</artifactId>
+        <scope>test</scope>
+    </dependency>
+
+</dependencies>
+```
+
+---
+
+### Creating Container
+#### Traditional Integration Approach
+
+Before Spring Boot 3.1:
+
+```java id="m1lm5m"
+@Testcontainers
+@SpringBootTest
+class ProductServiceTests {
+
+    @Container
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>("postgres:16");
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add(
+            "spring.datasource.url",
+            postgres::getJdbcUrl
+        );
+
+        registry.add(
+            "spring.datasource.username",
+            postgres::getUsername
+        );
+
+        registry.add(
+            "spring.datasource.password",
+            postgres::getPassword
+        );
+    }
+}
+```
+- `@Testcontainers`: Enables JUnit/Testcontainers integration.
+- `@Container`: Marks managed containers.
+- `@DynamicPropertySource`: Injects runtime container values into Spring Boot.
+
+Because:
+
+* ports are dynamic
+* container host may change
+* credentials may be generated
+
+---
+
+#### Modern Spring Boot 3.1+ Approach
+
+Modern preferred approach:
+
+```java id="8jlwm4"
+@Testcontainers
+@SpringBootTest
+class ProductServiceTests {
+
+    @Container
+    @ServiceConnection
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>("postgres:16");
+}
+```
+
+**What `@ServiceConnection` Does**
+
+Spring Boot automatically detects:
+
+* JDBC URL
+* username
+* password
+* connection details
+
+No need for: `@DynamicPropertySource`
+
+**Supported Technologies**
+
+`@ServiceConnection` supports many services:
+
+| Technology | Container Type        |
+| ---------- | --------------------- |
+| PostgreSQL | `PostgreSQLContainer` |
+| MySQL      | `MySQLContainer`      |
+| MongoDB    | `MongoDBContainer`    |
+| Kafka      | `KafkaContainer`      |
+| Redis      | `GenericContainer`    |
+| RabbitMQ   | `RabbitMQContainer`   |
+
+---
+
+#### MongoDB Example
+
+```java id="8qmy3x"
+@Testcontainers
+@SpringBootTest
+class ProductServiceTests {
+
+    @Container
+    @ServiceConnection
+    static MongoDBContainer mongo =
+            new MongoDBContainer("mongo:7");
+}
+```
+
+Spring Boot auto-configures: `spring.data.mongodb.uri`
+
+#### Kafka Example
+
+```java id="jrz6j8"
+@Testcontainers
+@SpringBootTest
+class KafkaTests {
+
+    @Container
+    @ServiceConnection
+    static KafkaContainer kafka =
+        new KafkaContainer(
+            DockerImageName.parse("confluentinc/cp-kafka:7.6.1")
+        );
+}
+```
+
+Spring Boot auto-configures Kafka bootstrap servers.
+
+---
+
+#### Full Integration Test Example
+
+<Tabs groupId="code">
+
+<TabItem value="Entity" label="Entity">
+
+```java id="3w9lpc"
+@Entity
+class Product {
+
+    @Id
+    @GeneratedValue
+    private Long id;
+
+    private String name;
+}
+```
+
+</TabItem>
+
+<TabItem value="Repository" label="Repository">
+
+```java id="9rj0n0"
+interface ProductRepository
+        extends JpaRepository<Product, Long> {
+}
+```
+
+</TabItem>
+
+<TabItem value="Test" label="Test">
+
+```java id="s6fr9v"
+@Testcontainers
+@SpringBootTest
+class ProductRepositoryTests {
+
+    @Container
+    @ServiceConnection
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>("postgres:16");
+
+    @Autowired
+    ProductRepository repository;
+
+    @Test
+    void shouldSaveProduct() {
+
+        Product product = new Product();
+        product.setName("Laptop");
+
+        Product saved = repository.save(product);
+
+        assertThat(saved.getId()).isNotNull();
+    }
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+#### Container Lifecycle
+
+##### Static Container
+
+```java id="gq6yzi"
+@Container
+static PostgreSQLContainer<?> postgres;
+```
+
+Lifecycle:
+
+* once per test class
+
+Fastest option.
+
+Most common.
+
+---
+
+##### Instance Container
+
+```java id="o4aqjs"
+@Container
+PostgreSQLContainer<?> postgres;
+```
+
+Lifecycle:
+
+* once per test method
+
+Better isolation.
+Slower.
+
+---
+
+##### Reusable Containers
+
+You can enable reuse:
+
+```java id="mqigmx"
+new PostgreSQLContainer<>("postgres:16")
+    .withReuse(true);
+```
+
+And in:
+
+```text id="8ltx7q"
+~/.testcontainers.properties
+```
+
+```properties id="w71cz9"
+testcontainers.reuse.enable=true
+```
+
+Useful for local development.
+
+---
+
+##### Spring Boot Managed Containers (No `@Container`)
+
+Spring Boot can manage containers as beans.
+
+**Example**
+
+```java id="9slrjv"
+@TestConfiguration
+class ContainersConfig {
+
+    @Bean
+    @ServiceConnection
+    PostgreSQLContainer<?> postgresContainer() {
+
+        return new PostgreSQLContainer<>("postgres:16");
+    }
+}
+```
+
+Then:
+
+```java id="1h3m43"
+@SpringBootTest
+@Import(ContainersConfig.class)
+class ProductTests {
+}
+```
+
+---
+
+**Advantages**
+
+No:
+
+* `@Container`
+* `@Testcontainers`
+
+Spring manages everything.
+
+---
+
+##### Development-Time Containers
+
+Spring Boot 3.1+ also supports running containers during development.
+
+**Example**
+
+```java id="6u4x2g"
+public class TestMyApplication {
+
+    public static void main(String[] args) {
+
+        SpringApplication.from(MyApplication::main)
+            .with(ContainersConfig.class)
+            .run(args);
+    }
+}
+```
+
+This allows:
+
+* local development against containers
+* no docker-compose needed
+
+---
+
+### Common Testing Styles
+
+| Test Type             | Common Annotation                               |
+| --------------------- | ----------------------------------------------- |
+| Full integration test | `@SpringBootTest`                               |
+| JPA slice test        | `@DataJpaTest`                                  |
+| Mongo slice test      | `@DataMongoTest`                                |
+| REST API test         | `@SpringBootTest(webEnvironment = RANDOM_PORT)` |
+
+---
+
+**Example with `@DataJpaTest`**
+
+```java id="4i4uh7"
+@Testcontainers
+@DataJpaTest
+class RepositoryTests {
+
+    @Container
+    @ServiceConnection
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>("postgres:16");
+}
+```
+
+### Why Testcontainers Is Valuable
+
+Instead of:
+
+```text id="5uzgbn"
+H2 in-memory DB
+Fake Kafka
+Mock Redis
+```
+
+You test against:
+
+* real PostgreSQL
+* real MongoDB
+* real Kafka
+
+This catches:
+
+* SQL dialect issues
+* transaction behavior
+* indexing problems
+* serialization issues
+* container configuration mistakes
+
+### Typical Architecture
+
+```text id="89ec3g"
+JUnit
+  ↓
+Spring TestContext
+  ↓
+Testcontainers
+  ↓
+Docker Containers
+  ↓
+Real Infrastructure
+```
+
+### Recommended Modern Stack
+
+For modern Spring Boot applications:
+
+```java id="ab7a4o"
+@Testcontainers
+@SpringBootTest
+class MyTests {
+
+    @Container
+    @ServiceConnection
+    static PostgreSQLContainer<?> postgres =
+            new PostgreSQLContainer<>("postgres:16");
+}
+```
+
+This is currently the cleanest and most common setup.
+
+### Relation between @Testcontainers,@Container and @ServiceConnection
+they serve **different layers of responsibility** in modern Spring Boot + Testcontainers integration.
+
+
+#### `@Testcontainers`
+
+`@Testcontainers` is a **JUnit integration annotation** from [Testcontainers official site](https://testcontainers.com?utm_source=chatgpt.com) / [Testcontainers Java docs](https://java.testcontainers.org?utm_source=chatgpt.com).
+
+It tells JUnit:
+
+> “This test class uses Testcontainers-managed containers.”
+
+It activates the lifecycle management for fields annotated with `@Container`.
+
+---
+
+**Example**
+
+```java
+@Testcontainers
+class ProductServiceTests {
+
+    @Container
+    static PostgreSQLContainer<?> postgres =
+        new PostgreSQLContainer<>("postgres:16");
+
+}
+```
+
+---
+
+**What it does**
+
+It automatically:
+
+* starts containers before tests
+* stops containers after tests
+* integrates with JUnit 5 lifecycle
+
+---
+
+**Without `@Testcontainers`**
+
+`@Container` fields are ignored by the JUnit extension.
+
+You would need to manually start/stop containers:
+
+```java
+postgres.start();
+postgres.stop();
+```
+
+#### `@Container`
+
+`@Container` marks a specific Testcontainers container instance that should be managed by the Testcontainers JUnit extension.
+
+---
+
+**Example**
+
+```java
+@Container
+static MongoDBContainer mongo =
+    new MongoDBContainer("mongo:7");
+```
+
+---
+
+**Responsibilities**
+
+It identifies:
+
+* WHICH field is a container
+* WHICH lifecycle should be managed
+
+---
+
+**Static vs Non-static Containers**
+
+**Static container**
+
+```java
+@Container
+static PostgreSQLContainer<?> postgres;
+```
+
+Lifecycle: one container per test class
+
+Best for:
+
+* integration tests
+* performance
+
+---
+
+**Instance container**
+
+```java
+@Container
+PostgreSQLContainer<?> postgres;
+```
+
+Lifecycle: new container per test method
+
+Best for: strong isolation
+
+But:  slower
+
+---
+
+**Relationship Between `@Testcontainers` and `@Container`**
+
+Think of them as:
+
+| Annotation        | Responsibility                          |
+| ----------------- | --------------------------------------- |
+| `@Testcontainers` | enable Testcontainers JUnit integration |
+| `@Container`      | identify managed container fields       |
+
+They work together.
+
+---
+
+#### `@ServiceConnection`
+
+`@ServiceConnection` is completely different.
+
+It is a **Spring Boot annotation** introduced in Spring Boot.
+
+Official docs:
+[Spring Boot Testcontainers docs](https://docs.spring.io/spring-boot/reference/testing/testcontainers.html?utm_source=chatgpt.com)
+
+It is NOT from Testcontainers itself.
+
+---
+
+**Purpose of `@ServiceConnection`**
+
+It automatically connects Spring Boot services to containers.
+
+Meaning: You no longer need:
+
+```java
+@DynamicPropertySource
+static void properties(DynamicPropertyRegistry registry) {
+    registry.add("spring.datasource.url", postgres::getJdbcUrl);
+    registry.add("spring.datasource.username", postgres::getUsername);
+    registry.add("spring.datasource.password", postgres::getPassword);
+}
+```
+
+Spring Boot does this automatically.
+
+---
+
+**Example**
+
+```java
+@Testcontainers
+@SpringBootTest
+class ProductServiceTests {
+
+    @Container
+    @ServiceConnection
+    static PostgreSQLContainer<?> postgres =
+        new PostgreSQLContainer<>("postgres:16");
+
+}
+```
+
+Spring Boot automatically configures:
+
+```properties
+spring.datasource.url
+spring.datasource.username
+spring.datasource.password
+```
+
+from the container.
+
+---
+
+**Supported Services**
+
+`@ServiceConnection` supports many technologies:
+
+* PostgreSQL
+* MySQL
+* MongoDB
+* Redis
+* Kafka
+* RabbitMQ
+* Neo4j
+* Elasticsearch
+* etc.
+
+---
+
+**Before Spring Boot 3.1**
+
+You needed:
+
+```java
+@DynamicPropertySource
+```
+
+Example:
+
+```java
+@DynamicPropertySource
+static void configure(DynamicPropertyRegistry registry) {
+    registry.add("spring.data.mongodb.uri", mongo::getReplicaSetUrl);
+}
+```
+
+
+**After Spring Boot 3.1**
+
+Usually replaced with:
+
+```java
+@ServiceConnection
+```
+
+Cleaner and less boilerplate.
+
+---
+
+#### Modern Recommended Usage
+
+Today the most common setup is:
+
+```java
+@Testcontainers
+@SpringBootTest
+class MyTests {
+
+    @Container
+    @ServiceConnection
+    static PostgreSQLContainer<?> postgres =
+        new PostgreSQLContainer<>("postgres:16");
+
+}
+```
+
+---
+
+#### Are All Still Used?
+
+##### `@Testcontainers`
+
+Still widely used.
+
+But sometimes optional in newer Spring Boot setups if containers are started via beans.
+
+---
+
+##### `@Container`
+
+Still essential when using JUnit-managed containers.
+
+---
+
+##### `@ServiceConnection`
+
+Modern Spring Boot preferred approach for wiring containers into Spring configuration.
+
+Very actively used.
+
+---
+
+#### Important Distinction
+
+| Annotation           | Owned By       | Purpose                                        |
+| -------------------- | -------------- | ---------------------------------------------- |
+| `@Testcontainers`    | Testcontainers | enable JUnit integration                       |
+| `@Container`         | Testcontainers | manage container lifecycle                     |
+| `@ServiceConnection` | Spring Boot    | auto-configure Spring services from containers |
+
+---
+
+#### Modern Spring Boot Alternative (No `@Container`)
+
+Spring Boot 3.1+ also allows:
+
+```java
+@TestConfiguration
+class ContainersConfig {
+
+    @Bean
+    @ServiceConnection
+    PostgreSQLContainer<?> postgres() {
+        return new PostgreSQLContainer<>("postgres:16");
+    }
+}
+```
+
+In this model:
+
+* Spring manages lifecycle
+* no `@Container`
+* no `@Testcontainers`
+
+This is becoming increasingly popular.
+
+---
+
+#### Comparison Summary
+
+| Feature                               | `@Testcontainers`        | `@Container`           | `@ServiceConnection`        |
+| ------------------------------------- | ------------------------ | ---------------------- | --------------------------- |
+| From                                  | Testcontainers           | Testcontainers         | Spring Boot                 |
+| Purpose                               | enable JUnit integration | mark managed container | auto-wire Spring properties |
+| Required for lifecycle                | yes                      | yes                    | no                          |
+| Required for Spring datasource config | no                       | no                     | yes                         |
+| Replaces `@DynamicPropertySource`     | no                       | no                     | yes                         |
+| Used in modern Spring Boot            | yes                      | yes                    | very yes                    |
+
+---
+
+#### Conceptual Layering
+
+```text
+JUnit Layer
+ └── @Testcontainers
+       └── @Container
+
+Spring Boot Layer
+ └── @ServiceConnection
+```
+
+So:
+
+* Testcontainers handles container lifecycle
+* Spring Boot handles application wiring
+
+They complement each other rather than compete.
+### Official Documentation
+
+* [Spring Boot Testcontainers Reference](https://docs.spring.io/spring-boot/reference/testing/testcontainers.html?utm_source=chatgpt.com)
+* [Testcontainers Java Documentation](https://java.testcontainers.org?utm_source=chatgpt.com)
+* [Spring Boot Official Site](https://spring.io/projects/spring-boot?utm_source=chatgpt.com)

@@ -1,0 +1,697 @@
+---
+id: software-engineering/implementation/performance-optimization/memory-management/object-allocation/avoid-unnecessary-objects
+title: Avoid Creating Unnecessary Objects
+description: Avoid creating objects that are not needed to reduce memory usage and improve performance.
+tags:
+  - performance optimization
+  - memory management
+  - object allocation
+---
+
+This rule is about **reducing needless object allocations** to improve:
+
+* memory usage
+* garbage collection pressure
+* CPU efficiency
+* cache locality
+* throughput
+* latency stability
+
+The principle became especially popular from Effective Java (“Avoid creating unnecessary objects”), but it applies to nearly all managed runtimes:
+
+* Java/JVM
+* .NET/C#
+* Python
+* JavaScript/Node.js
+* Go
+* Kotlin
+* Scala
+
+---
+
+## Core Idea
+
+Creating objects is not free.
+
+Every allocation may involve:
+
+1. memory allocation
+2. object initialization
+3. reference tracking
+4. garbage collection later
+5. CPU cache effects
+
+Modern runtimes optimize allocation heavily, but **massive unnecessary allocations still hurt performance**.
+
+The rule is:
+
+> Do not create new objects when:
+>
+> * an existing object can be reused
+> * the object is immutable and shareable
+> * a primitive/value type is enough
+> * lazy creation is possible
+> * allocation happens in hot paths
+
+---
+
+## Why This Matters
+
+### 1. Garbage Collection Pressure
+
+More temporary objects → more garbage collections.
+
+This can cause:
+
+* latency spikes
+* pauses
+* reduced throughput
+* memory fragmentation
+
+Example:
+
+```java
+for (int i = 0; i < 1_000_000; i++) {
+    String s = new String("hello");
+}
+```
+
+One million unnecessary `String` objects are created.
+
+Better:
+
+```java
+String s = "hello";
+
+for (int i = 0; i < 1_000_000; i++) {
+    use(s);
+}
+```
+
+---
+
+### 2. CPU Cost
+
+Allocation and deallocation consume CPU cycles.
+
+Even very fast allocators become expensive in tight loops.
+
+---
+
+### 3. Cache Efficiency
+
+Objects scattered in memory reduce CPU cache locality.
+
+Fewer allocations often improve:
+
+* cache hits
+* branch prediction
+* data locality
+
+---
+
+### 4. Scalability
+
+High-allocation systems suffer under load.
+
+Examples:
+
+* web servers
+* messaging systems
+* game engines
+* stream processors
+* low-latency trading systems
+
+---
+
+## Common Sources of Unnecessary Objects
+
+---
+
+### 1. Creating Objects Inside Tight Loops
+
+**Bad**
+
+```java
+for (String name : names) {
+    DateFormat format =
+        new SimpleDateFormat("yyyy-MM-dd");
+
+    System.out.println(format.format(date));
+}
+```
+
+A formatter is created repeatedly.
+
+**Better**
+
+```java
+DateFormat format =
+    new SimpleDateFormat("yyyy-MM-dd");
+
+for (String name : names) {
+    System.out.println(format.format(date));
+}
+```
+
+---
+
+### 2. Recreating Immutable Objects
+
+Immutable objects can often be reused safely.
+
+**Bad**
+
+```java
+String s = new String("admin");
+```
+
+**Better**
+
+```java
+String s = "admin";
+```
+
+String literals are interned/shared.
+
+---
+
+### 3. Excessive Boxing and Unboxing
+
+**Bad**
+
+```java
+Integer sum = 0;
+
+for (int i = 0; i < 1000000; i++) {
+    sum += i;
+}
+```
+
+Creates many temporary wrapper objects.
+
+**Better**
+
+```java
+int sum = 0;
+
+for (int i = 0; i < 1000000; i++) {
+    sum += i;
+}
+```
+
+---
+
+### 4. Temporary Collection Creation
+
+**Bad**
+
+```java
+List<String> result =
+    users.stream()
+         .filter(User::active)
+         .collect(Collectors.toList());
+
+return result.size() > 0;
+```
+
+A full list is allocated unnecessarily.
+
+**Better**
+
+```java
+boolean exists =
+    users.stream()
+         .anyMatch(User::active);
+```
+
+---
+
+### 5. Creating Objects for Simple Operations
+
+**Bad**
+
+```java
+return Optional.of(value).orElse(defaultValue);
+```
+
+If `value` cannot be null, `Optional` creation is wasteful.
+
+**Better**
+
+```java
+return value != null ? value : defaultValue;
+```
+
+---
+
+### 6. Repeated Regular Expression Compilation
+
+**Bad**
+
+```java
+if (input.matches("\\d+")) {
+}
+```
+
+Regex compiled repeatedly.
+
+**Better**
+
+```java
+private static final Pattern DIGITS =
+    Pattern.compile("\\d+");
+
+if (DIGITS.matcher(input).matches()) {
+}
+```
+
+---
+
+### 7. Unnecessary Defensive Copies
+
+Copies improve safety but can waste memory if unnecessary.
+
+**Bad**
+
+```java
+return new ArrayList<>(internalList);
+```
+
+when immutability already guarantees safety.
+
+---
+
+## Key Techniques
+
+---
+
+## Object Reuse
+
+Reuse expensive objects.
+
+Examples:
+
+* database connections
+* thread pools
+* serializers
+* parsers
+* buffers
+
+---
+
+## Object Pooling
+
+Maintain reusable instances.
+
+Useful only for expensive objects.
+
+Examples:
+
+* DB connections
+* network buffers
+* GPU resources
+
+Danger:
+
+Poor pooling can worsen performance.
+
+Modern GC often makes pooling small objects unnecessary.
+
+---
+
+## Flyweight Pattern
+
+Share immutable objects.
+
+Examples:
+
+* string interning
+* cached integers
+* enum singletons
+
+Related pattern:
+
+Design Patterns Flyweight Pattern.
+
+---
+
+## Lazy Initialization
+
+Create objects only when needed.
+
+### Example
+
+```java
+private ExpensiveService service;
+
+public ExpensiveService getService() {
+    if (service == null) {
+        service = new ExpensiveService();
+    }
+
+    return service;
+}
+```
+
+---
+
+## Prefer Primitives or Value Types
+
+Use:
+
+```java
+int
+double
+boolean
+```
+
+instead of wrappers when possible.
+
+---
+
+## Avoid Intermediate Allocations
+
+Functional pipelines may allocate temporary objects.
+
+Example:
+
+```java
+list.stream()
+    .map(...)
+    .filter(...)
+    .collect(...)
+```
+
+Can create many intermediate objects depending on implementation.
+
+Performance-critical code may prefer imperative loops.
+
+---
+
+## Escape Analysis
+
+Modern runtimes optimize allocations automatically.
+
+For example, JVM escape analysis may:
+
+* allocate objects on stack
+* eliminate allocations entirely
+* scalar-replace objects
+
+Example:
+
+```java
+Point p = new Point(1, 2);
+return p.x + p.y;
+```
+
+The JVM may eliminate `Point` allocation entirely.
+
+So:
+
+> Do not prematurely optimize every allocation.
+
+Measure first.
+
+---
+
+## Important Distinction
+
+### Necessary Objects
+
+Good software engineering prioritizes:
+
+1. correctness
+2. readability
+3. maintainability
+4. safety
+
+before micro-optimizations.
+
+This rule targets:
+
+* hot paths
+* high-frequency code
+* memory-sensitive systems
+
+NOT ordinary business logic.
+
+---
+
+## Bad Optimization Example
+
+### Worse Readability
+
+```java
+StringBuilder sb = reusableThreadLocalBuilder.get();
+sb.setLength(0);
+```
+
+instead of:
+
+```java
+String result = a + b;
+```
+
+If not performance-critical, readability is usually better.
+
+---
+
+## Performance Contexts Where This Rule Matters Most
+
+---
+
+## High-Throughput Systems
+
+Examples:
+
+* APIs
+* event processors
+* Kafka consumers
+* stream processing
+
+---
+
+## Low-Latency Systems
+
+Examples:
+
+* trading systems
+* game loops
+* real-time telemetry
+
+---
+
+## Memory-Constrained Systems
+
+Examples:
+
+* mobile devices
+* embedded systems
+* containers with low memory limits
+
+---
+
+## Large-Scale Distributed Systems
+
+Allocation reduction improves:
+
+* node density
+* GC pauses
+* infrastructure costs
+
+---
+
+## Language-Specific Notes
+
+---
+
+### Java
+
+Very important due to GC pressure.
+
+Common optimizations:
+
+* reuse buffers
+* avoid boxing
+* cache regex
+* use primitive collections
+
+---
+
+### Python
+
+Object allocation is relatively expensive.
+
+Common issues:
+
+* temporary lists
+* excessive dict creation
+* unnecessary object wrappers
+
+Prefer:
+
+* generators
+* iterators
+* tuple reuse
+
+---
+
+### JavaScript
+
+Frequent allocations can trigger V8 GC pauses.
+
+Important in:
+
+* rendering loops
+* frontend animations
+* Node.js servers
+
+---
+
+### C#
+
+Similar to JVM guidance.
+
+Important topics:
+
+* structs vs classes
+* object pooling
+* `Span<T>`
+* `ArrayPool<T>`
+
+---
+
+## Relationship to Other Topics
+
+This topic connects strongly to:
+
+```text
+implementation/
+  performance/
+    memory-management/
+      garbage-collection/
+```
+
+```text
+implementation/
+  coding-practices/
+    class-design/
+      immutability/
+```
+
+```text
+implementation/
+  performance/
+    optimization/
+      profiling/
+```
+
+```text
+implementation/
+  concurrency/
+```
+
+because excessive allocation often increases contention and GC pauses in concurrent systems.
+
+---
+
+## Common Misunderstanding
+
+The rule is NOT:
+
+> “Never create objects.”
+
+The actual principle is:
+
+> “Avoid allocations that provide no meaningful value.”
+
+Readable and maintainable code is usually more important than tiny allocation savings unless profiling proves otherwise.
+
+---
+
+## Practical Engineering Guideline
+
+### Usually Optimize Only When:
+
+* profiling identifies allocation hotspots
+* GC pauses become measurable
+* throughput is insufficient
+* latency targets are missed
+* memory usage is excessive
+
+---
+
+## Typical Workflow
+
+```text
+Measure
+  →
+Find allocation hotspots
+  →
+Optimize targeted paths
+  →
+Measure again
+```
+
+NOT:
+
+```text
+Guess
+  →
+Micro-optimize everything
+```
+
+---
+
+## Examples of Good Real-World Usage
+
+---
+
+## Good Candidates for Reuse
+
+* regex patterns
+* JSON serializers
+* HTTP clients
+* buffers
+* thread pools
+* parsers
+* immutable constants
+
+---
+
+## Usually NOT Worth Optimizing
+
+* occasional DTO creation
+* configuration objects
+* request-scoped business objects
+* startup allocations
+* admin tools
+
+---
+
+## Summary
+
+“Avoid creating unnecessary objects” is a performance-oriented engineering rule focused on reducing avoidable memory allocation and garbage collection overhead.
+
+The core idea is:
+
+```text
+Allocate objects only when they provide real value.
+```
+
+The rule becomes especially important in:
+
+* high-throughput systems
+* low-latency systems
+* memory-sensitive applications
+* heavily concurrent environments
+
+but should always be balanced against:
+
+* readability
+* maintainability
+* correctness
+* simplicity
+

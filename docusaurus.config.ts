@@ -274,12 +274,12 @@ const config: Config = {
             {
               label: "Algorithms",
               sidebarId: "algorithmsSidebar",
-              to: "/software-systems/algorithms-data-structures/algorithms/concepts/algorithms",
+              to: "/software-systems/algorithms-data-structures/algorithms/concepts",
             },
             {
               label: "Data Structures",
               sidebarId: "DataStructuresSidebar",
-              to: "/software-systems/algorithms-data-structures/data-structures/concepts/algorithms",
+              to: "/software-systems/algorithms-data-structures/data-structures/concepts",
             },
           ],
         },

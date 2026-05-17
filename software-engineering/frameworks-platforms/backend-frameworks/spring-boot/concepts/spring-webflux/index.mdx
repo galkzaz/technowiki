@@ -1,5 +1,5 @@
 ---
-id: frameworks-platforms-backend-frameworks-spring-boot-spring-webflux
+id: software-engineering-frameworks-platforms-backend-frameworks-spring-boot-concepts-spring-webflux
 title: Spring WebFlux
 sidebar_position: 1
 ---
@@ -113,7 +113,7 @@ that waits for the processing to complete.
 8. We can now wrap up the test by using the assertThat method to assert that list after the 
 processing of the stream contains the expected result – the integers 4 and 8.
 
-## Dependencies
+## Enabling Reactive Spring 
 Before we can create a REST service based on Spring WebFlux, we need to add Spring WebFlux (and the dependencies that Spring WebFlux requires) to the classpath for Spring Boot to be detected and configured during startup. Spring Boot provides a large number of convenient start-
 er dependencies that bring in a specific feature, together with the dependencies each feature
 normally requires.
@@ -217,7 +217,7 @@ spring:
 
 ## Non-blocking persistence using Spring Data 
 
-### for MongoDB
+### NoSql
 Making the MongoDB-based repositories reactive is very simple:
 
 * Change the base class for the repositories to ReactiveCrudRepository
@@ -233,51 +233,409 @@ public interface ProductRepository extends ReactiveCrudRepository<ProductEntity,
 to make the APIs in the REST services non-blocking as well. We need to make the following changes:
 
 * Change the APIs so that they only return reactive data types
+* Change the service implementations so they don’t contain any blocking code
+* Change our tests so that they can test the reactive services
 
-  To make the APIs of the core services reactive, we need to update their methods so that they return either a Mono or Flux object.
-  For example, getProduct() in the product service now returns Mono&lt;Product> instead of a Product object:
-  ```java
+    To handle the asynchronous behavior of the reactive return 
+    types, Mono and Flux, the tests use a mix of calling the block() method and using the StepVerifier helper class.
+* Deal with blocking code – isolate the code that still needs to be blocking from the non-blocking code
+
+### Changes in the APIs Interfaces
+To make the APIs of the core services reactive, we need to update their methods so that they return either a Mono or Flux object.
+
+For example, getProduct() in the product service now returns Mono&lt;Product> instead of a Product object:
+```java
   Mono<Product> getProduct(@PathVariable int productId);
-  ```
+```
 
-  * Change the service implementations so they don’t contain any blocking code
+<Tabs groupId="code">
 
-    we can use the fluent API in Project Reactor. For example, the implementation of the getProduct() method looks like the following code:
-    ```java
-      public Mono<Product> getProduct(int productId) {
+<TabItem value="ProductService(Before)" label="ProductService(Before)">
+
+```java
+package se.magnus.api.core.product;
+
+import org.springframework.web.bind.annotation.*;
+
+public interface ProductService {
+
+  /**
+   * Sample usage, see below.
+   *
+   * curl -X POST $HOST:$PORT/product \
+   * -H "Content-Type: application/json" --data \
+   * '{"productId":123,"name":"product 123","weight":123}'
+   *
+   * @param body A JSON representation of the new product
+   * @return A JSON representation of the newly created product
+   */
+  @PostMapping(value = "/product", consumes = "application/json", produces = "application/json")
+  Product createProduct(@RequestBody Product body);
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/product/1".
+   *
+   * @param productId Id of the product
+   * @return the product, if found, else null
+   */
+  @GetMapping(value = "/product/{productId}", produces = "application/json")
+  Product getProduct(@PathVariable int productId);
+
+  /**
+   * Sample usage: "curl -X DELETE $HOST:$PORT/product/1".
+   *
+   * @param productId Id of the product
+   */
+  @DeleteMapping(value = "/product/{productId}")
+  void deleteProduct(@PathVariable int productId);
+}
+```
+
+</TabItem>
+
+<TabItem value="ProductService(After)" label="ProductService(After)">
+
+```java
+package se.magnus.api.core.product;
+
+import org.springframework.web.bind.annotation.*;
+
+import reactor.core.publisher.Mono;
+
+public interface ProductService {
+
+  /**
+   * Sample usage, see below.
+   *
+   * curl -X POST $HOST:$PORT/product \
+   * -H "Content-Type: application/json" --data \
+   * '{"productId":123,"name":"product 123","weight":123}'
+   *
+   * @param body A JSON representation of the new product
+   * @return A JSON representation of the newly created product
+   */
+  @PostMapping(value = "/product", consumes = "application/json", produces = "application/json")
+  Mono<Product> createProduct(Product body);
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/product/1".
+   *
+   * @param productId Id of the product
+   * @return the product, if found, else null
+   */
+  @GetMapping(value = "/product/{productId}", produces = "application/json")
+  Mono<Product> getProduct(@PathVariable int productId);
+
+  /**
+   * Sample usage: "curl -X DELETE $HOST:$PORT/product/1".
+   *
+   * @param productId Id of the product
+   */
+  @DeleteMapping(value = "/product/{productId}")
+  Mono<Void> deleteProduct(int productId);
+}
+```
+
+</TabItem>
+
+<TabItem value="RecommendationService(Before)" label="RecommendationService(Before)">
+
+```java
+package se.magnus.api.core.recommendation;
+
+import java.util.List;
+import org.springframework.web.bind.annotation.*;
+
+public interface RecommendationService {
+
+  /**
+   * Sample usage, see below.
+   *
+   * curl -X POST $HOST:$PORT/recommendation \
+   * -H "Content-Type: application/json" --data \
+   * '{"productId":123,"recommendationId":456,"author":"me","rate":5,"content":"yada,
+   * yada, yada"}'
+   *
+   * @param body A JSON representation of the new recommendation
+   * @return A JSON representation of the newly created recommendation
+   */
+  @PostMapping(value = "/recommendation", consumes = "application/json", produces = "application/json")
+  Recommendation createRecommendation(@RequestBody Recommendation body);
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/recommendation?productId=1".
+   *
+   * @param productId Id of the product
+   * @return the recommendations of the product
+   */
+  @GetMapping(value = "/recommendation", produces = "application/json")
+  List<Recommendation> getRecommendations(
+      @RequestParam(value = "productId", required = true) int productId);
+
+  /**
+   * Sample usage: "curl -X DELETE $HOST:$PORT/recommendation?productId=1".
+   *
+   * @param productId Id of the product
+   */
+  @DeleteMapping(value = "/recommendation")
+  void deleteRecommendations(@RequestParam(value = "productId", required = true) int productId);
+}
+```
+
+</TabItem>
+
+<TabItem value="RecommendationService(After)" label="RecommendationService(After)">
+
+```java
+package se.magnus.api.core.recommendation;
+
+import java.util.List;
+import org.springframework.web.bind.annotation.*;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+public interface RecommendationService {
+
+  /**
+   * Sample usage, see below.
+   *
+   * curl -X POST $HOST:$PORT/recommendation \
+   * -H "Content-Type: application/json" --data \
+   * '{"productId":123,"recommendationId":456,"author":"me","rate":5,"content":"yada,
+   * yada, yada"}'
+   *
+   * @param body A JSON representation of the new recommendation
+   * @return A JSON representation of the newly created recommendation
+   */
+  @PostMapping(value = "/recommendation", consumes = "application/json", produces = "application/json")
+  Mono<Recommendation> createRecommendation(Recommendation body);
+
+  /**
+   * Sample usage: "curl $HOST:$PORT/recommendation?productId=1".
+   *
+   * @param productId Id of the product
+   * @return the recommendations of the product
+   */
+  @GetMapping(value = "/recommendation", produces = "application/json")
+  Flux<Recommendation> getRecommendations(
+      @RequestParam(value = "productId", required = true) int productId);
+
+  /**
+   * Sample usage: "curl -X DELETE $HOST:$PORT/recommendation?productId=1".
+   *
+   * @param productId Id of the product
+   */
+  @DeleteMapping(value = "/recommendation")
+  Mono<Void> deleteRecommendations(int productId);
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+### Changes in the APIs Implementations
+we can use the fluent API in Project Reactor. For example, the implementation of a `getProduct()` method looks like the following code:
+```java
+    public Mono<Product> getProduct(int productId) {
+
+    if (productId < 1) {
+        throw new InvalidInputException("Invalid productId: " + productId);
+    }
+
+    LOG.info("Will get product info for id={}", productId);
+
+    return repository.findByProductId(productId)
+        .switchIfEmpty(Mono.error(new NotFoundException("No product found for productId: " + productId)))
+        .log(LOG.getName(), FINE)
+        .map(e -> mapper.entityToApi(e))
+        .map(e -> setServiceAddress(e));
+    }
+```
+1. The method will return a Mono object; the processing is only declared here. The processing 
+is triggered by the web framework, Spring WebFlux, subscribing to the `Mono` object once it 
+receives a request to this service!
+2. A product will be retrieved using its `productId` from the underlying database using the 
+`findByProductId()` method in the persistence repository.
+3. If no product is found for the given `productId`, a `NotFoundException` will be thrown.
+4. The `log` method will produce log output.
+5. The `mapper.entityToApi()` method will be called to transform the returned entity from the 
+persistence layer into an API model object.
+6. The final map method will use a helper method, `setServiceAddress()`, to set the DNS name 
+and IP address of the microservices that processed the request in the serviceAddress field 
+of the model object.
+<Tabs groupId="code">
+
+<TabItem value="ProductServiceImpl(Before)" label="ProductServiceImpl(Before)">
+
+```java
+package se.magnus.microservices.core.product.services;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.web.bind.annotation.RestController;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.product.ProductService;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.api.exceptions.NotFoundException;
+import se.magnus.microservices.core.product.persistence.ProductEntity;
+import se.magnus.microservices.core.product.persistence.ProductRepository;
+import se.magnus.util.http.ServiceUtil;
+
+@RestController
+public class ProductServiceImpl implements ProductService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ProductServiceImpl.class);
+
+    private final ServiceUtil serviceUtil;
+
+    private final ProductRepository repository;
+
+    private final ProductMapper mapper;
+
+    public ProductServiceImpl(ProductRepository repository, ProductMapper mapper, ServiceUtil serviceUtil) {
+        this.repository = repository;
+        this.mapper = mapper;
+        this.serviceUtil = serviceUtil;
+    }
+
+    @Override
+    public Product createProduct(Product body) {
+        try {
+            ProductEntity entity = mapper.apiToEntity(body);
+            ProductEntity newEntity = repository.save(entity);
+
+            LOG.debug("createProduct: entity created for productId: {}", body.getProductId());
+            return mapper.entityToApi(newEntity);
+
+        } catch (DuplicateKeyException dke) {
+            throw new InvalidInputException("Duplicate key, Product Id: " + body.getProductId());
+        }
+    }
+
+    @Override
+    public Product getProduct(int productId) {
 
         if (productId < 1) {
-          throw new InvalidInputException("Invalid productId: " + productId);
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
+
+        ProductEntity entity = repository.findByProductId(productId)
+                .orElseThrow(() -> new NotFoundException("No product found for productId: " + productId));
+
+        Product response = mapper.entityToApi(entity);
+        response.setServiceAddress(serviceUtil.getServiceAddress());
+
+        LOG.debug("getProduct: found productId: {}", response.getProductId());
+
+        return response;
+    }
+
+    @Override
+    public void deleteProduct(int productId) {
+        LOG.debug("deleteProduct: tries to delete an entity with productId: {}", productId);
+        repository.findByProductId(productId).ifPresent(e -> repository.delete(e));
+    }
+}
+```
+
+</TabItem>
+
+<TabItem value="ProductServiceImpl(After)" label="ProductServiceImpl(After)">
+
+```java
+package se.magnus.microservices.core.product.services;
+
+import static java.util.logging.Level.FINE;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Mono;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.product.ProductService;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.api.exceptions.NotFoundException;
+import se.magnus.microservices.core.product.persistence.ProductEntity;
+import se.magnus.microservices.core.product.persistence.ProductRepository;
+import se.magnus.util.http.ServiceUtil;
+
+@RestController
+public class ProductServiceImpl implements ProductService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ProductServiceImpl.class);
+
+    private final ServiceUtil serviceUtil;
+
+    private final ProductRepository repository;
+
+    private final ProductMapper mapper;
+
+    public ProductServiceImpl(ProductRepository repository, ProductMapper mapper, ServiceUtil serviceUtil) {
+        this.repository = repository;
+        this.mapper = mapper;
+        this.serviceUtil = serviceUtil;
+    }
+
+    @Override
+    public Mono<Product> createProduct(Product body) {
+
+        if (body.getProductId() < 1) {
+            throw new InvalidInputException("Invalid productId: " + body.getProductId());
+        }
+
+        ProductEntity entity = mapper.apiToEntity(body);
+        Mono<Product> newEntity = repository.save(entity)
+                .log(LOG.getName(), FINE)
+                .onErrorMap(
+                        DuplicateKeyException.class,
+                        ex -> new InvalidInputException("Duplicate key, Product Id: " + body.getProductId()))
+                .map(e -> mapper.entityToApi(e));
+
+        return newEntity;
+    }
+
+    @Override
+    public Mono<Product> getProduct(int productId) {
+
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
         }
 
         LOG.info("Will get product info for id={}", productId);
 
         return repository.findByProductId(productId)
-            .switchIfEmpty(Mono.error(new NotFoundException("No product found for productId: " + productId)))
-            .log(LOG.getName(), FINE)
-            .map(e -> mapper.entityToApi(e))
-            .map(e -> setServiceAddress(e));
-      }
-    ```
-    1. The method will return a Mono object; the processing is only declared here. The processing 
-    is triggered by the web framework, Spring WebFlux, subscribing to the Mono object once it 
-    receives a request to this service!
-    2. A product will be retrieved using its productId from the underlying database using the 
-    findByProductId() method in the persistence repository.
-    3. If no product is found for the given productId, a NotFoundException will be thrown.
-    4. The log method will produce log output.
-    5. The mapper.entityToApi() method will be called to transform the returned entity from the 
-    persistence layer into an API model object.
-    6. The final map method will use a helper method, setServiceAddress(), to set the DNS name 
-    and IP address of the microservices that processed the request in the serviceAddress field 
-    of the model object.
+                .switchIfEmpty(Mono.error(new NotFoundException("No product found for productId: " + productId)))
+                .log(LOG.getName(), FINE)
+                .map(e -> mapper.entityToApi(e))
+                .map(e -> setServiceAddress(e));
+    }
 
+    @Override
+    public Mono<Void> deleteProduct(int productId) {
 
-  * Change our tests so that they can test the reactive services
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
 
-    To handle the asynchronous behavior of the reactive return 
-    types, Mono and Flux, the tests use a mix of calling the block() method and using the StepVerifier helper class.
-  * Deal with blocking code – isolate the code that still needs to be blocking from the non-blocking code
+        LOG.debug("deleteProduct: tries to delete an entity with productId: {}", productId);
+        return repository.findByProductId(productId).log(LOG.getName(), FINE).map(e -> repository.delete(e))
+                .flatMap(e -> e);
+    }
+
+    private Product setServiceAddress(Product e) {
+        e.setServiceAddress(serviceUtil.getServiceAddress());
+        return e;
+    }
+}
+```
+
+</TabItem>
+
+</Tabs>
 
 ## Blocking Code
 For blocking code, we can run the blocking code using a Scheduler, which is capable of running the blocking code on a thread from a dedicated thread pool with a limited number of threads. Using a thread pool for the blocking code avoids draining the available threads in the microservice and avoids affecting concurrent non-blocking processing in the microservice, if there is any.
@@ -351,11 +709,256 @@ private List<Review> internalGetReviews(int productId) {
    the subscribeOn() method to run the blocking code in a thread from the thread pool of 
    jdbcScheduler.
 
+<Tabs groupId="code">
+<TabItem value="ReviewServiceApplication" label="ReviewServiceApplication">
+
+```java
+package se.magnus.microservices.core.review;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
+
+@SpringBootApplication
+@ComponentScan("se.magnus")
+public class ReviewServiceApplication {
+
+  private static final Logger LOG = LoggerFactory.getLogger(ReviewServiceApplication.class);
+
+  private final Integer threadPoolSize;
+  private final Integer taskQueueSize;
+
+  public ReviewServiceApplication(
+      @Value("${app.threadPoolSize:10}") Integer threadPoolSize,
+      @Value("${app.taskQueueSize:100}") Integer taskQueueSize) {
+    this.threadPoolSize = threadPoolSize;
+    this.taskQueueSize = taskQueueSize;
+  }
+
+  @Bean
+  public Scheduler jdbcScheduler() {
+    LOG.info("Creates a jdbcScheduler with thread pool size = {}", threadPoolSize);
+    return Schedulers.newBoundedElastic(threadPoolSize, taskQueueSize, "jdbc-pool");
+  }
+
+  public static void main(String[] args) {
+    ConfigurableApplicationContext ctx = SpringApplication.run(ReviewServiceApplication.class, args);
+
+    String mysqlUri = ctx.getEnvironment().getProperty("spring.datasource.url");
+    LOG.info("Connected to MySQL: " + mysqlUri);
+  }
+}
+
+```
+
+</TabItem>
+
+<TabItem value="ReviewServiceImpl(Before)" label="ReviewServiceImpl(Before)">
+
+```java
+package se.magnus.microservices.core.review.services;
+
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.web.bind.annotation.RestController;
+import se.magnus.api.core.review.Review;
+import se.magnus.api.core.review.ReviewService;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.microservices.core.review.persistence.ReviewEntity;
+import se.magnus.microservices.core.review.persistence.ReviewRepository;
+import se.magnus.util.http.ServiceUtil;
+
+@RestController
+public class ReviewServiceImpl implements ReviewService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ReviewServiceImpl.class);
+
+    private final ReviewRepository repository;
+
+    private final ReviewMapper mapper;
+
+    private final ServiceUtil serviceUtil;
+
+    public ReviewServiceImpl(ReviewRepository repository, ReviewMapper mapper, ServiceUtil serviceUtil) {
+        this.repository = repository;
+        this.mapper = mapper;
+        this.serviceUtil = serviceUtil;
+    }
+
+    @Override
+    public Review createReview(Review body) {
+        try {
+            ReviewEntity entity = mapper.apiToEntity(body);
+            ReviewEntity newEntity = repository.save(entity);
+
+            LOG.debug("createReview: created a review entity: {}/{}", body.getProductId(), body.getReviewId());
+            return mapper.entityToApi(newEntity);
+
+        } catch (DataIntegrityViolationException dive) {
+            throw new InvalidInputException(
+                    "Duplicate key, Product Id: " + body.getProductId() + ", Review Id:" + body.getReviewId());
+        }
+    }
+
+    @Override
+    public List<Review> getReviews(int productId) {
+
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
+
+        List<ReviewEntity> entityList = repository.findByProductId(productId);
+        List<Review> list = mapper.entityListToApiList(entityList);
+        list.forEach(e -> e.setServiceAddress(serviceUtil.getServiceAddress()));
+
+        LOG.debug("getReviews: response size: {}", list.size());
+
+        return list;
+    }
+
+    @Override
+    public void deleteReviews(int productId) {
+        LOG.debug("deleteReviews: tries to delete reviews for the product with productId: {}", productId);
+        repository.deleteAll(repository.findByProductId(productId));
+    }
+}
+```
+
+</TabItem>
+
+<TabItem value="ReviewServiceImpl(After)" label="ReviewServiceImpl(After)">
+
+```java
+package se.magnus.microservices.core.review.services;
+
+import static java.util.logging.Level.FINE;
+
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
+import se.magnus.api.core.review.Review;
+import se.magnus.api.core.review.ReviewService;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.microservices.core.review.persistence.ReviewEntity;
+import se.magnus.microservices.core.review.persistence.ReviewRepository;
+import se.magnus.util.http.ServiceUtil;
+
+@RestController
+public class ReviewServiceImpl implements ReviewService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ReviewServiceImpl.class);
+
+    private final ReviewRepository repository;
+
+    private final ReviewMapper mapper;
+
+    private final ServiceUtil serviceUtil;
+
+    private final Scheduler jdbcScheduler;
+
+    public ReviewServiceImpl(@Qualifier("jdbcScheduler") Scheduler jdbcScheduler, ReviewRepository repository,
+            ReviewMapper mapper, ServiceUtil serviceUtil) {
+        this.jdbcScheduler = jdbcScheduler;
+        this.repository = repository;
+        this.mapper = mapper;
+        this.serviceUtil = serviceUtil;
+    }
+
+    @Override
+    public Mono<Review> createReview(Review body) {
+
+        if (body.getProductId() < 1) {
+            throw new InvalidInputException("Invalid productId: " + body.getProductId());
+        }
+        return Mono.fromCallable(() -> internalCreateReview(body))
+                .subscribeOn(jdbcScheduler);
+    }
+
+    private Review internalCreateReview(Review body) {
+        try {
+            ReviewEntity entity = mapper.apiToEntity(body);
+            ReviewEntity newEntity = repository.save(entity);
+
+            LOG.debug("createReview: created a review entity: {}/{}", body.getProductId(), body.getReviewId());
+            return mapper.entityToApi(newEntity);
+
+        } catch (DataIntegrityViolationException dive) {
+            throw new InvalidInputException(
+                    "Duplicate key, Product Id: " + body.getProductId() + ", Review Id:" + body.getReviewId());
+        }
+    }
+
+    @Override
+    public Flux<Review> getReviews(int productId) {
+
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
+
+        LOG.info("Will get reviews for product with id={}", productId);
+
+        return Mono.fromCallable(() -> internalGetReviews(productId))
+                .flatMapMany(Flux::fromIterable)
+                .log(LOG.getName(), FINE)
+                .subscribeOn(jdbcScheduler);
+    }
+
+    private List<Review> internalGetReviews(int productId) {
+
+        List<ReviewEntity> entityList = repository.findByProductId(productId);
+        List<Review> list = mapper.entityListToApiList(entityList);
+        list.forEach(e -> e.setServiceAddress(serviceUtil.getServiceAddress()));
+
+        LOG.debug("Response size: {}", list.size());
+
+        return list;
+    }
+
+    @Override
+    public Mono<Void> deleteReviews(int productId) {
+
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
+
+        return Mono.fromRunnable(() -> internalDeleteReviews(productId)).subscribeOn(jdbcScheduler).then();
+    }
+
+    private void internalDeleteReviews(int productId) {
+
+        LOG.debug("deleteReviews: tries to delete reviews for the product with productId: {}", productId);
+
+        repository.deleteAll(repository.findByProductId(productId));
+    }
+}
+```
+
+</TabItem>
+
+
+
+</Tabs>
 we can look at the log output from the review service and 
 see proof that SQL statements are run in threads from the scheduler’s dedicated pool. We will be able 
 to see log output like this:
 
-!()[/docs/assets/software-engineering/frameworks-platforms/backend-frameworks/spring-boot/spring-webflux/reactive-programmig-blocking-code-log.png]
+```
+```
 
 From the preceding log output, we can see the following:
 

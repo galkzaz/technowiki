@@ -1,6 +1,886 @@
+---
+id: Execution Models
+title: Execution Models
+---
 
+{/* 
 ## blocking-vs-non-blocking
 ## synchronous-vs-asynchronous
 ## event-loop
 ## callback-model
-## futures-promises
+## futures-promises */}
+
+An **execution model** describes **how units of work are executed, scheduled, coordinated, and progressed** inside a software system.
+
+It answers questions like:
+
+* Who executes the work?
+* How many tasks run simultaneously?
+* How is waiting handled?
+* How are tasks scheduled?
+* What happens during blocking operations?
+* How do threads, events, coroutines, or processes interact?
+
+Execution models are the **runtime behavior layer** of concurrency.
+
+
+## Why Execution Models Matter
+
+The execution model determines:
+
+* scalability
+* throughput
+* latency
+* CPU utilization
+* memory consumption
+* synchronization complexity
+* failure handling
+* programming style
+
+The same business logic can behave very differently depending on the execution model.
+
+Example:
+
+A web server handling 100,000 connections:
+
+* Thread-per-request → may exhaust memory
+* Event loop → can handle it efficiently
+* Actor model → isolates failures better
+* Reactive model → handles backpressure better
+
+## Relationship to Concurrency
+
+Concurrency is the ability to manage multiple tasks at once.
+
+Execution models define **HOW** that concurrency is implemented.
+
+
+## Main Categories of Execution Models
+
+```text
+Execution Models
+│
+├── Sequential Execution
+│
+├── Thread-Based Models
+│   ├── Single Thread
+│   ├── Thread per Request
+│   ├── Thread Pool
+│   ├── Work Stealing
+│   └── Fork-Join
+│
+├── Event-Driven Models
+│   ├── Event Loop
+│   ├── Reactor Pattern
+│   └── Proactor Pattern
+│
+├── Asynchronous Models
+│   ├── Callback-Based
+│   ├── Future/Promise
+│   ├── async/await
+│   └── Coroutine-Based
+│
+├── Dataflow / Reactive Models
+│   ├── Reactive Streams
+│   ├── Pipeline Execution
+│   └── Stream Processing
+│
+├── Actor-Based Models
+│
+├── Parallel Execution Models
+│   ├── SIMD
+│   ├── MIMD
+│   └── GPU Parallelism
+│
+├── Distributed Execution Models
+│   ├── Message Passing
+│   ├── RPC-Based
+│   └── Event Streaming
+│
+└── Hybrid Models
+```
+
+### 1. Sequential Execution Model
+
+The simplest model.
+
+Tasks execute one after another.
+
+```text
+Task A → Task B → Task C
+```
+
+**Characteristics**
+
+* single flow of execution
+* no concurrency
+* deterministic
+* easy debugging
+
+#### Example
+
+```python
+read_file()
+process_data()
+save_result()
+```
+
+---
+
+### 2. Thread-Based Execution Models
+
+Concurrency is achieved using OS threads.
+
+---
+
+#### 2.1 Single Thread Model
+
+One thread handles everything.
+
+```text
+[ Main Thread ]
+    ├── Task A
+    ├── Task B
+    └── Task C
+```
+
+**Advantages**
+
+* simple
+* no synchronization issues
+
+**Problems**
+
+* blocking operations freeze everything
+* poor scalability
+
+---
+
+#### 2.2 Thread-per-Request Model
+
+Each request/task gets its own thread.
+
+```text
+Request 1 → Thread 1
+Request 2 → Thread 2
+Request 3 → Thread 3
+```
+
+**Common In**
+
+* traditional servlet containers
+* older web servers
+
+**Advantages**
+
+* intuitive
+* isolation between requests
+
+**Problems**
+
+* expensive context switching
+* large memory usage
+* thread exhaustion
+
+---
+
+#### 2.3 Thread Pool Model
+
+Reuse a fixed number of worker threads.
+
+```text
+Tasks Queue
+     ↓
++------------------+
+| Thread Pool      |
+| Worker 1         |
+| Worker 2         |
+| Worker 3         |
++------------------+
+```
+
+**Idea**
+
+Instead of creating threads repeatedly:
+
+* threads stay alive
+* tasks are dispatched to workers
+
+**Advantages**
+
+* controlled resource usage
+* better performance
+* reduced thread creation overhead
+
+**Problems**
+
+* blocking tasks can starve pool
+* deadlocks possible
+
+**Common In**
+
+* Java ExecutorService
+* web servers
+* database pools
+
+---
+
+#### 2.4 Work-Stealing Model
+
+Threads dynamically steal tasks from busy workers.
+
+```text
+Worker A Queue: [A1 A2 A3]
+Worker B Queue: []
+
+Worker B steals A3
+```
+
+**Goal**
+
+Improve CPU utilization.
+
+**Used In**
+
+* Java ForkJoinPool
+* parallel streams
+* task schedulers
+
+---
+
+#### 2.5 Fork-Join Model
+
+Split work recursively into subtasks.
+
+```text
+           Task
+         /      \
+      Sub1      Sub2
+      /  \      /  \
+```
+
+##### Workflow
+
+1. Fork subtasks
+2. Execute in parallel
+3. Join results
+
+**Good For**
+
+* divide-and-conquer algorithms
+* parallel computation
+
+##### Example
+
+* parallel merge sort
+* matrix multiplication
+
+---
+
+### 3. Event-Driven Execution Models
+
+Instead of many blocked threads:
+
+* tasks register interest in events
+* execution resumes when events occur
+
+---
+
+#### 3.1 Event Loop Model
+
+Central loop processes events continuously.
+
+```text
+while(true):
+    event = queue.get()
+    handle(event)
+```
+
+**Characteristics**
+
+* usually single-threaded
+* non-blocking I/O
+* extremely scalable for I/O workloads
+
+**Used In**
+
+* Node.js
+* Nginx
+* browsers
+
+##### Important Idea
+
+The thread never blocks waiting for I/O.
+
+Instead:
+
+1. initiate operation
+2. continue processing
+3. OS notifies when ready
+
+---
+
+##### Blocking vs Non-Blocking
+
+###### Blocking
+
+```text
+Thread waits for I/O
+```
+
+```python
+data = socket.read()  ## thread pauses
+```
+
+###### Non-Blocking
+
+```text
+Thread continues doing other work
+```
+
+```python
+socket.read_async(callback)
+```
+
+---
+
+#### 3.2 Reactor Pattern
+
+The reactor waits for events and dispatches handlers.
+
+```text
+      Events
+         ↓
++----------------+
+| Reactor Loop   |
++----------------+
+   ↓   ↓    ↓
+ Handler Handler
+```
+
+**Flow**
+
+1. register event handlers
+2. reactor waits
+3. events arrive
+4. handlers execute
+
+**Used In**
+
+* Netty
+* Node.js internals
+* NIO frameworks
+
+---
+
+#### 3.3 Proactor Pattern
+
+OS completes async operation first.
+
+Then completion handlers run.
+
+```text
+Submit Async I/O
+       ↓
+OS performs operation
+       ↓
+Completion callback fires
+```
+
+##### Difference from Reactor
+
+| Reactor                | Proactor                |
+| ---------------------- | ----------------------- |
+| app handles readiness  | OS handles operation    |
+| app performs I/O       | OS performs I/O         |
+| readiness notification | completion notification |
+
+---
+
+### 4. Asynchronous Execution Models
+
+Tasks progress independently without blocking callers.
+
+---
+
+#### 4.1 Callback-Based Model
+
+Pass function to execute later.
+
+```javascript
+readFile("a.txt", function(data) {
+    console.log(data)
+})
+```
+
+**Problems**
+
+* callback hell
+* difficult error handling
+
+---
+
+#### 4.2 Future / Promise Model
+
+Represents a value available later.
+
+```java
+Future<Data> f = fetchAsync();
+```
+
+**Advantages**
+
+* composability
+* async coordination
+
+---
+
+#### 4.3 async/await Model
+
+Syntactic abstraction over futures/promises.
+
+```python
+data = await fetch()
+```
+
+`await` does NOT necessarily block an OS thread.
+
+Usually:
+
+* coroutine pauses
+* thread becomes free
+* runtime resumes later
+
+This is fundamental in modern concurrency systems.
+
+---
+
+#### 4.4 Coroutine-Based Model
+
+Functions can suspend and resume.
+
+```text
+Start → Suspend → Resume → Complete
+```
+
+**Characteristics**
+
+* lightweight
+* cooperative scheduling
+* millions possible
+
+**Used In**
+
+* Kotlin coroutines
+* Python asyncio
+* Go goroutines (conceptually similar)
+
+---
+
+##### Thread vs Coroutine
+
+| Thread                   | Coroutine       |
+| ------------------------ | --------------- |
+| OS-managed               | runtime-managed |
+| expensive                | lightweight     |
+| preemptive               | cooperative     |
+| MB stack                 | KB/small stack  |
+| context switch expensive | cheap           |
+
+---
+
+### 5. Reactive / Dataflow Execution Models
+
+Execution flows through streams of data/events.
+
+---
+
+#### Reactive Streams
+
+Producer pushes data to consumers.
+
+```text
+Producer → Operators → Consumer
+```
+
+##### Example Pipeline
+
+```text
+Kafka → Filter → Transform → Database
+```
+
+##### Core Ideas
+
+* asynchronous
+* non-blocking
+* backpressure-aware
+
+---
+
+##### Backpressure
+
+Consumer tells producer:
+
+```text
+"I can only handle N items now."
+```
+
+Prevents overload.
+
+---
+
+##### Pipeline Execution
+
+Work is divided into stages.
+
+```text
+Input
+  ↓
+Parse
+  ↓
+Validate
+  ↓
+Transform
+  ↓
+Store
+```
+
+Stages may run concurrently.
+
+---
+
+### 6. Actor Execution Model
+
+System consists of independent actors.
+
+Each actor:
+
+* owns its state
+* processes messages
+* communicates via message passing
+
+```text
+Actor A ←→ Actor B
+```
+
+**Important Rule**
+
+Actors do NOT share mutable state.
+
+This avoids many synchronization problems.
+
+---
+
+#### Actor Behavior
+
+```text
+Receive Message
+      ↓
+Process
+      ↓
+Change Internal State
+      ↓
+Send Messages
+```
+
+---
+
+**Used In**
+
+* Erlang
+* Akka
+* Orleans
+
+---
+
+**Advantages**
+
+* fault isolation
+* scalability
+* easier distributed systems
+
+---
+
+### 7. Parallel Execution Models
+
+Focus on simultaneously executing computations.
+
+---
+
+#### SIMD
+
+Single Instruction Multiple Data.
+
+Same instruction applied to many elements.
+
+```text
+Add vectors in parallel
+```
+
+Used in:
+
+* CPUs vector instructions
+* GPUs
+
+---
+
+#### MIMD
+
+Multiple instructions on multiple processors.
+
+General multicore computing.
+
+---
+
+#### GPU Execution Model
+
+Thousands of lightweight threads execute together.
+
+Good for:
+
+* AI
+* simulations
+* graphics
+
+---
+
+### 8. Distributed Execution Models
+
+Concurrency across machines.
+
+---
+
+#### Message Passing Model
+
+Nodes communicate via messages.
+
+```text
+Service A → Message Broker → Service B
+```
+
+---
+
+#### RPC-Based Model
+
+Remote call appears local.
+
+```python
+result = remote_service.calculate()
+```
+
+---
+
+#### Event Streaming Model
+
+Continuous stream of events distributed across services.
+
+```text
+Producer → Kafka → Consumers
+```
+
+Useful for:
+
+* analytics
+* microservices
+* real-time systems
+
+---
+
+### Hybrid Execution Models
+
+Modern systems combine models.
+
+Example:
+
+```text
+Reactive API Gateway
+    ↓
+Thread Pools
+    ↓
+Event Loop
+    ↓
+Actor System
+    ↓
+Distributed Kafka Pipeline
+```
+
+Most real systems are hybrids.
+
+## Comparison of Major Models
+
+| Model              | Best For                | Main Weakness               |
+| ------------------ | ----------------------- | --------------------------- |
+| Thread-per-request | simplicity              | poor scalability            |
+| Thread pool        | balanced workloads      | blocking starvation         |
+| Event loop         | high I/O concurrency    | CPU-heavy tasks problematic |
+| Coroutine          | massive concurrency     | cooperative pitfalls        |
+| Reactive streams   | streaming systems       | complexity                  |
+| Actor model        | distributed concurrency | message overhead            |
+| Fork-join          | parallel computation    | recursive overhead          |
+
+## Key Concepts Across Execution Models
+
+### Scheduling
+
+Determines which task runs next.
+
+#### Types
+
+* OS scheduling
+* cooperative scheduling
+* runtime scheduling
+* work stealing
+
+---
+
+### Context Switching
+
+Switch execution between tasks.
+
+Expensive In
+
+* OS threads
+
+Cheap In
+
+* coroutines
+
+---
+
+### Synchronization
+
+Coordinate concurrent access.
+
+Examples:
+
+* mutexes
+* semaphores
+* atomics
+* channels
+* message passing
+
+---
+
+## Shared Memory vs Message Passing
+
+### Shared Memory
+
+```text
+Threads share variables
+```
+
+Needs synchronization.
+
+### Message Passing
+
+```text
+Tasks exchange messages
+```
+
+Avoids shared-state races.
+
+---
+
+## Preemptive vs Cooperative Execution
+
+### Preemptive
+
+OS interrupts tasks.
+
+```text
+Thread can be paused anytime
+```
+
+### Cooperative
+
+Task voluntarily yields.
+
+```python
+await something()
+```
+
+---
+
+## CPU-Bound vs I/O-Bound
+
+Execution model choice depends heavily on workload.
+
+### CPU-Bound
+
+Heavy computation.
+
+Better:
+
+* parallel threads
+* fork-join
+* SIMD
+
+### I/O-Bound
+
+Waiting dominates.
+
+Better:
+
+* event loops
+* async I/O
+* coroutines
+
+---
+
+## Real-World Technology Mapping
+
+| Technology             | Primary Execution Model     |
+| ---------------------- | --------------------------- |
+| Node.js                | event loop                  |
+| Nginx                  | event-driven reactor        |
+| Java Servlet (classic) | thread-per-request          |
+| Spring WebFlux         | reactive/event-loop         |
+| Kotlin Coroutines      | coroutine model             |
+| Go                     | goroutine scheduler         |
+| Akka                   | actor model                 |
+| Apache Kafka           | distributed event streaming |
+| CUDA                   | GPU parallel execution      |
+| Java ForkJoinPool      | work stealing               |
+
+---
+
+## Mental Model
+
+Think of execution models as:
+
+```text
+"How work flows through the system."
+```
+
+Different models optimize different things:
+
+| Optimization Goal       | Preferred Models              |
+| ----------------------- | ----------------------------- |
+| simplicity              | sequential/thread-per-request |
+| massive I/O scalability | event loop/coroutines         |
+| CPU parallelism         | fork-join/work stealing       |
+| distributed resilience  | actor/event streaming         |
+| streaming data          | reactive/dataflow             |
+
+---
+
+## Architectural Perspective
+
+Execution models are foundational for:
+
+* operating systems
+* web servers
+* databases
+* distributed systems
+* reactive systems
+* stream processing
+* concurrent programming
+* cloud-native platforms
+
+They directly influence architectural choices such as:
+
+* synchronous vs asynchronous
+* blocking vs non-blocking
+* shared-state vs message-passing
+* monolith vs distributed systems
+* scalability strategy

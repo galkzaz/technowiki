@@ -171,8 +171,7 @@ Now:
 - immutable after creation
 - each instance independent
 
-While our spell checker example had
-only a single resource (the dictionary), dependency injection works with an
+While our spell checker example had only a single resource (the dictionary), dependency injection works with an
 arbitrary number of resources and arbitrary dependency graphs. It preserves
 immutability (link to immutability), so multiple clients can share dependent objects (assuming
 the clients desire the same underlying resources). 
@@ -249,6 +248,15 @@ instead of:
 
 > “I will create this dependency myself”
 
+
+one of the biggest ideas in modern architecture: Business Objects Should Not Assemble Themselves
+
+Instead: system composition handled externally, This leads directly to:
+* IoC containers
+* modular systems
+* clean architecture
+* plugin systems
+* enterprise frameworks
 ## Benefits
 Prefer Dependency Injection to Hardwiring Resources.
 
@@ -287,6 +295,24 @@ Advantages:
 * clearer design
 
 This is generally the preferred approach.
+
+
+---
+
+**Why Constructor Injection Fits Frameworks Naturally**
+
+Frameworks love constructor injection because dependencies are explicit.
+
+Example:
+
+```java id="gjlwmq"
+public Service(Repository repo)
+```
+
+Framework can easily inspect constructor and resolve dependencies.
+
+This is why constructor injection became dominant.
+
 ### Setter Injection
 
 Dependencies provided through setters.
@@ -405,8 +431,215 @@ DI is the mechanism that achieves this.
 ## avoiding-service-locator
 
 ## Dependency Injection Containers
+{/* why DI frameworks exist and what problem they solve. */}
+Although dependency injection greatly improves flexibility and testability, it
+can clutter up large projects, which typically contain thousands of dependencies.
+
+Manual Dependency Injection scales conceptually very well, but eventually becomes operationally difficult in large systems.
 
 In large applications, manually wiring dependencies becomes difficult.
+
+**The Problem: Dependency Explosion**
+
+In small applications:
+
+```java id="1jlwmq"
+Repository repo = new Repository();
+Service service = new Service(repo);
+Controller controller = new Controller(service);
+```
+
+Manual wiring is simple.
+
+**But Large Systems Look Like This**
+
+Enterprise systems may contain:
+
+* hundreds of services
+* repositories
+* clients
+* caches
+* handlers
+* event processors
+* adapters
+* validators
+* configurations
+
+Each depends on others. This creates huge dependency graphs.
+
+**Example Dependency Graph**
+
+```text id="2jlwmq"
+Controller
+   |
+   v
+Service
+ /  |   \
+v   v    v
+Repo Cache APIClient
+       |
+       v
+    HttpClient
+```
+
+Now imagine: thousands of objects
+
+**Manual DI Starts Becoming Noisy**
+
+Without framework:
+
+```java id="4jlwmq"
+Database db = new Database();
+
+UserRepository repo =
+    new UserRepository(db);
+
+EmailService email =
+    new EmailService();
+
+PaymentGateway gateway =
+    new StripeGateway();
+
+OrderService orderService =
+    new OrderService(
+        repo,
+        email,
+        gateway
+    );
+
+OrderController controller =
+    new OrderController(orderService);
+```
+
+This is called: **manual wiring**
+
+**Why This Becomes Difficult**
+
+---
+
+**1. Object Creation Scattering**
+
+Creation logic spread everywhere.
+
+Hard to manage centrally.
+
+---
+
+**2. Dependency Graph Complexity**
+
+Objects depend on objects that depend on objects.
+
+Nested creation becomes difficult.
+
+---
+
+**3. Lifecycle Management**
+
+Some objects should be:
+
+| Type           | Lifecycle              |
+| -------------- | ---------------------- |
+| Singleton      | one shared instance    |
+| Prototype      | new instance each time |
+| Request-scoped | one per request        |
+| Session-scoped | one per session        |
+
+Managing manually becomes tedious.
+
+---
+
+**4. Configuration Complexity**
+
+Different environments need different implementations.
+
+Example:
+
+| Environment | Implementation     |
+| ----------- | ------------------ |
+| Production  | RealPaymentGateway |
+| Testing     | FakePaymentGateway |
+| Development | SandboxGateway     |
+
+Manual switching becomes cumbersome.
+
+---
+
+**5. Boilerplate Explosion**
+
+Large amounts of repetitive code appear:
+
+```java id="6jlwmq"
+new X(new Y(new Z(...)))
+```
+
+---
+
+**DI Frameworks Solve This**
+
+Frameworks automate:
+
+```text id="7jlwmq"
+object graph assembly
+```
+
+---
+
+**What DI Frameworks Actually Do**
+
+They:
+
+| Responsibility        | Handled By Framework |
+| --------------------- | -------------------- |
+| Object creation       | Yes                  |
+| Dependency resolution | Yes                  |
+| Lifecycle management  | Yes                  |
+| Configuration wiring  | Yes                  |
+| Scope management      | Yes                  |
+| Singleton handling    | Yes                  |
+| Lazy loading          | Yes                  |
+
+---
+
+**Example with Framework**
+
+Using Spring Framework:
+
+```java id="8jlwmq"
+@Service
+class OrderService {
+
+    private final UserRepository repo;
+
+    public OrderService(UserRepository repo) {
+        this.repo = repo;
+    }
+}
+```
+
+Framework automatically:
+
+* creates repository
+* creates service
+* injects repository
+* manages lifecycle
+
+---
+
+**Why This Reduces Clutter**
+
+Instead of:
+
+```java id="9jlwmq"
+new Repository(...)
+new Service(...)
+new Controller(...)
+```
+
+everywhere,
+
+framework centralizes composition.
+
+---
 
 A **DI Container** automates:
 
@@ -443,6 +676,8 @@ The container:
 * creates `UserService`
 * injects dependency automatically
 
+
+
 ## Manual DI vs Framework DI
 
 ### Manual DI
@@ -460,6 +695,90 @@ Good for:
 
 ---
 
+Frameworks Build on Manual DI, APIs designed for manual dependency injection are trivially adapted, Meaning: **Good DI design is framework-independent.**
+
+Example:
+
+```java id="bjlwmq"
+class Service {
+
+    private final Repository repo;
+
+    public Service(Repository repo) {
+        this.repo = repo;
+    }
+}
+```
+
+works both:
+
+* manually
+* with Spring
+* with Guice
+* with Dagger
+
+**Why This Matters**
+
+If your code only works because of framework magic: design quality is weaker
+
+Good architecture should remain clean without framework. Framework should assist architecture, not define it.
+
+---
+
+**Manual DI Is the Foundation**
+
+DI frameworks are essentially: automation layers over manual DI
+
+If you understand manual DI deeply:
+
+* frameworks become easy
+* annotations make sense
+* IoC containers become understandable
+
+Without manual DI knowledge: framework behavior feels magical/confusing.
+
+---
+
+**Important Architectural Principle**
+
+This implies: **Design First, Framework Second**
+
+Bad approach: Design architecture around framework
+
+Better approach: 
+- Design clean DI architecture
+- Then framework automates wiring
+
+This is a major engineering distinction.
+
+---
+
+**The Hidden Core Concept: Composition Root**
+
+In manual DI:
+
+```text id="hjlwmq"
+you create object graph yourself
+```
+
+usually in:
+
+```text id="ijlwmq"
+main()
+bootstrap code
+startup configuration
+```
+
+This is called:
+
+```text id="jjlwmq"
+Composition Root
+```
+
+DI frameworks automate the composition root.
+
+---
+
 ### Framework DI
 
 Container handles everything.
@@ -469,6 +788,289 @@ Good for:
 * enterprise systems
 * large applications
 * complex dependency graphs
+
+---
+
+**Deep Engineering Insight**
+
+**DI Itself Is Simple**
+
+The complexity comes from: large-scale object graph management.
+
+DI frameworks exist primarily to manage:
+
+* scale
+* lifecycle
+* configuration
+* graph assembly
+
+not because DI itself is complicated.
+
+---
+
+**The Big Picture**
+
+The progression is:
+
+```text id="mjlwmq"
+Manual Object Creation
+        ↓
+Manual Dependency Injection
+        ↓
+Large Dependency Graphs
+        ↓
+DI Frameworks Automate Wiring
+        ↓
+IoC Containers Manage System Composition
+```
+
+This evolution is one of the foundations of modern enterprise software architecture.
+
+---
+
+**Comparing Manual DI vs Framework DI**
+
+| Aspect               | Manual DI        | Framework DI       |
+| -------------------- | ---------------- | ------------------ |
+| Learning simplicity  | Easier initially | More concepts      |
+| Small projects       | Excellent        | Sometimes overkill |
+| Large projects       | Verbose          | Excellent          |
+| Wiring automation    | Manual           | Automatic          |
+| Lifecycle management | Manual           | Automatic          |
+| Reflection/proxies   | No               | Often yes          |
+| Framework coupling   | Minimal          | Possible           |
+
+---
+## Charactaistics
+1. DI is not limited to one dependency
+
+dependency injection works with an arbitrary number of resource.
+
+```java
+class OrderService {
+
+    private final PaymentGateway gateway;
+    private final InventoryService inventory;
+    private final NotificationService notifications;
+    private final Logger logger;
+
+    public OrderService(
+        PaymentGateway gateway,
+        InventoryService inventory,
+        NotificationService notifications,
+        Logger logger
+    ) {
+        this.gateway = gateway;
+        this.inventory = inventory;
+        this.notifications = notifications;
+        this.logger = logger;
+    }
+}
+```
+2. Dependencies form a graph
+
+Dependencies can depend on other dependencies, creating a graph.
+Example:
+```
+OrderController
+      |
+      v
+OrderService
+   /      \
+  v        v
+Payment   Inventory
+   |
+   v
+Database
+```
+Each object depends on others.
+
+DI scales to entire object networks.
+
+**Without DI**
+
+Each class manually creates its own dependencies:
+
+nested object creation chaos
+
+Example:
+```java
+new OrderService(
+    new PaymentService(
+        new Database()
+    )
+)
+```
+Hard to manage in large systems.
+
+**With DI Containers**
+
+Frameworks like: Spring Framework, Google Guice, automatically build the dependency graph.
+
+DI scales from: one object + one dependency
+
+to entire enterprise dependency graphs, while preserving:
+
+* immutability
+* configurability
+* testability
+* modularity
+* resource sharing
+
+That scalability is why DI became foundational in modern software engineering.
+
+3. It preserves immutability 
+
+Example:
+
+```java
+private final Lexicon dictionary;
+```
+Dependency never changes after construction. This creates immutable object state.
+
+**Why Immutability Matters**
+
+Immutable objects are:
+| Benefit                | Explanation                         |
+| ---------------------- | ----------------------------------- |
+| Thread-safe            | No changing shared state            |
+| Predictable            | Behavior stable after construction  |
+| Easier to reason about | No hidden mutation                  |
+| Easier to test         | Stable state                        |
+| Safer                  | Prevents accidental reconfiguration |
+
+DI Encourages Constructor Injection, Constructor injection naturally supports immutability.
+```java
+public SpellChecker(Lexicon dictionary)
+```
+Combined with:
+```java
+private final Lexicon dictionary;
+```
+This creates stable object composition.
+
+4. Multiple clients can share dependent objects
+
+It preserves immutability (link to immutability), so multiple clients can share dependent objects (assuming
+the clients desire the same underlying resources).
+
+This refers to shared dependencies.
+
+Example:
+
+```java id="4dmg6f"
+Lexicon english = new EnglishLexicon();
+
+SpellChecker sc1 = new SpellChecker(english);
+SpellChecker sc2 = new SpellChecker(english);
+SpellChecker sc3 = new SpellChecker(english);
+```
+
+All share same immutable resource safely.
+
+**Why Sharing Matters**
+
+Shared immutable dependencies improve:
+
+| Area        | Benefit                       |
+| ----------- | ----------------------------- |
+| Memory      | Avoid duplicate objects       |
+| Performance | Expensive resources reused    |
+| Consistency | Shared configuration          |
+| Scalability | Efficient resource management |
+
+sometimes clients need different resources.
+
+Example:
+
+```java id="r26r0v"
+new SpellChecker(englishDictionary);
+new SpellChecker(arabicDictionary);
+```
+
+DI supports both:
+
+* shared resources
+* customized resources
+
+5. Applicable to constructors, static factories, and builders
+
+DI is not limited to constructors.
+
+**A. Constructor Injection**
+
+Most common.
+
+```java id="j6ry5l"
+new Service(repository)
+```
+
+---
+
+**B. Static Factory Injection**
+
+Dependencies supplied through factory methods.
+
+```java id="ahwjlwm"
+class Service {
+
+    private final Repository repository;
+
+    private Service(Repository repository) {
+        this.repository = repository;
+    }
+
+    public static Service create(Repository repository) {
+        return new Service(repository);
+    }
+}
+```
+
+Dependency still injected externally.
+
+---
+
+**C. Builder Injection**
+
+Useful when many dependencies/configurations exist.
+
+```java id="32q69r"
+Service service = Service.builder()
+    .repository(repo)
+    .logger(logger)
+    .cache(cache)
+    .build();
+```
+
+Still DI because dependencies come externally.
+
+---
+
+Core Principle Remains Same, Regardless of mechanism: Object does not create dependencies itself.
+
+That is the essence of DI.
+
+---
+
+**Why This Matters Architecturally**
+
+DI is:
+* not tied to frameworks
+* not tied to annotations
+* not tied to constructors only
+
+It is a general composition principle.
+
+---
+
+**Relationship to Composition Root**
+
+In well-designed applications: Most object creation centralized Usually at:
+* application startup
+* container configuration
+* bootstrap layer
+
+This location is called: Composition Root, The composition root builds the dependency graph.
 
 ## Common Misconceptions
 
@@ -749,6 +1351,467 @@ Injected dynamically.
 Factories create dependencies.
 
 DI containers are effectively advanced factories.
+
+A useful variant of the pattern is to pass a resource factory to the constructor.
+A factory is an object that can be called repeatedly to create instances of a type.
+Such factories embody the Factory Method pattern.
+
+Instead of injecting: a ready-made object, you inject: omething that can CREATE objects on demand
+
+This is called: Factory Injection, or Injecting a factory/provider/supplier.
+
+**Regular Dependency Injection**
+
+Normal DI:
+
+```java id="1pmr9y"
+class SpellChecker {
+
+    private final Lexicon dictionary;
+
+    public SpellChecker(Lexicon dictionary) {
+        this.dictionary = dictionary;
+    }
+}
+```
+
+The dependency already exists.
+
+**Factory Injection**
+
+Now instead inject:
+
+```java id="2mqqha"
+Supplier<Lexicon>
+```
+
+Example:
+
+```java id="8g2jlwm"
+class SpellChecker {
+
+    private final Supplier<Lexicon> dictionaryFactory;
+
+    public SpellChecker(Supplier<Lexicon> dictionaryFactory) {
+        this.dictionaryFactory = dictionaryFactory;
+    }
+
+    public void check(String word) {
+        Lexicon dictionary = dictionaryFactory.get();
+    }
+}
+```
+
+Now the object can create dictionaries dynamically when needed.
+
+Why Inject a Factory Instead of an Instance? Because sometimes you need:
+
+* multiple instances
+* lazy creation
+* runtime-specific objects
+* short-lived objects
+* dynamic selection
+
+**Example Problem**
+
+Suppose a game creates many tiles:
+
+```text id="i8vqt9"
+Tile1
+Tile2
+Tile3
+...
+```
+
+Injecting one Tile object is insufficient. You need a mechanism to produce many tiles.
+
+
+Java 8 introduced: `The Supplier<T> Interface`, It represents: a function/object that supplies objects of type T on demand.
+
+Definition conceptually:
+
+```java id="xg0t44"
+interface Supplier<T> {
+    T get();
+}
+```
+Example
+
+```java id="gt5s0v"
+Supplier<Tile> factory = () -> new Tile();
+```
+
+Usage:
+
+```java id="lpjohd"
+Tile tile = factory.get();
+```
+
+Each call can create a new object.
+
+For example, here is a method that makes a mosaic using a client-provided factory to produce each tile:
+```java
+    public Mosaic create(
+            Supplier<? extends Tile> tileFactory,
+            int numberOfTiles) {
+```
+The method says: I accept any factory capable of producing Tile objects or subclasses of Tile, This follows the substitution principle.
+```java
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Supplier;
+
+/*
+ * =========================================
+ * Tile Abstraction
+ * =========================================
+ */
+interface Tile {
+    String render();
+}
+
+/*
+ * =========================================
+ * Concrete Tile Implementations
+ * =========================================
+ */
+class GrassTile implements Tile {
+
+    @Override
+    public String render() {
+        return "Grass";
+    }
+}
+
+class WaterTile implements Tile {
+
+    @Override
+    public String render() {
+        return "Water";
+    }
+}
+
+class StoneTile implements Tile {
+
+    @Override
+    public String render() {
+        return "Stone";
+    }
+}
+
+/*
+ * =========================================
+ * Mosaic Object
+ * =========================================
+ */
+class Mosaic {
+
+    private final List<Tile> tiles;
+
+    public Mosaic(List<Tile> tiles) {
+        this.tiles = tiles;
+    }
+
+    public void display() {
+
+        System.out.println("Mosaic:");
+
+        for (Tile tile : tiles) {
+            System.out.println("- " + tile.render());
+        }
+
+        System.out.println();
+    }
+}
+
+/*
+ * =========================================
+ * Mosaic Builder
+ *
+ * Dependency Injection:
+ *     Supplier<? extends Tile> is injected
+ *
+ * Factory Method:
+ *     tileFactory.get() creates Tile objects
+ * =========================================
+ */
+class MosaicBuilder {
+
+    public Mosaic create(
+            Supplier<? extends Tile> tileFactory,
+            int numberOfTiles) {
+
+        List<Tile> tiles = new ArrayList<>();
+
+        for (int i = 0; i < numberOfTiles; i++) {
+
+            /*
+             * Factory Method Call
+             */
+            Tile tile = tileFactory.get();
+
+            tiles.add(tile);
+        }
+
+        return new Mosaic(tiles);
+    }
+}
+
+/*
+ * =========================================
+ * Main Application
+ * =========================================
+ */
+public class Main {
+
+    public static void main(String[] args) {
+
+        MosaicBuilder builder = new MosaicBuilder();
+
+        /*
+         * =========================================
+         * Inject GrassTile Factory
+         * =========================================
+         */
+        Mosaic grassMosaic =
+                builder.create(GrassTile::new, 5);
+
+        grassMosaic.display();
+
+        /*
+         * =========================================
+         * Inject WaterTile Factory
+         * =========================================
+         */
+        Mosaic waterMosaic =
+                builder.create(WaterTile::new, 3);
+
+        waterMosaic.display();
+
+        /*
+         * =========================================
+         * Inject StoneTile Factory
+         * =========================================
+         */
+        Mosaic stoneMosaic =
+                builder.create(StoneTile::new, 4);
+
+        stoneMosaic.display();
+
+        /*
+         * =========================================
+         * Custom Lambda Factory
+         * =========================================
+         */
+        Mosaic customMosaic =
+                builder.create(() -> {
+
+                    System.out.println("Creating special tile...");
+
+                    return new GrassTile();
+
+                }, 2);
+
+        customMosaic.display();
+    }
+}
+```
+Methods that take a `Supplier<T>` on input should typically constrain the factory’s
+type parameter using a bounded wildcard type to allow the client to pass
+in a factory that creates any subtype of a specified type.
+**Why `<? extends Tile> ?`**
+
+This is Java generics covariance flexibility.
+
+---
+
+**Without Wildcard**
+
+```java id="x0u9b6"
+Supplier<Tile>
+```
+
+Only exact Tile suppliers allowed.
+
+---
+
+**With Wildcard**
+
+```java id="0gws4i"
+Supplier<? extends Tile>
+```
+
+Allows:
+
+```java id="vyz0u2"
+Supplier<GrassTile>
+Supplier<WaterTile>
+Supplier<StoneTile>
+```
+
+where:
+
+```java id="fjlwmh"
+GrassTile extends Tile
+```
+
+This increases flexibility.
+
+---
+
+**Factory Method Pattern Connection**
+
+The passage references:
+
+Design Patterns
+
+specifically the:
+
+```text id="4vf2r5"
+Factory Method Pattern
+```
+
+---
+
+**Factory Method Pattern**
+
+Core idea: Object creation delegated to specialized method/object
+
+instead of direct construction.
+
+**Without Factory**
+
+```java id="a9v58h"
+Tile tile = new GrassTile();
+```
+Hardcoded dependency.
+
+**With Factory**
+
+```java id="l00j05"
+Tile tile = tileFactory.get();
+```
+Creation abstracted away.
+
+---
+
+**Benefits of Factory Injection**
+
+**1. Lazy Creation**
+
+Object created only when needed.
+
+```java id="cqjlwm"
+tileFactory.get()
+```
+
+---
+
+**2. Multiple Instances**
+
+Each call may return new object.
+
+---
+
+**3. Runtime Flexibility**
+
+Different factories can produce different implementations.
+
+---
+
+**4. Encapsulation of Creation Logic**
+
+Complex creation hidden inside factory.
+
+---
+
+**5. Testability**
+
+Inject fake factory during tests.
+
+```java id="jlwmqa"
+Supplier<Tile> fakeFactory = () -> fakeTile;
+```
+
+---
+
+**Real-World Examples**
+
+**Database Connections**
+
+Instead of injecting one connection: `Connection`
+
+inject: `DataSource` which produces connections.
+
+---
+
+**Thread Creation**
+
+Inject: `ThreadFactory`, instead of raw threads.
+
+---
+
+**Object Pools**
+
+Inject pool/factory that creates reusable objects.
+
+---
+
+**HTTP Clients**
+
+Factory creates request-specific objects.
+
+---
+
+**Relationship to Dependency Injection**
+
+This is still DI.
+
+But instead of injecting: resource instance, you inject: resource creator.
+
+---
+
+**Important Architectural Shift**
+
+Normal DI: Inject WHAT to use
+
+Factory injection: Inject HOW to create what to use
+
+---
+
+**Dependency Graph Perspective**
+
+Sometimes dependencies are:
+
+* singleton/shared
+* immutable/global
+
+Sometimes dependencies are:
+
+* transient
+* dynamic
+* contextual
+
+Factories solve the second case.
+
+---
+
+**Relationship to IoC Containers**
+
+Modern DI frameworks internally use factories heavily.
+
+Examples:
+
+* bean factories
+* provider interfaces
+* scoped object creators
+
+Frameworks like:
+
+* Spring Framework
+* Google Guice
+
+often inject providers/factories behind the scenes.
 
 ---
 
@@ -1276,6 +2339,14 @@ Class receives everything it needs
 ```
 
 That single change greatly improves system flexibility and maintainability.
+
+## Summary
+In summary, do not use a singleton or static utility class to implement a class
+that depends on one or more underlying resources whose behavior affects that of
+the class, and do not have the class create these resources directly. Instead, pass
+the resources, or factories to create them, into the constructor (or static factory or
+builder). This practice, known as dependency injection, will greatly enhance the
+flexibility, reusability, and testability of a class.
 
 ## Related Topics
 - Dependency Inversion Principle
