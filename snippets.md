@@ -13,6 +13,26 @@ to replace all bullets with bold ****
 
 ## Tabs
 <Tabs groupId="code">
+
+<TabItem value="Class(Before)" label="Class(Before)">
+
+```java
+
+```
+
+</TabItem>
+
+<TabItem value="Class(After)" label="Class(After)">
+
+```java
+
+```
+
+</TabItem>
+</Tabs>
+
+
+<Tabs groupId="code">
 <TabItem value="Clang" label="Clang">
 ```C
 ```

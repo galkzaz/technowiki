@@ -5,14 +5,34 @@ description: Kafka is a distributed streaming platform that allows you to publis
 sidebar_position: 3
 ---
 
-## Messages
+Apache Kafka is a distributed event-streaming platform designed for high-throughput, fault-tolerant, scalable data pipelines and real-time applications.
+
+At its core, Kafka is built around **append-only logs**, **distributed storage**, and **publish-subscribe messaging**.
+
+
+## Event / Message
+The smallest unit in Kafka is an **event** (also called a message or record).
+
 A **message**, also called a *record*, is the basic piece of data flowing through Kafka. 
 
-Messages are how Kafka represents your data. Each message has 
-1. a timestamp, 
-2. a value, and
-3. an optional key. 
-4. Custom headers can be used if desired as well. 
+Messages are how Kafka represents your data. An event typically contains:
+
+* **Key** — an optional key, used for partitioning
+* **Value** — actual payload/data
+* **Timestamp**
+* **Headers** - Custom headers can be used if desired as well(optional metadata)
+
+Example:
+
+```json
+{
+  "key": "order-123",
+  "value": {
+    "customerId": 55,
+    "amount": 120.5
+  }
+}
+```
 
 ![Kafka messages are made up of a key and a value (timestamp and optional headers are not shown).](/docs/assets/software-engineering/design-architecture/distributed-systems/messaging-systems/kafka/message.png)
 
@@ -21,11 +41,23 @@ A simple example of a message could be something like the following:
 2. failed with the message “Alert: Machine Failed” (a message value) 
 3. at “2020-10-02T10:34:11.654Z” (a message timestamp). 
 
-## Brokers
-Now that we have a record, how do we let Kafka know about it? You will deliver this message to Kafka by sending it to what are known as brokers.
 
-**Brokers** can be thought of as the server side of Kafka. Before virtual machines and Kubernetes, you may have seen one physical server hosting one broker. 
 ## topics
+A **topic** is a named stream of events.
+
+Think of a topic as:
+
+* a database table
+* or a log file
+* or a queue category
+
+Examples:
+
+* `orders`
+* `payments`
+* `user-events`
+
+Applications write events to topics and read events from topics.
 
 To send our first message, we will need a place to send it.To create a topic, 
 <Tabs groupId="code">
@@ -71,12 +103,182 @@ docker compose exec kafka kafka-topics --create --bootstrap-server localhost:909
 
 </Tabs>
 
-You should see the output on the console where you just ran the command: `Created topic kinaction_helloworld`. 
-
-the name `kinaction_helloworld` is used for our topic. We could have used any name, of course, but a popular option is to follow general Unix/Linux naming conventions, including not using spaces
+There is a configuration to enable or disable the autocreation of topics. However, it is usually best to control the creation of topics as a specific action because we do not want new topics to randomly show up if someone mistypes a topic name once or twice or to be recreated due to producer retries.
 ## partitions
+Topics are divided into **partitions**.
+
+A partition is:
+
+* an ordered,
+* immutable,
+* append-only log.
+
+Example:
+
+```text
+Topic: orders
+
+Partition 0:
+[0] -> order1
+[1] -> order2
+
+Partition 1:
+[0] -> order3
+[1] -> order4
+```
+
+Important properties:
+
+### Ordering
+
+Kafka guarantees ordering **within a partition**.
+
+If messages with the same key go to the same partition:
+
+```text
+order-created
+order-paid
+order-shipped
+```
+
+they remain ordered.
+
+---
+
+### Scalability
+
+Partitions allow Kafka to scale horizontally.
+
+More partitions:
+
+* more parallelism
+* higher throughput
+* distributed load
+
+
 ## offsets
+Each message inside a partition has an **offset**.
+
+Offset = unique sequential identifier inside the partition.
+
+Example:
+
+```text
+Partition 0
+
+Offset 0 -> msgA
+Offset 1 -> msgB
+Offset 2 -> msgC
+```
+
+Consumers use offsets to track progress.
+
+## Brokers
+Now that we have a record, how do we let Kafka know about it? You will deliver this message to Kafka by sending it to what are known as brokers.
+
+**Brokers** can be thought of as the server side of Kafka. Before virtual machines and Kubernetes, you may have seen one physical server hosting one broker. 
+
+A Kafka server is called a **broker**.
+
+A Kafka cluster consists of multiple brokers.
+
+Responsibilities:
+
+* store partitions
+* serve reads/writes
+* replicate data
+* coordinate consumers/producers
+
+Example:
+
+```text
+Broker 1
+Broker 2
+Broker 3
+```
 
 ## producers
-## consumers
-## consumer-groups
+A producer writes events into Kafka topics.
+
+Responsibilities:
+
+* choose topic
+* optionally choose key
+* send records
+* handle retries/compression/batching
+
+Example flow:
+
+```text
+Application -> Producer -> Kafka Topic
+```
+### Partition Selection
+
+Producer determines partition by:
+
+#### Explicit partition
+
+```java
+partition = 2
+```
+
+#### Key hashing
+
+```text
+hash(key) % numPartitions
+```
+
+#### Round-robin
+
+If no key exists.
+
+---
+
+## Consumers
+A consumer reads events from topics.
+
+Example:
+
+```text
+Kafka Topic -> Consumer -> Application
+```
+
+Consumers pull data from Kafka.
+
+Kafka does not push messages.
+
+## Consumer Group
+Multiple consumers can cooperate using a **consumer group**.
+
+Key rule:
+
+> One partition is consumed by only one consumer within the same group.
+
+Example:
+
+```text
+Topic: orders (3 partitions)
+
+Consumer Group:
+- consumer A
+- consumer B
+- consumer C
+```
+
+Each consumer gets assigned partitions.
+### Parallelism Model
+
+Maximum parallelism:
+
+```text
+parallelism <= number of partitions
+```
+
+If:
+
+* 3 partitions
+* 10 consumers
+
+then only 3 consumers actively consume.
+
+---

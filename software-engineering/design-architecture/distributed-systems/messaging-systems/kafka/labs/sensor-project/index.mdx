@@ -3,3 +3,287 @@ id: sdd
 ---
 
 Because almost all clusters have more than one server (or node), we will have three Kafka servers running for most of our examples. This local test setup should let us see the output of commands against more than one broker, which will be similar to running with multiple brokers across different machines.
+
+## Installing Kafka on your local machine
+To get all the components up and running, issue the command `docker-compose up -d` in the directory with the YAML file as the following listing shows.
+```yaml
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.9.0
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=*"
+
+  broker1:
+    image: confluentinc/cp-kafka:7.9.0
+    hostname: broker1
+    container_name: broker1
+    depends_on:
+      - zookeeper
+    ports:
+      - "29092:29092"
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker1:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+
+  broker2:
+    image: confluentinc/cp-kafka:7.9.0
+    hostname: broker2
+    container_name: broker2
+    depends_on:
+      - zookeeper
+    ports:
+      - "29093:29093"
+      - "9093:9093"
+      - "9201:9201"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker2:29093,PLAINTEXT_HOST://localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9201
+      KAFKA_JMX_HOSTNAME: localhost
+
+  broker3:
+    image: confluentinc/cp-kafka:7.9.0
+    hostname: broker3
+    container_name: broker3
+    depends_on:
+      - zookeeper
+    ports:
+      - "29094:29094"
+      - "9094:9094"
+      - "9301:9301"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker3:29094,PLAINTEXT_HOST://localhost:9094
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9301
+      KAFKA_JMX_HOSTNAME: localhost
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.9.0
+    hostname: schema-registry
+    container_name: schema-registry
+    depends_on:
+      - broker1
+      - broker2
+      - broker3
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker1:29092'
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
+  ksqldb-server:
+    image: confluentinc/cp-ksqldb-server:7.9.0
+    hostname: ksqldb-server
+    container_name: ksqldb-server
+    depends_on:
+      - broker1
+      - broker2
+      - broker3
+      - schema-registry
+    ports:
+      - "8088:8088"
+    environment:
+      KSQL_CONFIG_DIR: "/etc/ksqldb"
+      KSQL_KSQL_EXTENSION_DIR: "/etc/ksqldb/ext/"
+      KSQL_LOG4J_OPTS: "-Dlog4j.configuration=file:/etc/ksqldb/log4j.properties"
+      KSQL_BOOTSTRAP_SERVERS: "broker1:29092"
+      KSQL_HOST_NAME: ksqldb-server
+      KSQL_LISTENERS: "http://0.0.0.0:8088"
+      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: "true"
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: "true"
+      KSQL_CACHE_MAX_BYTES_BUFFERING: 0
+      KSQL_KSQL_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+
+  ksqldb-cli:
+    image: confluentinc/cp-ksqldb-cli:7.9.0
+    container_name: ksqldb-cli
+    depends_on:
+      - broker1
+      - ksqldb-server
+    entrypoint: /bin/sh
+    tty: true
+    environment:
+      KSQL_CONFIG_DIR: "/etc/ksqldb"
+```
+To Validates that all components are up and running
+```bash
+docker compose ps --format "{{.Names}}: {{.State}}"
+```
+## Creating the kinaction_helloworld topic
+To send our first message, we will need a place to send it. To create a topic, we will run:
+<Tabs groupId="code">
+
+<TabItem value="Docker" label="Docker">
+
+```bash
+docker exec broker1 kafka-topics \
+  --create \
+  --bootstrap-server broker1:29092 \
+  --topic kinaction_helloworld \
+  --partitions 3 \
+  --replication-factor 3
+```
+
+</TabItem>
+
+<TabItem value="Linux" label="Linux/Windows">
+
+we will run the `kafka-topics.sh` command in a shell window with the `--create` option . 
+
+You will find this script in the installation directory of Kafka, where the path
+might look like this: `~/kafka_2.13-2.7.1/bin`. 
+
+```bash
+bin/kafka-topics.sh --create --bootstrap-server localhost:9094--topic kinaction_helloworld --partitions 3 --replication-factor 3
+```
+</TabItem>
+
+<TabItem value="Windows" label="Windows">
+
+Note that Windows users can use the `.bat`
+files with the same name as the shell equivalent. For example, `kafka-topics.sh` has
+the Windows equivalent script named `kafka-topics.bat`, which should be located
+in the `<kafka_install_directory>/bin/windows` directory.
+```bash
+bin/kafka-topics.bat --create --bootstrap-server localhost:9094 --topic kinaction_helloworld --partitions 3 --replication-factor 3
+```
+</TabItem>
+
+</Tabs>
+In listing above:
+- the name `kinaction_helloworld` is used for our topic.
+- The `--partitions` option determines how many parts we want the topic to be split
+into. For example, because we have three brokers, using three partitions gives us one partition per broker. For our test workloads, we might not need this many, based on
+data needs alone. However, creating more than one partition at this stage lets us see
+how the system works in spreading data across partitions. 
+- The `--replication-factor`
+also is set to three in this example. In essence, this says that for each partition, we want
+to have three replicas. These copies are a crucial part of our design to improve reliability and fault tolerance. 
+- The `--bootstrap-server` option points to our local Kafka broker. This is why the broker should be running before invoking this script. 
+
+You should see the output on the console where you just ran the command: `Created topic kinaction_helloworld`.
+
+To verify:
+```bash
+docker exec broker1 kafka-topics \
+  --describe \
+  --topic kinaction_helloworld \
+  --bootstrap-server broker1:29092
+```
+Note that our topic is not like a traditional single topic in other messaging systems: we have replicas and partitions.
+
+The output from this command shows in the first line a quick data view of the total count
+of partitions and replicas that this topic has. The following lines show each partition
+for the topic. The second line of output is specific to the partition labeled 0 and so
+forth.
+
+```
+Topic: kinaction_helloworld     TopicId: 3IM3zMcjQXKCoGb6uRLENw PartitionCount: 3       ReplicationFactor: 3    Configs: 
+        Topic: kinaction_helloworld     Partition: 0    Leader: 0       Replicas: 0,1,2 Isr: 0,1,2      Elr: N/A        LastKnownElr: N/A
+        Topic: kinaction_helloworld     Partition: 1    Leader: 1       Replicas: 1,2,0 Isr: 1,2,0      Elr: N/A        LastKnownElr: N/A
+        Topic: kinaction_helloworld     Partition: 2    Leader: 2       Replicas: 2,0,1 Isr: 2,0,1      Elr: N/A        LastKnownElr: N/A
+```        
+The numbers we see next to the labels for the `Leader`, `Replicas`, and `Isr` fields are the `broker.ids` that correspond to the value for our three brokers that we set in our configuration files. Briefly looking at the output, we can see that our topic consists of three partitions: `Partition 0`, `Partition 1`, and `Partition 2`. Each partition was replicated three times as we intended on topic creation.
+
+`Partition 0`, which has its replica copy leader on broker `0`. This
+partition also has replicas that exist on brokers `1` and `2`. The last column, `Isr`, stands
+for in-sync replicas. In-sync replicas show which brokers are current and not lagging
+behind the leader. Having a partition replica copy that is out of date or behind the
+leader is an issue
+!(View of one broker)[/docs/assets/software-engineering/design-architecture/distributed-systems/messaging-systems/kafka/labs/sensor-project/view_of_one_broker.png]
+For our kinaction_helloworld topic, note how broker 0 holds the leader replica
+for partition 0. It also holds replica copies for partitions 1 and 2 for which it is not the
+leader replica. In the case of its copy of partition 1, the data for this replica will be cop-
+ied from broker 1.
+
+We can also look at all existing topics that have been created and make sure that
+our new one is on the list. The `--list` option is what we can reach for to achieve this
+output. 
+```bash
+docker exec broker1 kafka-topics \
+  --list \
+  --bootstrap-server broker1:29092
+```
+
+```
+__consumer_offsets
+__transaction_state
+_confluent-ksql-default__command_topic
+_schemas
+default_ksql_processing_log
+kinaction_helloworld
+```
+## send a message
+To send a message, we will start a terminal tab or window to run a producer as a console application to take user input.
+
+The command in listing starts an interactive
+program that takes over the shell; you won’t get your prompt back to type more com-
+mands until you press Ctrl-C to quit the running application. You can just start typing,
+maybe something as simple as the default programmer’s first print statement with a pre-
+fix of kinaction (for Kafka In Action) as the following listing demonstrates:
+```bash
+docker exec -it broker1 kafka-console-producer \
+  --bootstrap-server broker1:29092 \
+  --topic kinaction_helloworld
+```
+we reference the topic that we want to interact with using a bootstrap-server parameter. This parameter can be just one (or a list) of the current brokers in our cluster. By supplying this information, the cluster can obtain the metadata it needs to work with the topic.
+
+After running it, the terminal waits for input.
+
+Type messages:
+```
+hello
+this is kafka
+message 3
+```
+Each line is sent as a Kafka message.
+
+Now, we will start a new terminal tab or window to run a consumer that also runs as a console application. The command in listing 2.5 starts a program that takes over the shell as well [2]. On this end, we should see the message we wrote in the producer console. Make sure that you use the same topic parameter for both commands; otherwise, you won’t see anything:
+```bash
+docker exec -it broker2 kafka-console-consumer \
+  --bootstrap-server broker2:29093 \
+  --topic kinaction_helloworld \
+  --from-beginning
+```
+You should see:
+```
+hello
+this is kafka
+message 3
+```
+
+You can also send a single message non-interactively:
+```bash
+echo "hello kafka" | docker exec -i broker1 kafka-console-producer \
+  --bootstrap-server broker1:29092 \
+  --topic kinaction_helloworld
+```
