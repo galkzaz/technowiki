@@ -9,6 +9,9 @@ Spring Cloud Stream is a framework from the Spring ecosystem that helps you buil
 Spring Cloud Stream provides a streaming abstraction over messaging, based on the publish and subscribe
 integration pattern. 
 
+Spring Cloud Stream is based on the publish and subscribe pattern, where a publisher publishes
+messages to topics and subscribers subscribe to topics they are interested in receiving messages from.
+
 **Spring Cloud Stream**, built on top of **Spring Cloud Function**, provides you with
 all the necessary plumbing to integrate your functions with external messaging
 systems like RabbitMQ or Kafka.
@@ -102,6 +105,14 @@ to a destination binding.
 ## Enabling Spring Cloud Stream 
 Spring Cloud Function and Spring Boot Starter is already included in Spring Cloud Stream.
 
+To specify what version of Spring Cloud we want to use, we first declare a variable for the version:
+
+Next, we use the variable to set up dependency management for the specified Spring Cloud version.
+
+To bring in Spring Cloud Stream and its binders for RabbitMQ and Kafka, we need to 
+- add the two starter dependencies known as `spring-cloud-starter-stream-rabbit` and `spring-cloud-starter-stream-kafka` in all four microservice projects. 
+- We also need a test dependency in the **product-composite** project, `spring-cloud-stream::test-binder`, to bring in test support.
+
 <Tabs>
   <TabItem value="maven" label="Maven">
   
@@ -129,8 +140,8 @@ Spring Cloud Function and Spring Boot Starter is already included in Spring Clou
         <groupId>org.springframework.cloud</groupId>
         <artifactId>spring-cloud-starter-stream-kafka</artifactId>
         <version>${spring.cloud.version}</version>
-    </dependency
-            <dependency>
+    </dependency>
+    <dependency>
         <groupId>org.springframework.cloud</groupId>
         <artifactId>spring-cloud-stream-test-support</artifactId>
         <scope>test</scope>
@@ -141,7 +152,7 @@ Spring Cloud Function and Spring Boot Starter is already included in Spring Clou
   
 ```groovy
 ext {
- springCloudVersion = "2022.0.1"
+  springCloudVersion = "2025.0.0"
 }
 dependencyManagement {
  imports {
@@ -158,7 +169,11 @@ dependencies {
 </Tabs>
 
 ## Programming Model (Modern Style)
-Spring Cloud Stream uses functional programming:
+The programming model is based on a functional paradigm,
+where functions implementing one of the functional interfaces (Supplier, Function, or Consumer)
+in the java.util.function package can be chained together to perform decoupled event-based
+processing. To trigger such functional-based processing externally, from non-functional code,
+the StreamBridge helper class can be used.
 ```java
 @Bean
 public Supplier<String> supplier() {
@@ -177,6 +192,9 @@ public Function<String, String> processor() {
 - Consumer → receives data 
 - Function → transforms data
 
+To tie the various functions together, we use configuration. 
+
+This programming model can be used independently of the messaging system used, for example, RabbitMQ or Apache Kafka!
 ## Sending and Receiving messages
 Spring Cloud Stream comes with two programming models: one older and nowadays deprecated model based on the use of annotations (for example, `@EnableBinding`, `@Output`, and `@StreamListener`) and one newer model based on writing functions. 
 ## Implementing event producers
@@ -217,7 +235,7 @@ ML RECEIVED: ML PROCESSED: Wed Mar 09 16:28:33 CET 2021
 ```
 In cases where the supplier should be triggered by an external event instead of using a timer, the
 StreamBridge helper class can be used. For example, if a message should be published to the
-processor when a REST API, sampleCreateAPI, is called, the code could look like the following:
+processor when a REST API, `sampleCreateAPI`, is called, the code could look like the following:
 ```java
 @Autowired
 private StreamBridge streamBridge; 
@@ -227,8 +245,10 @@ void sampleCreateAPI(@RequestBody String body) {
     streamBridge.send("myProcessor-in-0", body);
 }
 ```
+The `StreamBridge` helper class is used to trigger the processing. It will publish a message on a topic. 
+
 ## Implementing event consumers
-A subscriber is implemented as a Spring bean implementing the java.util.function.Consumer
+A subscriber is implemented as a Spring bean implementing the `java.util.function.Consumer`
 functional interface. For example, the following is a subscriber that consumes messages as strings:
 ```java
 @Bean
@@ -237,8 +257,7 @@ public Consumer<String> mySubscriber() {
 }
 ```
 
-To make Spring Cloud Stream aware of these functions, we need to declare them using the `spring.
-cloud.function.definition` configuration property. For example, for the three functions defined
+To make Spring Cloud Stream aware of these functions, we need to declare them using the `spring.cloud.function.definition` configuration property. For example, for the three functions defined
 previously, this would look as follows:
 ```yml
 spring.cloud.function:
@@ -261,43 +280,987 @@ This will result in the following message flow:
 myPublisher → myProcessor → mySubscriber
 ```
 
+## Consumer groups
+if we scale up the number of instances of a message consumer, for example,
+if we start two instances of the product microservice, both instances of the product microservice
+will consume the same messages, This could result in one message being processed two times, potentially leading to duplicates
+or other undesired inconsistencies in the database. Therefore, we only want one instance per
+consumer to process each message. This can be solved by introducing a consumer group, In Spring Cloud Stream, a consumer group can be configured on the consumer side. For example,
+for the product microservice, it will look like this:
+```yml
+spring.cloud.stream:
+  defaultBinder: rabbit
+  default.contentType: application/json
+  bindings.messageProcessor-in-0:
+    destination: products
+    group: productsGroup
+```
+From this configuration:
+- Spring Cloud Stream applies, by default, a naming convention for binding a configuration to a function. For messages sent to a function, the binding name is `<functionName>-in-<index>`:
+    - functionName is the name of the function, which is `messageProcessor`.
+    - `index` is set to `0`, unless the function requires multiple input or output arguments. We will not use multi-argument functions, so index will always be set to 0 in our examples.
+    - For outgoing messages, the binding name convention is `<functionName>-out-<index>`.
+- The `destination` property specifies the name of the topic that messages will be consumed
+from, which is products in this case.
+- The `group` property specifies what consumer group to add instances of the product microservice to, which is `productsGroup` in this example. This means that messages sent to the products topic will only be delivered by Spring Cloud Stream to one of the instances of the product microservice.
+
+## Guaranteed Order and Partitions
+
+**Guaranteed ordering** and **partitioning** are closely related concepts in event-driven systems and messaging platforms such as Spring Cloud Stream and Apache Kafka.
+
+If the business logic requires that messages are consumed and processed in the same order as they
+were sent, we cannot use multiple instances per consumer to increase processing performance;
+for example, we cannot use consumer groups. This might, in some cases, lead to an unacceptable
+latency in the processing of incoming messages.
+
+We can use **partitions** to ensure that messages are delivered in the same order as they were sent
+but without losing performance and scalability.
+
+### 1. Why Ordering is a Problem
+
+Imagine an Order Service publishes these events:
+
+```text
+OrderCreated(orderId=100)
+OrderPaid(orderId=100)
+OrderShipped(orderId=100)
+```
+
+Consumers expect:
+
+```text
+Created → Paid → Shipped
+```
+
+But in distributed systems:
+
+* Multiple producer instances may exist
+* Multiple consumer instances may exist
+* Messages may be processed concurrently
+* Different brokers may route messages differently
+
+Without special handling, consumers might receive:
+
+```text
+Paid
+Created
+Shipped
+```
+
+or
+
+```text
+Created
+Shipped
+Paid
+```
+
+which can corrupt business state.
+
+---
+
+### 2. What Does Guaranteed Order Mean?
+
+Guaranteed ordering means:
+
+> Messages that belong to the same business entity are always processed in the exact order they were produced.
+
+Example:
+
+For Order #100:
+
+```text
+Created
+Paid
+Shipped
+```
+
+must always arrive in that order.
+
+For Order #200:
+
+```text
+Created
+Paid
+```
+
+must also arrive in order.
+
+However:
+
+```text
+Order100 Created
+Order200 Created
+Order100 Paid
+Order200 Paid
+```
+
+may be interleaved.
+
+Ordering is usually guaranteed **per key**, not globally.
+
+---
+
+### 3. How Kafka Provides Ordering
+
+Kafka guarantees order only **inside a partition**.
+
+Suppose a topic:
+
+```text
+orders
+```
+
+has:
+
+```text
+Partition 0
+Partition 1
+Partition 2
+```
+
+Messages inside a partition are ordered:
+
+```text
+Partition 0
+
+Offset 0 -> Created(100)
+Offset 1 -> Paid(100)
+Offset 2 -> Shipped(100)
+```
+
+Kafka guarantees consumers read:
+
+```text
+Created
+Paid
+Shipped
+```
+
+in that order.
+
+---
+
+### 4. What is Partitioning?
+
+Partitioning means dividing a topic into multiple ordered streams.
+
+Example:
+
+```text
+Orders Topic
+
+Partition 0
+Partition 1
+Partition 2
+```
+
+Visualized:
+
+```text
+Orders Topic
+│
+├── Partition 0
+├── Partition 1
+└── Partition 2
+```
+
+Benefits:
+
+* Scalability
+* Parallel processing
+* High throughput
+* Ordering within each partition
+
+---
+
+### 5. How Messages Are Assigned to Partitions
+
+A partition key is chosen.
+
+Example:
+
+```java
+orderId
+```
+
+Kafka calculates:
+
+```text
+hash(orderId) % numberOfPartitions
+```
+
+Suppose:
+
+```text
+hash(100) % 3 = 0
+hash(200) % 3 = 1
+```
+
+Result:
+
+```text
+Order100 -> Partition 0
+Order200 -> Partition 1
+```
+
+All events for Order100 go to the same partition.
+
+---
+
+### 6. Why Partitioning Enables Ordering
+
+Suppose:
+
+```text
+Order100 Created
+Order100 Paid
+Order100 Shipped
+```
+
+All use key:
+
+```text
+100
+```
+
+Kafka sends all of them to:
+
+```text
+Partition 0
+```
+
+Partition 0:
+
+```text
+Offset 0 Created
+Offset 1 Paid
+Offset 2 Shipped
+```
+
+Order is preserved.
+
+If events were spread across partitions:
+
+```text
+Created -> P0
+Paid -> P1
+Shipped -> P2
+```
+
+ordering would be impossible.
+
+---
+
+### 7. Spring Cloud Stream Partitioning
+
+Spring Cloud Stream hides broker-specific APIs.
+
+You tell it:
+
+```text
+Use orderId as partition key
+```
+
+and it routes messages consistently.
+
+---
+
+### Producer Example
+
+#### Event
+
+```java
+public record OrderEvent(
+        Long orderId,
+        String type
+) {}
+```
+
+---
+
+#### Producer
+
+```java
+@Bean
+public Supplier<Message<OrderEvent>> orderEvents() {
+
+    return () -> MessageBuilder
+            .withPayload(
+                new OrderEvent(100L, "CREATED"))
+            .setHeader("orderId", 100L)
+            .build();
+}
+```
+
+---
+
+#### Configuration
+
+```yaml
+spring:
+  cloud:
+    stream:
+      bindings:
+        orderEvents-out-0:
+          destination: orders
+
+      kafka:
+        bindings:
+          orderEvents-out-0:
+            producer:
+              message-key-expression: headers['orderId']
+```
+
+This tells Spring Cloud Stream:
+
+```text
+Partition Key = orderId
+```
+
+Kafka then routes all events with:
+
+```text
+orderId=100
+```
+
+to the same partition.
+
+---
+
+### Alternative: Native Partition Configuration
+
+```yaml
+spring:
+  cloud:
+    stream:
+      bindings:
+        orderEvents-out-0:
+          producer:
+            partition-key-expression: payload.orderId
+            partition-count: 3
+```
+
+Meaning:
+
+```text
+Use orderId
+Generate partition number
+Send to one of 3 partitions
+```
+
+---
+
+### Example Routing
+
+Events:
+
+```text
+Created(100)
+Paid(100)
+Shipped(100)
+
+Created(200)
+Paid(200)
+```
+
+Possible distribution:
+
+```text
+Partition 0
+
+Created(100)
+Paid(100)
+Shipped(100)
+
+Partition 1
+
+Created(200)
+Paid(200)
+```
+
+Ordering remains correct for each order.
+
+---
+
+### 8. Consumer Side
+
+```java
+@Bean
+public Consumer<OrderEvent> processOrder() {
+
+    return event -> {
+        System.out.println(event);
+    };
+}
+```
+
+Configuration:
+
+```yaml
+spring:
+  cloud:
+    stream:
+      bindings:
+        processOrder-in-0:
+          destination: orders
+```
+
+Consumer receives:
+
+```text
+Created
+Paid
+Shipped
+```
+
+for order 100.
+
+---
+
+### 9. Multiple Consumer Instances
+
+Suppose:
+
+```text
+orders topic
+3 partitions
+```
+
+and
+
+```text
+Consumer Instance A
+Consumer Instance B
+Consumer Instance C
+```
+
+Kafka assigns:
+
+```text
+Partition 0 -> A
+Partition 1 -> B
+Partition 2 -> C
+```
+
+Example:
+
+```text
+P0: Order100
+P1: Order200
+P2: Order300
+```
+
+Result:
+
+```text
+A processes Order100
+B processes Order200
+C processes Order300
+```
+
+in parallel.
+
+---
+
+### 10. Why Ordering Still Works
+
+All events for Order100:
+
+```text
+Created
+Paid
+Shipped
+```
+
+stay in Partition 0.
+
+Only one consumer instance owns Partition 0.
+
+Therefore:
+
+```text
+Created
+Paid
+Shipped
+```
+
+is processed sequentially.
+
+---
+
+### 11. Real Business Example
+
+#### Bank Account
+
+Events:
+
+```text
+Deposit $100
+Withdraw $50
+Withdraw $25
+```
+
+Wrong order:
+
+```text
+Withdraw $50
+Deposit $100
+Withdraw $25
+```
+
+can produce incorrect balances.
+
+Use:
+
+```java
+accountId
+```
+
+as partition key.
+
+All account events go to the same partition:
+
+```text
+Account 123
+ ├ Deposit
+ ├ Withdraw
+ └ Withdraw
+```
+
+Order is guaranteed.
+
+---
+
+### 12. Consumer Groups + Partitions
+
+Suppose:
+
+```text
+Topic: orders
+Partitions: 4
+```
+
+Consumer Group:
+
+```text
+shipping-service
+```
+
+with two instances:
+
+```text
+Shipping-1
+Shipping-2
+```
+
+Assignment:
+
+```text
+P0 -> Shipping-1
+P1 -> Shipping-1
+P2 -> Shipping-2
+P3 -> Shipping-2
+```
+
+Within each partition:
+
+```text
+Order preserved
+```
+
+Across partitions:
+
+```text
+No ordering guarantee
+```
+
+---
+
+### Important Rule
+
+Ordering in Kafka (and therefore in Spring Cloud Stream) is: **Guaranteed per partition**, not **Guaranteed across the entire topic**
+
+Therefore, To guarantee ordering for a business entity:
+1. Choose a partition key
+2. Use the same key for all related events
+3. Ensure those events always go to the same partition
+4. Let a single consumer instance process that partition
+```
+
+This pattern is fundamental for event-driven microservices handling orders, payments, accounts, inventory, and other stateful business entities.
+
 ## Making messaging resilient to failures
-Spring Cloud Stream uses the retry pattern with an exponential backoff strategy by default, relying on the Spring Retry library for imperative consumers and the
-retryWhen() Reactor operator for reactive consumers, you can customize it via configuration properties.
+If a consumer fails to process a message, it may be re-queued for the failing consumer until it is
+successfully processed. If the content of the message is invalid, also known as a **poisoned message**, the message will block the consumer from processing other messages until it is manually
+removed. If the failure is due to a temporary problem, for example, the database can’t be reached
+due to a temporary network error, the processing will probably succeed after a number of retries.
 
-Spring Cloud Stream defines several defaults to make the interaction more resilient, including error channels and graceful shutdown. You can configure different
-aspects of message processing, including dead-letter queues, acknowledgment flows,
-and republishing messages on error.
+It must be possible to specify the number of retries until a message is moved to another storage
+for fault analysis and correction. A failing message is typically moved to a dedicated queue called
+a **dead-letter queue**. To avoid overloading the infrastructure during temporary failure (for example, a network error), it must be possible to configure how often retries are performed, preferably
+with an increasing length of time between each retry.
 
-======
+Spring Cloud Stream uses the retry pattern with an exponential backoff strategy by default, relying on the Spring Retry library for imperative consumers and the `retryWhen()` Reactor operator for reactive consumers, you can customize it via configuration properties.
 
-- **CaveatEmptor**
+Spring Cloud Stream defines several defaults to make the interaction more resilient, including error channels and graceful shutdown. You can configure different aspects of message processing, including dead-letter queues, acknowledgment flows, and republishing messages on error.
 
-  - **Country.java**
+In Spring Cloud Stream, this can be configured on the consumer side, for example, for the product
+microservice, as shown here:
+```yml
+spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+  maxAttempts: 3
+  backOffInitialInterval: 500
+  backOffMaxInterval: 1000
+  backOffMultiplier: 2.0
 
-    ```java
-    ```
-- **Cities API**
+spring.cloud.stream.rabbit.bindings.messageProcessor-in-0.consumer:
+  autoBindDlq: true
+  republishToDlq: true
 
-  - **Country.java**
+spring.cloud.stream.kafka.bindings.messageProcessor-in-0.consumer:
+  enableDlq: true
+```
+In the preceding example, we specify that Spring Cloud Stream should perform 3 retries before
+placing a message on the dead-letter queue. The first retry will be attempted after 500 ms and
+the two other attempts after 1000 ms.
+Enabling the use of dead-letter queues is binding-specific; therefore, we have one configuration
+for RabbitMQ and one for Kafka.
 
-    ```java
-    ```
-- **Multiplication microservices**
+### Relation between Producers, Consumers and Partitions
+The number of **partitions** directly affects how much parallelism Kafka can provide to producers and consumers, but the relationships are different for producers and consumers.
 
-  ```java
-  ```
-- **Microservices with Spring Boot 3 and Spring Cloud**
+#### 1. Producers vs Partitions
 
-  - **Country.java**
+There is **no strict relationship** between the number of producers and the number of partitions.
 
-    ```java
-    ```
-- **Polar Book Shop**
+You can have:
 
-  ```java
-  ```
-  ======
+```text
+1 Producer  -> 10 Partitions
+```
+
+or
+
+```text
+100 Producers -> 3 Partitions
+```
+
+Both are valid.
+
+Example:
+
+```text
+Producer A
+Producer B
+Producer C
+
+          Orders Topic
+    ┌──────┬──────┬──────┐
+    │ P0   │ P1   │ P2   │
+    └──────┴──────┴──────┘
+```
+
+All producers can write to any partition.
+
+Kafka brokers coordinate writes and maintain ordering within each partition.
+
+---
+
+#### 2. Consumers vs Partitions
+
+Here there is a very important relationship.
+
+Within a consumer group:
+
+```text
+One partition can be consumed by only one consumer instance at a time.
+```
+
+Therefore:
+
+```text
+Maximum consumer parallelism
+=
+Number of partitions
+```
+
+---
+
+##### Example 1
+
+Topic:
+
+```text
+Orders
+P0
+P1
+P2
+```
+
+Consumer Group:
+
+```text
+C1
+C2
+C3
+```
+
+Assignment:
+
+```text
+P0 -> C1
+P1 -> C2
+P2 -> C3
+```
+
+All consumers are active.
+
+---
+
+##### Example 2
+
+Topic:
+
+```text
+Orders
+P0
+P1
+P2
+```
+
+Consumer Group:
+
+```text
+C1
+C2
+C3
+C4
+C5
+```
+
+Assignment:
+
+```text
+P0 -> C1
+P1 -> C2
+P2 -> C3
+
+C4 -> idle
+C5 -> idle
+```
+
+Two consumers do nothing.
+
+Why?
+
+Because only three partitions exist.
+
+---
+
+##### Example 3
+
+Topic:
+
+```text
+Orders
+P0
+P1
+P2
+P3
+P4
+P5
+```
+
+Consumers:
+
+```text
+C1
+C2
+```
+
+Assignment:
+
+```text
+C1 -> P0 P1 P2
+C2 -> P3 P4 P5
+```
+
+Consumers handle multiple partitions.
+
+---
+
+#### 3. Spring Cloud Stream Example
+
+Suppose:
+
+```yaml
+spring:
+  cloud:
+    stream:
+      bindings:
+        processOrder-in-0:
+          destination: orders
+          group: shipping-service
+```
+
+Kafka topic:
+
+```text
+orders
+6 partitions
+```
+
+Deployment:
+
+```text
+shipping-service-1
+shipping-service-2
+shipping-service-3
+```
+
+Kafka might assign:
+
+```text
+P0,P1 -> Instance 1
+P2,P3 -> Instance 2
+P4,P5 -> Instance 3
+```
+
+All three instances process messages concurrently.
+
+---
+
+#### 4. Rule of Thumb
+
+Think of partitions as **units of parallelism**.
+
+```text
+Partitions determine:
+✓ Consumer scalability
+✓ Consumer parallelism
+✓ Ordering boundaries
+```
+
+Not:
+
+```text
+✗ Producer scalability
+```
+
+Producers can scale independently.
+
+---
+
+#### 5. Common Sizing Strategy
+
+Suppose you expect:
+
+```text
+8 consumer instances
+```
+
+in the future.
+
+Create:
+
+```text
+12 partitions
+```
+
+instead of:
+
+```text
+2 partitions
+```
+
+Why?
+
+Because later you can run:
+
+```text
+Consumer 1
+Consumer 2
+...
+Consumer 8
+```
+
+and Kafka can distribute partitions among them.
+
+If you only have:
+
+```text
+2 partitions
+```
+
+then no matter how many consumer instances you add:
+
+```text
+Maximum active consumers = 2
+```
+
+---
+
+#### 6. Spring Cloud Stream Partitioning + Scaling
+
+Imagine an e-commerce system:
+
+```text
+Orders Topic
+12 Partitions
+```
+
+Partition key:
+
+```java
+orderId
+```
+
+Spring Cloud Stream:
+
+```yaml
+spring:
+  cloud:
+    stream:
+      bindings:
+        orderEvents-out-0:
+          producer:
+            partition-key-expression: payload.orderId
+            partition-count: 12
+```
+
+Result:
+
+```text
+Order 100 -> P3
+Order 200 -> P8
+Order 300 -> P1
+```
+
+All events for the same order stay together, preserving order, while many consumers can process different orders in parallel.
+
+#### Summary
+
+| Component              | Relationship with Partitions                                  |
+| ---------------------- | ------------------------------------------------------------- |
+| Producers              | No hard limit; many producers can write to the same partition |
+| Consumers (same group) | Maximum active consumers = number of partitions               |
+| Ordering               | Guaranteed only within a partition                            |
+| Scalability            | Partitions determine consumer parallelism                     |
+| Best Practice          | Create enough partitions to support future consumer scaling   |
+
+A useful mental model is:
+
+```text
+Partitions = lanes on a highway
+
+Producers = cars entering the highway
+Consumers = cars leaving the highway
+
+More cars can enter regardless of lanes.
+
+But the number of lanes determines how much traffic can flow in parallel and how many independent streams of ordered messages exist.
+```
 
 ## Testing
 see 11-development/02-spring/07-testing/spring-cloud-stream

@@ -2,7 +2,7 @@
 id: software-systems-operating-systems-linux-architecture
 title: Linux Architecture
 description: Linux Architecture
-sidebar_position: 2
+sidebar_position: 3
 ---
 
 Linux system architecture describes how the operating system is organized internally, how software interacts with hardware, and how different system components cooperate to provide services such as process execution, memory management, networking, storage, and device control.

@@ -1,0 +1,878 @@
+---
+id: software-engineering-design-architecture-architectural-styles-microservices-labs-product-review-recommendation-microservices-lab07
+title: "Lab07: Developing event-driven asynchronous services"
+sidebar_position: 7
+---
+
+In this Lab, we will learn how to develop event-driven and asynchronous versions of the create
+and delete services. The composite service will publish create and delete events on each core
+service topic and then return an OK response to the caller without waiting for processing to take
+place in the core services.
+![The createCompositeProduct and deleteCompositeProduct parts of the landscape](/docs/assets/software-engineering/design-architecture/architectural-styles/microservices/labs/product-review-recommendation-microservices/lab07/lab07-microservice-landscape.png)
+
+To implement the event-driven create and delete services, we will use **Spring Cloud Stream**. 
+
+## Changes in Gradle build files
+To specify what version of Spring Cloud we want to use, we first declare a variable for the version:
+
+Next, we use the variable to set up dependency management for the specified Spring Cloud version.
+
+To bring in Spring Cloud Stream and its binders for RabbitMQ and Kafka, we need to 
+- add the two starter dependencies known as `spring-cloud-starter-stream-rabbit` and `spring-cloud-starter-stream-kafka` in all four microservice projects. 
+- We also need a test dependency in the **product-composite** project, `spring-cloud-stream::test-binder`, to bring in test support.
+
+```groovy
+plugins {
+    id 'org.springframework.boot' version '3.5.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'java'
+}
+
+group = 'se.magnus.microservices.composite.product'
+version = '1.0.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+ext {
+    springCloudVersion = "2025.0.0"
+}
+
+repositories {
+    mavenCentral()
+}
+
+jar {
+    enabled = false
+}
+
+dependencies {
+    implementation project(':api')
+    implementation project(':util')
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'org.springdoc:springdoc-openapi-starter-webflux-ui:2.8.6'
+    implementation 'org.springframework.cloud:spring-cloud-starter-stream-rabbit'
+    implementation 'org.springframework.cloud:spring-cloud-starter-stream-kafka'
+
+    // To avoid the following error message on Apple silicon (for details, see https://github.com/netty/netty/issues/11693):
+    // Unable to load io.netty.resolver.dns.macos.MacOSDnsServerAddressStreamProvider, fallback to system defaults. This may result in incorrect DNS resolutions on MacOS.
+    implementation group: 'io.netty', name: 'netty-resolver-dns-native-macos', classifier: 'osx-aarch_64'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.cloud:spring-cloud-stream-test-binder'
+    testImplementation 'io.projectreactor:reactor-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+tasks.withType(JavaCompile) {
+    options.compilerArgs += "-parameters"
+}
+```
+## Defining topics and events
+We will use one topic per type of entity: products, recommendations, and reviews.
+
+An event is, for the scope of this book, defined by the following:
+- The **type** of event – for example, a `create` or `delete` event
+- A **key** that identifies the data – for example, a `product ID`
+- A **data** element – that is, the actual data in the event
+- A **timestamp**, which describes when the event occurred
+
+```java
+package se.magnus.api.event;
+
+import static java.time.ZonedDateTime.now;
+
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.datatype.jsr310.ser.ZonedDateTimeSerializer;
+import java.time.ZonedDateTime;
+
+public class Event<K, T> {
+
+    public enum Type {
+        CREATE,
+        DELETE
+    }
+
+    private final Type eventType;
+    private final K key;
+    private final T data;
+    private final ZonedDateTime eventCreatedAt;
+
+    public Event() {
+        this.eventType = null;
+        this.key = null;
+        this.data = null;
+        this.eventCreatedAt = null;
+    }
+
+    public Event(Type eventType, K key, T data) {
+        this.eventType = eventType;
+        this.key = key;
+        this.data = data;
+        this.eventCreatedAt = now();
+    }
+
+    public Type getEventType() {
+        return eventType;
+    }
+
+    public K getKey() {
+        return key;
+    }
+
+    public T getData() {
+        return data;
+    }
+
+    @JsonSerialize(using = ZonedDateTimeSerializer.class)
+    public ZonedDateTime getEventCreatedAt() {
+        return eventCreatedAt;
+    }
+}
+```
+- The Event class is a generic class parameterized over the types of its key and data fields,
+K and T
+- The event type is declared as an enumerator with the allowed values – that is, CREATE
+and DELETE
+- The class defines two constructors, one empty and one that can be used to initialize the
+type, key, and value members
+- Finally, the class defines getter methods for its member variables
+
+## Publishing events in the composite service
+When the composite service receives HTTP requests for the creation and deletion of composite
+products, it will publish the corresponding events to the core services on their topics. To be able
+to publish events in the composite service, we need to perform the following steps:
+1. Publish events in the integration layer.
+2. Add configuration for publishing events.
+3. Change tests so that they can test the publishing of events.
+
+no changes are required in the composite service implementation class – it is taken care of by the integration layer!
+## Consuming events in the core services
+To be able to consume events in the core services, we need to do the following:
+- Declare message processors that consume events published on the core service’s topic
+- Change our service implementations to use the reactive persistence layer
+- Add configuration required for consuming events
+- Change our tests so that they can test the asynchronous processing of the events
+
+The source code for consuming events is structured in the same way in all three core services.
+
+### Publishing events in the integration layer
+To publish an event in the integration layer, we need to do the following:
+1. Create an `Event` object based on the body of the HTTP request.
+2. Create a `Message` object where the `Event` object is used as the payload and the key field
+in the `Event` object is used as the partition key in the header.
+3. Use the `StreamBridge` helper class to publish the event on the desired topic.
+
+The code for sending create product events:
+- The integration layer implements the createProduct() method in the ProductService
+interface by using a helper method, sendMessage(). The helper method takes the name
+of an output binding and an event object. The binding name, products-out-0, will be
+bound to the topic of the product service in the following configuration.
+- Since sendMessage() uses blocking code, when calling streamBridge, it is executed on
+a thread provided by a dedicated scheduler, publishEventScheduler. This is the same
+approach as for handling blocking JPA code in the review microservice. See the Dealing
+with blocking code section for details.
+- The helper method, sendMessage(), creates a Message object and sets the payload and the
+partitionKey header, as described previously. Finally, it uses the streamBridge object to send
+the event to the messaging system, which will publish it on the topic defined in the configuration.
+
+```java
+package se.magnus.microservices.composite.product.services;
+
+import static java.util.logging.Level.FINE;
+import static reactor.core.publisher.Flux.empty;
+import static se.magnus.api.event.Event.Type.CREATE;
+import static se.magnus.api.event.Event.Type.DELETE;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.actuate.health.Health;
+import org.springframework.cloud.stream.function.StreamBridge;
+import org.springframework.http.HttpStatus;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.support.MessageBuilder;
+import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.product.ProductService;
+import se.magnus.api.core.recommendation.Recommendation;
+import se.magnus.api.core.recommendation.RecommendationService;
+import se.magnus.api.core.review.Review;
+import se.magnus.api.core.review.ReviewService;
+import se.magnus.api.event.Event;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.api.exceptions.NotFoundException;
+import se.magnus.util.http.HttpErrorInfo;
+
+@Component
+public class ProductCompositeIntegration implements ProductService, RecommendationService, ReviewService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ProductCompositeIntegration.class);
+
+    private final WebClient webClient;
+    private final ObjectMapper mapper;
+
+    private final String productServiceUrl;
+    private final String recommendationServiceUrl;
+    private final String reviewServiceUrl;
+
+    private final StreamBridge streamBridge;
+
+    private final Scheduler publishEventScheduler;
+
+    public ProductCompositeIntegration(
+            @Qualifier("publishEventScheduler") Scheduler publishEventScheduler,
+
+            WebClient.Builder webClient,
+            ObjectMapper mapper,
+            StreamBridge streamBridge,
+
+            @Value("${app.product-service.host}") String productServiceHost,
+            @Value("${app.product-service.port}") int productServicePort,
+
+            @Value("${app.recommendation-service.host}") String recommendationServiceHost,
+            @Value("${app.recommendation-service.port}") int recommendationServicePort,
+
+            @Value("${app.review-service.host}") String reviewServiceHost,
+            @Value("${app.review-service.port}") int reviewServicePort) {
+
+        this.publishEventScheduler = publishEventScheduler;
+        this.webClient = webClient.build();
+        this.mapper = mapper;
+        this.streamBridge = streamBridge;
+
+        productServiceUrl = "http://" + productServiceHost + ":" + productServicePort;
+        recommendationServiceUrl = "http://" + recommendationServiceHost + ":" + recommendationServicePort;
+        reviewServiceUrl = "http://" + reviewServiceHost + ":" + reviewServicePort;
+    }
+
+    @Override
+    public Mono<Product> createProduct(Product body) {
+
+        return Mono.fromCallable(() -> {
+            sendMessage("products-out-0", new Event<>(CREATE, body.getProductId(), body));
+            return body;
+        }).subscribeOn(publishEventScheduler);
+    }
+
+    @Override
+    public Mono<Product> getProduct(int productId) {
+        String url = productServiceUrl + "/product/" + productId;
+        LOG.debug("Will call the getProduct API on URL: {}", url);
+
+        return webClient.get().uri(url).retrieve().bodyToMono(Product.class).log(LOG.getName(), FINE)
+                .onErrorMap(WebClientResponseException.class, ex -> handleException(ex));
+    }
+
+    @Override
+    public Mono<Void> deleteProduct(int productId) {
+
+        return Mono.fromRunnable(() -> sendMessage("products-out-0", new Event<>(DELETE, productId, null)))
+                .subscribeOn(publishEventScheduler).then();
+    }
+
+    @Override
+    public Mono<Recommendation> createRecommendation(Recommendation body) {
+
+        return Mono.fromCallable(() -> {
+            sendMessage("recommendations-out-0", new Event<>(CREATE, body.getProductId(), body));
+            return body;
+        }).subscribeOn(publishEventScheduler);
+    }
+
+    @Override
+    public Flux<Recommendation> getRecommendations(int productId) {
+
+        String url = recommendationServiceUrl + "/recommendation?productId=" + productId;
+
+        LOG.debug("Will call the getRecommendations API on URL: {}", url);
+
+        // Return an empty result if something goes wrong to make it possible for the
+        // composite service to return partial responses
+        return webClient.get().uri(url).retrieve().bodyToFlux(Recommendation.class).log(LOG.getName(), FINE)
+                .onErrorResume(error -> empty());
+    }
+
+    @Override
+    public Mono<Void> deleteRecommendations(int productId) {
+
+        return Mono.fromRunnable(() -> sendMessage("recommendations-out-0", new Event<>(DELETE, productId, null)))
+                .subscribeOn(publishEventScheduler).then();
+    }
+
+    @Override
+    public Mono<Review> createReview(Review body) {
+
+        return Mono.fromCallable(() -> {
+            sendMessage("reviews-out-0", new Event<>(CREATE, body.getProductId(), body));
+            return body;
+        }).subscribeOn(publishEventScheduler);
+    }
+
+    @Override
+    public Flux<Review> getReviews(int productId) {
+
+        String url = reviewServiceUrl + "/review?productId=" + productId;
+
+        LOG.debug("Will call the getReviews API on URL: {}", url);
+
+        // Return an empty result if something goes wrong to make it possible for the
+        // composite service to return partial responses
+        return webClient.get().uri(url).retrieve().bodyToFlux(Review.class).log(LOG.getName(), FINE)
+                .onErrorResume(error -> empty());
+    }
+
+    @Override
+    public Mono<Void> deleteReviews(int productId) {
+
+        return Mono.fromRunnable(() -> sendMessage("reviews-out-0", new Event<>(DELETE, productId, null)))
+                .subscribeOn(publishEventScheduler).then();
+    }
+
+    public Mono<Health> getProductHealth() {
+        return getHealth(productServiceUrl);
+    }
+
+    public Mono<Health> getRecommendationHealth() {
+        return getHealth(recommendationServiceUrl);
+    }
+
+    public Mono<Health> getReviewHealth() {
+        return getHealth(reviewServiceUrl);
+    }
+
+    private Mono<Health> getHealth(String url) {
+        url += "/actuator/health";
+        LOG.debug("Will call the Health API on URL: {}", url);
+        return webClient.get().uri(url).retrieve().bodyToMono(String.class)
+                .map(s -> new Health.Builder().up().build())
+                .onErrorResume(ex -> Mono.just(new Health.Builder().down(ex).build()))
+                .log(LOG.getName(), FINE);
+    }
+
+    private void sendMessage(String bindingName, Event event) {
+        LOG.debug("Sending a {} message to {}", event.getEventType(), bindingName);
+        Message message = MessageBuilder.withPayload(event)
+                .setHeader("partitionKey", event.getKey())
+                .build();
+        streamBridge.send(bindingName, message);
+    }
+
+    private Throwable handleException(Throwable ex) {
+
+        if (!(ex instanceof WebClientResponseException)) {
+            LOG.warn("Got a unexpected error: {}, will rethrow it", ex.toString());
+            return ex;
+        }
+
+        WebClientResponseException wcre = (WebClientResponseException) ex;
+
+        switch (HttpStatus.resolve(wcre.getStatusCode().value())) {
+
+            case NOT_FOUND:
+                return new NotFoundException(getErrorMessage(wcre));
+
+            case UNPROCESSABLE_ENTITY:
+                return new InvalidInputException(getErrorMessage(wcre));
+
+            default:
+                LOG.warn("Got an unexpected HTTP error: {}, will rethrow it", wcre.getStatusCode());
+                LOG.warn("Error body: {}", wcre.getResponseBodyAsString());
+                return ex;
+        }
+    }
+
+    private String getErrorMessage(WebClientResponseException ex) {
+        try {
+            return mapper.readValue(ex.getResponseBodyAsString(), HttpErrorInfo.class).getMessage();
+        } catch (IOException ioex) {
+            return ex.getMessage();
+        }
+    }
+}
+```
+
+### Adding configuration for publishing events
+We also need to set up the configuration for the messaging system, to be able to publish events;
+Declaring RabbitMQ as the default messaging
+system, JSON as the default content type, and Kafka and RabbitMQ for connectivity information
+is the same as for the consumers.
+
+To declare what topics should be used for the output binding names, we have the following
+configuration:
+### Declaring message processors
+The REST APIs for creating and deleting entities have been replaced with a message processor
+in each core microservice that consumes create and delete events on each entity’s topic. To be
+able to consume messages that have been published to a topic, we need to declare a Spring bean
+that implements the java.util.function.Consumer functional interface.
+
+From the following code, we can see the following:
+- The class is annotated with `@Configuration`, telling Spring to look for Spring beans in
+the class.
+- We inject an implementation of the `ProductService` interface in the constructor. The
+`productService` bean contains the business logic to perform the actual creation and
+deletions of the product entities.
+- We declare the message processor as a Spring bean that implements the `Consumer` functional interface, accepting an event as an input parameter of the `Event<Integer,Product>` type.
+
+```java
+package se.magnus.microservices.core.product.services;
+
+import java.util.function.Consumer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.core.product.ProductService;
+import se.magnus.api.event.Event;
+import se.magnus.api.exceptions.EventProcessingException;
+
+@Configuration
+public class MessageProcessorConfig {
+
+    private static final Logger LOG = LoggerFactory.getLogger(MessageProcessorConfig.class);
+
+    private final ProductService productService;
+
+    public MessageProcessorConfig(ProductService productService) {
+        this.productService = productService;
+    }
+
+    @Bean
+    public Consumer<Event<Integer, Product>> messageProcessor() {
+        return event -> {
+            LOG.info("Process message created at {}...", event.getEventCreatedAt());
+
+            switch (event.getEventType()) {
+
+                case CREATE:
+                    Product product = event.getData();
+                    LOG.info("Create product with ID: {}", product.getProductId());
+                    productService.createProduct(product).block();
+                    break;
+
+                case DELETE:
+                    int productId = event.getKey();
+                    LOG.info("Delete product with ProductID: {}", productId);
+                    productService.deleteProduct(productId).block();
+                    break;
+
+                default:
+                    String errorMessage = "Incorrect event type: " + event.getEventType()
+                            + ", expected a CREATE or DELETE event";
+                    LOG.warn(errorMessage);
+                    throw new EventProcessingException(errorMessage);
+            }
+
+            LOG.info("Message processing done!");
+
+        };
+    }
+}
+```
+The implementation of the Consumer function:
+- It takes an event of the `Event<Integer,Product>` type as an input parameter
+- Using a switch statement, based on the event type, it will either create or delete a product
+entity
+- It uses the injected `productService` bean to perform the actual create and delete operation
+- If the event type is neither create nor delete, an exception will be thrown.
+
+To ensure that we can propagate exceptions thrown by the `productService` bean back to the messaging system, we call the block() method on the responses we get back from the productService bean.
+This ensures that the message processor waits for the productService bean to complete its creation
+or deletion in the underlying database. Without calling the block() method, we would not be able
+to propagate exceptions and the messaging system would not be able to re-queue a failed attempt or
+possibly move the message to a dead-letter queue; instead, the message would silently be dropped.
+
+:::note
+
+Calling a block() method is, in general, considered a bad practice from a performance and scalability perspective. But in this case, we will only handle a few incoming messages in parallel, one per partition, as described previously. This means that we will only have a few threads blocked concurrently, which will not negatively impact the performance or the scalability.
+
+:::
+
+### Adding configuration for consuming events
+We also need to set up a configuration for the messaging system to be able to consume events. To
+do this, we need to complete the following steps:
+1. We declare that RabbitMQ is the default messaging system and that the default content
+type is JSON:
+```yml
+spring.cloud.stream:
+  defaultBinder: rabbit
+  default.contentType: application/json
+```
+2. Next, we bind the input to the message processors to specific topic names, as follows:
+```yml
+spring.cloud.stream:
+  bindings.messageProcessor-in-0:
+    destination: products
+    group: productsGroup
+```
+3. Finally, we declare connectivity information for both Kafka and RabbitMQ:
+```yml
+spring.cloud.stream.kafka.binder:
+  brokers: 127.0.0.1
+  defaultBrokerPort: 9092
+
+spring.rabbitmq:
+  host: 127.0.0.1
+  port: 5672
+  username: guest
+  password: guest
+---
+spring.config.activate.on-profile: docker
+spring.rabbitmq.host: rabbitmq
+
+spring.cloud.stream.kafka.binder.brokers: kafka
+```
+
+In the default Spring profile, we specify hostnames to be used when we run our system landscape
+without Docker on localhost with the IP address `127.0.0.1`. In the docker Spring profile, we
+specify the hostnames we will use when running in Docker and using Docker Compose – that is,
+rabbitmq and kafka.
+### Changes in the service implementations
+The service implementations of the create and delete methods for the product and
+recommendation service have been rewritten to use the non-blocking reactive persistence layer
+for MongoDB. 
+
+### Changes in the test code
+Since the core services now receive events for creating and deleting their entities, the tests need
+to be updated so that they send events instead of calling REST APIs, as they did in the previous Lab. 
+- To be able to call the message processor from the test class, we inject the message processor bean into a member variable.
+- we not only inject any Consumer function but also use the `@Qualifier` annotation to specify that we want to inject the Consumer function that has the name `messageProcessor`.
+- To send create and delete events to the message processor, we add two helper methods, `sendCreateProductEvent` and `sendDeleteProductEvent`.
+- we use the `accept()` method in the Consumer function interface declaration to invoke the message processor. This means that we skip the messaging system in the tests and call the message processor directly.
+- The tests for creating and deleting entities are updated to use these helper methods.
+
+```java
+package se.magnus.microservices.core.product;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+import static org.springframework.http.HttpStatus.*;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static se.magnus.api.event.Event.Type.CREATE;
+import static se.magnus.api.event.Event.Type.DELETE;
+
+import java.util.function.Consumer;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import se.magnus.api.core.product.Product;
+import se.magnus.api.event.Event;
+import se.magnus.api.exceptions.InvalidInputException;
+import se.magnus.microservices.core.product.persistence.ProductRepository;
+
+@SpringBootTest(webEnvironment = RANDOM_PORT)
+class ProductServiceApplicationTests extends MongoDbTestBase {
+
+    @Autowired
+    private WebTestClient client;
+
+    @Autowired
+    private ProductRepository repository;
+
+    @Autowired
+    @Qualifier("messageProcessor")
+    private Consumer<Event<Integer, Product>> messageProcessor;
+
+    @BeforeEach
+    void setupDb() {
+        repository.deleteAll().block();
+    }
+
+    @Test
+    void getProductById() {
+
+        int productId = 1;
+
+        assertNull(repository.findByProductId(productId).block());
+        assertEquals(0, (long) repository.count().block());
+
+        sendCreateProductEvent(productId);
+
+        assertNotNull(repository.findByProductId(productId).block());
+        assertEquals(1, (long) repository.count().block());
+
+        getAndVerifyProduct(productId, OK)
+                .jsonPath("$.productId").isEqualTo(productId);
+    }
+
+    @Test
+    void duplicateError() {
+
+        int productId = 1;
+
+        assertNull(repository.findByProductId(productId).block());
+
+        sendCreateProductEvent(productId);
+
+        assertNotNull(repository.findByProductId(productId).block());
+
+        InvalidInputException thrown = assertThrows(
+                InvalidInputException.class,
+                () -> sendCreateProductEvent(productId),
+                "Expected a InvalidInputException here!");
+        assertEquals("Duplicate key, Product Id: " + productId, thrown.getMessage());
+    }
+
+    @Test
+    void deleteProduct() {
+
+        int productId = 1;
+
+        sendCreateProductEvent(productId);
+        assertNotNull(repository.findByProductId(productId).block());
+
+        sendDeleteProductEvent(productId);
+        assertNull(repository.findByProductId(productId).block());
+
+        sendDeleteProductEvent(productId);
+    }
+
+    @Test
+    void getProductInvalidParameterString() {
+
+        getAndVerifyProduct("/no-integer", BAD_REQUEST)
+                .jsonPath("$.path").isEqualTo("/product/no-integer")
+                .jsonPath("$.message").isEqualTo("Type mismatch.");
+    }
+
+    @Test
+    void getProductNotFound() {
+
+        int productIdNotFound = 13;
+        getAndVerifyProduct(productIdNotFound, NOT_FOUND)
+                .jsonPath("$.path").isEqualTo("/product/" + productIdNotFound)
+                .jsonPath("$.message").isEqualTo("No product found for productId: " + productIdNotFound);
+    }
+
+    @Test
+    void getProductInvalidParameterNegativeValue() {
+
+        int productIdInvalid = -1;
+
+        getAndVerifyProduct(productIdInvalid, UNPROCESSABLE_ENTITY)
+                .jsonPath("$.path").isEqualTo("/product/" + productIdInvalid)
+                .jsonPath("$.message").isEqualTo("Invalid productId: " + productIdInvalid);
+    }
+
+    private WebTestClient.BodyContentSpec getAndVerifyProduct(int productId, HttpStatus expectedStatus) {
+        return getAndVerifyProduct("/" + productId, expectedStatus);
+    }
+
+    private WebTestClient.BodyContentSpec getAndVerifyProduct(String productIdPath, HttpStatus expectedStatus) {
+        return client.get()
+                .uri("/product" + productIdPath)
+                .accept(APPLICATION_JSON)
+                .exchange()
+                .expectStatus().isEqualTo(expectedStatus)
+                .expectHeader().contentType(APPLICATION_JSON)
+                .expectBody();
+    }
+
+    private void sendCreateProductEvent(int productId) {
+        Product product = new Product(productId, "Name " + productId, productId, "SA");
+        Event<Integer, Product> event = new Event<>(CREATE, productId, product);
+        messageProcessor.accept(event);
+    }
+
+    private void sendDeleteProductEvent(int productId) {
+        Event<Integer, Product> event = new Event<>(DELETE, productId, null);
+        messageProcessor.accept(event);
+    }
+}
+```
+## Handling challenges with messaging
+### Consumer groups
+The problem here is that if we scale up the number of instances of a message consumer, for example,
+if we start two instances of the product microservice, both instances of the product microservice
+will consume the same messages, This could result in one message being processed two times, potentially leading to duplicates
+or other undesired inconsistencies in the database. Therefore, we only want one instance per
+consumer to process each message. This can be solved by introducing a consumer group, In Spring Cloud Stream, a consumer group can be configured on the consumer side. For example,
+for the product microservice, it will look like this:
+```yml
+spring.cloud.stream:
+  bindings.messageProcessor-in-0:
+    destination: products
+    group: productsGroup
+```
+From this configuration:
+- Spring Cloud Stream applies, by default, a naming convention for binding a configuration to a function. For messages sent to a function, the binding name is `<functionName>-in-<index>`:
+    - functionName is the name of the function, which is `messageProcessor`.
+    - `index` is set to `0`, unless the function requires multiple input or output arguments. We will not use multi-argument functions, so index will always be set to 0 in our examples.
+    - For outgoing messages, the binding name convention is `<functionName>-out-<index>`.
+- The `destination` property specifies the name of the topic that messages will be consumed
+from, which is products in this case.
+- The `group` property specifies what consumer group to add instances of the product microservice to, which is `productsGroup` in this example. This means that messages sent to the products topic will only be delivered by Spring Cloud Stream to one of the instances of the product microservice.
+### Retries and dead-letter queues
+If a consumer fails to process a message, it may be re-queued for the failing consumer until it is
+successfully processed. If the content of the message is invalid, also known as a **poisoned message**, the message will block the consumer from processing other messages until it is manually
+removed. If the failure is due to a temporary problem, for example, the database can’t be reached
+due to a temporary network error, the processing will probably succeed after a number of retries.
+
+It must be possible to specify the number of retries until a message is moved to another storage
+for fault analysis and correction. A failing message is typically moved to a dedicated queue called
+a **dead-letter queue**. To avoid overloading the infrastructure during temporary failure (for example, a network error), it must be possible to configure how often retries are performed, preferably
+with an increasing length of time between each retry.
+
+In Spring Cloud Stream, this can be configured on the consumer side, for example, for the product
+microservice, as shown here:
+```yml
+spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+  maxAttempts: 3
+  backOffInitialInterval: 500
+  backOffMaxInterval: 1000
+  backOffMultiplier: 2.0
+
+spring.cloud.stream.rabbit.bindings.messageProcessor-in-0.consumer:
+  autoBindDlq: true
+  republishToDlq: true
+
+spring.cloud.stream.kafka.bindings.messageProcessor-in-0.consumer:
+  enableDlq: true
+```
+In the preceding example, we specify that Spring Cloud Stream should perform 3 retries before
+placing a message on the dead-letter queue. The first retry will be attempted after 500 ms and
+the two other attempts after 1000 ms.
+Enabling the use of dead-letter queues is binding-specific; therefore, we have one configuration
+for RabbitMQ and one for Kafka.
+
+### Guaranteed order and partitions
+If the business logic requires that messages are consumed and processed in the same order as they
+were sent, we cannot use multiple instances per consumer to increase processing performance;
+for example, we cannot use consumer groups. This might, in some cases, lead to an unacceptable
+latency in the processing of incoming messages.
+We can use partitions to ensure that messages are delivered in the same order as they were sent
+but without losing performance and scalability.
+
+In Spring Cloud Stream, this needs to be configured on both the publisher and consumer sides.
+On the publisher side, the key and number of partitions must be specified. For example, for the
+product-composite service, we have the following:
+```yml
+spring.cloud.stream.bindings.products-out-0.producer:
+  partition-key-expression: headers['partitionKey']
+  partition-count: 2
+```
+This configuration means that the key will be taken from the message header with the name
+partitionKey and that two partitions will be used.
+Each consumer can specify which partition it wants to consume messages from. For example, for
+the product microservice, we have the following:
+```yml
+
+spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+  partitioned: true
+  instanceCount: 2
+```
+This configuration tells Spring Cloud Stream that this consumer will only consume messages
+from partition number 0, that is, the first partition.
+
+```yml
+server.port: 7002
+server.error.include-message: always
+
+spring.data.mongodb:
+  host: localhost
+  port: 27017
+  database: product-db
+
+spring.cloud.function.definition: messageProcessor
+
+spring.cloud.stream:
+  defaultBinder: rabbit
+  default.contentType: application/json
+  bindings.messageProcessor-in-0:
+    destination: products
+    group: productsGroup
+
+spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+  maxAttempts: 3
+  backOffInitialInterval: 500
+  backOffMaxInterval: 1000
+  backOffMultiplier: 2.0
+
+spring.cloud.stream.rabbit.bindings.messageProcessor-in-0.consumer:
+  autoBindDlq: true
+  republishToDlq: true
+
+spring.cloud.stream.kafka.bindings.messageProcessor-in-0.consumer:
+  enableDlq: true
+
+spring.cloud.stream.kafka.binder:
+  brokers: 127.0.0.1
+  defaultBrokerPort: 9092
+
+spring.rabbitmq:
+  host: 127.0.0.1
+  port: 5672
+  username: guest
+  password: guest
+
+logging:
+  level:
+    root: INFO
+    se.magnus: DEBUG
+    org.springframework.data.mongodb.core.ReactiveMongoTemplate: DEBUG
+
+management.endpoint.health.show-details: "ALWAYS"
+management.endpoints.web.exposure.include: "*"
+---
+spring.config.activate.on-profile: docker
+
+server.port: 8080
+
+spring.data.mongodb.host: mongodb
+
+spring.rabbitmq.host: rabbitmq
+
+spring.cloud.stream.kafka.binder.brokers: kafka
+
+---
+spring.config.activate.on-profile: streaming_partitioned
+
+spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+  partitioned: true
+  instanceCount: 2
+
+---
+spring.config.activate.on-profile: streaming_instance_0
+
+spring.cloud.stream.bindings.messageProcessor-in-0.consumer.instanceIndex: 0
+
+---
+spring.config.activate.on-profile: streaming_instance_1
+
+spring.cloud.stream.bindings.messageProcessor-in-0.consumer.instanceIndex: 1
+
+---
+spring.config.activate.on-profile: kafka
+
+management.health.rabbit.enabled: false
+spring.cloud.stream.defaultBinder: kafka
+spring.kafka.bootstrap-servers: kafka:9092
+spring.cloud.stream.kafka.binder.replication-factor: 1
+```

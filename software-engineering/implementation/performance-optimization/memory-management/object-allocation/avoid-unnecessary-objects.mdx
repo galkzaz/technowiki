@@ -8,6 +8,8 @@ tags:
   - object allocation
 ---
 
+It is often appropriate to reuse a single object instead of creating a new functionally equivalent object each time it is needed. Reuse can be both faster and more stylish.
+
 This rule is about **reducing needless object allocations** to improve:
 
 * memory usage
@@ -27,8 +29,6 @@ The principle became especially popular from Effective Java (“Avoid creating u
 * Kotlin
 * Scala
 
----
-
 ## Core Idea
 
 Creating objects is not free.
@@ -43,17 +43,12 @@ Every allocation may involve:
 
 Modern runtimes optimize allocation heavily, but **massive unnecessary allocations still hurt performance**.
 
-The rule is:
-
-> Do not create new objects when:
->
-> * an existing object can be reused
-> * the object is immutable and shareable
-> * a primitive/value type is enough
-> * lazy creation is possible
-> * allocation happens in hot paths
-
----
+The rule is: Do not create new objects when:
+* an existing object can be reused
+* the object is immutable and shareable
+* a primitive/value type is enough
+* lazy creation is possible
+* allocation happens in hot paths
 
 ## Why This Matters
 
@@ -88,15 +83,11 @@ for (int i = 0; i < 1_000_000; i++) {
 }
 ```
 
----
-
 ### 2. CPU Cost
 
 Allocation and deallocation consume CPU cycles.
 
 Even very fast allocators become expensive in tight loops.
-
----
 
 ### 3. Cache Efficiency
 
@@ -107,8 +98,6 @@ Fewer allocations often improve:
 * cache hits
 * branch prediction
 * data locality
-
----
 
 ### 4. Scalability
 
@@ -122,11 +111,7 @@ Examples:
 * stream processors
 * low-latency trading systems
 
----
-
 ## Common Sources of Unnecessary Objects
-
----
 
 ### 1. Creating Objects Inside Tight Loops
 
@@ -154,8 +139,6 @@ for (String name : names) {
 }
 ```
 
----
-
 ### 2. Recreating Immutable Objects
 
 Immutable objects can often be reused safely.
@@ -173,8 +156,6 @@ String s = "admin";
 ```
 
 String literals are interned/shared.
-
----
 
 ### 3. Excessive Boxing and Unboxing
 
@@ -200,8 +181,6 @@ for (int i = 0; i < 1000000; i++) {
 }
 ```
 
----
-
 ### 4. Temporary Collection Creation
 
 **Bad**
@@ -225,8 +204,6 @@ boolean exists =
          .anyMatch(User::active);
 ```
 
----
-
 ### 5. Creating Objects for Simple Operations
 
 **Bad**
@@ -242,8 +219,6 @@ If `value` cannot be null, `Optional` creation is wasteful.
 ```java
 return value != null ? value : defaultValue;
 ```
-
----
 
 ### 6. Repeated Regular Expression Compilation
 
@@ -266,8 +241,6 @@ if (DIGITS.matcher(input).matches()) {
 }
 ```
 
----
-
 ### 7. Unnecessary Defensive Copies
 
 Copies improve safety but can waste memory if unnecessary.
@@ -280,13 +253,9 @@ return new ArrayList<>(internalList);
 
 when immutability already guarantees safety.
 
----
-
 ## Key Techniques
 
----
-
-## Object Reuse
+### Object Reuse
 
 Reuse expensive objects.
 
@@ -298,9 +267,415 @@ Examples:
 * parsers
 * buffers
 
+Some object creations are much more expensive than others. If you’re going
+to need such an “expensive object” repeatedly, it may be advisable to cache it for
+reuse.
+
+Not all object allocations cost the same. Creating:
+
+```java id="j0c9c4"
+new Point(1, 2)
+```
+
+is tiny. Creating:
+
+```java id="d85ieo"
+Pattern.compile(regex)
+```
+
+is expensive.
+
+Suppose you want to write a method to determine whether a string is a valid
+Roman numeral. Here’s the easiest way to do this using a regular expression:
+```java
+// Performance can be greatly improved!
+static boolean isRomanNumeral(String s) {
+return s.matches("^(?=.)M*(C[MD]|D?C{0,3})"
++ "(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$");
+}
+```
+Each call:
+
+```text id="u2rvr4"
+compile
+allocate
+match
+garbage collect
+```
+
+A regex string is not used directly.
+
+The regex engine must:
+
+1. parse the regex
+2. validate syntax
+3. build internal structures
+4. compile a finite state machine
+5. optimize matching logic
+
+Conceptually:
+
+```text id="y5m3yx"
+Regex String
+    →
+Parser
+    →
+Finite State Machine
+    →
+Optimized Matcher
+```
+
+That compilation work is the expensive part.
+
+**Hidden Allocation Problem**
+
+The original code:
+
+```java id="0x7mq1"
+s.matches(regex)
+```
+
+looks simple.
+
+But internally:
+
+```java id="96my5g"
+Pattern.compile(regex)
+```
+
+happens every call.
+
+Conceptually:
+
+```java id="m1o2ec"
+boolean matches(String regex) {
+    Pattern p = Pattern.compile(regex);
+    return p.matcher(this).matches();
+}
+```
+
+So every invocation causes:
+
+* regex parsing
+* FSM compilation
+* object allocation
+* GC pressure
+
+**Why This Is a Performance Problem**
+
+Suppose:
+
+```text id="s3nq4p"
+100,000 requests/sec
+```
+
+Each request validates Roman numerals.
+
+Then:
+
+```text id="0df7zm"
+100,000 Pattern objects/sec
+```
+
+are unnecessarily created.
+
+That creates:
+
+* CPU overhead
+* GC overhead
+* memory churn
+* cache inefficiency
+
+To improve the performance, explicitly compile the regular expression into a
+Pattern instance (which is immutable) as part of class initialization, cache it, and
+reuse the same instance for every invocation of the isRomanNumeral method:
+```java
+// Reusing expensive object for improved performance
+public class RomanNumerals {
+  private static final Pattern ROMAN = Pattern.compile(
+  "^(?=.)M*(C[MD]|D?C{0,3})"
+  + "(X[CL]|L?X{0,3})(I[XV]|V?I{0,3})$");
+  
+  static boolean isRomanNumeral(String s) {
+    return ROMAN.matcher(s).matches();
+  }
+}
+```
+The improved version moves compilation to class initialization:
+
+```java id="jlwm8f"
+private static final Pattern ROMAN =
+    Pattern.compile(...);
+```
+
+Now compilation happens once.
+
+After that:
+
+```java id="i6g2vi"
+ROMAN.matcher(s).matches()
+```
+
+reuses the compiled immutable object.
+
+**Why This Works**
+
+Because `Pattern` is immutable.
+
+That means:
+
+* thread-safe reuse
+* global sharing
+* no synchronization needed
+* safe caching
+
+This directly connects to the earlier principle:
+
+> Immutable objects are excellent reuse candidates.
+
+**Important Performance Principle**
+
+The optimization eliminates: Repeated Expensive Work
+
+Instead of: compile regex every call
+
+we do:
+```text id="t4l1gx"
+compile once
+reuse forever
+```
+
+This is essentially:
+
+```text id="mxo1gd"
+precomputation + caching
+```
+
+**Important Broader Engineering Pattern**
+
+This is a very common optimization pattern:
+
+| Expensive Operation       | Cacheable Artifact |
+| ------------------------- | ------------------ |
+| Regex compilation         | Pattern            |
+| JSON schema parsing       | Compiled schema    |
+| SQL parsing               | Prepared statement |
+| Template parsing          | Compiled template  |
+| Reflection lookup         | Cached metadata    |
+| Serialization config      | ObjectMapper       |
+| Dependency graph creation | DI container       |
+
+**Hidden Cost APIs**
+
+Some APIs appear simple but hide expensive work.
+
+Example:
+
+```java id="mofg9g"
+s.matches(...)
+```
+
+looks harmless.
+
+But internally it allocates and compiles.
+
+This is a major software-engineering lesson:
+
+```text id="1qstzc"
+Simple-looking APIs may hide expensive operations.
+```
+
+Performance engineering often requires understanding runtime behavior beneath APIs.
+
+**Why the Optimized Version Is Also Clearer**
+
+Not only is the performance improved, but arguably, so is clarity.
+Making a static final field for the otherwise invisible Pattern instance allows us
+to give it a name, which is far more readable than the regular expression itself
+
+```java id="lq0qz6"
+private static final Pattern ROMAN
+```
+
+gives the regex:
+
+* identity
+* meaning
+* documentation
+* discoverability
+
+instead of burying it inline.
+
+So the optimization improves both:
+
+* performance
+* maintainability
+
+This is ideal engineering.
+
+If the class containing the improved version of the isRomanNumeral method is
+initialized but the method is never invoked, the field ROMAN will be initialized
+needlessly. It would be possible to eliminate the initialization by lazily initializing
+the field(link)) the first time the isRomanNumeral method is invoked:
+```java id="4gdq76"
+if (ROMAN == null) {
+    ROMAN = Pattern.compile(...);
+}
+```
+but this
+is not recommended. As is often the case with lazy initialization, it would complicate the implementation with no measurable performance improvement.
+
+If the method is never called:
+
+```text id="x4mq6x"
+Pattern never created
+```
+
+So theoretically we save memory/startup work.
+
+
+This is a Important Engineering Principle
+
+> Avoid complexity unless measurement proves value.
+
+Lazy initialization introduces:
+
+* branching
+* synchronization concerns
+* harder reasoning
+* more code
+* possible bugs
+
+for almost no measurable gain.
+### Static Factory Methods
+You can often avoid creating unnecessary objects by using static factory methods (link to static factory methods) in preference to constructors on immutable classes that provide both.
+
+The key observation is:
+
+```text
+Constructors always create new objects.
+Factory methods are free not to.
+```
+
+That is one of the major advantages of static factory methods.
+
+**Constructor Behavior**
+
+A constructor:
+
+```java
+new Boolean("true")
+```
+
+must allocate a brand-new object every call.
+
+Even if an equivalent object already exists.
+
 ---
 
-## Object Pooling
+**Factory Method Behavior**
+
+A factory method:
+
+```java
+Boolean.valueOf("true")
+```
+
+may:
+
+* reuse cached objects
+* return shared instances
+* return singleton objects
+* avoid allocation entirely
+
+because callers do not control instance creation directly.
+
+
+**Why Boolean Is a Perfect Example**
+
+`Boolean` has only two possible values:
+
+```text
+true
+false
+```
+
+So creating millions of separate Boolean objects is wasteful.
+
+The JVM can safely reuse two immutable instances:
+
+```java
+Boolean.TRUE
+Boolean.FALSE
+```
+Conceptually, Instead of:
+
+```java
+return new Boolean(parsedValue);
+```
+
+the factory method can do:
+
+```java
+return parsedValue
+       ? Boolean.TRUE
+       : Boolean.FALSE;
+```
+
+No allocation required.
+
+**Why Immutability Makes This Safe**
+
+Because Boolean objects are immutable:
+
+```java
+Boolean.TRUE
+```
+
+can be shared globally forever. Nobody can modify it. This connects directly to the earlier principle: Immutable objects are naturally reusable.
+
+**Factory Methods Enable Allocation Optimizations**
+
+Static factories allow implementations to:
+
+* cache objects
+* pool instances
+* intern values
+* reuse singletons
+* hide allocation strategies
+
+Constructors cannot do this because:
+
+```text
+new
+```
+
+always means: allocate fresh object
+
+**Example: Integer Caching**
+
+Java internally caches small integers:
+
+```java
+Integer a = Integer.valueOf(127);
+Integer b = Integer.valueOf(127);
+
+System.out.println(a == b); // true
+```
+
+because `Integer.valueOf()` reuses cached immutable objects.
+
+But:
+
+```java
+new Integer(127)
+```
+
+always allocates a new object.
+
+That constructor is deprecated for similar reasons.
+
+### Object Pooling
 
 Maintain reusable instances.
 
@@ -318,9 +693,7 @@ Poor pooling can worsen performance.
 
 Modern GC often makes pooling small objects unnecessary.
 
----
-
-## Flyweight Pattern
+### Flyweight Pattern
 
 Share immutable objects.
 
@@ -330,17 +703,13 @@ Examples:
 * cached integers
 * enum singletons
 
-Related pattern:
+Related pattern: Design Patterns Flyweight Pattern.
 
-Design Patterns Flyweight Pattern.
-
----
-
-## Lazy Initialization
+### Lazy Initialization
 
 Create objects only when needed.
 
-### Example
+**Example**
 
 ```java
 private ExpensiveService service;
@@ -354,9 +723,7 @@ public ExpensiveService getService() {
 }
 ```
 
----
-
-## Prefer Primitives or Value Types
+### Prefer Primitives or Value Types
 
 Use:
 
@@ -368,9 +735,7 @@ boolean
 
 instead of wrappers when possible.
 
----
-
-## Avoid Intermediate Allocations
+### Avoid Intermediate Allocations
 
 Functional pipelines may allocate temporary objects.
 
@@ -387,9 +752,7 @@ Can create many intermediate objects depending on implementation.
 
 Performance-critical code may prefer imperative loops.
 
----
-
-## Escape Analysis
+### Escape Analysis
 
 Modern runtimes optimize allocations automatically.
 
@@ -414,7 +777,1529 @@ So:
 
 Measure first.
 
+## Immutable Object Reuse
+This is one of the major advantages of immutability.
+
+An immutable object can safely be reused because its state can never change after creation.
+
+### Why Immutable Objects Are Reusable
+
+If an object cannot change:
+
+* no caller can accidentally modify it
+* sharing it introduces no side effects
+* synchronization is often unnecessary
+* multiple threads can safely use the same instance
+
+This makes immutable objects ideal for:
+
+* caching
+* flyweight patterns
+* constants
+* singleton values
+* shared configuration
+* functional programming
+
+### Example
+
+#### Mutable Object (Unsafe to Reuse)
+
+```java
+class User {
+    String name;
+}
+```
+
+If reused:
+
+```java
+User user = new User();
+user.name = "Alice";
+
+serviceA(user);
+
+user.name = "Bob";
+
+serviceB(user);
+```
+
+`serviceA` may unexpectedly observe `"Bob"` later.
+
+The object is unsafe to share broadly.
+
+### Immutable Object (Safe to Reuse)
+
+```java
+final class User {
+    private final String name;
+
+    public User(String name) {
+        this.name = name;
+    }
+
+    public String getName() {
+        return name;
+    }
+}
+```
+
+Now:
+
+```java
+User user = new User("Alice");
+
+serviceA(user);
+serviceB(user);
+serviceC(user);
+```
+
+No service can alter the object.
+
+The same instance can be safely reused everywhere.
+
+### Common Real-World Reused Immutable Objects
+
+#### Strings
+
+As an extreme example of what not to do, consider this statement:
+```java
+
+String s = new String("bikini"); // DON'T DO THIS!
+```
+The statement creates a new String instance each time it is executed, and none
+of those object creations is necessary. The argument to the String constructor
+("bikini") is itself a String instance, functionally identical to all of the objects
+created by the constructor. If this usage occurs in a loop or in a frequently invoked
+method, millions of String instances can be created needlessly.
+The improved version is simply the following:
+```java
+String s = "bikini";
+```
+This version uses a single String instance, rather than creating a new one
+each time it is executed. Furthermore, it is guaranteed that the object will be
+reused by any other code running in the same virtual machine that happens to
+contain the same string litera
+
+In Java:
+
+```java
+String s1 = "admin";
+String s2 = "admin";
+```
+
+Both references usually point to the same interned immutable string object.
+
+### Cached Wrapper Objects
+
+Java caches small immutable integers:
+
+```java
+Integer a = 127;
+Integer b = 127;
+
+System.out.println(a == b); // true
+```
+
+Possible because `Integer` is immutable.
+
+### Enums
+
+```java
+enum Status {
+    ACTIVE,
+    INACTIVE
+}
+```
+
+Single immutable instances reused globally.
+
+### Immutable Collections
+
+Examples:
+
+```java
+List.of(...)
+Map.of(...)
+```
+
+Can often be shared safely.
+
+### Concurrency Advantage
+
+Immutability eliminates many synchronization problems.
+
+Shared mutable state:
+
+```text
+Thread A modifies object
+Thread B reads object
+→ race conditions
+```
+
+Immutable shared state:
+
+```text
+Thread A reads object
+Thread B reads object
+→ safe
+```
+
+This is why immutability is heavily used in:
+
+* reactive systems
+* actor systems
+* functional programming
+* distributed systems
+* concurrent caches
+
+### Important Clarification
+
+The statement:
+
+> “An object can always be reused if it is immutable”
+
+is mostly true in terms of **correctness and safety**, but not always optimal in terms of:
+
+* memory lifetime
+* cache pressure
+* object retention
+* domain semantics
+
+### Example Where Reuse Is Technically Safe but Undesirable
+
+#### Large Immutable Objects
+
+```java
+byte[] hugeData
+```
+
+If wrapped immutably and globally cached:
+
+```java
+ImmutableFile file = loadHugeFile();
+```
+
+Reusing forever may waste huge memory.
+
+So:
+
+* immutable → safe to reuse
+* but not always wise to retain indefinitely
+
+### Another Important Nuance
+
+Immutability must be **deep** enough.
+
+This is not truly immutable:
+
+```java
+class User {
+    private final List<String> roles;
+}
+```
+
+because the list itself may still mutate.
+
+True immutability requires protecting internal mutable state.
+
+Example:
+
+```java
+this.roles = List.copyOf(roles);
+```
+
+### Relationship to “Avoid Creating Unnecessary Objects”
+
+Immutability enables:
+
+* object sharing
+* caching
+* singleton reuse
+* flyweight patterns
+
+which directly reduces allocations.
+
+That is why these topics are strongly connected:
+
+```text
+implementation/
+  coding-practices/
+    class-design/
+      immutability/
+```
+
+and
+
+```text
+implementation/
+  performance/
+    memory-management/
+      object-allocation/
+        avoid-unnecessary-objects/
+```
+
+### Key Engineering Insight
+
+Mutable objects usually model:
+
+* identity
+* lifecycle
+* changing state
+
+Immutable objects usually model:
+
+* values
+* snapshots
+* messages
+* configurations
+* computations
+
+Value-like objects are excellent reuse candidates.
+
+### Summary
+
+Immutable objects are highly reusable because:
+
+* their state cannot change
+* they are safe to share
+* they reduce synchronization needs
+* they enable caching and flyweight reuse
+* they reduce unnecessary allocations
+
+This is one of the fundamental reasons immutability improves both:
+
+* software correctness
+* runtime performance
+
+
+## Reusing Mutable Objects
+
+You can also reuse mutable objects if you know they won’t be modified.
+
+### Immutable Reuse vs Mutable Reuse
+
+Immutable reuse is: universally safe
+
+Mutable reuse is: conditionally safe
+
+Only safe if mutation is controlled.
+
+### Example: Reusing a Mutable Buffer
+
+#### Inefficient
+
+```java
+for (...) {
+    StringBuilder sb = new StringBuilder();
+}
+```
+
+Creates many temporary objects.
+
+### Better
+
+```java
+StringBuilder sb = new StringBuilder();
+
+for (...) {
+    sb.setLength(0);
+    // reuse buffer
+}
+```
+
+Safe if:
+
+* only one thread accesses it
+* old contents are cleared properly
+* references do not escape unexpectedly
+
+### Common Reused Mutable Objects
+
+Examples include:
+
+* `StringBuilder`
+* byte buffers
+* parsers
+* serializers
+* database connections
+* thread-local caches
+* reusable arrays
+
+### Important Engineering Tradeoff
+
+Reusing mutable objects improves performance but increases complexity.
+
+Potential risks:
+
+* accidental shared state
+* stale data bugs
+* race conditions
+* lifecycle confusion
+* thread safety issues
+
+### Example of Dangerous Mutable Reuse
+
+```java
+static StringBuilder sb = new StringBuilder();
+```
+
+Shared across threads:
+
+```text
+Thread A writes
+Thread B writes
+→ corruption
+```
+
+This is why immutable reuse is preferred whenever possible.
+
+### Modern JVM Optimization Note
+
+Modern JVMs optimize short-lived allocations extremely well.
+
+Sometimes:
+
+```java
+new SmallObject()
+```
+
+is cheaper than:
+
+* synchronization
+* object pooling
+* reuse bookkeeping
+
+So modern guidance is:
+
+```text
+Avoid unnecessary allocations,
+but do not fight the runtime unnecessarily.
+```
+
+Measure first.
+
+### Deep Principle Behind the Passage
+
+The passage is really teaching:
+
+```text
+Allocation is a resource-management decision.
+```
+
+Good software engineering asks:
+
+* Does this object represent unique state?
+* Does it actually need identity?
+* Can it be shared?
+* Can it be cached?
+* Can it be reused safely?
+
+If yes: avoid allocating another one
+
+### Relationship to TOC
+
+This passage belongs strongly to:
+
+```text
+software-engineering/
+  implementation/
+    performance/
+      memory-management/
+        object-allocation/
+          avoid-unnecessary-objects/
+```
+
+but also connects to:
+
+```text
+implementation/
+  coding-practices/
+    class-design/
+      immutability/
+```
+
+```text
+implementation/
+  design-patterns/
+    creational-patterns/
+      factory-method/
+```
+
+```text
+implementation/
+  concurrency/
+```
+
+because object reuse and mutability strongly affect thread safety.
+
+## Stateless Adapters and Views Reuse
+Reuse is not limited to immutable objects. Many developers learn:
+
+```text
+immutable → reusable
+mutable → not reusable
+```
+
+but that's an oversimplification.
+
+```text
+stateful owner object
+        ↑
+    shared view
+```
+
+where the view object itself can be reused even though the underlying data is mutable.
+
+Most developers understand:
+
+```text
+Boolean.TRUE
+String literals
+Integer cache
+```
+
+These are immutable reusable objects. but Objects can be reusable even when they are not immutable.
+
+The real question is: Does this object actually own state?
+
+If the answer is: No, then reuse is often possible.
+
 ---
+
+### Understanding the Adapter (View) Concept
+
+An **adapter** (or **view**) is an object that:
+
+* does not own data
+* does not copy data
+* exposes a different interface to existing data
+
+Conceptually:
+
+```text
+Map
+ ├── data
+ ├── data
+ ├── data
+ └── data
+
+       │
+       ▼
+
+   KeySet View
+
+       │
+       ▼
+
+     Set API
+```
+
+The view merely presents the same underlying data differently.
+
+A view/adapter often contains little or no independent state and can therefore be safely reused.
+
+---
+
+### Example: Map.keySet()
+
+Suppose we have:
+
+```java
+Map<String, Integer> scores = new HashMap<>();
+
+scores.put("Alice", 95);
+scores.put("Bob", 88);
+```
+
+Calling:
+
+```java
+Set<String> keys = scores.keySet();
+```
+
+does **not** create a new collection containing copies of the keys.
+
+Instead, it creates (or reuses) a lightweight view:
+
+```text
+scores
+    ↓
+{Alice=95, Bob=88}
+
+    ↓
+
+keySet view
+    ↓
+
+[Alice, Bob]
+```
+
+---
+
+**What a Naive Implementation Might Do**
+
+A beginner might imagine:
+
+```java
+public Set<K> keySet() {
+    return new HashSet<>(internalKeys);
+}
+```
+
+Every call allocates:
+
+* a new Set
+* new internal structures
+* copied references
+
+---
+
+**What Java Actually Does**
+
+Conceptually:
+
+```java
+private Set<K> keySet;
+
+public Set<K> keySet() {
+    if (keySet == null) {
+        keySet = new KeySetView(this);
+    }
+
+    return keySet;
+}
+```
+
+The same view object can be returned repeatedly.
+
+---
+
+**Why Is This Safe?**
+
+Because the view contains almost no state of its own.
+
+Conceptually:
+
+```java
+class KeySetView {
+    private final Map backingMap;
+}
+```
+
+The view simply delegates operations:
+
+```java
+size()
+contains()
+remove()
+iterator()
+```
+
+to the backing map.
+
+---
+
+**The Key Insight**
+
+The state lives here:
+
+```text
+Map
+```
+
+not here:
+
+```text
+KeySetView
+```
+
+The adapter merely exposes another interface.
+
+---
+
+**Why Multiple Instances Are Pointless**
+
+Imagine:
+
+```java
+Set<String> s1 = map.keySet();
+Set<String> s2 = map.keySet();
+Set<String> s3 = map.keySet();
+```
+
+Suppose Java created three separate view objects.
+
+All three would still represent:
+
+```text
+same map
+same keys
+same behavior
+```
+
+because:
+
+```text
+s1 ──┐
+s2 ──┼──► same Map
+s3 ──┘
+```
+
+Nothing is gained by allocating three wrappers.
+
+---
+
+**Demonstration**
+
+```java
+Map<String,Integer> map = new HashMap<>();
+
+map.put("A", 1);
+
+Set<String> keys = map.keySet();
+
+System.out.println(keys);
+```
+
+Output:
+
+```text
+[A]
+```
+
+Now:
+
+```java
+map.put("B", 2);
+```
+
+Without recreating the view:
+
+```java
+System.out.println(keys);
+```
+
+Output:
+
+```text
+[A, B]
+```
+
+The view automatically reflects changes.
+
+---
+
+**Why This Seems Counterintuitive**
+
+Many developers assume:
+
+```text
+mutable data
+    ↓
+must create new wrapper every time
+```
+
+But the wrapper itself isn't mutable state.
+
+The mutable state is elsewhere.
+
+The view is merely a window.
+
+Think of it as:
+
+```text
+House = Map
+
+Window = KeySet View
+```
+
+Creating more windows doesn't create more houses.
+
+---
+
+**Adapter vs Copy**
+
+This distinction is crucial.
+
+**View**
+
+```java
+Set<String> keys = map.keySet();
+```
+
+Characteristics:
+
+```text
+shares data
+cheap
+reflects updates
+little memory
+```
+
+---
+
+**Copy**
+
+```java
+Set<String> keys =
+    new HashSet<>(map.keySet());
+```
+
+Characteristics:
+
+```text
+independent data
+more memory
+allocation required
+does not reflect updates
+```
+
+---
+
+
+### General Pattern
+
+Many frameworks use reusable views.
+
+Examples:
+
+- Collection Views
+
+```java
+map.keySet()
+map.values()
+map.entrySet()
+```
+
+---
+
+- Database Result Views
+
+```java
+RowView
+ColumnView
+```
+
+---
+
+- Buffer Views
+
+```java
+ByteBuffer.slice()
+ByteBuffer.asReadOnlyBuffer()
+```
+
+---
+
+- File-System Views
+
+```java
+Path views
+Directory views
+```
+
+---
+
+- ORM Proxies
+
+```java
+Hibernate proxies
+JPA lazy collections
+```
+
+---
+
+### Relationship to Design Patterns
+
+This is closely related to the **Adapter Pattern** from Design Patterns.
+
+The adapter pattern:
+
+```text
+existing object
+      ↓
+alternative interface
+```
+
+without duplicating data.
+
+It is also related to:
+
+* View pattern
+* Proxy pattern
+* Facade pattern
+
+all of which often avoid copying underlying state.
+
+---
+
+### Connection to "Avoid Creating Unnecessary Objects"
+
+This expands the rule from:
+
+```text
+Reuse immutable objects.
+```
+
+to:
+
+```text
+Reuse any object whose identity carries no unique value.
+```
+
+The `keySet` view:
+
+* has no unique state
+* owns no data
+* merely delegates
+
+Therefore:
+
+```text
+creating another one
+=
+extra allocation
++
+no additional value
+```
+
+which is exactly the kind of unnecessary object creation the rule is trying to eliminate.
+
+---
+
+### Deep Engineering Principle
+
+A useful way to think about this is:
+
+```text
+Objects that OWN state
+    often need distinct instances.
+
+Objects that merely REPRESENT state
+    are often reusable.
+```
+
+`HashMap` owns state.
+
+`keySet()` represents that state.
+
+Because the view is only a representation, one shared instance is sufficient.
+
+## Autoboxing Overhead
+Another way to create unnecessary objects is autoboxing, which allows the programmer to mix primitive and boxed primitive types, boxing and unboxing automatically as needed. Autoboxing blurs but does not erase the distinction between primitive and boxed primitive types.
+
+Consider the following method, which calculates the sum of all the positive int values. To do this, the program has to use long arithmetic because an int is not big enough to hold the sum of all the positive int values:
+
+```java
+Long sum = 0L;
+
+for (long i = 0; i <= Integer.MAX_VALUE; i++)
+    sum += i;
+```
+
+looks innocent.
+
+Because of autoboxing, the compiler effectively generates something similar to:
+
+```java
+Long sum = Long.valueOf(0);
+
+for (long i = 0; i <= Integer.MAX_VALUE; i++) {
+    sum = Long.valueOf(
+        sum.longValue() + i
+    );
+}
+```
+
+Every iteration performs:
+
+1. unboxing
+
+```java
+sum.longValue()
+```
+
+2. arithmetic
+
+```java
++ i
+```
+
+3. boxing
+
+```java
+Long.valueOf(...)
+```
+
+Conceptually:
+
+```text
+Long
+ ↓ unbox
+long
+ ↓ add
+long
+ ↓ box
+Long
+```
+
+Billions of unnecessary conversions occur.
+
+** Why `Long` Is So Bad Here**
+
+`Long` is immutable.
+
+This means:
+
+```java
+sum += i;
+```
+
+cannot modify the existing object.
+
+Instead:
+
+```text
+old Long
+    ↓
+new Long
+    ↓
+new Long
+    ↓
+new Long
+```
+
+A new wrapper object is created repeatedly.
+
+---
+
+**Correct Version**
+
+```java
+long sum = 0L;
+
+for (long i = 0; i <= Integer.MAX_VALUE; i++)
+    sum += i;
+```
+
+Now:
+
+```text
+primitive arithmetic only
+```
+
+No allocations.
+
+---
+
+**Key Lesson**
+
+Use primitives when:
+
+* values are numeric
+* null is not needed
+* collections/framework APIs don't require wrappers
+
+## Object Creation Misconceptions
+
+Many developers incorrectly conclude:
+
+```text
+new = bad
+```
+
+**What the Rule Actually Means**
+
+Not:
+
+```text
+Never create objects.
+```
+
+Instead:
+
+```text
+Avoid creating objects that provide no value.
+```
+
+**Good Allocation**
+
+```java
+Money total = new Money(amount, currency);
+```
+
+This improves:
+
+* readability
+* domain modeling
+* correctness
+
+Even if an allocation occurs.
+
+---
+
+**Bad Allocation**
+
+```java
+new Boolean(true)
+```
+
+when:
+
+```java
+Boolean.TRUE
+```
+
+already exists.
+
+No value is added.
+
+---
+
+This item should not be misconstrued to imply that object creation is expensive and should be avoided. On the contrary, the creation and reclamation of small objects whose constructors do little explicit work is cheap, especially on modern JVM implementations. Creating additional objects to enhance the clarity, simplicity, or power of a program is generally a good thing.
+
+Modern JVMs are extremely good at:
+
+```text
+allocate
+use
+collect
+```
+
+for small objects.
+
+Therefore:
+
+```text
+clarity > micro-optimization
+```
+
+unless profiling identifies a problem.
+
+---
+
+## Object Pooling Tradeoffs
+avoiding object creation by maintaining your own object pool is a bad idea unless the objects in the pool are extremely heavyweight. 
+
+Historically developers wrote:
+
+```java
+ObjectPool pool = new ObjectPool();
+```
+
+for almost everything.
+
+Example:
+
+```java
+Point p = pointPool.borrow();
+```
+
+instead of:
+
+```java
+Point p = new Point();
+```
+
+---
+
+**Why This Was Once Useful**
+
+Older runtimes had:
+
+* slower allocation
+* weaker garbage collectors
+* more expensive memory management
+
+Pooling sometimes helped.
+
+---
+
+**Why It's Usually Wrong Today**
+
+A pool introduces:
+
+```text
+pool management
+synchronization
+extra memory
+bookkeeping
+complexity
+```
+
+Example:
+
+```text
+Borrow object
+Use object
+Reset object
+Return object
+```
+
+instead of:
+
+```text
+Create object
+Use object
+Discard object
+```
+
+For lightweight objects, the pool can be slower than allocation.
+
+---
+
+**When Pooling Is Justified**
+
+The classic example of an object that does justify an object pool is a database connection. The cost of establishing the connection is sufficiently high that it makes sense to reuse these objects. 
+
+because creating one involves:
+
+```text
+network setup
+authentication
+resource allocation
+protocol negotiation
+```
+
+which is expensive.
+
+---
+
+**Other Valid Pool Candidates**
+
+Examples:
+
+* database connections
+* TCP connections
+* HTTP connections
+* GPU contexts
+* large memory buffers
+* thread pools
+
+These are **resource pools**, not merely object pools.
+
+---
+
+**Objects That Usually Should NOT Be Pooled**
+
+Examples:
+
+```java
+Point
+Customer
+Address
+DTO
+Money
+OrderLine
+```
+
+Modern JVMs allocate these extremely cheaply.
+
+## Reuse vs defensive Copy
+
+This is one of the most important things because it establishes a **fundamental engineering tradeoff**: Reuse vs Copy
+
+The counterpoint to “Don’t create a new object when you should reuse an existing one,” is on defensive copying, “Don’t reuse an existing object when you should create a new one.”
+
+good engineering requires knowing **when each principle applies**:
+- Reuse objects whenever possible.
+- Create copies whenever necessary.
+
+
+Creating an unnecessary object may hurt performance.
+
+Failing to create a necessary defensive copy may break correctness and security.
+
+When the two conflict,choose correctness and safety over performance.
+
+### The Real Rule
+
+The real rule is not:
+
+```text
+Always reuse.
+```
+
+or
+
+```text
+Always copy.
+```
+
+The real rule is:
+
+```text
+Choose between reuse and copying
+based on ownership and safety.
+```
+
+---
+
+### Two Competing Forces
+
+#### Reuse
+
+Benefits:
+
+* fewer allocations
+* less memory usage
+* less GC pressure
+* better performance
+
+Example:
+
+```java
+Pattern.compile(...)
+```
+
+Compile once and reuse.
+
+---
+
+#### Defensive Copying
+
+Benefits:
+
+* protects invariants
+* prevents accidental mutation
+* prevents data corruption
+* improves security
+
+Example:
+
+```java
+public Date getBirthDate() {
+    return new Date(birthDate.getTime());
+}
+```
+
+Return a copy instead of the internal object.
+
+---
+
+### Why Defensive Copying Exists
+
+Consider:
+
+```java
+public class Employee {
+
+    private Date hireDate;
+
+    public Date getHireDate() {
+        return hireDate;
+    }
+}
+```
+
+Looks innocent.
+
+Usage:
+
+```java
+Date d = employee.getHireDate();
+
+d.setYear(1900);
+```
+
+Now:
+
+```text
+employee.hireDate
+```
+
+has been modified from outside the class.
+
+The class has lost control of its own state.
+
+---
+
+### Defensive Copy Solution
+
+```java
+public Date getHireDate() {
+    return new Date(hireDate.getTime());
+}
+```
+
+Now:
+
+```java
+Date d = employee.getHireDate();
+
+d.setYear(1900);
+```
+
+modifies only the copy.
+
+The object's internal state remains protected.
+
+---
+
+the penalty for reusing an object when defensive copying is called
+for is far greater than the penalty for needlessly creating a duplicate object. Compare the consequences.
+
+**Unnecessary Object Creation**
+
+Suppose:
+
+```java
+return new ArrayList<>(items);
+```
+
+when reuse would have been safe.
+
+Cost:
+
+```text
+extra memory
+extra allocation
+slightly slower
+```
+
+The program still works correctly.
+
+---
+
+**Missing Defensive Copy**
+
+Suppose:
+
+```java
+return internalMutableState;
+```
+
+when a copy was required.
+
+Possible consequences:
+
+```text
+corrupted state
+race conditions
+security vulnerabilities
+broken invariants
+data loss
+```
+
+The program may become incorrect.
+
+---
+
+### Performance Problem vs Correctness Problem
+
+This is the key distinction.
+
+**Avoiding Unnecessary Objects**
+
+Primarily affects:
+
+```text
+performance
+memory
+style
+```
+
+---
+
+**Missing Defensive Copies**
+
+Primarily affects:
+
+```text
+correctness
+security
+reliability
+```
+
+Correctness always wins.
+
+---
+
+### Priority Hierarchy
+
+```text
+Correctness
+    >
+Safety
+    >
+Maintainability
+    >
+Performance
+```
+
+Therefore:
+
+```text
+If copying is required for correctness,
+copy.
+```
+
+Even if it creates extra objects.
+
+---
+
+### Example: Collections
+
+Unsafe:
+
+```java
+public List<Order> getOrders() {
+    return orders;
+}
+```
+
+Client:
+
+```java
+customer.getOrders().clear();
+```
+
+Internal state destroyed.
+
+---
+
+Safe:
+
+```java
+public List<Order> getOrders() {
+    return new ArrayList<>(orders);
+}
+```
+
+Extra allocation: Yes
+
+Correctness preserved: Yes
+
+### Ownership Is the Real Question
+
+When deciding between reuse and copying, ask: Who owns this object?
+
+**Caller Owns It**
+
+Reuse is usually fine.
+
+```java
+Pattern
+String
+Integer
+BigDecimal
+```
+
+Often immutable.
+
+**Class Owns It**
+
+Defensive copying may be required.
+
+```java
+Date
+List
+Map
+Set
+Array
+```
+
+Often mutable.
 
 ## Important Distinction
 
@@ -437,8 +2322,6 @@ This rule targets:
 
 NOT ordinary business logic.
 
----
-
 ## Bad Optimization Example
 
 ### Worse Readability
@@ -456,11 +2339,7 @@ String result = a + b;
 
 If not performance-critical, readability is usually better.
 
----
-
 ## Performance Contexts Where This Rule Matters Most
-
----
 
 ## High-Throughput Systems
 
@@ -471,8 +2350,6 @@ Examples:
 * Kafka consumers
 * stream processing
 
----
-
 ## Low-Latency Systems
 
 Examples:
@@ -480,8 +2357,6 @@ Examples:
 * trading systems
 * game loops
 * real-time telemetry
-
----
 
 ## Memory-Constrained Systems
 
@@ -491,8 +2366,6 @@ Examples:
 * embedded systems
 * containers with low memory limits
 
----
-
 ## Large-Scale Distributed Systems
 
 Allocation reduction improves:
@@ -501,11 +2374,7 @@ Allocation reduction improves:
 * GC pauses
 * infrastructure costs
 
----
-
 ## Language-Specific Notes
-
----
 
 ### Java
 
@@ -518,7 +2387,14 @@ Common optimizations:
 * cache regex
 * use primitive collections
 
----
+| Example                          | Section                            |
+| -------------------------------- | ---------------------------------- |
+| `Boolean.valueOf()`              | immutable-object-reuse             |
+| `Integer.valueOf()` cache        | immutable-object-reuse             |
+| Compiled `Pattern` regex         | expensive-object-caching           |
+| `Map.keySet()`                   | adapter-and-view-reuse             |
+| Lazy initialization of `Pattern` | lazy-initialization-considerations |
+| Connection pools                 | object-pooling                     |
 
 ### Python
 
@@ -536,8 +2412,6 @@ Prefer:
 * iterators
 * tuple reuse
 
----
-
 ### JavaScript
 
 Frequent allocations can trigger V8 GC pauses.
@@ -547,8 +2421,6 @@ Important in:
 * rendering loops
 * frontend animations
 * Node.js servers
-
----
 
 ### C#
 
@@ -560,8 +2432,6 @@ Important topics:
 * object pooling
 * `Span<T>`
 * `ArrayPool<T>`
-
----
 
 ## Relationship to Other Topics
 
@@ -595,8 +2465,6 @@ implementation/
 
 because excessive allocation often increases contention and GC pauses in concurrent systems.
 
----
-
 ## Common Misunderstanding
 
 The rule is NOT:
@@ -609,8 +2477,6 @@ The actual principle is:
 
 Readable and maintainable code is usually more important than tiny allocation savings unless profiling proves otherwise.
 
----
-
 ## Practical Engineering Guideline
 
 ### Usually Optimize Only When:
@@ -620,8 +2486,6 @@ Readable and maintainable code is usually more important than tiny allocation sa
 * throughput is insufficient
 * latency targets are missed
 * memory usage is excessive
-
----
 
 ## Typical Workflow
 
@@ -643,11 +2507,7 @@ Guess
 Micro-optimize everything
 ```
 
----
-
 ## Examples of Good Real-World Usage
-
----
 
 ## Good Candidates for Reuse
 
@@ -659,8 +2519,6 @@ Micro-optimize everything
 * parsers
 * immutable constants
 
----
-
 ## Usually NOT Worth Optimizing
 
 * occasional DTO creation
@@ -669,17 +2527,11 @@ Micro-optimize everything
 * startup allocations
 * admin tools
 
----
-
 ## Summary
 
 “Avoid creating unnecessary objects” is a performance-oriented engineering rule focused on reducing avoidable memory allocation and garbage collection overhead.
 
-The core idea is:
-
-```text
-Allocate objects only when they provide real value.
-```
+The core idea is: Allocate objects only when they provide real value.
 
 The rule becomes especially important in:
 
