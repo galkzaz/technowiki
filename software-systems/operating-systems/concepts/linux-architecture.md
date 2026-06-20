@@ -113,9 +113,10 @@ Kernel Space
 
 This distinction is enforced primarily by hardware and forms the basis of modern OS design.
 
----
-
 ### User Mode and Kernel Mode
+
+Most CPUs, except very simple ones used in embedded systems, have (at least) two modes, kernel mode and user mode, as mentioned earlier. Usually, a bit in the PSW controls the mode. When running in kernel mode, the CPU can execute every instruction in its instruction set and use every feature of the hardware. On desktop, notebook, and server machines, the operating system normally runs in kernel mode, giving it access to the complete hardware. On most embedded systems, a small piece runs in kernel mode, with the rest of the operating system running in user mode.
+
 
 Processors provide different execution modes with different privilege levels.
 
@@ -125,6 +126,17 @@ The two most important are:
 | ----------- | ------------------------------ |
 | User Mode   | Run applications safely        |
 | Kernel Mode | Run operating system core code |
+
+User programs always run in user mode, which permits only a subset of the
+instructions to be executed and a subset of the features to be accessed. Generally,
+all instructions involving I/O and memory protection are disallowed in user mode.
+Setting the PSW mode bit to enter kernel mode is also forbidden, of course.
+
+To obtain services from the operating system, a user program must make a **system call**, which traps into the kernel and invokes the operating system. The trap
+instruction (e.g., syscall on x86-64 processors) switches from user mode to kernel
+mode and starts the operating system. When the operating system is done, it
+returns control to the user program at the instruction following the system call. think of system call as a special kind of procedure call that has the additional
+property of switching from user mode to kernel mode
 
 ### CPU Privilege Levels
 
