@@ -1,0 +1,625 @@
+---
+id: software-engineering-design-architecture-distributed-systems-service-communication-api-gateways-fundamentals
+title: "Fundamentals"
+sidebar_position: 3
+---
+
+# Chapter 3 — API Gateway Fundamentals
+
+In the previous chapter, we learned **how an API Gateway works internally**.
+
+In this chapter, we'll answer a more fundamental question:
+
+> **Where does an API Gateway fit within the overall network architecture?**
+
+Many beginners confuse an API Gateway with a reverse proxy, a load balancer, or a service mesh because these technologies share some capabilities. Understanding their differences is essential before learning specific gateway implementations like Spring Cloud Gateway or Kong.
+
+# Learning Objectives
+
+After completing this chapter, you should be able to:
+
+* Explain what an **Edge Server** is.
+* Distinguish **North-South** traffic from **East-West** traffic.
+* Compare an API Gateway with:
+
+  * Reverse Proxy
+  * Load Balancer
+  * Service Mesh
+  * Ingress Controller
+* Identify where each technology belongs in a microservices architecture.
+
+# 3.1 Edge Server
+
+## What is an Edge?
+
+In networking, the **edge** is the boundary between an organization's internal infrastructure and the outside world.
+
+```text
+             Internet
+                 │
+                 │
+      ===========================
+          Network Boundary
+      ===========================
+                 │
+          Edge Server
+                 │
+     -------------------------
+     Internal Network
+                 │
+        Backend Services
+```
+
+Everything above the boundary is **outside** your organization.
+
+Everything below the boundary is **inside** your trusted infrastructure.
+
+## What is an Edge Server?
+
+An **Edge Server** is the first server that receives requests from external clients.
+
+Instead of exposing every internal service to the Internet, only the edge server is publicly accessible.
+
+```text
+          Internet
+              │
+              ▼
+      +----------------+
+      | Edge Server    |
+      +----------------+
+              │
+      ┌───────┼────────┐
+      ▼       ▼        ▼
+ Product   Order   Payment
+ Service   Service Service
+```
+
+An API Gateway is one type of Edge Server.
+
+Other examples include:
+
+* Reverse Proxy
+* CDN Edge Node
+* Web Application Firewall (WAF)
+* API Gateway
+
+## Why Have an Edge Server?
+
+Imagine exposing every service directly.
+
+```text
+Internet
+
+│
+
+├──────── Product Service
+├──────── Order Service
+├──────── Inventory Service
+├──────── Payment Service
+├──────── User Service
+└──────── Shipping Service
+```
+
+Problems:
+
+* Every service needs HTTPS.
+* Every service must authenticate users.
+* Every service needs firewall rules.
+* Clients must know every URL.
+* Security policies are duplicated.
+* Every service becomes publicly attackable.
+
+Instead, expose only one component.
+
+```text
+Internet
+     │
+     ▼
++------------------+
+|   API Gateway    |
++------------------+
+     │
+     ├──────── Product
+     ├──────── Order
+     ├──────── Payment
+     └──────── User
+```
+
+The gateway becomes the **front door** of your system.
+
+## Real Example
+
+Suppose your company owns these services.
+
+```text
+inventory.internal.local
+
+orders.internal.local
+
+payments.internal.local
+```
+
+These addresses are private.
+
+Clients only access
+
+```text
+https://api.company.com
+```
+
+Internally the gateway routes requests.
+
+```http
+GET /products
+```
+
+↓
+
+```text
+inventory.internal.local
+```
+
+The client never learns the internal network topology.
+
+# 3.2 North-South vs East-West Traffic
+
+This distinction is one of the most important concepts in distributed systems.
+
+## North-South Traffic
+
+North-South traffic crosses the boundary between **external clients** and the **internal system**.
+
+```text
+           Internet
+               │
+               ▼
+        API Gateway
+               │
+               ▼
+        Product Service
+```
+
+The request moves **from outside to inside** (or the reverse).
+
+Examples:
+
+* Browser → API Gateway
+* Mobile App → Gateway
+* Partner API → Gateway
+
+Characteristics:
+
+* Crosses trust boundaries.
+* Requires authentication.
+* Usually encrypted (HTTPS).
+* Public-facing.
+* Controlled by the API Gateway.
+
+## Example
+
+```http
+GET /products
+```
+
+The request path is:
+
+```text
+Browser
+
+↓
+
+API Gateway
+
+↓
+
+Product Service
+```
+
+This is North-South traffic.
+
+## East-West Traffic
+
+East-West traffic occurs **inside** the system between services.
+
+```text
+Product Service
+
+↓
+
+Inventory Service
+
+↓
+
+Pricing Service
+```
+
+The client is no longer involved.
+
+## Example
+
+A customer places an order.
+
+```text
+Browser
+     │
+     ▼
+API Gateway
+     │
+     ▼
+Order Service
+     │
+     ├──────── Inventory Service
+     ├──────── Payment Service
+     └──────── Shipping Service
+```
+
+The first request (Browser → Gateway) is North-South.
+
+The communication between:
+
+* Order Service
+* Inventory Service
+* Payment Service
+
+is East-West.
+
+## Why Does This Matter?
+
+Different technologies specialize in different traffic.
+
+| Technology    | North-South | East-West  |
+| ------------- | ----------- | ---------- |
+| API Gateway   | ✅           | ❌ (rarely) |
+| Service Mesh  | ❌           | ✅          |
+| Reverse Proxy | ✅           | ❌          |
+| Load Balancer | Both        | Both       |
+
+A common production architecture is:
+
+```text
+                Internet
+                    │
+                    ▼
+              API Gateway
+                    │
+     ┌──────────────┼──────────────┐
+     ▼              ▼              ▼
+ Product       Order         Payment
+ Service       Service        Service
+     │              │
+     └───────┬──────┘
+             ▼
+       Service Mesh
+```
+
+The gateway handles client traffic, while the service mesh manages internal service-to-service communication.
+
+# 3.3 API Gateway vs Reverse Proxy
+
+These terms are often confused because an API Gateway **contains** reverse proxy functionality.
+
+## What is a Reverse Proxy?
+
+A reverse proxy receives requests and forwards them to backend servers.
+
+```text
+Client
+
+↓
+
+Reverse Proxy
+
+↓
+
+Web Server
+```
+
+Its primary responsibilities are:
+
+* Hide backend servers.
+* Forward requests.
+* SSL termination.
+* Basic load balancing.
+* Compression.
+* Static content caching.
+
+Examples:
+
+* NGINX
+* Apache HTTP Server
+* HAProxy
+
+## API Gateway
+
+An API Gateway also forwards requests but adds application-aware features.
+
+```text
+Client
+    │
+    ▼
+API Gateway
+    │
+    ├── Authentication
+    ├── Authorization
+    ├── Rate Limiting
+    ├── JWT Validation
+    ├── Request Transformation
+    ├── Metrics
+    ├── Tracing
+    └── Routing
+```
+
+It understands APIs rather than simply forwarding HTTP traffic.
+
+## Comparison
+
+| Feature                | Reverse Proxy | API Gateway |
+| ---------------------- | ------------- | ----------- |
+| Request forwarding     | ✅             | ✅           |
+| SSL termination        | ✅             | ✅           |
+| Routing                | Basic         | Advanced    |
+| JWT validation         | ❌             | ✅           |
+| OAuth2                 | ❌             | ✅           |
+| Rate limiting          | Limited       | ✅           |
+| API versioning         | Limited       | ✅           |
+| Request transformation | Limited       | ✅           |
+| Service discovery      | Usually no    | ✅           |
+| API aggregation        | ❌             | ✅           |
+
+Think of it this way:
+
+> **Every API Gateway acts as a reverse proxy, but not every reverse proxy is an API Gateway.**
+
+# 3.4 API Gateway vs Load Balancer
+
+Although both direct traffic, they operate at different levels.
+
+## Load Balancer
+
+A load balancer distributes requests across multiple instances of the **same service**.
+
+```text
+             Client
+                │
+                ▼
+        Load Balancer
+        ┌──────┼──────┐
+        ▼      ▼      ▼
+    Product1 Product2 Product3
+```
+
+It answers: **Which instance should receive this request?**
+
+## API Gateway
+
+The gateway answers a different question: **Which service should receive this request?**
+
+```text
+Client
+    │
+    ▼
+API Gateway
+    │
+    ├──────── Product Service
+    ├──────── Order Service
+    └──────── Payment Service
+```
+
+After choosing the service, it may use a load balancer to choose a specific instance.
+
+```text
+Client
+    │
+    ▼
+Gateway
+    │
+    ▼
+Product Service
+    │
+    ▼
+Load Balancer
+    │
+ ┌──┴──┐
+ ▼     ▼
+P1     P2
+```
+
+The gateway and load balancer complement each other rather than compete.
+
+# 3.5 API Gateway vs Service Mesh
+
+A service mesh manages communication **between services**, not between clients and services.
+
+## API Gateway
+
+```text
+Browser
+
+↓
+
+Gateway
+
+↓
+
+Order Service
+```
+
+Responsibilities:
+
+* Authentication
+* Routing
+* Rate limiting
+* API policies
+* Public traffic
+
+## Service Mesh
+
+```text
+Order Service
+
+↓
+
+Inventory Service
+
+↓
+
+Payment Service
+```
+
+Responsibilities:
+
+* mTLS
+* Retries
+* Circuit breakers
+* Observability
+* Traffic policies
+* Service identity
+
+The client never communicates directly with the service mesh.
+
+## Example
+
+An order is submitted.
+
+```text
+Browser
+    │
+    ▼
+Gateway
+    │
+    ▼
+Order Service
+    │
+    ├──────── Inventory Service
+    ├──────── Payment Service
+    └──────── Shipping Service
+```
+
+Gateway responsibilities:
+
+* Verify JWT.
+* Apply rate limits.
+* Route to Order Service.
+
+Service mesh responsibilities:
+
+* Encrypt service-to-service traffic.
+* Retry failed internal calls.
+* Collect distributed traces.
+* Apply traffic policies.
+
+# 3.6 API Gateway vs Ingress Controller
+
+This comparison is especially important in Kubernetes.
+
+## Ingress Controller
+
+An Ingress Controller exposes Kubernetes services to external traffic.
+
+```text
+Internet
+     │
+     ▼
+Ingress Controller
+     │
+     ▼
+Kubernetes Services
+```
+
+Responsibilities:
+
+* HTTP routing
+* TLS termination
+* Host-based routing
+* Path-based routing
+
+Examples:
+
+* NGINX Ingress Controller
+* Traefik
+* HAProxy Ingress
+
+## API Gateway
+
+An API Gateway builds on routing and adds richer API management capabilities, such as:
+
+* OAuth2
+* JWT validation
+* Rate limiting
+* Request transformation
+* API versioning
+* Analytics
+
+Many organizations use both:
+
+```text
+Internet
+     │
+     ▼
+Ingress Controller
+     │
+     ▼
+API Gateway
+     │
+     ▼
+Microservices
+```
+
+or use a gateway product that also functions as an ingress controller.
+
+# Summary Comparison
+
+| Technology         | Main Responsibility                     | Typical Location |
+| ------------------ | --------------------------------------- | ---------------- |
+| Reverse Proxy      | Forward requests                        | Edge             |
+| Load Balancer      | Distribute traffic among instances      | Edge/Internal    |
+| API Gateway        | Manage external APIs and route requests | Edge             |
+| Service Mesh       | Manage service-to-service communication | Internal         |
+| Ingress Controller | Expose Kubernetes services              | Kubernetes Edge  |
+
+# Real Production Architecture
+
+Putting everything together:
+
+```text
+                     Internet
+                         │
+                         ▼
+                  External Load Balancer
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+      API Gateway A                API Gateway B
+          │                             │
+          └──────────────┬──────────────┘
+                         ▼
+                 Kubernetes Cluster
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+    Product Svc     Order Svc     Payment Svc
+          │              │              │
+          └──────────────┼──────────────┘
+                         ▼
+                  Service Mesh
+                 (Internal Traffic)
+```
+
+In this architecture:
+
+* **External Load Balancer** distributes client requests across multiple gateway instances.
+* **API Gateways** handle all North-South concerns: authentication, authorization, routing, rate limiting, and API policies.
+* **Microservices** implement business logic.
+* **Service Mesh** manages East-West communication between services.
+
+## Key Takeaways
+
+* An **Edge Server** is the first server exposed to external clients.
+* An **API Gateway** is a specialized edge server focused on API management and cross-cutting concerns.
+* **North-South traffic** flows between external clients and your system; **East-West traffic** flows between internal services.
+* A **Reverse Proxy** forwards requests, while an **API Gateway** adds API-specific capabilities such as authentication, authorization, and rate limiting.
+* A **Load Balancer** selects a service instance; an **API Gateway** selects the destination service and often uses a load balancer afterward.
+* A **Service Mesh** complements the gateway by managing secure, observable, and resilient communication between internal services.
+* An **Ingress Controller** exposes Kubernetes services, whereas an API Gateway provides richer API management features.
+
+The next chapter, **Gateway Patterns**, will explore common architectural patterns such as the **API Gateway Pattern**, **Backend for Frontend (BFF)**, **Gateway Aggregation**, **Request Routing**, and **Request Composition**, showing how different gateway designs address different application requirements.

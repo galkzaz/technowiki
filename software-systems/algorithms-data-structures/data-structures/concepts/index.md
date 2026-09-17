@@ -58,11 +58,9 @@ Example:
 ```text
 Numbers: 5 8 2 9 1
 
-Stored in:
-Array
+Stored in: Array
 
-Algorithm:
-Sorting
+Algorithm: Sorting
 
 Result:
 1 2 5 8 9

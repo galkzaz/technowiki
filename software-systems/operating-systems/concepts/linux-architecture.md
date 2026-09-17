@@ -1336,11 +1336,27 @@ This transition occurs during:
 
 ## System Call Interface
 
+
 The **System Call Interface (SCI)** is the boundary between user applications and the kernel.
 
-Applications cannot directly access hardware.
-Instead, they request services using **system calls**.
+Applications cannot directly access hardware. Instead, they request services using **system calls**.
 
+Applications cannot directly access hardware or privileged OS functions. Instead, they request services from the operating system through **system calls**.
+
+Examples:
+
+* Reading a file
+* Creating a process
+* Allocating memory
+* Sending data through a network
+
+For example:
+
+```c
+read(fd, buffer, 100);
+```
+
+Although `read()` looks like a normal function call, it eventually triggers a **system call**.
 
 ### What is a System Call?
 
@@ -1357,6 +1373,43 @@ Examples:
 | Device Access   | `ioctl()`                     |
 | Signals         | `kill()`, `signal()`          |
 
+---
+
+### What Happens During a System Call?
+
+When a user program executes a system call:
+
+1. Program runs in **User Mode**
+2. System call instruction executes (`syscall` on x86-64)
+3. CPU switches to **Kernel Mode**
+4. Control transfers to the OS kernel
+5. Kernel performs requested service
+6. Kernel returns result
+7. CPU switches back to **User Mode**
+8. Program continues after the system call
+
+Diagram:
+
+```text
+User Program
+     |
+     | read()
+     v
++----------------+
+| syscall        |
++----------------+
+     |
+     v
+Kernel Mode
+     |
+     | Execute OS Service
+     |
+     v
+Return Result
+     |
+     v
+User Program Continues
+```
 
 ### System Call Flow
 

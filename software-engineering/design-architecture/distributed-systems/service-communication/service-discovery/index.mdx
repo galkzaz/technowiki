@@ -1,0 +1,2044 @@
+---
+id: software-engineering-design-architecture-distributed-systems-service-communication-service-discovery
+title: Service Discovery
+description: Service discovery is a key component of distributed systems that allows services to find and communicate with each other dynamically. It enables services to register themselves and discover other services without hardcoding their locations.
+---
+## Overview
+
+### What is Service Discovery?
+
+Service Discovery is the mechanism that allows services in a distributed system to locate and communicate with each other dynamically without hardcoding network addresses.
+
+Instead of a service knowing:
+
+```
+Order Service
+192.168.10.25:8080
+```
+
+it simply knows
+
+```
+Order Service
+```
+
+and asks a discovery mechanism where that service is currently running.
+
+This becomes necessary because in modern cloud systems:
+
+* Containers are created and destroyed frequently.
+* IP addresses change constantly.
+* Instances scale up and down automatically.
+* Services may exist in multiple data centers.
+
+Without service discovery every service would need manual configuration whenever something changes.
+
+Service discovery is probably the most important support function required to make a landscape 
+of cooperating microservices production-ready.  a service discovery service (or a discovery service as 
+an abbreviation) can be used to keep track of existing microservices and their instances.
+
+In the cloud, you’ll probably want to have multiple instances of a service running, and
+each service instance will have its own IP address. Unlike physical machines or longrunning virtual machines, a service instance will not live long in the cloud. Application instances are disposable—they can be removed or replaced for different reasons,
+such as when they are not responsive anymore. You can even enable the auto-scaling
+feature to automatically scale your application in and out, depending on the workload.
+
+Using IP addresses for interprocess communication in the cloud is not an option. To overcome that issue, you might consider using DNS records, relying on a
+round-robin name resolution pointing to one of the IP addresses assigned to the replicas. Knowing the hostname, you can reach the backing service even if one of the IP
+addresses changes because the DNS server would be updated with the new ones. However, this approach is not the best fit for cloud environments because the topology
+changes too often. Some DNS implementations cache the results of name lookups
+even after they should have expired. Similarly, some applications cache DNS lookup
+responses for too long. Either way, there’s a high chance of using a hostname/IP
+address resolution that is no longer valid.
+
+Service discovery in cloud environments requires a different solution. First, we
+need to keep track of all the service instances running and store that information in a
+service registry. Whenever a new instance is created, an entry should be added to the
+registry. When it’s shut down, it should be removed accordingly. The registry recognizes that multiple instances of the same application can be up and running. When an
+application needs to call a backing service, it performs a lookup in the registry to determine which IP address to contact. If multiple instances are available, a load-balancing
+strategy is applied to distribute the workload across them.
+
+The service discovery pattern consists of two main concepts.
+
+- **The service registry**:
+A central place with a list of available services,
+the address where they’re located, and some extra metadata like their
+name. It may contain entries for different services, but also multiple
+instances of the same service. In the last case, clients accessing
+the registry can obtain a list of available instances by querying a
+service alias. For example, various instances of the product
+microservice can register with the same alias, product. Then,
+when querying that value, all instances are returned.
+- **The registrar**:
+The logic in charge of registering the service instance at
+the registry. It can be an external running process observing the state
+of your microservice, or it can be embedded in the service itself as a
+library, like it’ll be this case.
+
+### Problem It Solves
+
+Imagine:
+
+```
+Inventory Service
+```
+
+starts at
+
+```
+10.0.1.7
+```
+
+Later Kubernetes replaces it with
+
+```
+10.0.8.21
+```
+
+If Product Service stored the old IP
+
+```
+10.0.1.7
+```
+
+every request fails.
+
+Service Discovery removes this problem by keeping a continuously updated directory of available service instances.
+#### The problem with DNS-based service discovery
+The idea behind round-robin DNS is that each instance of a microservice registers its IP address 
+under the same name in a DNS server. When a client asks for IP addresses for the DNS name, the 
+DNS server will return a list of IP addresses for the registered instances. The client can use this 
+list of IP addresses to send requests to the microservice instances in a round-robin fashion, using 
+the IP addresses one after another.
+
+<details>
+<summary>Example from  product-review-recommendation-microservices Project</summary>
+
+Let’s try it out and see what happens! Follow these steps:
+1. Assuming that you have followed the instructions from Lab: Developing Reactive Microservices, start the system landscape and insert some test data with the following command:
+```bash
+./test-em-all.bash start
+```
+2. Scale up the review microservice to two instances:
+```bash
+docker compose up -d --scale review=2
+```
+3. Ask the composite product service for the IP addresses it finds for the review microservice:
+```bash
+docker compose exec product-composite getent hosts review
+```
+Expect an answer like the following:
+```text
+192.168.96.9 review
+192.168.96.8 review
+```
+Great, the composite product service sees two IP addresses – in my case, 192.168.96.9
+and 192.168.96.8 – one for each instance of the review microservice!
+4. If you want to, you can verify that these are the correct IP addresses by using the following
+commands. The commands ask each instance of the review microservice for its IP address:
+```bash
+docker compose exec --index=1 review cat /etc/hosts
+docker compose exec --index=2 review cat /etc/hosts
+```
+The last line in the output from each command should contain one of the IP addresses, as
+shown in the preceding code. Here’s an example:
+```text
+192.168.96.8 70eb82fc7e61
+```
+5. Now, let’s try out a couple of calls to the product-composite service and see whether it
+uses both instances of the review microservice:
+```bash
+curl localhost:8080/product-composite/1 -s | jq -r .serviceAddresses.rev
+```
+Unfortunately, we will only get responses from one of the microservice instances, as in
+this example:
+```text
+70eb82fc7e61/192.168.96.8:8080 
+```
+That was disappointing!
+Okay, so what is going on here? A DNS client asks a DNS server to resolve a DNS name and receives a list of IP addresses. Next, the 
+DNS client tries out the received IP addresses one by one until it finds one that works – in most 
+cases, the first one in the list. A DNS client typically holds on to a working IP address; it does not 
+apply a round-robin approach per request. Added to this, neither a typical DNS server implementation nor the DNS protocol itself is well suited for handling volatile microservice instances that 
+come and go all the time. Because of this, even though DNS-based round robin is appealing in 
+theory, it is not very practical to use for the service discovery of microservice instances.
+
+</details>
+
+### Main Components
+
+```
+                +------------------+
+                | Service Registry |
+                +---------+--------+
+                          ^
+                          |
+             Register / Update
+                          |
+         +----------------+---------------+
+         |                                |
++----------------+              +----------------+
+| Order Service  |              | Product Service|
++----------------+              +----------------+
+
+               Discovery Request
+
+Product Service
+      |
+      v
+Registry
+      |
+Returns:
+Order Service ->
+10.1.2.15
+10.1.2.17
+10.1.2.21
+```
+
+---
+
+### Core Responsibilities
+
+A discovery system usually provides:
+
+* Service registration
+* Service lookup
+* Health monitoring
+* Removing failed instances
+* Supporting load balancing
+* Supporting auto scaling
+
+---
+## Challenges with service discovery
+ {/* **Why do we need a service discovery system instead of a simple list of IP addresses or DNS records?**
+
+It motivates the design of the rest of the service discovery components (registry, registration, health checks, heartbeats, etc.). */}
+So, we need something a bit more powerful than a plain DNS to keep track of available microservice instances!
+We must take the following into consideration when we’re keeping track of many small moving 
+parts, that is, microservice instances:
+
+- New instances can start up at any point in time.
+- Existing instances can stop responding and eventually crash at any point in time.
+- Some of the failing instances might be okay after a while and should start to receive traffic 
+again, while others will not and should be removed from the service registry.
+- Some microservice instances might take some time to start up; that is, just because they 
+can receive HTTP requests doesn’t mean that traffic should be routed to them.
+- Unintended network partitioning and other network-related errors can occur at any time.
+
+### Why Is Service Discovery Difficult?
+
+In a traditional monolithic application, the server's address rarely changes.
+
+```text
+Web Server
+
+192.168.1.10
+```
+
+Clients can safely use that address for months or even years.
+
+Microservices are very different.
+
+A single service may have dozens or hundreds of instances that are continuously:
+
+* starting
+* stopping
+* scaling
+* crashing
+* restarting
+* moving to different hosts
+
+The discovery system must maintain an accurate view of this constantly changing environment.
+
+---
+
+### Challenge 1: Dynamic Service Instances
+
+New instances can appear at any time.
+
+Suppose Order Service currently has two instances.
+
+```text
+Order Service
+
+10.0.1.10
+
+10.0.1.11
+```
+
+The auto-scaler detects increased traffic.
+
+```text
+CPU = 90%
+```
+
+Three new instances are created.
+
+```text
+10.0.1.12
+
+10.0.1.13
+
+10.0.1.14
+```
+
+The registry must quickly:
+
+* detect the new instances
+* register them
+* make them discoverable
+
+Otherwise clients continue using only the original two instances.
+
+This is why **Service Registration** exists.
+
+---
+
+### Challenge 2: Detecting Failed Instances
+
+Instances may fail unexpectedly.
+
+```text
+Inventory Service
+
+10.0.2.15
+
+↓
+
+JVM crash
+```
+
+If the registry still advertises
+
+```text
+10.0.2.15
+```
+
+clients continue sending requests there.
+
+```text
+Client
+
+↓
+
+10.0.2.15
+
+↓
+
+Connection refused
+```
+
+The registry must detect failures and remove failed instances quickly.
+
+This leads directly to:
+
+* Health Checks
+* Heartbeats
+* Failure Handling
+
+---
+
+### Challenge 3: Recovering Instances
+
+Failures are not always permanent.
+
+Suppose an instance temporarily loses database connectivity.
+
+```text
+Database
+
+↓
+
+Unavailable
+```
+
+The service becomes unhealthy.
+
+Later the database returns.
+
+```text
+Database
+
+↓
+
+Available
+```
+
+The instance is healthy again.
+
+A discovery system must decide:
+
+* Should it immediately receive traffic?
+* Should it pass health checks first?
+* Should it warm up before becoming available?
+
+The registry therefore needs to support transitions between healthy and unhealthy states.
+
+---
+
+### Challenge 4: Startup Readiness
+
+A process starting does **not** mean it is ready to handle requests.
+
+For example, a Spring Boot service may take several seconds to:
+
+* load configuration
+* initialize beans
+* connect to databases
+* build caches
+* establish Kafka connections
+
+During this period:
+
+```text
+JVM Running
+
+✓
+
+HTTP Port Open
+
+✓
+
+Ready to Serve Requests
+
+✗
+```
+
+If traffic is routed too early, requests may fail.
+
+This is why many platforms distinguish between:
+
+* **Liveness**: Is the process alive?
+* **Readiness**: Is the service ready to receive traffic?
+
+Only ready instances should be discoverable.
+
+---
+
+### Challenge 5: Network Partitions
+
+Distributed systems assume the network is unreliable.
+
+Consider:
+
+```text
+Registry
+
+|
+
+X
+
+|
+
+Payment Service
+```
+
+The registry cannot contact the service.
+
+There are several possibilities:
+
+1. The service crashed.
+2. The registry crashed.
+3. A router failed.
+4. The network is partitioned.
+5. The service is overloaded.
+
+The registry cannot immediately determine which situation occurred.
+
+If it removes the service too quickly, healthy instances may disappear from discovery.
+
+If it waits too long, clients continue sending requests to unavailable instances.
+
+This is one of the hardest problems in distributed systems.
+
+---
+
+### Challenge 6: Consistency vs Availability
+
+Suppose there are multiple registry servers.
+
+```text
+Registry A
+
+Registry B
+
+Registry C
+```
+
+If one registry receives a registration but another does not:
+
+```text
+A
+
+Service X
+
+B
+
+Service X
+
+C
+
+No Service X
+```
+
+Different clients may receive different answers.
+
+The discovery system must balance:
+
+* consistency (all registries agree on the same data)
+* availability (the system continues operating during failures)
+
+This is a classic distributed systems trade-off.
+
+---
+
+### Challenge 7: Scalability
+
+Large systems may contain thousands of service instances.
+
+```text
+Authentication Service
+
+2,000 instances
+
+↓
+
+Discovery System
+```
+
+The registry must efficiently handle:
+
+* registrations
+* deregistrations
+* heartbeats
+* health checks
+* discovery requests
+* endpoint updates
+
+without becoming a bottleneck.
+
+This motivates techniques such as:
+
+* clustering
+* replication
+* caching
+* watch/notification mechanisms
+
+---
+
+### Challenge 8: Frequent State Changes
+
+Microservice instances continuously change state.
+
+```text
+Created
+
+↓
+
+Starting
+
+↓
+
+Registering
+
+↓
+
+Healthy
+
+↓
+
+Serving
+
+↓
+
+Unhealthy
+
+↓
+
+Recovered
+
+↓
+
+Serving
+
+↓
+
+Stopping
+
+↓
+
+Removed
+```
+
+The discovery system must track these transitions accurately and ensure clients always receive up-to-date information.
+
+This leads to the concept of the **Service Instance Lifecycle**.
+
+---
+
+### How These Challenges Shape the Rest of the TOC
+
+Each challenge motivates one or more subsequent topics:
+
+| Challenge              | Solution / Related Topic                          |
+| ---------------------- | ------------------------------------------------- |
+| New instances appear   | Service Registration                              |
+| Failed instances       | Health Checks, Heartbeats                         |
+| Temporary failures     | Failure Handling                                  |
+| Startup delay          | Readiness Checks, Service Instance Lifecycle      |
+| Network partitions     | Failure Handling, Heartbeats                      |
+| Many instances         | Scalability                                       |
+| Clients need endpoints | Service Registry                                  |
+| Selecting an instance  | Client-Side/Server-Side Discovery, Load Balancing |
+
+{/* ---
+
+### Big Picture
+
+The progression of your Service Discovery chapter can now be understood as answering a sequence of questions:
+
+```text
+Overview
+    │
+    ▼
+Why do we need service discovery?
+    │
+    ▼
+Challenges
+    │
+    ├── Instances start and stop dynamically
+    ├── Instances fail and recover
+    ├── Services are not immediately ready
+    ├── Networks can partition
+    ├── The system must scale
+    │
+    ▼
+Service Registry
+    │
+    ▼
+Service Registration
+    │
+    ▼
+Health Checks & Heartbeats
+    │
+    ▼
+Discovery Patterns
+    │
+    ▼
+Load Balancing
+    │
+    ▼
+Failure Handling
+    │
+    ▼
+Scalability
+    │
+    ▼
+DNS-Based Discovery & Service Mesh Discovery
+```
+
+In other words, the **Challenges** section is the motivation for every other component in the Service Discovery chapter. It explains *why* a robust discovery system needs features such as registration, health monitoring, lifecycle management, and scalability, rather than simply maintaining a static list of service addresses. */}
+
+## Service Registry
+
+The **Service Registry** is the central directory containing information about all available service instances.
+
+Think of it like a phone book.
+
+Instead of
+
+```
+John -> 555-1234
+```
+
+it stores
+
+```
+Order Service
+
+Instance A
+10.0.0.5:8080
+
+Instance B
+10.0.0.9:8080
+
+Instance C
+10.0.0.15:8080
+```
+
+---
+
+### Information Stored
+
+A registry commonly stores:
+
+* Service name
+* Instance ID
+* IP address
+* Port
+* Version
+* Region
+* Availability zone
+* Metadata
+* Health status
+* Last heartbeat
+
+---
+
+### Popular Registries
+
+* Netflix Eureka
+* Consul
+* ZooKeeper
+* Apache Curator
+* Kubernetes API Server
+* etcd
+* Nacos
+
+---
+
+## Service Registration
+
+Registration is the process by which a service announces itself to the registry.
+
+Example:
+
+```
+POST /register
+
+{
+   service: "OrderService",
+   ip: "10.0.5.12",
+   port: 8080
+}
+```
+
+Registry stores
+
+```
+Order Service
+
+10.0.5.12:8080
+```
+
+---
+
+### Registration Types
+
+### Self Registration
+
+The service registers itself.
+
+```
+Service
+
+   |
+   | Register
+   v
+
+Registry
+```
+
+Example:
+
+Netflix Eureka Client
+
+---
+
+### Third-Party Registration
+
+Another component registers the service.
+
+```
+Service
+
+      |
+
+Agent
+
+      |
+
+Registry
+```
+
+Example:
+
+Consul Agent
+
+---
+
+## Service Discovery Patterns
+
+This section explains how clients obtain service locations.
+
+Two major patterns exist.
+
+---
+
+### Client-Side Discovery
+
+The client queries the registry directly.
+
+```
+             Lookup
+Client ----------------> Registry
+
+Registry
+
+Returns
+
+A
+B
+C
+
+Client
+
+Chooses
+
+B
+
+Client -----------> Service B
+```
+Client-side service discovery, meaning that the clients run software 
+that talks to the discovery server, Netflix Eureka, to get information about the available microservice instances.
+
+Other services may query a given service name from the registry, retrieve a list, and
+then decide which instance to call. This technique is known as client-side discovery,
+and it implies that clients are aware of the service registry and perform load balancing
+themselves. Note that, by client, we mean an application, microservice, browser, and so
+on, that wants to perform an HTTP call to another service
+
+![alt text](/docs/assets/software-engineering/software-engineering/design-architecture/distributed-systems/service-communication/service-discovery/image-1.png)
+
+Client-side service discovery requires applications to register themselves with a service
+registry upon startup and unregister when shutting down. Whenever they need to call
+a backing service, they ask the service registry for an IP address. If multiple instances are available, the registry will return the list of IP addresses. The application will
+choose one of them, depending on a load-balancing strategy defined by the application itself.
+
+![The interprocess communication between Alpha App and Beta App is based on the IP address of the specific instance to call](/docs/assets/software-engineering/software-engineering/design-architecture/distributed-systems/service-communication/service-discovery/client-side-service-discovery-and-load-balancing-model.png)
+
+The process is as follows:
+
+1. Whenever a microservice instance starts up – for example, the Review service – it registers 
+itself to one of the Eureka servers.
+2. On a regular basis, each microservice instance sends a heartbeat message to the Eureka 
+server, telling it that the microservice instance is okay and is ready to receive requests.
+3. Clients – for example, the Product Composite service – use a client library that regularly 
+asks the Eureka service for information about available services.
+4. When the client needs to send a request to another microservice, it already has a list of 
+available instances in its client library and can pick one of them without asking the discovery server. Typically, available instances are chosen in a round-robin fashion; that is, 
+they are called one after another before the first one is called once more.
+
+A benefit of such a solution is that your applications have complete control
+over the load-balancing strategy. Suppose you need to implement patterns like hedging:sending the same request to multiple instances to increase the chance one responds
+correctly within a specific time limit. Client service discovery can help you with that.
+
+A drawback is that client service discovery assigns more responsibility to developers. If your system includes applications built using different languages and frameworks, you’ll need to handle the client part of each of them in different ways. Also, it
+results in one more service to deploy and maintain (the service registry), unless you
+use PaaS solutions like Azure Spring Apps or VMware Tanzu Application Service,
+which provide it for you. Server-side discovery solutions solve these issues at the expense
+of fine-grained control in the application.
+
+---
+
+#### Flow
+
+1. Query registry
+2. Receive all instances
+3. Choose instance
+4. Call service
+
+---
+
+#### Advantages
+
+* Intelligent client
+* Flexible load balancing
+* Supports retries
+* Supports custom routing
+
+---
+
+#### Disadvantages
+
+Every client needs discovery logic.
+
+---
+
+#### Examples
+
+* Netflix Eureka
+* Spring Cloud LoadBalancer
+* Ribbon (legacy)
+
+---
+
+### Server-Side Discovery
+
+The client calls a load balancer instead of the registry.
+
+```
+Client
+
+   |
+
+Load Balancer
+
+   |
+
+Registry
+
+   |
+
+Service
+```
+On the other side, server-side discovery abstracts all this logic from the clients by
+providing a unique address, known in advance, where callers can find a given service.
+When they make the request, it’s intercepted by a load balancer, which is aware of the
+registry. This balancer will proxy the request to one of the replicas
+image::07-discovery/image-2.png[alt text]
+
+Server-side service discovery solutions move a lot of responsibility to the deployment
+platform, so that developers can focus on the business logic and rely on the platform
+to provide all the necessary functionality for service discovery and load balancing.
+Such solutions automatically register and deregister application instances and rely on
+a load-balancer component to route any incoming requests to one of the available
+instances according to a specific strategy. In this case, the application doesn’t need to
+interact with the service registry, which is updated and managed by the platform. 
+
+![The interprocess communication between Alpha App and Beta App is based on a DNS name that gets resolved to one of the instance IP addresses by a load-balancer component. The service registration process is handled by the platform transparently.](/docs/assets/software-engineering/software-engineering/design-architecture/distributed-systems/service-communication/service-discovery/Server-side service discovery and load balancing model.png)
+
+Typically, in a microservices architecture, you’ll see either both approaches
+combined or just server-side discovery. Client-side discovery doesn’t work well when
+the API clients are outside your system, because you shouldn’t require external clients to
+interact with a service registry and do load balancing themselves. Normally, the gateway
+takes this responsibility. Therefore, your API gateway will be connected to the service
+registry and will include a load balancer to distribute the load across the instances.
+
+---
+
+#### Flow
+
+Client
+
+↓
+
+Load Balancer
+
+↓
+
+Registry lookup
+
+↓
+
+Choose instance
+
+↓
+
+Forward request
+
+---
+
+#### Advantages
+
+Client remains simple.
+
+---
+
+#### Examples
+
+* Kubernetes Service
+* AWS ELB
+* NGINX
+* HAProxy
+* Envoy
+
+---
+
+## Health Checks
+
+Discovery only works if unhealthy services are removed.
+
+Health checks determine whether an instance is able to serve requests.
+
+Two common methods:
+
+---
+
+### Active Checks
+
+Registry periodically asks:
+
+```
+GET /health
+```
+
+Response
+
+```
+UP
+```
+
+or
+
+```
+DOWN
+```
+
+---
+
+### Passive Checks
+
+Failures are inferred from:
+
+* connection failures
+* timeouts
+* error rates
+
+---
+
+Example:
+
+```
+Registry
+
+Every 10 seconds
+
+GET /health
+```
+
+---
+
+## Heartbeats
+
+Heartbeats are periodic signals sent by a service indicating that it is still alive.
+
+Unlike active health checks, the service initiates the communication.
+
+Example:
+
+```
+Every 30 seconds
+
+Service
+
+Heartbeat
+
+Registry
+```
+
+If no heartbeat arrives:
+
+```
+Missed heartbeat
+
+↓
+
+Missed heartbeat
+
+↓
+
+Registry removes service
+```
+
+---
+
+### Difference from Health Checks
+
+Health checks ask: Are you healthy?
+
+Heartbeats say: I'm still alive.
+
+A service may be alive but unhealthy, so many systems use both.
+
+---
+
+## Service Instance Lifecycle
+
+A service instance passes through several states.
+
+- Created
+- Starting
+- Registering
+- Healthy
+- Serving Requests
+- Stopping
+- Deregistering
+- Removed
+
+---
+
+### Lifecycle Events
+
+* Instance creation
+* Registration
+* Health verification
+* Heartbeat updates
+* Graceful shutdown
+* Deregistration
+* Failure removal
+
+## Load Balancing Integration
+
+Discovery and load balancing work together.
+
+Discovery answers: Where are the services?
+
+Load balancing answers: Which instance should receive this request?
+
+Example:
+
+Registry returns
+
+```
+A
+B
+C
+```
+
+Load balancer selects
+
+```
+B
+```
+
+Algorithms include:
+
+* Round Robin
+* Least Connections
+* Random
+* Weighted Round Robin
+* Response Time
+* Consistent Hashing
+
+## Failure Handling
+
+Discovery systems must cope with failures.
+
+Examples include:
+
+### Instance Crash
+
+```
+Heartbeat stops
+
+↓
+
+Registry removes instance
+```
+
+---
+
+### Network Partition
+
+Registry may temporarily lose contact with healthy services.
+
+Strategies:
+
+* Lease timeouts
+* Grace periods
+* Quorum consensus
+* Multi-node registries
+
+---
+
+### Registry Failure
+
+Single registry failure creates a single point of failure.
+
+Solutions:
+
+* Replicated registries
+* Consensus protocols
+* Multiple registry nodes
+* Leader election
+
+---
+
+## Scalability
+
+Large systems may contain tens of thousands of service instances.
+
+Scalability techniques include:
+
+### Registry Clustering
+
+```
+Registry A
+
+Registry B
+
+Registry C
+```
+
+---
+
+### Replication
+
+Registry information is synchronized among nodes.
+
+---
+
+### Partitioning (Sharding)
+
+Different registry nodes manage subsets of services.
+
+---
+
+### Caching
+
+Clients cache discovery results to reduce registry load.
+
+---
+
+### Watch Mechanisms
+
+Instead of polling:
+
+```
+Client
+
+Watch registry
+
+↓
+
+Registry pushes updates
+```
+
+This reduces unnecessary network traffic.
+
+---
+
+## DNS-Based Discovery
+
+Instead of using a dedicated registry API, services are discovered through DNS.
+
+Example:
+
+```
+orders.company.internal
+```
+
+DNS resolves to
+
+```
+10.0.1.2
+
+10.0.1.4
+
+10.0.1.8
+```
+
+Client connects using standard DNS resolution.
+
+there is an important distinction between **traditional DNS-based service discovery** and **modern DNS-based service discovery**. The discussion about the limitations of round-robin DNS belongs **inside** the **DNS-Based Discovery** topic as the motivation for why modern systems don't rely on plain DNS alone.
+
+### Advantages
+
+* Simple
+* Standard protocol
+* Widely supported
+* Minimal client changes
+
+---
+
+### Limitations
+
+* DNS caching may delay updates.
+* Health information is limited.
+* Routing decisions are less flexible than registry-based systems.
+
+---
+
+### Examples
+
+* Kubernetes CoreDNS
+* AWS Cloud Map
+* Consul DNS interface
+
+This is an excellent question because there is an important distinction between **traditional DNS-based service discovery** and **modern DNS-based service discovery**. The discussion about the limitations of round-robin DNS belongs **inside** the **DNS-Based Discovery** topic as the motivation for why modern systems don't rely on plain DNS alone.
+
+I would organize the topic like this:
+
+```text
+dns-based-discovery/
+│
+├── overview/
+├── traditional-dns-discovery/
+├── round-robin-dns/
+├── limitations-of-round-robin-dns/
+├── modern-dns-based-discovery/
+├── kubernetes-dns/
+├── cloud-dns-services/
+└── comparison-with-service-registry/
+```
+
+Then the story becomes very clear.
+
+---
+
+## 1. Traditional DNS-Based Discovery
+
+Start by explaining the original idea.
+
+Instead of a service registry:
+
+```text
+Order Service
+        |
+        |
+Registry
+        |
+10.0.1.10
+10.0.1.11
+10.0.1.12
+```
+
+we simply use DNS.
+
+```text
+orders.company.com
+
+↓
+
+10.0.1.10
+10.0.1.11
+10.0.1.12
+```
+
+DNS itself becomes the discovery mechanism.
+
+---
+
+## 2. Round-Robin DNS
+
+Then explain how DNS performs load distribution.
+
+Suppose three instances exist.
+
+```text
+orders.company.com
+
+↓
+
+10.0.1.10
+10.0.1.11
+10.0.1.12
+```
+
+DNS may rotate the order of returned addresses.
+
+Lookup 1
+
+```text
+10.0.1.10
+10.0.1.11
+10.0.1.12
+```
+
+Lookup 2
+
+```text
+10.0.1.11
+10.0.1.12
+10.0.1.10
+```
+
+Lookup 3
+
+```text
+10.0.1.12
+10.0.1.10
+10.0.1.11
+```
+
+This gives the appearance of load balancing.
+
+---
+
+### 3. Limitations of Round-Robin DNS
+
+This is exactly where the text from the book belongs.
+
+Explain that although DNS can return multiple IP addresses, it cannot manage dynamic microservices effectively.
+
+Discuss:
+
+* DNS caching
+* stale addresses
+* no health checks
+* no heartbeats
+* slow updates
+* no retries
+* no metadata
+* uneven client behavior
+
+This section answers:
+
+> Why don't microservices simply use DNS?
+
+The answer is:
+
+Because DNS only resolves names.
+
+It is **not** a service management system.
+
+At first glance, **round-robin DNS** seems like it should solve service discovery:
+
+1. Every service instance starts.
+2. Each instance registers its IP address under the same DNS name.
+3. Clients perform a DNS lookup.
+4. DNS returns all IP addresses.
+5. Clients distribute requests among those addresses.
+
+For example:
+
+```text
+Order Service instances
+
+10.0.1.10
+10.0.1.11
+10.0.1.12
+
+Registered as
+
+orders.company.com
+```
+
+DNS stores:
+
+```text
+orders.company.com
+
+10.0.1.10
+10.0.1.11
+10.0.1.12
+```
+
+A client performs:
+
+```text
+lookup("orders.company.com")
+```
+
+DNS returns:
+
+```text
+10.0.1.10
+10.0.1.11
+10.0.1.12
+```
+
+The client sends requests like:
+
+```text
+Request 1 → 10.0.1.10
+Request 2 → 10.0.1.11
+Request 3 → 10.0.1.12
+Request 4 → 10.0.1.10
+```
+
+This appears to provide service discovery and load balancing without a service registry.
+
+The problem is that DNS was **designed for name resolution**, not **dynamic service management**. Modern microservices change far more rapidly than DNS was intended to handle.
+
+---
+
+#### Problem 1: DNS Caching
+
+DNS responses are heavily cached.
+
+```text
+Client
+   |
+DNS lookup
+   |
+DNS Server
+   |
+Returns:
+10.0.1.10
+10.0.1.11
+10.0.1.12
+
+Client caches for 60 seconds
+```
+
+Suppose one instance crashes immediately afterward.
+
+```text
+10.0.1.10  ✓
+10.0.1.11  ✗ crashed
+10.0.1.12  ✓
+```
+
+The client still has:
+
+```text
+10.0.1.10
+10.0.1.11
+10.0.1.12
+```
+
+because the DNS entry is cached.
+
+For the next minute, every request to `10.0.1.11` fails.
+
+A service registry, by contrast, can remove unhealthy instances almost immediately.
+
+---
+
+#### Problem 2: Slow Updates
+
+Microservices are created and destroyed constantly.
+
+Imagine an auto-scaling event.
+
+Before scaling:
+
+```text
+Payment Service
+
+10.0.1.10
+10.0.1.11
+```
+
+Auto-scaler launches:
+
+```text
+10.0.1.20
+10.0.1.21
+10.0.1.22
+```
+
+Clients that already cached DNS records continue using only the original two instances until their cache expires.
+
+The new instances receive little or no traffic, defeating the purpose of rapid scaling.
+
+---
+
+#### Problem 3: No Health Awareness
+
+DNS only knows:
+
+* hostname
+* IP address
+
+It does **not** know whether the application is actually healthy.
+
+Suppose:
+
+```text
+10.0.1.10  Healthy
+10.0.1.11  Database disconnected
+10.0.1.12  Healthy
+```
+
+The unhealthy instance is still running, so DNS still returns it.
+
+```text
+DNS
+
+orders.company.com
+
+10.0.1.10
+10.0.1.11
+10.0.1.12
+```
+
+Clients continue sending requests to an instance that cannot serve them.
+
+A service registry typically performs health checks or processes heartbeats and removes unhealthy instances from discovery.
+
+---
+
+#### Problem 4: Uneven Load Balancing
+
+DNS merely returns a list of IP addresses.
+
+It does **not** enforce how clients use that list.
+
+Different clients behave differently.
+
+Client A:
+
+```text
+Always uses first IP
+```
+
+Client B:
+
+```text
+Random selection
+```
+
+Client C:
+
+```text
+Round robin
+```
+
+Client D:
+
+```text
+Caches only first address
+```
+
+The result can be very uneven traffic distribution.
+
+A dedicated load balancer or service discovery framework applies a consistent load-balancing algorithm across all clients.
+
+---
+
+#### Problem 5: No Routing Intelligence
+
+DNS cannot answer questions like:
+
+* Route only to version 2.
+* Route to services in the same availability zone.
+* Route to the nearest region.
+* Send only 10% of traffic to the new release.
+* Prefer instances with lower latency.
+
+DNS simply returns IP addresses.
+
+Modern discovery systems can filter or prioritize instances using metadata.
+
+Example:
+
+```text
+Product Service
+
+Version 1
+Version 2
+
+Region = us-east
+Region = eu-west
+
+Zone = A
+Zone = B
+```
+
+The discovery system can select instances based on these attributes.
+
+---
+
+#### Problem 6: No Retry Support
+
+Suppose:
+
+```text
+Client
+
+↓
+
+10.0.1.11
+
+↓
+
+Connection failed
+```
+
+DNS has no mechanism to say:
+
+> "That instance is unavailable; try another."
+
+Instead, retry logic must be implemented by the application.
+
+Service discovery frameworks often integrate retries with load balancing:
+
+```text
+Try Instance A
+
+↓
+
+Failed
+
+↓
+
+Automatically retry Instance B
+```
+
+---
+
+#### Problem 7: No Instance Metadata
+
+DNS records contain very limited information.
+
+Typically:
+
+```text
+Hostname
+↓
+
+IP Address
+```
+
+A service registry can store much richer metadata, such as:
+
+```text
+Service Name
+
+Order Service
+
+Instance ID
+
+Region
+
+Zone
+
+Version
+
+Protocol
+
+Port
+
+Weight
+
+Health
+
+Tags
+
+Capabilities
+```
+
+This metadata enables advanced routing and operational decisions.
+
+---
+
+#### Problem 8: Scaling Thousands of Instances
+
+Consider a service with 2,000 instances.
+
+DNS may return a large list of IP addresses, but:
+
+* Clients may not use all returned addresses.
+* Large DNS responses may exceed UDP limits and require TCP fallback.
+* Frequent DNS updates become expensive.
+* Cached records quickly become stale in highly dynamic environments.
+
+Dedicated discovery systems are designed to handle frequent registrations, deregistrations, and health updates at this scale.
+
+---
+
+#### Comparison
+
+| Feature                               | Round-Robin DNS    | Service Registry                            |
+| ------------------------------------- | ------------------ | ------------------------------------------- |
+| Name resolution                       | ✔                  | ✔                                           |
+| Dynamic registration                  | Limited            | ✔                                           |
+| Fast updates                          | ✗                  | ✔                                           |
+| Health awareness                      | ✗                  | ✔                                           |
+| Heartbeats                            | ✗                  | ✔                                           |
+| Automatic removal of failed instances | ✗                  | ✔                                           |
+| Metadata                              | Very limited       | ✔                                           |
+| Intelligent routing                   | ✗                  | ✔                                           |
+| Built-in retries                      | ✗                  | ✔ (when integrated with clients or proxies) |
+| Auto-scaling support                  | Limited by caching | ✔                                           |
+| Canary/blue-green deployments         | ✗                  | ✔                                           |
+
+#### Does DNS Still Have a Role?
+
+Yes. DNS is still widely used, but often as **one layer** of service discovery rather than the entire solution.
+
+Examples include:
+
+* **Kubernetes**: Services are discovered through DNS names (for example, `orders.default.svc.cluster.local`), but the Kubernetes control plane continuously updates endpoints and removes unhealthy Pods.
+* **AWS Cloud Map**: Uses DNS names backed by a service registry.
+* **Consul**: Provides a DNS interface backed by a health-aware service registry.
+
+In these systems, DNS is **backed by a dynamic registry and health information**, so clients get the convenience of DNS names while the platform manages registrations, health checks, and endpoint updates.
+
+##### Key Takeaway
+
+Round-robin DNS works well for relatively static environments where servers rarely change. Microservices, however, are highly dynamic: instances start, stop, scale, and fail continuously. Because DNS lacks real-time health awareness, rapid updates, rich metadata, and advanced routing capabilities, modern microservice platforms typically rely on a **service registry** (often combined with load balancers or service meshes), with DNS serving as a convenient naming layer rather than the primary discovery mechanism.
+
+
+### 4. Modern DNS-Based Discovery
+
+Now explain what happens today.
+
+Modern platforms still let applications use DNS names.
+
+For example
+
+```text
+orders.default.svc.cluster.local
+```
+
+looks like ordinary DNS.
+
+However, behind that DNS server is an entire service discovery system.
+
+Instead of
+
+```text
+Client
+
+↓
+
+DNS Server
+
+↓
+
+Static IPs
+```
+
+we have
+
+```text
+Client
+
+↓
+
+CoreDNS
+
+↓
+
+Kubernetes API
+
+↓
+
+Pods
+
+↓
+
+Health information
+```
+
+The client still performs DNS lookups, but the answers are generated dynamically from the registry.
+
+---
+
+### 5. Kubernetes Example
+
+This is probably the most important modern example.
+
+```text
+Pod A
+Pod B
+Pod C
+
+↓
+
+Kubernetes API
+
+↓
+
+Endpoints
+
+↓
+
+CoreDNS
+
+↓
+
+orders.default.svc.cluster.local
+```
+
+If Pod B dies
+
+```text
+Pod A ✓
+Pod B ✗
+Pod C ✓
+```
+
+the Endpoint object changes immediately.
+
+CoreDNS now returns only
+
+```text
+Pod A
+
+Pod C
+```
+
+The application never sees the failed Pod.
+
+Notice that **DNS is only the interface**.
+
+Kubernetes is doing the real discovery work.
+
+---
+
+### 6. Cloud DNS Services
+
+Same idea.
+
+AWS Cloud Map
+
+Azure Private DNS
+
+Google Cloud DNS
+
+Consul DNS
+
+All expose DNS names.
+
+Internally they maintain:
+
+* registrations
+* health status
+* metadata
+* dynamic updates
+
+Again:
+
+DNS is the API.
+
+The registry is the intelligence.
+
+---
+
+### 7. Comparison with Service Registry
+
+Finish the chapter by comparing both approaches.
+
+| Traditional DNS         | Modern DNS-Based Discovery  |
+| ----------------------- | --------------------------- |
+| Static DNS records      | Dynamic registry-backed DNS |
+| No health checks        | Health-aware                |
+| No heartbeats           | Heartbeats supported        |
+| Slow updates            | Real-time updates           |
+| Client caches stale IPs | Registry updates endpoints  |
+| No metadata             | Rich metadata               |
+| Simple name resolution  | Full service discovery      |
+
+---
+
+### How It Fits into the Overall Service Discovery TOC
+
+```text
+Service Discovery
+│
+├── Overview
+├── Service Registry
+├── Service Registration
+├── Discovery Patterns
+│      ├── Client-Side Discovery
+│      └── Server-Side Discovery
+├── Health Checks
+├── Heartbeats
+├── Instance Lifecycle
+├── Load Balancing
+├── Failure Handling
+├── Scalability
+├── DNS-Based Discovery
+│      ├── Traditional DNS
+│      ├── Round-Robin DNS
+│      ├── Limitations of Round-Robin DNS   ← explains why DNS alone is insufficient
+│      ├── Modern DNS-Based Discovery       ← DNS backed by a registry
+│      ├── Kubernetes DNS (CoreDNS)
+│      ├── Cloud Map / Consul DNS
+│      └── Comparison with Service Registry
+└── Service Mesh Discovery
+```
+
+The key idea is that **DNS-Based Discovery** is not a competing concept to **Service Registry**. Instead, there are two forms:
+
+* **Traditional DNS-based discovery** uses DNS **as the discovery mechanism**. This is simple but suffers from the limitations you quoted.
+* **Modern DNS-based discovery** uses DNS **as the lookup interface**, while a **service registry** (such as Kubernetes Endpoints, Consul, or AWS Cloud Map) maintains the actual service information. In other words, DNS becomes the user-friendly front end, and the registry provides the dynamic, health-aware intelligence behind it. This is why platforms like Kubernetes can expose services through familiar DNS names while still supporting health checks, scaling, and rapid endpoint updates.
+
+
+## Service Mesh Discovery
+
+A service mesh extends service discovery by combining it with traffic management through sidecar proxies or ambient networking.
+
+```
+               Registry
+                   ^
+                   |
+        Control Plane (e.g., Istiod)
+                   |
+     +-------------+-------------+
+     |                           |
++------------+             +------------+
+| Sidecar A  |             | Sidecar B  |
+| (Service A)|<----------->| (Service B)|
++------------+             +------------+
+```
+
+Services no longer communicate directly. Each request passes through the local proxy, which obtains service information from the mesh control plane.
+
+### Discovery Process
+
+1. A service instance registers with the platform (often Kubernetes).
+2. The control plane watches the registry for changes.
+3. Proxies receive updated endpoint information.
+4. A proxy selects a healthy destination instance.
+5. The request is forwarded to the destination proxy and then to the service.
+
+### Benefits Beyond Discovery
+
+A service mesh augments discovery with capabilities such as:
+
+* Advanced load balancing
+* Automatic retries
+* Circuit breaking
+* Traffic splitting (e.g., canary and blue/green deployments)
+* Mutual TLS (mTLS)
+* Fine-grained routing
+* Distributed tracing and telemetry
+
+### Examples
+
+* Istio
+* Linkerd
+* Consul Connect
+* Kuma
+
+---
+
+## Overall Relationship
+
+The topics in your hierarchy fit together as follows:
+
+```text
+Service Discovery
+│
+├── Overview
+│      ├── Why service discovery exists
+│      ├── Problems it solves
+│      └── Core architecture
+│
+├── Service Registry
+│      └── Central directory of service instances
+│
+├── Service Registration
+│      └── How instances join the registry
+│
+├── Service Discovery Patterns
+│      ├── Client-Side Discovery
+│      └── Server-Side Discovery
+│
+├── Health Checks
+│      └── Verify service readiness and health
+│
+├── Heartbeats
+│      └── Keep registrations alive
+│
+├── Service Instance Lifecycle
+│      └── Creation → Registration → Healthy → Serving → Deregistration
+│
+├── Load Balancing Integration
+│      └── Select a healthy instance after discovery
+│
+├── Failure Handling
+│      └── Remove failed instances and maintain availability
+│
+├── Scalability
+│      └── Handle thousands of services and instances efficiently
+│
+├── DNS-Based Discovery
+│      └── Use DNS records as the discovery mechanism
+│
+└── Service Mesh Discovery
+       └── Integrate discovery with advanced traffic management
+```
+
+This progression moves from the fundamental concepts (what service discovery is and why it exists), through its core mechanisms (registry, registration, discovery patterns), to operational concerns (health, heartbeats, lifecycle, failure handling, scalability), and finally to modern implementations (DNS-based discovery and service mesh–based discovery).
+
+## References
+- software-engineering/design-architecture/distributed-systems/service-communication/service-discovery/index.mdx
+- software-engineering/design-architecture/distributed-systems/service-communication/service-discovery/implementations/netflix-eureka/index.mdx
+- software-engineering/frameworks-platforms/backend-frameworks/spring-boot/concepts/spring-cloud/service-discovery/index.mdx
+- software-engineering/frameworks-platforms/backend-frameworks/spring-boot/concepts/spring-cloud/service-discovery/implementations/netflix-eureka/index.mdx

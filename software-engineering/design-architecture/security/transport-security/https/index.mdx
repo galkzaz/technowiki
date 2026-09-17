@@ -1,0 +1,771 @@
+---
+id: software-engineering-design-architecture-security-transport-security-https
+title: "HTTPS"
+---
+## Overview
+
+HTTPS (**HyperText Transfer Protocol Secure**) is the secure version of HTTP. It combines:
+
+* **HTTP** → Defines how clients and servers exchange web resources.
+* **TLS (Transport Layer Security)** → Encrypts and protects the HTTP communication.
+
+```
+Application
++----------------------+
+| HTTP                 |
++----------------------+
+| TLS                  |
++----------------------+
+| TCP                  |
++----------------------+
+| IP                   |
++----------------------+
+```
+
+HTTPS provides three essential security properties:
+
+| Property        | Purpose                                                         |
+| --------------- | --------------------------------------------------------------- |
+| Confidentiality | Prevents others from reading transmitted data                   |
+| Integrity       | Prevents data modification during transmission                  |
+| Authentication  | Verifies the identity of the server (and optionally the client) |
+
+Without HTTPS:
+
+```
+Client ---------------------- HTTP ---------------------- Server
+
+Anyone on the network can:
+
+✓ Read passwords
+✓ Read cookies
+✓ Modify responses
+✓ Inject JavaScript
+✓ Steal sessions
+```
+
+With HTTPS:
+
+```
+Client ======== Encrypted TLS Tunnel ======== Server
+
+Attacker sees only encrypted bytes.
+```
+
+Under the hood, HTTPS uses the Secure Sockets Layer (SSL) protocol to
+encrypt communication. SSL is a protocol that provides privacy, authentication, and data integrity
+in communications. Over time, SSL was succeeded by its more secure and modern counterpart,
+Transport Layer Security (TLS).
+---
+
+# Why HTTPS Exists
+
+Imagine logging into an online bank.
+
+Without HTTPS:
+
+```
+Username: alice
+Password: mypassword123
+```
+
+Anyone on public Wi-Fi could capture these credentials.
+
+With HTTPS:
+
+```
+Encrypted Data
+
+8A 29 BC 4D F1 ...
+```
+
+The attacker only sees encrypted bytes.
+
+---
+
+# Security Goals
+
+HTTPS protects against:
+
+* Eavesdropping
+* Man-in-the-middle (MITM) attacks
+* Session hijacking
+* Data tampering
+* Fake websites (when certificates are validated correctly)
+
+---
+
+# Components of HTTPS
+
+```
+HTTPS
+
+├── HTTP
+│      GET /index.html
+│
+└── TLS
+       Encryption
+       Authentication
+       Integrity
+```
+
+HTTP remains unchanged.
+
+TLS secures the transport.
+
+---
+
+# HTTPS Request Flow
+
+```
+Browser
+   |
+DNS Lookup
+   |
+TCP Connection
+   |
+TLS Handshake
+   |
+Encrypted Connection Established
+   |
+HTTP GET
+   |
+Encrypted Response
+```
+
+---
+
+# Default Port
+
+| Protocol | Port |
+| -------- | ---- |
+| HTTP     | 80   |
+| HTTPS    | 443  |
+
+---
+
+# HTTPS vs HTTP
+
+| HTTP                       | HTTPS                |
+| -------------------------- | -------------------- |
+| Plain text                 | Encrypted            |
+| No identity verification   | Server authenticated |
+| Vulnerable to interception | Protected by TLS     |
+| Port 80                    | Port 443             |
+
+---
+
+# TLS Handshake
+
+The TLS handshake establishes a secure session before any HTTP data is exchanged.
+
+Its goals are to:
+
+* Authenticate the server.
+* Negotiate cryptographic algorithms.
+* Agree on shared session keys.
+* Confirm that both parties derived the same secrets.
+
+Modern HTTPS uses **TLS 1.3**, which simplifies and speeds up the handshake compared to older versions.
+
+---
+
+## High-Level TLS 1.3 Handshake
+
+```
+Client                               Server
+------                               ------
+
+ClientHello ------------------------>
+
+                     ServerHello
+                     Certificate
+                     CertificateVerify
+                     Finished <----------------
+
+Finished --------------------------->
+
+========= Secure Encrypted Channel =========
+
+HTTP Request
+HTTP Response
+```
+
+---
+
+## Step 1: ClientHello
+
+The client sends information needed to start the connection.
+
+Example contents:
+
+```
+Supported TLS versions
+Supported cipher suites
+Supported key exchange groups
+Random value
+Server Name (SNI)
+ALPN (HTTP/1.1, HTTP/2, HTTP/3)
+```
+
+Example:
+
+```
+ClientHello
+
+TLS 1.3
+
+Cipher Suites:
+AES-128-GCM
+AES-256-GCM
+ChaCha20-Poly1305
+
+Supported Groups:
+X25519
+P-256
+```
+
+---
+
+## Step 2: ServerHello
+
+The server selects compatible parameters.
+
+```
+ServerHello
+
+TLS 1.3
+AES-256-GCM
+X25519
+```
+
+At this point both sides derive shared encryption keys using ephemeral key exchange (typically ECDHE), providing **forward secrecy**.
+
+---
+
+## Step 3: Certificate
+
+The server proves its identity by sending its certificate chain.
+
+Example:
+
+```
+Server Certificate
+
+Subject:
+www.example.com
+
+Issuer:
+Trusted CA
+
+Public Key:
+RSA/ECDSA
+```
+
+---
+
+## Step 4: CertificateVerify
+
+The server signs part of the handshake using the private key corresponding to the certificate, proving ownership of that private key.
+
+---
+
+## Step 5: Finished Messages
+
+Both sides exchange **Finished** messages that authenticate the entire handshake transcript.
+
+If verification succeeds:
+
+```
+Handshake complete
+```
+
+---
+
+## Secure Communication
+
+Only after the handshake completes are HTTP messages exchanged:
+
+```
+GET /products
+
+Host: shop.example.com
+```
+
+The request and response are encrypted with symmetric session keys negotiated during the handshake.
+
+---
+
+## Why Symmetric Encryption?
+
+Public-key cryptography is computationally expensive.
+
+Instead:
+
+* Asymmetric cryptography authenticates the parties and establishes secrets.
+* Symmetric cryptography encrypts the application data efficiently.
+
+---
+
+## Session Resumption
+
+To reduce latency, TLS supports session resumption, allowing later connections to reuse previously established secrets instead of performing a full handshake.
+
+Benefits:
+
+* Faster connections.
+* Lower CPU usage.
+* Reduced network round trips.
+
+---
+
+# Certificates
+
+A **TLS certificate** is a digitally signed document that binds a public key to an identity, such as a domain name.
+
+It answers the question:
+
+> "How do I know this public key really belongs to `example.com`?"
+
+Without certificates, an attacker could substitute their own public key.
+
+---
+
+## Certificate Contents
+
+Typical fields include:
+
+```
+Subject
+Issuer
+Public Key
+Serial Number
+Validity Period
+Signature Algorithm
+Extensions
+```
+
+Example:
+
+```
+Subject:
+www.example.com
+
+Issuer:
+Example CA
+
+Valid:
+2026-01-01
+2027-01-01
+
+Public Key:
+ECDSA
+```
+
+---
+
+## Certificate Chain
+
+Servers usually send a chain:
+
+```
+Leaf Certificate
+      │
+Intermediate CA
+      │
+Root CA
+```
+
+The client already trusts the root CA, so it verifies each signature up the chain.
+
+---
+
+## Public and Private Keys
+
+The server generates a key pair:
+
+```
+Private Key
+    ↓
+Never leaves server
+
+Public Key
+    ↓
+Included in certificate
+```
+
+The private key must remain secret. Compromise of the private key allows attackers to impersonate the server.
+
+---
+
+## Types of Certificates
+
+### Domain Validation (DV)
+
+* Confirms control of the domain.
+* Most common for public websites.
+* Automated issuance (e.g., ACME).
+
+### Organization Validation (OV)
+
+* Includes organization identity checks.
+* Less common today.
+
+### Extended Validation (EV)
+
+* Requires extensive validation of the organization.
+* Modern browsers no longer give EV certificates special visual treatment.
+
+---
+
+## Wildcard Certificates
+
+```
+*.example.com
+```
+
+Matches:
+
+```
+api.example.com
+mail.example.com
+shop.example.com
+```
+
+Does not match:
+
+```
+a.b.example.com
+```
+
+---
+
+## SAN (Subject Alternative Name)
+
+A certificate can secure multiple names.
+
+Example:
+
+```
+example.com
+www.example.com
+api.example.com
+```
+
+---
+
+# Certificate Authorities (CAs)
+
+A **Certificate Authority (CA)** is a trusted organization that verifies identities and signs certificates.
+
+Examples include:
+
+* Let's Encrypt
+* DigiCert
+* GlobalSign
+* Sectigo
+
+---
+
+## Trust Model
+
+```
+Browser
+
+Trusted Root CA
+      │
+Signs
+      │
+Intermediate CA
+      │
+Signs
+      │
+Server Certificate
+```
+
+Operating systems and browsers maintain a trusted store of root CA certificates. Trust in the server certificate derives from a valid chain ending at one of these trusted roots.
+
+---
+
+## Why Use Intermediate CAs?
+
+Instead of signing end-entity certificates directly, root CAs typically sign intermediate CAs.
+
+Benefits:
+
+* Protects highly sensitive root keys.
+* Simplifies operational management.
+* Allows revoking or replacing intermediates without replacing the root.
+
+---
+
+# Certificate Validation
+
+When connecting to a server, the client performs multiple checks before trusting the certificate.
+
+---
+
+## 1. Signature Validation
+
+```
+Root
+   ↓
+Intermediate
+   ↓
+Server Certificate
+```
+
+Each certificate's signature must verify correctly.
+
+---
+
+## 2. Trust Anchor
+
+The certificate chain must terminate at a trusted root CA already installed on the client.
+
+---
+
+## 3. Hostname Validation
+
+The requested hostname must match the certificate's Subject Alternative Name (SAN).
+
+Example:
+
+```
+URL:
+https://api.example.com
+
+Certificate:
+api.example.com
+
+✓ Valid
+```
+
+But:
+
+```
+URL:
+https://evil.com
+
+Certificate:
+example.com
+
+✗ Invalid
+```
+
+---
+
+## 4. Validity Period
+
+The current time must fall within the certificate's validity window.
+
+```
+Not Before
+Not After
+```
+
+Expired or not-yet-valid certificates are rejected.
+
+---
+
+## 5. Key Usage and Extensions
+
+The certificate must be appropriate for TLS server authentication, based on extensions such as Key Usage and Extended Key Usage.
+
+---
+
+## 6. Revocation Status
+
+The client may check whether the certificate has been revoked before its expiration date.
+
+---
+
+# Certificate Revocation
+
+Sometimes a valid certificate should no longer be trusted.
+
+Common reasons:
+
+* Private key compromised.
+* Certificate issued fraudulently.
+* Domain ownership changed.
+* Certificate replaced.
+
+---
+
+## Certificate Revocation List (CRL)
+
+A CA periodically publishes a signed list of revoked certificate serial numbers.
+
+```
+CA
+
+Revoked:
+
+12345
+55555
+90000
+```
+
+Clients can download and consult the list.
+
+### Pros
+
+* Simple.
+* Signed by the CA.
+
+### Cons
+
+* Lists can become large.
+* Revocation information may be stale between updates.
+
+---
+
+## Online Certificate Status Protocol (OCSP)
+
+Instead of downloading a full list, the client asks an OCSP responder about a specific certificate.
+
+```
+Browser
+
+"Is certificate 12345 valid?"
+
+        ↓
+
+OCSP Server
+
+"Good"
+
+or
+
+"Revoked"
+```
+
+### Advantages
+
+* Smaller responses.
+* More up-to-date status.
+
+### Disadvantages
+
+* Adds latency.
+* Requires contacting the CA's responder unless stapled.
+
+---
+
+## OCSP Stapling
+
+To avoid extra client requests, the server periodically obtains a signed OCSP response from the CA and "staples" it to the TLS handshake.
+
+```
+CA
+   │
+OCSP Response
+   │
+Server
+   │
+TLS Handshake
+   │
+Client
+```
+
+Benefits:
+
+* Lower latency.
+* Better privacy (the CA does not learn which sites the client visits).
+* Reduced load on CA infrastructure.
+
+---
+
+# HSTS (HTTP Strict Transport Security)
+
+HSTS is an HTTP response header that instructs browsers to always use HTTPS for a site for a specified period.
+
+Example:
+
+```
+Strict-Transport-Security:
+max-age=31536000;
+includeSubDomains
+```
+
+Meaning:
+
+* Remember this policy for one year.
+* Apply it to all subdomains.
+
+---
+
+## Why HSTS Matters
+
+Without HSTS:
+
+```
+User types:
+
+example.com
+
+↓
+
+Browser
+
+http://example.com
+
+↓
+
+Redirect
+
+https://example.com
+```
+
+An attacker could intercept the initial HTTP request and prevent the redirect (an SSL stripping attack).
+
+With HSTS:
+
+```
+User types:
+
+example.com
+
+↓
+
+Browser
+
+HTTPS immediately
+```
+
+No insecure HTTP request is sent.
+
+---
+
+## HSTS Preload
+
+Some domains are included in browser preload lists, meaning browsers know they must use HTTPS even on the very first visit.
+
+Flow:
+
+```
+Browser
+      │
+HSTS Preload List
+      │
+example.com
+      │
+Always HTTPS
+```
+
+This protects against attacks on the initial connection before the browser has seen an HSTS header.
+
+---
+
+# Summary
+
+| Topic                   | Purpose                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| HTTPS                   | Secure HTTP using TLS                                                              |
+| TLS Handshake           | Authenticates the server and establishes shared session keys                       |
+| Certificates            | Bind a public key to a verified identity                                           |
+| Certificate Authorities | Trusted organizations that issue and sign certificates                             |
+| Certificate Validation  | Ensures the certificate is trusted, valid, and matches the requested hostname      |
+| Certificate Revocation  | Invalidates certificates before expiration using CRLs or OCSP                      |
+| HSTS                    | Forces browsers to use HTTPS and helps prevent downgrade and SSL stripping attacks |

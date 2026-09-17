@@ -1,0 +1,454 @@
+---
+id: software-engineering-design-architecture-architectural-styles-microservices-labs-product-review-recommendation-microservices-lab09
+title: "Lab09: Using Spring Cloud Gateway as an edge server"
+sidebar_position: 9
+---
+
+In this lab, we will learn how to use Spring Cloud Gateway as an edge server, to control what
+APIs are exposed from our microservices-based system landscape. We will see how microservices
+that have public APIs are made accessible from the outside through the edge server, while mi-
+croservices that have private APIs are only accessible from the inside of the microservice land-
+scape. In our system landscape, this means that the product composite service and the discovery
+server, Netflix Eureka, will be exposed through the edge server. The three core services, product,
+recommendation, and review, will be hidden from the outside.
+
+the Edge server can be used to secure a microservice
+landscape, which involves hiding private services from external usage and protecting public
+services when they’re used by external clients.
+
+The following diagram shows how all requests from external clients go through Spring Cloud
+Gateway as an edge server. Based on URL paths, it routes requests to the intended microservice
+
+!(Requests being routed through an edge server)[/docs/assets/software-engineering/design-architecture/architectural-styles/microservices/labs/product-review-recommendation-microservices/lab09-Using-Spring-Cloud-Gateway-as-an-edge-server.png]
+
+In the preceding diagram, we can see how the edge server will send external requests that have
+a URL path that starts with /product-composite/ to the Product Composite microservice. The
+core Product, Recommendation, and Review services are not reachable from external clients.
+
+Using Spring Cloud Gateway to Hide Microservices Behind an Edge Server, we will look
+at how to set up Spring Cloud Gateway with our microservices.
+
+:::note
+
+Spring Cloud Gateway is well-suited as an edge server for development and testing. In
+a production environment, a full-featured API management product such as Apigee,
+Kong Konnect, IBM API Connect, or MuleSoft Anypoint is typically used.
+
+:::
+
+## Adding an edge server to our system landscape
+In this section, we will see how the edge server is added to the system landscape and how it af-
+fects the way external clients access the public APIs that the microservices expose. All incoming
+requests will now be routed through the edge server, as illustrated by the above diagram.
+
+As we can see from the preceding diagram, external clients send all their requests to the edge
+server. The edge server can route the incoming requests based on the URL path.
+
+For example, requests with a URL that starts with /product-composite/ are routed to the product composite microservice, and a request with a URL that starts with /eureka/ is routed to the discovery server based on Netflix Eureka.
+
+:::note
+
+To make the discovery service work with Netflix Eureka, we don’t need to expose it
+through the edge server. The internal services will communicate directly with Netflix
+Eureka. The reasons for exposing it are to make its web page and API accessible to an
+operator that needs to check the status of Netflix Eureka and to see what instances
+are currently registered in the discovery service.
+
+:::
+
+In lab09, Adding Service Discovery Using Netflix Eureka, we exposed both the product-composite
+service and the discovery server, Netflix Eureka, to the outside. When we introduce the edge server
+in this chapter, this will no longer be the case. This is implemented by removing the following
+port declarations for the two services in the Docker Compose files:
+```yml
+product-composite:
+    build: microservices/product-composite-service
+    ports:
+        - "8080:8080"
+eureka:
+    build: spring-cloud/eureka-server
+    ports:
+        - "8761:8761"
+```  
+
+## Setting up Spring Cloud Gateway, including configuring routing rules
+Setting up Spring Cloud Gateway as an edge server is straightforward and can be done with the
+following steps:
+1. Create a Spring Boot project using Spring Initializr.
+2. Add a dependency on `spring-cloud-starter-gateway-server-webflux`.
+3. To be able to locate microservice instances through Netflix Eureka, also add the `spring-cloud-starter-netflix-eureka-client` dependency.
+4. Add the edge server project to the common build file, settings.gradle:
+```groovy
+include ':spring-cloud:gateway'
+```
+5. Add a Dockerfile with the same content as for the microservices; see the Dockerfile content in the microservices folder.
+6. Add the edge server to our three Docker Compose files:
+```yml
+  gateway:
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    build: spring-cloud/gateway
+    mem_limit: 512m
+    ports:
+      - "8080:8080"
+```
+From the preceding code:
+- we can see that the edge server exposes port 8080 to the outside of the Docker engine. 
+- To control how much memory is required, a memory limit of 512 MB is applied to the edge server, in the same way as we did for the other microservices.
+7. Since the edge server will handle all incoming traffic, we will move the composite health
+check from the product composite service to the edge server. This is described in the
+Adding a composite health check section next.
+8. Add configuration for routing rules and more. Since there is a lot to configure, it is handled
+in a separate section, Configuring Spring Cloud Gateway.
+### Adding a composite health check
+With an edge server in place, external health check requests also have to go through the edge
+server. Therefore, the composite health check that checks the status of all microservices has
+been moved from the product-composite service to the edge server. See Lab 7, Developing
+Reactive Microservices – refer to the Adding a health API section for implementation details for the
+composite health check.
+
+The following has been added to the edge server:
+1. The `HealthCheckConfiguration` class has been added, which declares the reactive health contributor:
+```java
+
+@Configuration
+public class HealthCheckConfiguration {
+
+  private static final Logger LOG = LoggerFactory.getLogger(HealthCheckConfiguration.class);
+
+  private WebClient webClient;
+
+  @Autowired
+  public HealthCheckConfiguration(WebClient.Builder webClientBuilder) {
+    this.webClient = webClientBuilder.build();
+  }
+
+  @Bean
+  ReactiveHealthContributor healthcheckMicroservices() {
+
+    final Map<String, ReactiveHealthIndicator> registry = new LinkedHashMap<>();
+
+    registry.put("product",           () -> getHealth("http://product"));
+    registry.put("recommendation",    () -> getHealth("http://recommendation"));
+    registry.put("review",            () -> getHealth("http://review"));
+    registry.put("product-composite", () -> getHealth("http://product-composite"));
+
+    return CompositeReactiveHealthContributor.fromMap(registry);
+  }
+
+  private Mono<Health> getHealth(String baseUrl) {
+    String url = baseUrl + "/actuator/health";
+    LOG.debug("Setting up a call to the Health API on URL: {}", url);
+    return webClient.get().uri(url).retrieve().bodyToMono(String.class)
+      .map(s -> new Health.Builder().up().build())
+      .onErrorResume(ex -> Mono.just(new Health.Builder().down(ex).build()))
+      .log(LOG.getName(), FINE);
+  }
+
+}
+```
+From the preceding code, we can see that a health check for the product-composite
+service has been added, instead of the health check used in Chapter 7, Developing Reactive
+Microservices.
+2. The main application class, GatewayApplication, declares a WebClient.Builder bean to
+be used by the implementation of the health indicator, as follows:
+```java
+@SpringBootApplication
+public class GatewayApplication {
+
+  @Bean
+  @LoadBalanced
+  public WebClient.Builder loadBalancedWebClientBuilder() {
+    return WebClient.builder();
+  }
+
+  public static void main(String[] args) {
+    SpringApplication.run(GatewayApplication.class, args);
+  }
+
+}
+```
+From the preceding source code, we can see that `WebClient.builder` is annotated with
+`@LoadBalanced`, which makes it aware of microservice instances registered in the discovery server, Netflix Eureka. Refer to the Service discovery with Netflix Eureka in Spring
+Cloud section in Lab 9, Adding Service Discovery Using Netflix Eureka, for more details.
+
+With a composite health check in place for the edge server, we are ready to look at the configuration that needs to be set up for Spring Cloud Gateway.
+### Configuring Spring Cloud Gateway
+When it comes to configuring Spring Cloud Gateway, the most important thing is setting up the
+routing rules. We also need to set up a few other things in the configuration:
+1. Since Spring Cloud Gateway will use Netflix Eureka to find the microservices it will route
+traffic to, it must be configured as a Eureka client in the same way as described in Chap-
+ter 9, Adding Service Discovery Using Netflix Eureka – refer to the Configuring clients to the
+Eureka server section.
+2. Configure Spring Boot Actuator for development usage, as described in Chapter 7, Devel-
+oping Reactive Microservices – refer to the Adding a health API section:
+```yml
+management.endpoint.health.show-details: "ALWAYS"
+management.endpoints.web.exposure.include: "*"
+```
+3. Configure log levels so that we can see log messages from interesting parts of the internal processing in Spring Cloud Gateway – for example, how it decides where to route
+incoming requests to:
+```
+logging:
+  level:
+    root: INFO
+    org.springframework.cloud.gateway.route.RouteDefinitionRouteLocator: INFO
+    org.springframework.cloud.gateway: TRACE
+```
+o prevent forwarding sensitive headers such as X-Forwarded-For and Forwarded from
+untrusted proxies, Spring Cloud Gateway requires IP addresses for trusted proxies to be
+specified in the spring.cloud.gateway.trusted-proxies property. For development
+purposes, it can be set to allow any IP address. Note that this must be narrowed down
+to the actual IP addresses used by proxies, in a production environment! For the sample
+code in this book, the Swagger UI and its “Try out an API” feature require a trusted proxy.
+For more information, see https://spring.io/security/cve-2025-41235. To specify
+trusted proxies during development, the following configuration is added:
+spring.cloud.gateway.trusted-proxies: ".*"
+### Routing rules
+In the following subsections, we will first learn how to route requests to product-composite and
+the Eureka server.
+
+#### Routing requests to the product-composite API
+If we, for example, want to route incoming requests where the URL path starts with /product-
+composite/ to our product-composite service, we can specify a routing rule like this:
+spring.cloud.gateway.routes:
+```yml
+- id: product-composite
+  uri: lb://product-composite
+  predicates:
+  - Path=/product-composite/**
+```
+Here are some points to note from the preceding code:
+- `id: product-composite`: The name of the route is product-composite.
+- `uri: lb://product-composite`: If the route is selected by its predicates, the request will
+be routed to the service that is named product-composite in the discovery service, Netflix
+Eureka. The `lb://protocol` is used to direct Spring Cloud Gateway to use the client-side
+load balancer to look up the destination in the discovery service.
+- predicates: `- Path=/product-composite/**` is used to specify what requests this route
+should match. `**` matches zero or more elements in the path.
+
+To be able to route requests to the Swagger UI set up in Chapter 5, Adding an API Description Using
+OpenAPI, an extra route to the product-composite service is added:
+```yml
+- id: product-composite-swagger-ui
+  uri: lb://product-composite
+  predicates:
+  - Path=/openapi/**
+```
+Requests sent to the edge server with a URI starting with `/openapi/` will be directed to the
+product-composite service
+
+When the Swagger UI is presented behind an edge server, it must be able to pres-
+ent an OpenAPI specification of the API that contains the correct server URL – the
+URL of the edge server instead of the URL of the product-composite service itself.
+To enable the product-composite service to produce a correct server URL in the
+OpenAPI specification, the following configuration has been added to the product-
+composite service:
+```yml
+server.forward-headers-strategy: framework
+```
+For more details, see https://springdoc.org/index.html#how-can-i-deploy-
+springdoc-openapi-starter-webmvc-ui-behind-a-reverse-proxy.
+To verify that the correct server URL is set in the OpenAPI specification, the following
+test has been added to the test script, test-em-all.bash:
+```bash
+assertCurl 200 “curl -s http://$HOST:$PORT/
+openapi/v3/api-docs”
+assertEqual “http://$HOST:$PORT” “$(echo $RESPONSE | jq -r .servers[].url)”
+## Trying out the edge server
+```
+#### Routing requests to the Eureka server’s API and web page
+Eureka exposes both an API and a web page for its clients. To provide a clean separation between
+the API and the web page in Eureka, we will set up routes as follows:
+- Requests sent to the edge server with the path starting with `/eureka/api/` should be
+handled as a call to the Eureka API
+- Requests sent to the edge server with the path starting with `/eureka/web/` should be
+handled as a call to the Eureka web page
+API requests will be routed to `http://${app.eureka-server}:8761/eureka`. The routing rule
+for the Eureka API looks like this:
+```yml
+- id: eureka-api
+  uri: http://${app.eureka-server}:8761
+  predicates:
+  - Path=/eureka/api/{segment}
+  filters:
+  - SetPath=/eureka/{segment}
+```
+The {segment} part in the Path value matches zero or more elements in the path and will be used
+to replace the {segment} part in the SetPath value.
+Web page requests will be routed to http://${app.eureka-server}:8761. The web page will
+load several web resources, such as .js, .css, and .png files. These requests will be routed to
+http://${app.eureka-server}:8761/eureka. The routing rules for the Eureka web page look
+like this:
+```yml
+- id: eureka-web-start
+  uri: http://${app.eureka-server}:8761
+  predicates:
+  - Path=/eureka/web
+  filters:
+  - SetPath=/
+
+- id: eureka-web-other
+  uri: http://${app.eureka-server}:8761
+  predicates:
+  - Path=/eureka/**
+```
+From the preceding configuration, we can take the following notes. The ${app.eureka-server}
+property is resolved by Spring’s property mechanism, depending on what Spring profile is acti-
+vated:
+1. When running the services on the same host without using Docker, for example, for de-
+bugging purposes, the property will be translated to localhost using the default profile.
+2. When running the services as Docker containers, the Netflix Eureka server will run in
+a container with the DNS name eureka. Therefore, the property will be translated into
+eureka using the docker profile.
+The relevant parts in the application.yml file that define this translation look like this:
+```yml
+app.eureka-server: localhost
+---
+spring.config.activate.on-profile: docker
+app.eureka-server: eureka
+```
+
+## Trying out the edge server
+To try out the edge server, we perform the following steps:
+1. First, build the Docker images with the following commands:
+```bash
+./gradlew clean build && docker compose build
+```
+2. Next, start the system landscape in Docker and run the usual tests with the following
+command:
+```bash
+./test-em-all-docker.bash start
+```
+3. Expect output similar to what we have seen in previous chapters:
+```text
+```
+4. From the log output, note the second to last test result, `http://localhost:8080`. That is
+the output from the test that verifies that the server URL in Swagger UI’s OpenAPI specification is correctly rewritten as the URL of the edge server.
+
+With the system landscape, including the edge server, up and running, let’s explore the following
+topics:
+
+### Examining what is exposed outside the Docker engine
+To understand what the edge server exposes to the outside of the system landscape, perform the
+following steps:
+1. Use the docker compose ps command to see which ports are exposed by our services:
+```bash
+docker compose ps gateway eureka product-composite product
+```
+recommendation review
+2. As we can see in the following output, only the edge server (named gateway) exposes its
+port (8080) outside the Docker engine:
+3. If we want to see what routes the edge server has set up, we can use the `/actuator/gateway/routes` API. The response from this API is rather verbose. To limit the response
+to information we are interested in, we can apply a jq filter. In the following example, the
+id of the route and the uri that the request will be routed to are selected:
+```bash
+curl localhost:8080/actuator/gateway/routes -s | jq '.[] | {"\(.route_id)": "\(.uri)"}' | grep -v '{\|}'
+```
+4. This command will respond with the following:
+```text
+  "product-composite": "lb://product-composite"
+  "product-composite-swagger-ui": "lb://product-composite"
+  "eureka-api": "http://eureka:8761"
+  "eureka-web-start": "http://eureka:8761"
+  "eureka-web-other": "http://eureka:8761"
+  "host_route_200": "http://httpstat.us:80"
+  "host_route_418": "http://httpstat.us:80"
+  "host_route_501": "http://httpstat.us:80"
+```
+### Trying out the routing rules
+In this section, we will try out the edge server and the routes it exposes to the outside of the
+system landscape. Let’s start by calling the product-composite API and its Swagger UI. Then,
+we’ll call the Eureka API and visit its web page. Finally, we’ll conclude by testing the routes that
+are based on hostnames.
+#### Calling the product composite API through the edge server
+Let’s perform the following steps to call the product composite API through the edge server:
+1. To be able to see what is going on in the edge server, we can follow its log output:
+docker compose logs -f --tail=0 gateway
+2. Now, in a separate terminal window, make the call to the product-composite API through
+the edge server:
+```bash
+curl http://localhost:8080/product-composite/1
+```
+3. Expect the normal type of response from the product-composite API:
+4. We should be able to find the following information in the log output:
+```text
+gateway-1  | 2026-08-02T13:13:46.404Z TRACE 1 --- [gateway] [or-http-epoll-1] o.s.c.g.h.p.PathRoutePredicateFactory    : Pattern "/product-composite/**" matches against value "/product-composite/1"
+....
+gateway-1  | 2026-08-02T13:13:46.405Z TRACE 1 --- [gateway] [or-http-epoll-1] s.c.g.f.ReactiveLoadBalancerClientFilter : ReactiveLoadBalancerClientFilter url before: lb://product-composite/product-composite/1
+gateway-1  | 2026-08-02T13:13:46.407Z TRACE 1 --- [gateway] [or-http-epoll-1] s.c.g.f.ReactiveLoadBalancerClientFilter : LoadBalancerClientFilter url chosen: http://fbe953b063d3:8080/product-composite/1
+```
+5. From the log output, we can see the pattern matching based on the predicate we specified
+in the configuration, and we can see which microservice instance the edge server selected
+from the available instances in the discovery server – in this case, it forwards the request
+to http://fbe953b063d3:8080/product-composite/1.
+
+#### Calling the Swagger UI through the edge server
+To verify that we can reach the Swagger UI introduced in Chapter 5, Adding an API Description Using
+OpenAPI, through the edge server, open the http://localhost:8080/openapi/swagger-ui.html
+URL in a web browser. The resulting Swagger UI page should look like this:
+
+Note the server URL: http://localhost:8080; this means that the product-composite API’s own
+URL, http://product-service:8080/, has been replaced in the OpenAPI specification returned
+by the Swagger UI.
+If you want to, you can proceed and actually try out the product-composite API in the Swagger
+UI, as we did back in Lab 5, Adding an API Description Using OpenAPI!
+
+#### Calling Eureka through the edge server
+To call Eureka through an edge server, perform the following steps:
+1. First, call the Eureka API through the edge server to see what instances are currently
+registered in the discovery server:
+```bash
+curl -H "accept:application/json" \
+localhost:8080/eureka/api/apps -s | \
+jq -r .applications.application[].instance[].instanceId
+```
+2. Expect a response along the lines of the following:
+```text
+d2df3c690a69:gateway:8080
+fbe953b063d3:product-composite:8080
+dc377e9a8306:product:8080
+bd8dd15bedee:review:8080
+8eb4c8da1576:recommendation:8080
+```
+Note that the edge server (named gateway) is also present in the response
+
+3. Next, open the Eureka web page in a web browser using the http://localhost:8080/eureka/web URL:
+4. From the preceding screenshot, we can see the Eureka web page reporting the same available instances as the API response in the previous step.
+
+#### Routing based on the host header
+Let’s wrap up by testing the route configuration based on the hostname used in the requests to
+see predicates and filters in use!
+Normally, the hostname in the request is set automatically in the Host header by the HTTP client.
+When testing the edge server locally, the hostname will be localhost – that is not so useful when
+testing hostname-based routing. However, we can cheat by specifying another hostname in the
+Host header in the call to the API. Let’s see how this can be done:
+1. To call for the i.feel.lucky hostname, use this code:
+curl http://localhost:8080/headerrouting -H "Host: i.feel.
+lucky:8080"
+2. Expect the response 200 OK.
+3. For the im.a.teapot hostname, use the following command:
+curl http://localhost:8080/headerrouting -H "Host: im.a.teapot:8080"
+4. Expect the response 418 I'm a teapot.
+5. Finally, if not specifying any Host header, use localhost as the Host header:
+curl http://localhost:8080/headerrouting
+6. Expect the response 501 Not Implemented.
+
+We can also use i.feel.lucky and im.a.teapot as real hostnames in the requests if we add
+them to the /etc/hosts file, specifying that they should be translated into the same IP address
+as localhost, that is, 127.0.0.1. To do so, perform the following steps:
+1. Run the following command to add a row to the /etc/hosts file with the required in-
+formation:
+sudo bash -c "echo '127.0.0.1 i.feel.lucky im.a.teapot' >> /etc/
+hosts"
+2. We can now perform the same routing based on the hostname, but without specifying
+the Host header. Try it out by running the following commands:
+curl http://i.feel.lucky:8080/headerrouting
+curl http://im.a.teapot:8080/headerrouting
+3. Expect the same responses as previously, 200 OK and 418 I'm a teapot.
+4. Wrap up the tests by shutting down the system landscape with the following command:
+docker compose down
+5. Clean up the /etc/hosts file from the DNS name translation we added for the hostnames,
+i.feel.lucky and im.a.teapot. Edit the /etc/hosts file and remove the line we added:
+127.0.0.1 i.feel.lucky im.a.teapot
+These tests of the routing capabilities in the edge server end the chapter.

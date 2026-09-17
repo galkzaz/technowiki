@@ -1,0 +1,703 @@
+---
+id: software-engineering-design-architecture-distributed-systems-service-communication-api-gateways-architecture
+title: "Architecture"
+sidebar_position: 2
+---
+
+
+## API Gateway Architecture
+
+In the previous chapter, we learned **what an API Gateway is** and **why it exists**.
+
+Now we'll answer a different question: **How does an API Gateway actually process a request internally?**
+
+This chapter explains the internal architecture of an API Gateway, its major components, and the complete lifecycle of a request.
+
+{/* ### Learning Objectives
+
+After this chapter, you should be able to:
+
+* Explain the internal architecture of an API Gateway.
+* Describe the lifecycle of an HTTP request through the gateway.
+* Understand the responsibilities of each gateway component.
+* Explain the difference between the **control plane** and the **data plane**.
+* Understand why API gateways are typically stateless.
+* Explain how gateways achieve high availability and scalability. */}
+
+### 2.1 High-Level Architecture
+
+An API Gateway sits between clients and backend services.
+
+```text
+                Internet
+                    │
+                    ▼
+          +--------------------+
+          |    API Gateway     |
+          +--------------------+
+                    │
+      ┌─────────────┼─────────────┐
+      ▼             ▼             ▼
+ Product        Order        Payment
+ Service        Service       Service
+```
+
+Unlike a simple reverse proxy, an API Gateway performs many tasks before forwarding the request.
+
+### Internal Architecture
+
+A modern API Gateway typically consists of the following components:
+
+```text
+                   Client
+                      │
+                      ▼
+        ┌───────────────────────────┐
+        │      API Gateway          │
+        │                           │
+        │ Authentication            │
+        │ Authorization             │
+        │ Rate Limiting             │
+        │ Request Filters           │
+        │ Route Matching            │
+        │ Service Discovery         │
+        │ Load Balancer             │
+        │ Response Filters          │
+        │ Logging & Metrics         │
+        └───────────────────────────┘
+                      │
+                      ▼
+               Backend Services
+```
+
+Think of the gateway as a **pipeline**, where each component processes the request before passing it to the next stage.
+
+### 2.2 Request Lifecycle
+
+Let's follow a real request.
+
+A user wants product **123**.
+
+```http
+GET /products/123
+```
+
+The client sends
+
+```text
+https://api.shop.com/products/123
+```
+
+The request goes through several stages.
+
+#### Step 1 — Client Sends Request
+
+```text
+Browser
+
+↓
+
+GET /products/123
+```
+
+Nothing has happened yet except the client sending the request.
+
+#### Step 2 — Connection Accepted
+
+The gateway accepts the TCP (or HTTP/2, HTTP/3) connection.
+
+It may also:
+
+* terminate TLS (HTTPS)
+* validate certificates
+* negotiate HTTP version
+* decompress the request if needed
+
+```text
+HTTPS
+
+↓
+
+Gateway accepts connection
+```
+
+At this stage the request has **not** been routed.
+
+#### Step 3 — Request Filtering
+
+Before routing, the gateway executes request filters.
+
+Example filters:
+
+* Logging
+* Authentication
+* Rate limiting
+* Header validation
+* IP filtering
+* CORS checks
+
+```text
+Request
+
+↓
+
+Filter 1
+
+↓
+
+Filter 2
+
+↓
+
+Filter 3
+```
+
+If any filter rejects the request:
+
+```http
+401 Unauthorized
+```
+
+or
+
+```http
+403 Forbidden
+```
+
+or
+
+```http
+429 Too Many Requests
+```
+
+the request never reaches the backend.
+
+**Example**
+
+Client:
+
+```http
+GET /orders
+Authorization: Bearer eyJ...
+```
+
+Gateway verifies the JWT.
+
+Valid?
+
+Yes → Continue.
+
+Invalid? Return
+
+```http
+401 Unauthorized
+```
+
+#### Step 4 — Route Matching
+
+Now the gateway determines which service should receive the request.
+
+Example configuration
+
+```text
+/products/**
+
+↓
+
+Product Service
+```
+
+```text
+/orders/**
+
+↓
+
+Order Service
+```
+
+```text
+/payments/**
+
+↓
+
+Payment Service
+```
+
+Incoming request
+
+```http
+GET /products/123
+```
+
+Gateway chooses
+
+```text
+Product Service
+```
+
+This process is called **route matching**.
+
+### Step 5 — Service Discovery
+
+The gateway usually doesn't know the backend's IP address in advance.
+
+Instead it asks a service registry.
+
+```text
+Gateway
+
+↓
+
+Eureka
+
+↓
+
+Product Service
+
+10.0.4.18
+```
+
+Instead of
+
+```text
+10.0.4.18
+```
+
+being hardcoded.
+
+This enables dynamic scaling.
+
+### Step 6 — Load Balancing
+
+Suppose there are three Product Service instances.
+
+```text
+Product-1
+
+Product-2
+
+Product-3
+```
+
+The gateway selects one.
+
+Example:
+
+Round Robin
+
+Request 1
+
+↓
+
+Product-1
+
+Request 2
+
+↓
+
+Product-2
+
+Request 3
+
+↓
+
+Product-3
+
+Other algorithms include least connections, weighted, or consistent hashing, depending on the gateway.
+
+### Step 7 — Forward Request
+
+Only now is the request sent to the backend.
+
+```text
+Gateway
+
+↓
+
+Product Service
+```
+
+The service processes the request.
+
+```http
+200 OK
+```
+
+### Step 8 — Response Processing
+
+The response comes back.
+
+Gateway executes response filters.
+
+Example
+
+Add security headers.
+
+Compress response.
+
+Log latency.
+
+Transform JSON.
+
+Cache response.
+
+```text
+Product Service
+
+↓
+
+Gateway
+
+↓
+
+Response Filters
+
+↓
+
+Client
+```
+
+### Complete Lifecycle
+
+```text
+                Client
+                   │
+                   ▼
+          Connection Accepted
+                   │
+                   ▼
+         Authentication Filter
+                   │
+                   ▼
+          Authorization Filter
+                   │
+                   ▼
+            Rate Limiter
+                   │
+                   ▼
+             Route Matching
+                   │
+                   ▼
+          Service Discovery
+                   │
+                   ▼
+            Load Balancer
+                   │
+                   ▼
+           Backend Service
+                   │
+                   ▼
+          Response Filters
+                   │
+                   ▼
+                Client
+```
+
+This pipeline model is common to most API gateways, including Spring Cloud Gateway, Envoy, Kong, and Traefik.
+
+### 2.3 Gateway Components
+
+Let's examine each component in more detail.
+
+#### Router
+
+The router determines **where** the request should go.
+
+Example:
+
+```text
+/products/**
+
+↓
+
+Product Service
+```
+
+Without a router, every request would go to the same backend.
+
+#### Authentication Module
+
+Verifies the client's identity.
+
+Examples:
+
+* JWT
+* OAuth2 access token
+* API key
+* Mutual TLS (mTLS)
+
+Example:
+
+```http
+Authorization: Bearer eyJ...
+```
+
+If the token is invalid:
+
+```http
+401 Unauthorized
+```
+
+#### Authorization Module
+
+Checks **what** an authenticated client is allowed to do.
+
+Example:
+
+```text
+Admin
+
+↓
+
+DELETE /users
+```
+
+Allowed.
+
+```text
+Customer
+
+↓
+
+DELETE /users
+```
+
+Denied with:
+
+```http
+403 Forbidden
+```
+
+Authentication answers **Who are you?**
+
+Authorization answers **What are you allowed to do?**
+
+#### Filters
+
+Filters perform additional processing.
+
+Examples:
+
+* Add request headers
+* Remove headers
+* Validate input
+* Rewrite URLs
+* Compress responses
+* Add correlation IDs
+* Log requests
+
+Filters are usually organized into a chain where each filter performs one focused task.
+
+#### Service Discovery Client
+
+The gateway asks a registry: Where is Product Service? Registry returns:
+
+```text
+Product Service
+
+↓
+
+10.0.4.18
+10.0.4.21
+10.0.4.34
+```
+
+The gateway doesn't need fixed addresses.
+
+#### Load Balancer
+
+Chooses one instance from the available service instances.
+
+Example:
+
+```text
+Product-1
+
+Product-2
+
+Product-3
+```
+
+↓
+
+Choose Product-2
+
+This distributes traffic and improves availability.
+
+#### Observability Components
+
+The gateway records operational data such as:
+
+* Request count
+* Latency
+* Error rate
+* Response size
+* Status codes
+
+It also emits logs, metrics, and traces to monitoring systems.
+
+### 2.4 Filter Chain
+
+One of the most important architectural concepts is the **filter chain**.
+
+Instead of putting all logic into one large function, gateways execute a sequence of small, reusable filters.
+
+```text
+Request
+
+↓
+
+Logging
+
+↓
+
+Authentication
+
+↓
+
+Rate Limiting
+
+↓
+
+Routing
+
+↓
+
+Forward
+```
+
+Each filter has a single responsibility, making the pipeline easier to maintain and extend.
+
+### 2.5 Stateless Architecture
+
+Most API gateways are **stateless**.
+
+Each request contains all the information needed for processing.
+
+Example:
+
+```http
+Authorization: Bearer eyJ...
+```
+
+The gateway validates the token but doesn't store the user's session in memory.
+
+Benefits include:
+
+* Easy horizontal scaling
+* No session replication
+* Simpler failover
+* Better fault tolerance
+
+If one gateway instance fails, another can immediately process new requests because no user-specific state was stored locally.
+
+### 2.6 Control Plane vs. Data Plane
+
+Modern gateways separate **configuration** from **traffic processing**.
+
+#### Data Plane
+
+The data plane handles live traffic.
+
+Responsibilities:
+
+* Receive requests
+* Apply filters
+* Route requests
+* Balance traffic
+* Return responses
+
+```text
+Client
+
+↓
+
+Gateway Instance
+
+↓
+
+Service
+```
+
+Every request passes through the data plane.
+
+#### Control Plane
+
+The control plane manages gateway configuration.
+
+Responsibilities:
+
+* Define routes
+* Configure security policies
+* Manage certificates
+* Configure rate limits
+* Distribute configuration updates
+
+```text
+Administrator
+
+↓
+
+Gateway Management
+
+↓
+
+Gateway Instances
+```
+
+The control plane does **not** process user requests.
+
+#### Why Separate Them?
+
+If an administrator changes a route, every gateway instance receives the updated configuration without interrupting active requests.
+
+```text
+Administrator
+      │
+      ▼
+Control Plane
+      │
+      ├────────► Gateway A
+      ├────────► Gateway B
+      └────────► Gateway C
+
+Clients
+      │
+      ▼
+Data Plane
+      │
+      ▼
+Backend Services
+```
+
+This separation improves scalability, consistency, and operational flexibility.
+
+### 2.7 High Availability
+
+A production system never relies on a single gateway instance.
+
+```text
+              Load Balancer
+                    │
+      ┌─────────────┼─────────────┐
+      ▼             ▼             ▼
+ Gateway A     Gateway B     Gateway C
+      │             │             │
+      └─────────────┼─────────────┘
+                    ▼
+            Backend Services
+```
+
+If **Gateway B** fails, the load balancer stops sending traffic to it, and the remaining instances continue serving requests.
+
+### Key Takeaways
+
+* An API Gateway is a **request-processing pipeline** composed of specialized components.
+* Every request typically flows through **connection handling → filters → route matching → service discovery → load balancing → backend service → response filters**.
+* Filters implement cross-cutting concerns such as authentication, logging, and rate limiting.
+* Service discovery allows gateways to route to dynamically changing service instances.
+* Stateless gateways are easy to scale horizontally and recover from failures.
+* Separating the **control plane** (configuration management) from the **data plane** (request processing) enables centralized management without affecting traffic.
+* High availability is achieved by running multiple gateway instances behind a load balancer.
+
+

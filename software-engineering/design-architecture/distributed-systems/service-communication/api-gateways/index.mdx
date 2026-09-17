@@ -1,0 +1,638 @@
+---
+id: software-engineering-design-architecture-distributed-systems-service-communication-api-gateways
+title: "Overview"
+sidebar_position: 1
+---
+
+## Overview
+
+### What is an API Gateway?
+
+An **API Gateway** is a server that sits between clients and backend services.
+
+Instead of clients communicating directly with dozens of microservices, they communicate with a **single entry point**, the API Gateway.
+
+```
+                   Client
+                      │
+                      │ HTTP
+                      ▼
+             ┌────────────────┐
+             │  API Gateway   │
+             └────────────────┘
+                 │    │     │
+                 │    │     │
+        ┌────────┘    │     └────────┐
+        ▼             ▼              ▼
+ Product Service  Order Service  Payment Service
+```
+
+The gateway receives every client request and decides:
+
+* Which service should handle it?
+* Is the user authenticated?
+* Is the request allowed?
+* Should the request be rate limited?
+* Should the response be cached?
+* Should the request be logged?
+
+The gateway performs these tasks before forwarding the request.
+
+### Why does an API Gateway exist?
+
+Imagine an e-commerce application.
+
+Microservices
+
+```
+Product Service
+Inventory Service
+Review Service
+Order Service
+Payment Service
+Shipping Service
+Notification Service
+```
+
+Without a gateway, the frontend must know every service.
+
+```
+Browser
+   │
+   ├────────► Product Service
+   ├────────► Review Service
+   ├────────► Inventory Service
+   ├────────► Order Service
+   ├────────► Payment Service
+   └────────► Shipping Service
+```
+
+Problems:
+
+* Too many endpoints
+* Clients know internal architecture
+* Authentication duplicated
+* Different URLs
+* Different ports
+* Versioning becomes difficult
+
+With a gateway
+
+```
+Browser
+      │
+      ▼
++----------------+
+| API Gateway    |
++----------------+
+      │
+      ├────────► Product Service
+      ├────────► Inventory Service
+      ├────────► Order Service
+      └────────► Payment Service
+```
+
+The client only knows one endpoint:
+
+```
+https://api.company.com
+```
+
+Everything else is hidden.
+
+### Real Example
+
+Suppose Amazon had these services.
+
+```
+catalog-service
+
+order-service
+
+payment-service
+
+shipping-service
+
+review-service
+```
+
+Instead of exposing
+
+```
+catalog.company.com
+
+orders.company.com
+
+payment.company.com
+
+shipping.company.com
+```
+
+they expose
+
+```
+api.company.com
+```
+
+The gateway routes internally.
+
+```
+GET /products/5
+```
+
+↓
+
+```
+Catalog Service
+```
+
+```
+POST /orders
+```
+
+↓
+
+```
+Order Service
+```
+
+```
+POST /payments
+```
+
+↓
+
+```
+Payment Service
+```
+
+Clients never know where the services are.
+
+### Problems an API Gateway Solves
+
+#### 1. Too Many Endpoints
+
+Without gateway
+
+```
+Customer App
+
+↓
+
+15 Microservices
+
+↓
+
+15 URLs
+```
+
+With gateway
+
+```
+Customer App
+
+↓
+
+1 URL
+
+↓
+
+Gateway
+
+↓
+
+15 Services
+```
+
+#### 2. Centralized Authentication
+
+Without gateway
+
+Every service checks JWT.
+
+```
+Product Service
+
+↓
+
+Verify JWT
+```
+
+```
+Order Service
+
+↓
+
+Verify JWT
+```
+
+```
+Review Service
+
+↓
+
+Verify JWT
+```
+
+Repeated everywhere.
+
+With gateway
+
+```
+JWT
+
+↓
+
+Gateway verifies
+
+↓
+
+Services trust gateway
+```
+
+Authentication logic exists once.
+
+#### 3. Centralized Logging
+
+Without gateway
+
+Each service logs independently.
+
+Hard to reconstruct requests.
+
+With gateway
+
+```
+Gateway
+
+↓
+
+Incoming Request
+
+↓
+
+Request ID
+
+↓
+
+Forward
+```
+
+Every request gets a correlation ID.
+
+#### 4. Load Balancing
+
+Instead of
+
+```
+Gateway
+
+↓
+
+Product Service #1
+```
+
+Gateway can choose
+
+```
+Gateway
+
+↓
+
+Product-1
+
+Product-2
+
+Product-3
+```
+
+Automatically.
+
+#### 5. Rate Limiting
+
+Suppose a client sends
+
+```
+10000 requests/second
+```
+
+Gateway can reject requests.
+
+```
+Allowed
+
+100 requests/minute
+```
+
+Remaining requests receive
+
+```
+429 Too Many Requests
+```
+
+Backend stays healthy.
+
+#### 6. Request Aggregation
+
+Client wants
+
+```
+Product
+
+Inventory
+
+Reviews
+```
+
+Without gateway
+
+```
+Client
+
+↓
+
+Product Service
+
+↓
+
+Inventory Service
+
+↓
+
+Review Service
+```
+
+Three HTTP calls.
+
+With gateway
+
+```
+Client
+
+↓
+
+Gateway
+
+↓
+
+Gateway calls
+
+Product
+
+Inventory
+
+Reviews
+
+↓
+
+One response
+```
+
+Much faster for the client.
+
+### Benefits
+
+#### Simpler Clients
+
+Client knows
+
+```
+api.company.com
+```
+
+instead of
+
+```
+10 service URLs
+```
+
+#### Better Security
+
+Authentication
+
+Authorization
+
+Rate limiting
+
+CORS
+
+Firewall
+
+IP filtering
+
+all in one place.
+
+#### Centralized Monitoring
+
+Gateway logs
+
+```
+Who?
+
+When?
+
+Which endpoint?
+
+How long?
+
+Status code?
+```
+
+#### Easier Versioning
+
+Gateway routes
+
+```
+/v1/products
+```
+
+to
+
+```
+Old Product Service
+```
+
+and
+
+```
+/v2/products
+```
+
+to
+
+```
+New Product Service
+```
+
+#### Protocol Translation
+
+Client
+
+```
+HTTP
+```
+
+↓
+
+Gateway
+
+↓
+
+```
+gRPC
+```
+
+↓
+
+Backend
+
+Backend implementation stays hidden.
+
+### Drawbacks
+
+API Gateway is not free.
+
+#### Single Point of Failure
+
+If one gateway crashes
+
+```
+Client
+
+↓
+
+Gateway ❌
+
+↓
+
+No services reachable
+```
+
+Solution
+
+Run multiple gateway instances.
+
+#### Additional Latency
+
+Instead of
+
+```
+Client
+
+↓
+
+Product Service
+```
+
+Now
+
+```
+Client
+
+↓
+
+Gateway
+
+↓
+
+Product Service
+```
+
+One additional network hop.
+
+#### More Infrastructure
+
+Need
+
+* monitoring
+* scaling
+* configuration
+* routing
+* certificates
+* security
+* deployments
+
+#### Gateway Can Become a Bottleneck
+
+Poorly configured gateway
+
+↓
+
+All requests slow
+
+↓
+
+Entire system slows
+
+#### Risk of Becoming a "God Gateway"
+
+Putting business logic into the gateway is an anti-pattern.
+
+Bad
+
+```
+Gateway
+
+↓
+
+Calculates Discounts
+
+↓
+
+Checks Inventory
+
+↓
+
+Updates Database
+```
+
+A gateway should **route and enforce cross-cutting concerns**, not implement domain logic.
+
+### When Should You Use an API Gateway?
+
+Use one when you have:
+
+* Many microservices
+* Public APIs
+* Mobile applications
+* Web applications
+* Multiple client types (web, mobile, partner APIs)
+* Centralized security requirements
+* Need for rate limiting, logging, and routing
+
+You may not need one for:
+
+* A small monolithic application
+* A system with only one or two backend services
+* Internal prototypes where direct service access is acceptable
+
+### API Gateway in a Microservices Architecture
+
+A common production architecture looks like this:
+
+```
+                           Internet
+                               │
+                               ▼
+                     +------------------+
+                     |  API Gateway     |
+                     +------------------+
+                               │
+            ┌──────────────────┼──────────────────┐
+            ▼                  ▼                  ▼
+     Product Service     Order Service     User Service
+            │                  │                  │
+            └──────────────┬───┴──────────────────┘
+                           ▼
+                  Service Discovery
+                     (Eureka, Consul)
+                           │
+                           ▼
+                    Service Instances
+```
+
+In this architecture:
+
+* The **API Gateway** is the only component exposed to external clients.
+* **Service Discovery** allows the gateway to dynamically locate healthy service instances.
+* Backend services remain private and communicate with each other without being directly exposed to the Internet.

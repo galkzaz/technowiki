@@ -1,0 +1,1068 @@
+---
+id: software-engineering-frameworks-platforms-backend-frameworks-spring-boot-concepts-spring-cloud-service-discovery-implementations-netflix-eureka
+title: "Netflix Eureka"
+sidebar_position: 1
+---
+
+## 1. Overview
+
+Before learning how to build a Eureka Server or register services, it's important to understand **what Spring Cloud adds on top of Netflix Eureka**.
+
+Netflix Eureka is the **service registry** itself. Spring Cloud Netflix is the **integration layer** that allows Spring Boot applications to use Eureka with minimal configuration and almost no boilerplate code.
+
+---
+
+### Why Spring Cloud Integrates Eureka
+
+#### The Problem
+
+In a traditional monolithic application, services communicate using fixed addresses.
+
+```
+Order Service
+        |
+        | HTTP
+        v
+http://localhost:8081/products
+```
+
+The client always knows where the server is located.
+
+In a microservices architecture, however, this approach quickly becomes problematic.
+
+Suppose you have three Product Service instances:
+
+```
+Product Service
+    10.0.1.12
+
+Product Service
+    10.0.1.18
+
+Product Service
+    10.0.1.25
+```
+
+Questions immediately arise:
+
+* Which instance should Order Service call?
+* What happens if one instance crashes?
+* What if a new instance starts?
+* What if instances are deployed in containers and receive new IP addresses?
+
+Hardcoding addresses becomes impossible.
+
+---
+
+#### The Solution
+
+Instead of remembering server addresses, every service registers itself with a central registry.
+
+```
+               Eureka Server
+            +----------------+
+            | ProductService |
+            | Inventory      |
+            | Payment        |
+            +----------------+
+```
+
+Clients simply ask the registry:
+
+> "Where is Product Service?"
+
+The registry responds with available instances.
+
+```
+Order Service
+
+      |
+
+Ask Eureka
+
+      |
+
+Gets
+
+10.0.1.12
+10.0.1.18
+10.0.1.25
+```
+
+The client then selects one instance and sends the request.
+
+---
+
+#### Why Spring Cloud?
+
+Netflix created Eureka.
+
+Spring Cloud integrates Eureka into the Spring ecosystem by providing:
+
+* automatic registration
+* automatic discovery
+* automatic configuration
+* Spring Boot integration
+* load balancing
+* health monitoring
+* configuration through `application.yml`
+
+Without Spring Cloud, developers would have to manually:
+
+* configure Eureka clients
+* create registry connections
+* refresh registries
+* handle failures
+* implement discovery logic
+
+Spring Cloud automates these tasks.
+
+---
+
+### Spring Boot Auto-Configuration
+
+One of Spring Boot's most powerful features is **auto-configuration**.
+
+Instead of writing configuration code, Spring Boot detects which libraries are on the classpath and automatically configures them.
+
+For example:
+
+```
+dependencies
+
+↓
+
+Spring Boot starts
+
+↓
+
+Finds Eureka Client library
+
+↓
+
+Creates Eureka beans
+
+↓
+
+Registers service automatically
+```
+
+The developer only adds the dependency.
+
+Example:
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+</dependency>
+```
+
+Spring Boot configures:
+
+* EurekaClient
+* DiscoveryClient
+* Heartbeat scheduler
+* Registry fetch scheduler
+* Instance information
+* Service registration
+
+without requiring explicit Java configuration.
+
+---
+
+#### How Auto-Configuration Works
+
+At startup:
+
+```
+SpringApplication.run()
+
+↓
+
+ApplicationContext created
+
+↓
+
+AutoConfiguration imports
+
+↓
+
+EurekaAutoConfiguration
+
+↓
+
+Beans created
+
+↓
+
+Registration begins
+```
+
+The developer usually never creates these beans manually.
+
+---
+
+### @EnableEurekaServer
+
+`@EnableEurekaServer` turns a Spring Boot application into a **Eureka Server**, which acts as the central service registry.
+
+Without this annotation:
+
+```
+Spring Boot
+
+↓
+
+Normal REST application
+```
+
+With the annotation:
+
+```
+Spring Boot
+
+↓
+
+Eureka Registry
+
+↓
+
+Accepts registrations
+
+↓
+
+Stores instances
+
+↓
+
+Answers discovery requests
+```
+
+Example:
+
+```java
+@SpringBootApplication
+@EnableEurekaServer
+public class EurekaServerApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(EurekaServerApplication.class, args);
+    }
+}
+```
+
+When the application starts, it hosts the registry and exposes endpoints such as:
+
+```
+/eureka/apps
+/eureka/apps/{application}
+/eureka/*
+```
+
+Client applications interact with these endpoints to register, renew leases, fetch the registry, and deregister.
+
+---
+
+### @EnableDiscoveryClient
+
+`@EnableDiscoveryClient` enables a Spring Boot application to participate in a service discovery system.
+
+```
+Application
+
+↓
+
+Discovery Enabled
+
+↓
+
+Can register
+
+↓
+
+Can discover
+```
+
+Historically, this annotation was required.
+
+Example:
+
+```java
+@EnableDiscoveryClient
+@SpringBootApplication
+public class ProductServiceApplication {
+
+}
+```
+
+Today, with recent versions of Spring Boot and Spring Cloud, this annotation is often optional. If the Eureka client dependency is present, auto-configuration usually enables discovery automatically.
+
+---
+
+#### DiscoveryClient vs EurekaClient
+
+`@EnableDiscoveryClient` is **technology-independent**.
+
+The same application can work with:
+
+* Eureka
+* Consul
+* Zookeeper
+* Kubernetes
+* other Spring Cloud discovery implementations
+
+Spring injects the appropriate implementation based on the dependencies present.
+
+---
+
+### EurekaClient
+
+Spring Cloud comes with an abstraction of how to communicate with a discovery service such
+as Netflix Eureka and provides an interface called DiscoveryClient. This can be used to interact
+with a discovery service to get information regarding available services and instances. Implemen-
+tations of the DiscoveryClient interface are also capable of automatically registering a Spring
+Boot application with the discovery server.
+
+Spring Boot can find implementations of the DiscoveryClient interface automatically during
+startup, so we only need to bring in a dependency on the corresponding implementation to
+connect to a discovery server. In the case of Netflix Eureka, the dependency that’s used by our
+microservices is spring-cloud-starter-netflix-eureka-client.
+
+`EurekaClient` is the **Netflix-specific client API**.
+
+It communicates directly with the Eureka Server using the Eureka protocol.
+
+```
+Product Service
+
+↓
+
+EurekaClient
+
+↓
+
+HTTP
+
+↓
+
+Eureka Server
+```
+
+Responsibilities include:
+
+* registering the instance
+* renewing leases (heartbeats)
+* downloading the registry
+* deregistering on shutdown
+* maintaining the local registry cache
+
+Example:
+
+```java
+@Autowired
+private EurekaClient eurekaClient;
+```
+
+Finding instances:
+
+```java
+Application application =
+    eurekaClient.getApplication("PRODUCT-SERVICE");
+```
+
+This API exposes Eureka-specific concepts such as applications, instances, leases, and metadata.
+
+---
+
+### DiscoveryClient
+
+`DiscoveryClient` is Spring Cloud's abstraction for service discovery.
+
+```
+Application
+
+↓
+
+DiscoveryClient
+
+↓
+
+Eureka
+Consul
+Kubernetes
+Zookeeper
+```
+
+Unlike `EurekaClient`, it is **not tied to Eureka**.
+
+Example:
+
+```java
+@Autowired
+private DiscoveryClient discoveryClient;
+```
+
+Retrieving service instances:
+
+```java
+List<ServiceInstance> instances =
+        discoveryClient.getInstances("product-service");
+```
+
+Each `ServiceInstance` provides information such as:
+
+* host
+* port
+* URI
+* metadata
+* secure flag
+
+Because it is implementation-independent, using `DiscoveryClient` makes your application more portable.
+
+---
+
+#### EurekaClient vs DiscoveryClient
+
+| Feature                                 | EurekaClient                  | DiscoveryClient   |
+| --------------------------------------- | ----------------------------- | ----------------- |
+| Owner                                   | Netflix                       | Spring Cloud      |
+| Vendor-specific                         | Yes                           | No                |
+| Works only with Eureka                  | Yes                           | No                |
+| Returns                                 | `Application`, `InstanceInfo` | `ServiceInstance` |
+| Recommended for new Spring applications | Usually no                    | Yes               |
+
+In most Spring Boot applications, `DiscoveryClient` is preferred unless you need Eureka-specific functionality.
+
+---
+
+### Auto-Registration
+
+One of Spring Cloud's biggest conveniences is **automatic service registration**.
+
+When a client starts:
+
+```
+Spring Boot Starts
+
+↓
+
+Reads application.yml
+
+↓
+
+Creates EurekaClient
+
+↓
+
+Contacts Eureka Server
+
+↓
+
+Registers Instance
+
+↓
+
+Ready
+```
+
+No registration code is required.
+
+Example configuration:
+
+```yaml
+spring:
+  application:
+    name: product-service
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka
+```
+
+After startup, the Eureka dashboard will display:
+
+```
+PRODUCT-SERVICE
+
+Instance:
+localhost:8081
+```
+
+If another instance starts:
+
+```
+PRODUCT-SERVICE
+
+localhost:8081
+
+localhost:8082
+```
+
+Both instances are automatically registered.
+
+---
+
+### Auto-Discovery
+
+Registration is only half of the process. Clients must also discover other services.
+
+Suppose Order Service wants to call Product Service.
+
+Instead of hardcoding:
+
+```
+http://localhost:8081
+```
+
+it simply requests:
+
+```
+PRODUCT-SERVICE
+```
+
+The flow is:
+
+```
+Order Service
+
+↓
+
+DiscoveryClient
+
+↓
+
+Local Registry Cache
+
+↓
+
+PRODUCT-SERVICE
+
+↓
+
+Returns
+
+8081
+8082
+8083
+```
+
+The client receives the available instances, and a load balancer (such as Spring Cloud LoadBalancer) selects one for the request.
+
+This enables dynamic scaling:
+
+```
+Start new instance
+
+↓
+
+Registers automatically
+
+↓
+
+Appears in registry
+
+↓
+
+Clients discover it
+
+↓
+
+Traffic begins flowing
+```
+
+No client configuration changes are required when instances are added or removed.
+
+---
+
+### Summary
+
+| Component                          | Purpose                                                                                 |
+| ---------------------------------- | --------------------------------------------------------------------------------------- |
+| **Spring Cloud Netflix**           | Integrates Netflix Eureka with Spring Boot                                              |
+| **Spring Boot Auto-Configuration** | Automatically configures Eureka components based on dependencies                        |
+| **`@EnableEurekaServer`**          | Creates a Eureka registry server                                                        |
+| **`@EnableDiscoveryClient`**       | Enables a Spring application to participate in service discovery (often optional today) |
+| **`EurekaClient`**                 | Netflix-specific API for interacting with Eureka                                        |
+| **`DiscoveryClient`**              | Spring Cloud's vendor-neutral service discovery abstraction                             |
+| **Auto-Registration**              | Automatically registers a service instance with Eureka at startup                       |
+| **Auto-Discovery**                 | Automatically discovers available service instances without hardcoded addresses         |
+
+
+## 2. Getting Started
+
+### Create Eureka Server
+Setting
+up a Netflix Eureka server using Spring Cloud is really easy – just follow these steps:
+1. Create a Spring Boot project using Spring Initializr.
+2. Add a dependency to spring-cloud-starter-netflix-eureka-server.
+```xml
+   	<dependencies>
+   		<dependency>
+   			<groupId>org.springframework.clou</groupId>
+   			<artifactId>spring-cloud-starter-netflix-eureka-server</artifactId>
+   		</dependency>
+   	</dependencies>
+```
+3. Add the `@EnableEurekaServer` annotation to the application class.
+```java
+package se.magnus.springcloud.eurekaserver;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.netflix.eureka.server.EnableEurekaServer;
+
+@EnableEurekaServer
+@SpringBootApplication
+public class EurekaServerApplication {
+
+  public static void main(String[] args) {
+    SpringApplication.run(EurekaServerApplication.class, args);
+  }
+
+}
+
+```
+4. Finally, add some configuration. 
+### Start Registry
+
+### Create Eureka Client
+
+Spring Boot can find implementations of the `DiscoveryClient` interface automatically during
+startup, so we only need to bring in a dependency on the corresponding implementation to
+connect to a discovery server. In the case of Netflix Eureka, the dependency that’s used by our
+microservices is `spring-cloud-starter-netflix-eureka-client`.
+
+To be able to register a microservice instance in the Eureka server, we need to do the following:
+1. Add a dependency to `spring-cloud-starter-netflix-eureka-client` in the build file, `build.gradle`:
+
+```groovy
+Implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+```
+
+```xml
+       <dependency>
+           <groupId>org.springframework.cloud</groupId>
+           <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+       </dependency>
+```
+2. When running tests on a single microservice, we don’t want to depend on having the
+Eureka server up and running. Therefore, we will disable the use of Netflix Eureka in all
+Spring Boot tests, that is, JUnit tests annotated with `@SpringBootTest`. This can be done
+by adding the eureka.client.enabled property and setting it to false in the annotation,
+like so:
+```java
+@SpringBootTest(webEnvironment=RANDOM_PORT, properties = {"eureka.client.enabled=false"})
+```
+3. Finally, add some configuration
+
+There is one property in the configuration that is extra important: `spring.application.name`. It
+is used to give each microservice a virtual hostname, a name used by the Eureka service to iden-
+tify each microservice. Eureka clients will use this virtual hostname in the URLs that are used to
+make HTTP calls to the microservice
+### Register Services
+
+### Discover Services
+### Call Services
+
+
+## 3. Configuration
+
+Eureka configuration parameters
+The configuration parameters for Eureka are divided into three groups:
+- Parameters for the Eureka server, prefixed with `eureka.server`.
+- Parameters for Eureka clients, prefixed with `eureka.client`. This is for clients who want
+to communicate with the Eureka server.
+- Parameters for Eureka instances, prefixed with `eureka.instance`. This is for the microservice instances that want to register themselves in the Eureka server.
+
+Examples:
+
+Server:
+
+```
+eureka.client.register-with-eureka=false
+eureka.client.fetch-registry=false
+```
+
+Client:
+
+```
+eureka.client.service-url.defaultZone
+```
+
+Instance:
+
+```
+eureka.instance.hostname
+eureka.instance.instance-id
+eureka.instance.metadata-map
+```
+
+Spring Boot properties:
+
+```
+spring.application.name
+server.port
+management.endpoints.web.exposure.include
+```
+
+For an extensive list of available parameters:
+- For Eureka server parameters, look at the `org.springframework.cloud.netflix.eureka.server.EurekaServerConfigBean` class for default values and the `com.netflix.eureka.EurekaServerConfig` interface for the relevant documentation
+- For Eureka client parameters, look at the `org.springframework.cloud.netflix.eureka.EurekaClientConfigBean` class for the default values and documentation
+- For Eureka instance parameters, look at the `org.springframework.cloud.netflix.eureka.EurekaInstanceConfigBean` class for default values and documentation
+
+### Setting up the configuration for development use
+Fortunately, Netflix Eureka comes with good default values for most of the configurable parameters – at least when it comes to using them in a production environment.
+
+When it comes to using Netflix Eureka during development, the default values cause long start-
+up times. For example, it can take a long time for a client to make an initial successful call to a
+microservice instance that is registered in the Eureka server.
+Up to two minutes of wait time can be experienced when using the default configuration values.
+This wait time is added to the time it takes for the Eureka service and the microservices to start
+up. The reason for this wait time is that the involved processes need to synchronize registration
+information with each other. The microservice instances need to register with the Eureka server,
+and the client needs to gather information from the Eureka server. This communication is main-
+ly based on heartbeats, which happen every 30 seconds by default. A couple of caches are also
+involved, which slows down the propagation of updates.
+
+To configure the Eureka server for use in a development environment, the following configuration
+can be used:
+```yml
+server:
+  port: 8761
+
+eureka:
+  instance:
+    hostname: localhost
+  client:
+    registerWithEureka: false
+    fetchRegistry: false
+    serviceUrl:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+  # from: https://github.com/spring-cloud-samples/eureka/blob/master/src/main/resources/application.yml
+  server:
+    waitTimeInMsWhenSyncEmpty: 0
+    response-cache-update-interval-ms: 5000
+
+management.endpoints.web.exposure.include: "*"
+```
+- The first part of the configuration, for a Eureka instance and client, is a standard configuration
+for a standalone Eureka server. 
+- The last two parameters used for the Eureka server, `waitTimeInMsWhenSyncEmpty`
+and `response-cache-update-interval-ms`, are used to minimize the startup time.
+
+**Configuring clients to the Eureka server**
+
+To be able to connect to the Eureka server, the microservices have the following configuration:
+```yml
+app.eureka-server: localhost
+
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://${app.eureka-server}:8761/eureka/
+    initialInstanceInfoReplicationIntervalSeconds: 5
+    registryFetchIntervalSeconds: 5
+  instance:
+    leaseRenewalIntervalInSeconds: 5
+    leaseExpirationDurationInSeconds: 5
+```
+- The `eureka.client.serviceUrl.defaultZone` parameter is used to find the Eureka server, using
+the localhost hostname when running without Docker and the eureka hostname when running
+as containers in Docker. 
+- The other parameters are used to minimize the startup time and the time
+it takes to deregister a microservice instance that is stopped.
+## 4. Runtime
+
+This explains **what actually happens after the application starts**.
+
+### Application startup
+
+```
+Application starts
+
+↓
+
+Spring Context
+
+↓
+
+EurekaClient created
+
+↓
+
+Registration request
+
+↓
+
+Registry updated
+```
+
+---
+
+### Heartbeats
+
+Every client periodically sends:
+
+```
+PUT /eureka/apps/PRODUCT-SERVICE/instance
+```
+
+to tell the server:
+
+> "I'm still alive."
+
+---
+
+### Lease Renewal
+
+Each instance owns a lease.
+
+```
+renew every 30 seconds
+
+↓
+
+expiration after 90 seconds
+
+↓
+
+remove instance
+```
+
+unless renewed.
+
+---
+
+### Registry Refresh
+
+Clients periodically download updates.
+
+```
+Registry
+
+↓
+
+Delta changes
+
+↓
+
+Local cache
+
+↓
+
+Load Balancer
+```
+
+---
+
+### Self-Preservation
+
+If many heartbeats suddenly stop (for example due to a network partition), Eureka avoids immediately evicting instances.
+
+```
+Many missed renewals
+
+↓
+
+Enter self-preservation mode
+
+↓
+
+Stop evicting instances
+
+↓
+
+Wait for recovery
+```
+
+This reduces the risk of accidental mass eviction during temporary network issues.
+
+---
+
+## 5. Load Balancing
+
+Spring Cloud no longer uses Ribbon.
+
+Instead:
+
+```
+DiscoveryClient
+
+↓
+
+Spring Cloud LoadBalancer
+
+↓
+
+Choose instance
+
+↓
+
+HTTP request
+```
+
+Spring Cloud also comes with an abstraction – the `LoadBalancerClient` interface – for clients that
+want to make requests through a load balancer to registered instances in the discovery service.
+The standard reactive HTTP client, `WebClient`, can be configured to use the `LoadBalancerClient`
+implementation. By adding the `@LoadBalanced` annotation to a `@Bean` declaration that returns
+a `WebClient.Builder` object, a `LoadBalancerClient` implementation will be injected into the
+Builder instance as an `ExchangeFilterFunction`.
+
+Selection algorithms include:
+
+* Round Robin
+* Random
+* Weighted
+* Custom
+
+---
+
+## 6. Monitoring
+
+Spring Boot Actuator integrates with Eureka.
+
+Useful endpoints:
+
+```
+/actuator/health
+
+/actuator/info
+
+/actuator/metrics
+
+/actuator/env
+
+/actuator/configprops
+```
+
+Health indicators can report whether the application is successfully registered with Eureka and able to communicate with the registry.
+
+---
+
+## 7. Deployment
+
+This covers production deployment patterns.
+
+### Dockerizing
+Add a Dockerfile
+```dockerfile
+FROM eclipse-temurin:24_36-jre-noble AS builder
+WORKDIR /extracted
+ADD ./build/libs/*.jar app.jar
+RUN java -Djarmode=layertools -jar app.jar extract
+
+FROM eclipse-temurin:24_36-jre-noble
+WORKDIR /application
+COPY --from=builder /extracted/dependencies/ ./
+COPY --from=builder /extracted/spring-boot-loader/ ./
+COPY --from=builder /extracted/snapshot-dependencies/ ./
+COPY --from=builder /extracted//application/ ./
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
+```
+Add the Eureka server to Docker Compose file
+```yml
+  eureka:
+    build: spring-cloud/eureka-server
+    mem_limit: 512m
+    ports:
+      - "8761:8761"
+```
+### Clustering
+
+```
+Server A
+
+⇄
+
+Server B
+
+⇄
+
+Server C
+```
+
+Each Eureka server replicates registry changes to its peers.
+
+---
+
+### High Availability
+
+Clients are configured with multiple Eureka servers:
+
+```
+Server A
+
+Server B
+
+Server C
+```
+
+If one registry becomes unavailable, clients continue communicating with another.
+
+---
+
+### Zones and Regions
+
+For multi-region deployments:
+
+```
+US-East
+
+├── Zone A
+├── Zone B
+
+Europe
+
+├── Zone C
+├── Zone D
+```
+
+Clients prefer instances in their own zone to reduce latency but can fall back to other zones if needed.
+
+---
+
+## 8. Migration
+
+Important migration topics include:
+
+### Eureka vs Consul
+
+| Eureka                  | Consul                           |
+| ----------------------- | -------------------------------- |
+| JVM ecosystem           | Multi-language                   |
+| Client-side health      | Built-in active health checks    |
+| AP-oriented             | More CP-oriented                 |
+| Widely used with Spring | Broader infrastructure ecosystem |
+
+---
+
+### Eureka vs Kubernetes
+
+In Kubernetes:
+
+```
+Pod
+
+↓
+
+Service
+
+↓
+
+CoreDNS
+
+↓
+
+Client
+```
+
+Kubernetes already provides built-in service discovery through Services and DNS, making Eureka unnecessary for most Kubernetes-native deployments. Eureka remains useful for Spring Boot applications running on virtual machines, mixed environments, or platforms without native service discovery.
+
+---
+
+This organization cleanly separates **Spring Cloud's implementation details** (annotations, auto-configuration, Spring Boot integration, LoadBalancer, Actuator, OpenFeign, configuration properties) from the **underlying Netflix Eureka concepts** (registry, leases, heartbeats, replication, self-preservation, zones, and regions). That separation helps readers first understand the technology itself and then learn how Spring Cloud automates and integrates it.

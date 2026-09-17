@@ -1,0 +1,97 @@
+---
+id: software-engineering-frameworks-platforms-backend-frameworks-spring-boot-concepts-core-ssl
+title: "SSL"
+---
+
+Spring Boot provides the ability to configure SSL trust material that can be applied to several types of connections in order to support secure communications. Configuration properties with the prefix spring.ssl.bundle can be used to specify named sets of trust material and associated information.
+
+## Configuring SSL With Java KeyStore Files
+
+Configuration properties with the prefix spring.ssl.bundle.jks can be used to configure bundles of trust material created with the Java keytool utility and stored in Java KeyStore files in the JKS or PKCS12 format. Each bundle has a user-provided name that can be used to reference the bundle.
+
+When used to secure an embedded web server, a keystore is typically configured with a Java KeyStore containing a certificate and private key as shown in this example:
+
+To use HTTPS, we need to create a certificate: We will create our own self-signed certificate, sufficient for development purposes
+
+The self-signed certificate is created with the following command:
+```bash
+keytool -genkeypair -alias localhost -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore edge.p12 -validity 365
+```
+The command will ask for a number of parameters. When asked for a password, I entered password.
+For the rest of the parameters, I simply entered an empty value to accept the default value. The
+certificate file created, edge.p12, is placed in the gateway projects folder, src/main/resources/
+keystore. This means that the certificate file will be placed in the .jar file when it is built and will
+be available on the classpath at runtime at keystore/edge.p12
+
+:::note
+
+Providing certificates using the classpath is sufficient during development, but not applicable to other environments, for example, a production environment. See the Replacing a self-signed certificate at runtime section for how we can replace this certificate with an external certificate at runtime!
+
+:::
+
+Configuring secure communication with SSL and TLS is inherently complex. This complexity is
+made even greater because different libraries—and even major versions of the same library—often
+require unique configuration approaches. SSL Bundles were introduced in Spring Boot 3.1 to sim-
+plify this process, a concept designed to streamline and centralize SSL and TLS configuration. SSL
+bundles support both Java KeyStore files in the JKS or PKCS12 format, and PEM-encoded certifi-
+cates. Once an SSL bundle has been configured, it can be reused by multiple types of connections,
+such as a web server, database, queue manager, or its clients. In this case, the edge server will use
+an SSL bundle to secure the communication to its embedded web server. For more information
+on how SSL bundles can be used in Spring Boot, see https://docs.spring.io/spring-boot/
+reference/features/ssl.html.
+
+To configure the edge server to use the certificate and HTTPS, the following is added to application.yml in the gateway project:
+
+```yml
+spring.ssl.bundle.jks.gateway:
+  key:
+    alias: localhost
+  keystore:
+    type: PKCS12
+    location: classpath:keystore/edge.p12
+    password: password
+
+server.ssl.bundle: gateway
+```
+Some notes from the preceding source code:
+- First, an SSL bundle for a Java Key Store, named `gateway`, is declared.
+- The SSL bundle points out the path to the certificate in the `keystore.location` parameter
+set to `classpath:keystore/edge.p12`. This means that the certificate will be picked up
+on the classpath from the location `keystore/edge.p12`.
+- The password for the certificate is specified in the keystore.password parameter.
+- To indicate that the edge server talks `HTTPS` and not `HTTP`, we also change the port from
+`8080` to `8443` in the server.port parameter.
+- Secondly, the `server.ssl.bundle` parameter is used to specify that the gateway SSL bundle
+shall be used by the embedded web server.
+
+## Replacing a self-signed certificate at runtime
+Placing a self-signed certificate in the .jar file is only useful for development. For a working
+solution in runtime environments – for example, for test or production – it must be possible to
+use certificates signed by authorized CAs (short for Certificate Authorities).
+
+It must also be possible to specify the certificates to be used during runtime without the need
+to rebuild the .jar files and, when using Docker, the Docker image that contains the .jar file.
+When using Docker Compose to manage the Docker container, we can map a volume in the
+Docker container to a certificate that resides on the Docker host. We can also set up environment
+variables for the Docker container that points to the external certificate in the Docker volume.
+
+To replace the certificate packaged in the .jar file, perform the following steps:
+1. Create a second certificate and set the password to testtest when asked for it:
+```bash
+cd project_dir
+mkdir keystore
+keytool -genkeypair -alias localhost -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore keystore/edge-test.p12 -validity 3650
+```
+2. Update the Docker Compose file, docker-compose.yml, with environment variables for
+the location, the password for the new certificate, and a volume that maps to the folder
+where the new certificate is placed. The configuration of the edge server will look like the
+following after the change:
+
+```yml
+gateway:
+    environment:
+        - SERVER_SSL_BUNDLE_JKS_GATEWAY_KEYSTORE_LOCATION=file:/keystore/edge-test.p12
+        - SERVER_SSL_BUNDLE_JKS_GATEWAY_KEYSTORE_PASSWORD=testtest
+    volumes:
+    - $PWD/keystore:/keystore
+```

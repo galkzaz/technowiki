@@ -1,0 +1,419 @@
+---
+id: software-engineering-frameworks-platforms-backend-frameworks-spring-boot-concepts-spring-cloud-service-discovery
+title: "Service Discovery"
+sidebar_position: 1
+---
+{/* # Spring Cloud Service Discovery
+
+## Overview
+
+### What is Spring Cloud Service Discovery? */}
+
+Spring Cloud Service Discovery is a set of Spring Cloud components that enable **Spring Boot microservices** to automatically:
+
+* Register themselves when they start
+* Discover other services dynamically
+* Integrate with client-side or server-side load balancing
+* Handle changing service instances without hardcoded addresses
+
+Instead of configuring service URLs manually:
+
+```text
+product.service.url=http://192.168.1.25:8080
+```
+
+a service simply refers to another service by **logical name**:
+
+```text
+http://product-service
+```
+
+Spring Cloud resolves the logical service name into one of the available service instances.
+
+---
+
+## Why Spring Cloud Provides Service Discovery
+
+In a microservice architecture:
+
+* Services are deployed independently.
+* Instances are created and destroyed dynamically.
+* IP addresses change frequently.
+* Services scale horizontally.
+* Containers may run on different hosts.
+
+Without service discovery, every service would need to know the physical addresses of every other service.
+
+For example:
+
+```text
+Order Service
+      |
+      | HTTP
+      |
+      v
+http://10.0.2.15:8080
+```
+
+If the Product Service moves to another host:
+
+```text
+10.0.2.15
+      ↓
+10.0.8.31
+```
+
+every client configuration must be updated.
+
+Spring Cloud eliminates this problem.
+
+---
+
+## Spring Cloud's Role
+
+Spring Cloud itself is **not** a service registry.
+
+Instead, it provides an abstraction layer over different discovery technologies.
+
+```text
+              Spring Cloud
+                    │
+        DiscoveryClient Interface
+                    │
+    ┌───────────────┼────────────────┐
+    │               │                │
+Netflix Eureka   Consul        Kubernetes
+```
+
+This abstraction allows applications to switch discovery implementations with minimal code changes.
+
+---
+
+## Main Features
+
+Spring Cloud Service Discovery provides:
+
+* Automatic service registration
+* Automatic service discovery
+* Integration with Spring Boot
+* Client-side load balancing
+* Health monitoring integration
+* Cloud platform integration
+* Support for multiple discovery providers
+
+---
+
+## Core Components
+
+The main components are:
+
+```text
+Spring Boot Application
+        │
+        ▼
+DiscoveryClient
+        │
+        ▼
+Service Registry
+        │
+        ▼
+Available Service Instances
+```
+
+---
+
+## Supported Discovery Providers
+
+Spring Cloud supports multiple service discovery implementations, including:
+
+| Discovery Provider | Description                      |
+| ------------------ | -------------------------------- |
+| Netflix Eureka     | Spring Cloud Netflix integration |
+| Consul             | HashiCorp service discovery      |
+| Kubernetes         | Kubernetes API and Services      |
+| Zookeeper          | Apache ZooKeeper-based discovery |
+
+---
+
+## Relationship with Spring Boot
+
+Spring Boot provides:
+
+* Dependency Injection
+* Auto-configuration
+* Embedded web server
+* Actuator endpoints
+
+Spring Cloud builds on top of Spring Boot by adding distributed system capabilities.
+
+```text
+Spring Boot
+      │
+      ▼
+Application
+
+Spring Cloud
+      │
+      ▼
+Distributed Features
+      ├── Service Discovery
+      ├── Configuration
+      ├── Load Balancing
+      ├── Circuit Breakers
+      └── Gateway
+```
+
+---
+
+# Architecture
+
+## High-Level Architecture
+
+A typical Spring Cloud service discovery architecture looks like this:
+
+```text
+                   +----------------------+
+                   |   Service Registry   |
+                   | (Eureka/Consul/etc.) |
+                   +----------+-----------+
+                              ^
+               Register        |        Discover
+                              |
+        +---------------------+---------------------+
+        |                                           |
++--------------------+                   +--------------------+
+| Product Service    |                   | Order Service      |
+| Spring Boot        |                   | Spring Boot        |
++--------------------+                   +--------------------+
+        |                                           |
+        +---------------- HTTP ----------------------+
+```
+
+The registry acts as a directory of available service instances.
+
+---
+
+## Component Architecture
+
+A Spring Cloud application contains several layers.
+
+```text
+Application Code
+        │
+        ▼
+Spring Cloud DiscoveryClient
+        │
+        ▼
+Discovery Implementation
+(Eureka, Consul, Kubernetes)
+        │
+        ▼
+Registry
+```
+
+The application interacts only with the `DiscoveryClient` abstraction.
+
+---
+
+## Registration Flow
+
+When a service starts:
+
+```text
+Spring Boot Starts
+        │
+        ▼
+Auto Configuration
+        │
+        ▼
+Discovery Client Created
+        │
+        ▼
+Register Service
+        │
+        ▼
+Registry Stores Instance
+```
+
+For example:
+
+```text
+Product Service
+
+↓
+
+Registers
+
+↓
+
+product-service
+
+↓
+
+10.0.1.15:8080
+```
+
+---
+
+## Discovery Flow
+
+Suppose the Order Service needs to call the Product Service.
+
+```text
+Order Service
+       │
+       ▼
+DiscoveryClient
+       │
+       ▼
+Registry
+       │
+Returns:
+Product Service
+10.0.1.15
+10.0.1.16
+10.0.1.17
+```
+
+The discovery client returns the available instances to the caller.
+
+---
+
+## Request Flow
+
+With client-side load balancing, the request flows like this:
+
+```text
+Order Service
+      │
+      ▼
+Spring Cloud LoadBalancer
+      │
+      ▼
+DiscoveryClient
+      │
+      ▼
+Registry
+      │
+      ▼
+Selected Product Service Instance
+      │
+      ▼
+HTTP Request
+```
+
+The application never needs to know the actual IP address.
+
+---
+
+## Runtime Architecture
+
+During execution:
+
+```text
+                    Registry
+                 +-------------+
+                 | Discovery   |
+                 +------+------+
+                        ^
+                        |
+             Register / Discover
+                        |
+    +-------------------+-------------------+
+    |                                       |
+Product Service                       Order Service
+    |                                       |
+    +----------- HTTP Requests -------------+
+```
+
+Each service both:
+
+* Registers itself with the registry.
+* Discovers other services through the registry.
+
+---
+
+## Internal Spring Cloud Layers
+
+```text
+Business Logic
+       │
+       ▼
+RestTemplate / WebClient / Feign Client
+       │
+       ▼
+Spring Cloud LoadBalancer
+       │
+       ▼
+DiscoveryClient
+       │
+       ▼
+Discovery Provider
+(Eureka/Consul/Kubernetes)
+```
+
+Each layer has a distinct responsibility:
+
+| Layer                     | Responsibility                                    |
+| ------------------------- | ------------------------------------------------- |
+| Business Logic            | Implements application functionality              |
+| HTTP Client               | Makes remote service calls                        |
+| Spring Cloud LoadBalancer | Selects a target service instance                 |
+| DiscoveryClient           | Retrieves available instances from the registry   |
+| Discovery Provider        | Communicates with the underlying service registry |
+
+---
+
+## Discovery Abstraction
+
+One of Spring Cloud's key design goals is to decouple applications from a specific discovery technology.
+
+```text
+                 DiscoveryClient
+                        │
+      ┌─────────────────┼─────────────────┐
+      │                 │                 │
+      ▼                 ▼                 ▼
+  Eureka Client     Consul Client    Kubernetes Client
+```
+
+Because the application depends only on the `DiscoveryClient` interface, the underlying registry can often be changed by replacing the appropriate Spring Cloud starter and configuration, without rewriting the application's service lookup logic.
+
+---
+
+## Relationship to the Service Discovery Chapter
+
+Your documentation can naturally separate the concepts into two layers:
+
+```text
+service-discovery/                    ← Generic distributed systems concepts
+├── overview
+├── challenges
+├── service-registry
+├── service-registration
+├── health-checks
+├── heartbeats
+├── discovery-patterns
+└── ...
+
+spring-cloud/
+└── service-discovery/                ← Spring implementation
+    ├── overview
+    ├── architecture
+    ├── discoveryclient/
+    ├── auto-registration/
+    ├── auto-discovery/
+    ├── spring-cloud-loadbalancer/
+    ├── netflix-eureka/
+    ├── consul/
+    └── kubernetes/
+```
+
+This separation keeps the **Service Discovery** chapter focused on vendor-neutral distributed systems concepts, while the **Spring Cloud Service Discovery** chapter explains how Spring implements those concepts through abstractions like `DiscoveryClient`, auto-configuration, and integrations with providers such as Netflix Eureka, Consul, and Kubernetes.
+
+
+## References
+- software-engineering/design-architecture/distributed-systems/service-communication/service-discovery/index.mdx
+- software-engineering/design-architecture/distributed-systems/service-communication/service-discovery/implementations/netflix-eureka/index.mdx
+- software-engineering/frameworks-platforms/backend-frameworks/spring-boot/concepts/spring-cloud/service-discovery/index.mdx
+- software-engineering/frameworks-platforms/backend-frameworks/spring-boot/concepts/spring-cloud/service-discovery/implementations/netflix-eureka/index.mdx

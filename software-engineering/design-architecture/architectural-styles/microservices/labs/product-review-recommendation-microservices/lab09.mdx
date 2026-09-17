@@ -1,0 +1,609 @@
+---
+id: software-engineering-design-architecture-architectural-styles-microservices-labs-product-review-recommendation-microservices-lab10
+title: "lab10: Securing Access to APIs"
+sidebar_position: 10
+---
+
+In this Lab, we will see how we can secure access to the APIs and web pages exposed by the
+edge server introduced in the previous chapter. We will learn how to use HTTPS to protect against
+eavesdropping on external access to our APIs, and how to use OAuth 2.0 and OpenID Connect to
+authenticate and authorize users and client applications to access our APIs. Finally, we will use
+HTTP Basic authentication to secure access to the discovery server, Netflix Eureka.
+
+## Securing the system landscape
+To secure the system landscape as described in the introduction to this chapter, we will perform
+the following steps:
+1. Encrypt external requests and responses to and from our external API using HTTPS to
+protect against eavesdropping.
+2. Authenticate and authorize users and client applications that access our APIs using OAuth
+2.0 and OpenID Connect.
+3. Secure access to the discovery server, Netflix Eureka, using HTTP basic authentication.
+
+We will only apply HTTPS for external communication to our edge server, using plain HTTP for
+communication inside our system landscape.
+
+For test purposes, we will add a local OAuth 2.0 authorization server to our system landscape.
+All external communication with the authorization server will be routed through the edge server.
+The edge server and the product-composite service will act as OAuth 2.0 resource servers; that
+is, they will require a valid OAuth 2.0 access token to allow access.
+
+To minimize the overhead of validating access tokens, we will assume that they are encoded as
+signed JWTs and that the authorization server exposes an endpoint that the resource servers can
+use to access the public keys, also known as a JSON Web Key Set, or jwk-set for short, required
+to validate the signing.
+The system landscape will look like the following:
+
+![Adding an authorization server to the system landscape](/docs/assets/software-engineering/design-architecture/architectural-styles/microservices/labs/product-review-recommendation-microservices/lab10.png)
+
+From the preceding diagram, we can note the following:
+- HTTPS is used for external communication, while plain text HTTP is used inside the system landscape
+- The local OAuth 2.0 authorization server will be accessed externally through the edge server
+ Both the edge server and the product-composite microservice will validate access tokens
+as signed JWTs
+- The edge server and the product-composite microservice will get the authorization
+server’s public keys from its jwk-set endpoint and use them to validate the signature of
+the JWT-based access tokens
+
+## Protecting external communication with HTTPS
+In this section, we will learn how to prevent eavesdropping on external communication, for example, from the internet, via the public APIs exposed by the edge server. We will use HTTPS to encrypt communication. 
+
+To use HTTPS, we need to do the following:
+- Create a certificate: We will create our own self-signed certificate, sufficient for devel-
+opment purposes
+- Configure the edge server: It has to be configured to accept only HTTPS-based external
+traffic using the certificate
+
+The self-signed certificate is created with the following command:
+```bash
+keytool -genkeypair -alias localhost -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore edge.p12 -validity 365
+```
+The command will ask for a number of parameters. When asked for a password, I entered password.
+For the rest of the parameters, I simply entered an empty value to accept the default value. The
+certificate file created, edge.p12, is placed in the gateway projects folder, src/main/resources/
+keystore. This means that the certificate file will be placed in the .jar file when it is built and will
+be available on the classpath at runtime at keystore/edge.p12
+
+:::note
+
+Providing certificates using the classpath is sufficient during development, but not applicable to other environments, for example, a production environment. See the Replacing a self-signed certificate at runtime section for how we can replace this certificate with an external certificate at runtime!
+
+:::
+
+
+
+Spring Boot provides the ability to configure SSL trust material that can be applied to several types of connections in order to support secure communications.  In this case, the edge server will use
+an SSL bundle to secure the communication to its embedded web server. 
+
+To configure the edge server to use the certificate and HTTPS, the following is added to application.yml in the gateway project:
+
+```yml
+server.port: 8443
+
+spring.ssl.bundle.jks.gateway:
+  key:
+    alias: localhost
+  keystore:
+    type: PKCS12
+    location: classpath:keystore/edge.p12
+    password: password
+
+server.ssl.bundle: gateway
+```
+Some notes from the preceding source code:
+- First, an SSL bundle for a Java Key Store, named `gateway`, is declared.
+- The SSL bundle points out the path to the certificate in the `keystore.location` parameter
+set to `classpath:keystore/edge.p12`. This means that the certificate will be picked up
+on the classpath from the location `keystore/edge.p12`.
+- The password for the certificate is specified in the keystore.password parameter.
+- To indicate that the edge server talks `HTTPS` and not `HTTP`, we also change the port from
+`8080` to `8443` in the server.port parameter.
+- Secondly, the `server.ssl.bundle` parameter is used to specify that the gateway SSL bundle
+shall be used by the embedded web server.
+
+In addition to these changes in the edge server, changes are also required in the following files to
+reflect the changes to the port and HTTP protocol, replacing HTTP with HTTPS and 8080 with 8443:
+- The three Docker Compose files, `docker-compose*.yml`
+- The test script, `test-em-all.bash`
+Providing certificates using the classpath is, as mentioned previously, only sufficient during
+development. Let’s see how we can replace this certificate with an external certificate at runtime.
+
+This concludes the section on how to protect external communication with HTTPS. In the next section, we will learn how to secure access to the discovery server, Netflix Eureka, using HTTP Basic authentication.
+
+
+## Securing access to the discovery server
+Previously, we learned how to protect external communication with HTTPS. Now we will use HTTP
+Basic authentication to restrict access to the APIs and web pages on the discovery server, Netflix
+Eureka. This means that we will require a user to supply a username and password to get access.
+Changes are required both on the Eureka server and in the Eureka clients, described as follows.
+### Changes in the Eureka server
+To protect the Eureka server, the following changes have been applied to the source code:
+1. In build.gradle, a dependency has been added for Spring Security:
+```groovy
+implementation 'org.springframework.boot:spring-boot-starter-security'
+```
+2. Security configuration has been added to the SecurityConfig class:
+a. The user is defined as follows:
+```java
+    @Bean
+    public InMemoryUserDetailsManager userDetailsService() {
+        @SuppressWarnings("deprecation") // Ok for test purposes, not for production use
+        UserDetails user = User.withDefaultPasswordEncoder()
+                .username(username)
+                .password(password)
+                .roles("USER")
+                .build();
+        return new InMemoryUserDetailsManager(user);
+    }
+```
+b. The username and password are injected into the constructor from the configuration file:
+```java
+    private final String username;
+    private final String password;
+
+    public SecurityConfig(
+            @Value("${app.eureka-username}") String username,
+            @Value("${app.eureka-password}") String password) {
+        this.username = username;
+        this.password = password;
+    }
+```
+c. All APIs and web pages are protected using HTTP Basic authentication by means of the following definition:
+```java
+    @Bean
+    public SecurityFilterChain configure(HttpSecurity http) throws Exception {
+        // Disable CSRF to allow services to register themselves with Eureka
+        http
+                .csrf(csrf -> csrf.disable())
+                .authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
+                .httpBasic(Customizer.withDefaults());
+        return http.build();
+    }
+```
+3. Credentials for the user are set up in the configuration file, application.yml:
+```yml
+app:
+  eureka-username: u
+  eureka-password: p
+```
+4. Finally, the test class, `EurekaServerApplicationTests`, uses the credentials from the
+configuration file when testing the APIs of the Eureka server:
+```java
+  @Value("${app.eureka-username}")
+  private String username;
+
+  @Value("${app.eureka-password}")
+  private String password;
+
+  @Autowired
+  void setTestRestTemplate(TestRestTemplate testRestTemplate) {
+    this.testRestTemplate = testRestTemplate.withBasicAuth(username, password);
+  }
+
+  private TestRestTemplate testRestTemplate;
+```
+The preceding are the steps required for restricting access to the APIs and web pages of the discov-
+ery server, Netflix Eureka. It will now use HTTP Basic authentication and require a user to supply
+a username and password to get access. The last step is to configure Netflix Eureka clients so that
+they pass credentials when accessing the Netflix Eureka server.
+
+### Changes in Eureka clients
+For Eureka clients, the credentials can be specified in the connection URL for the Eureka server.
+This is specified in each client’s configuration file, application.yml, as follows:
+
+```yml
+app:
+  eureka-username: u
+  eureka-password: p
+  eureka-server: localhost
+  auth-server: localhost
+
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: "http://${app.eureka-username}:${app.eureka-password}@${app.eureka-server}:8761/eureka/"
+    initialInstanceInfoReplicationInter
+```
+This concludes the section on how to restrict access to the Netflix Eureka server. In the Testing the
+protected discovery server section, we will run tests to verify that the access is protected. In the next
+section, we will learn how to add a local authorization server to the system landscape.
+
+## Adding a local authorization server
+To be able to run tests locally and fully automated with APIs that are secured using OAuth 2.0 and
+OpenID Connect, we will add an authorization server that is compliant with these specifications
+to our system landscape. 
+
+The authorization server in this Lab is based on the sample authorization server provided by
+the Spring Authorization Server project; see https://github.com/spring-projects/spring-authorization-server/tree/main/samples/default-authorizationserver.
+The following changes have been applied to the sample project:
+- The build file has been updated to follow the structure of the other projects’ build files
+in this labs.
+- The port is set to `9999`.
+- A Dockerfile has been added with the same structure as for the other projects in this labs.
+- The authorization server has been integrated with Eureka for service discovery in the
+same way as the other projects in this lab.
+```yml
+server.port: 9999
+server.forward-headers-strategy: framework
+
+spring.application.name: auth-server
+
+app:
+  eureka-username: u
+  eureka-password: p
+  eureka-server: localhost
+
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: "http://${app.eureka-username}:${app.eureka-password}@${app.eureka-server}:8761/eureka/"
+    initialInstanceInfoReplicationIntervalSeconds: 5
+    registryFetchIntervalSeconds: 5
+  instance:
+    leaseRenewalIntervalInSeconds: 5
+    leaseExpirationDurationInSeconds: 5
+
+management.endpoint.health.show-details: "ALWAYS"
+management.endpoints.web.exposure.include: "*"
+
+logging:
+  level:
+    root: INFO
+
+---
+spring.config.activate.on-profile: docker
+
+app.eureka-server: eureka
+```
+- Public access has been added to the actuator’s endpoints.
+```java
+  @Bean
+  SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
+    http
+      .authorizeHttpRequests(authorizeRequests -> authorizeRequests
+        .requestMatchers("/actuator/**").permitAll()
+        .anyRequest().authenticated()
+      )
+      .formLogin(withDefaults());
+    return http.build();
+  }
+```
+- Unit tests have been added that verify access to the most critical endpoints according to
+the OpenID Connect specification.
+- The username and password for the single registered user are set to u and p, respectively.
+```java
+  @Bean
+  UserDetailsService users() {
+    @SuppressWarnings("deprecation") // Ok for test purposes, not for production use
+    UserDetails user = User.withDefaultPasswordEncoder()
+      .username("u")
+      .password("p")
+      .roles("USER")
+      .build();
+    return new InMemoryUserDetailsManager(user);
+  }
+```
+- Two OAuth clients are registered, reader and writer. The reader client is granted a `product:read` scope, and the writer client is granted both a `product:read` and `product:write` scope. The clients are configured to have their client secret set to `secret-reader` and `secret-writer`, respectively.
+```java
+
+  @Bean
+  public RegisteredClientRepository registeredClientRepository() {
+    RegisteredClient writerClient = RegisteredClient.withId(UUID.randomUUID().toString())
+      .clientId("writer")
+      .clientSecret("{noop}secret-writer")
+      .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+      .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+      .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
+      .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+      .redirectUri("https://my.redirect.uri")
+      .redirectUri("https://localhost:8443/openapi/swagger-ui/oauth2-redirect.html")
+      .scope(OidcScopes.OPENID)
+      .scope("product:read")
+      .scope("product:write")
+      .clientSettings(ClientSettings.builder().requireAuthorizationConsent(true).build())
+      .tokenSettings(TokenSettings.builder().accessTokenTimeToLive(Duration.ofHours(1)).build())
+      .build();
+
+    RegisteredClient readerClient = RegisteredClient.withId(UUID.randomUUID().toString())
+      .clientId("reader")
+      .clientSecret("{noop}secret-reader")
+      .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+      .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+      .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
+      .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS)
+      .redirectUri("https://my.redirect.uri")
+      .redirectUri("https://localhost:8443/openapi/swagger-ui/oauth2-redirect.html")
+      .scope(OidcScopes.OPENID)
+      .scope("product:read")
+      .clientSettings(ClientSettings.builder().requireAuthorizationConsent(true).build())
+      .tokenSettings(TokenSettings.builder().accessTokenTimeToLive(Duration.ofHours(1)).build())
+      .build();
+
+    return new InMemoryRegisteredClientRepository(writerClient, readerClient);
+
+  }
+```
+- Allowed redirect URIs for the clients are set to `https://my.redirect.uri` and `https://localhost:8443/openapi/swagger-ui/oauth2-redirect.html`. The first URL will be
+used in the tests described shortly, and the second URL will be used by the Swagger UI
+component.
+- By default, for security reasons, the authorization server does not allow redirect URIs
+that start with https://localhost. The authorization server has been customized to
+accept https://localhost for development and testing purposes. The applied customization is described here: https://docs.spring.io/spring-authorization-server/docs/1.0.0/reference/html/protocol-endpoints.html#oauth2-authorization-endpoint-customizing-authorization-request-validation.
+
+:::note
+
+WARNING: As already warned about in Lab 8, Developing Reactive Microservices, allowing public access to the actuator’s endpoints is very helpful
+during development, but it can be a security issue to reveal too much information in actuator endpoints in production systems. Therefore, plan for minimizing the information exposed by the actuator endpoints in production!
+
+:::
+
+To incorporate the authorization server in the system landscape, changes to the following files
+have been applied:
+- The server has been added to the common build file, `settings.gradle`.
+- The server has been added to the three Docker Compose files, `docker-compose*.yml`.
+```yml
+  auth-server:
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    build: spring-cloud/authorization-server
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "-O -", "-q", "http://localhost:9999/actuator/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
+```
+- The edge server, spring-cloud/gateway.
+- A health check has been added for the authorization server in `HealthCheckConfiguration`.
+```java
+  @Bean
+  ReactiveHealthContributor healthcheckMicroservices() {
+
+    final Map<String, ReactiveHealthIndicator> registry = new LinkedHashMap<>();
+
+    registry.put("product", () -> getHealth("http://product"));
+    registry.put("recommendation", () -> getHealth("http://recommendation"));
+    registry.put("review", () -> getHealth("http://review"));
+    registry.put("product-composite", () -> getHealth("http://product-composite"));
+    registry.put("auth-server", () -> getHealth("http://auth-server"));
+
+    return CompositeReactiveHealthContributor.fromMap(registry);
+  }
+```
+- Routes to the authorization server for the URIs starting with `/oauth`, `/login`, and `/error`
+have been added in the configuration file, `application.yml`. These URIs are used to issue
+tokens for clients, authenticate users, and show error messages.
+```yml
+- id: oauth2-server
+  uri: lb://auth-server
+  predicates:
+  - Path=/oauth2/**
+
+- id: oauth2-login
+  uri: lb://auth-server
+  predicates:
+  - Path=/login/**
+
+- id: oauth2-error
+  uri: lb://auth-server
+  predicates:
+  - Path=/error/**
+```
+- Since these three URIs need to be unprotected by the edge server, they are configured in
+the new `SecurityConfig` class to permit all requests.
+```java
+@Configuration
+@EnableWebFluxSecurity
+public class SecurityConfig {
+
+    @Bean
+    SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) throws Exception {
+        http
+                .csrf(csrf -> csrf.disable()
+                        .authorizeExchange(exchange -> exchange
+                                .pathMatchers("/headerrouting/**").permitAll()
+                                .pathMatchers("/actuator/**").permitAll()
+                                .pathMatchers("/eureka/**").permitAll()
+                                .pathMatchers("/oauth2/**").permitAll()
+                                .pathMatchers("/login/**").permitAll()
+                                .pathMatchers("/error/**").permitAll()
+                                .pathMatchers("/openapi/**").permitAll()
+                                .anyExchange().authenticated()))
+                .oauth2ResourceServer(server -> server
+                        .jwt(Customizer.withDefaults()));
+        return http.build();
+    }
+
+}
+```
+With an understanding of how a local authorization server is added to the system landscape,
+let’s move on and see how to use OAuth 2.0 and OpenID Connect to authenticate and authorize
+access to APIs.
+
+## Protecting APIs using OAuth 2.0 and OpenID Connect
+With the authorization server in place, we can enhance the edge server and the product-composite
+service to become OAuth 2.0 resource servers, so that they will require a valid access token to
+allow access. The edge server will be configured to accept any access token it can validate using
+the digital signature provided by the authorization server. The product-composite service will
+also require the access token to contain valid OAuth 2.0 scopes:
+- The `product:read` scope will be required for accessing the read-only APIs
+- The `product:write` scope will be required for accessing the create and delete APIs
+
+The product-composite service will also be enhanced with a configuration that allows its Swagger
+UI component to interact with the authorization server to issue an access token. This will allow
+users of the Swagger UI web page to test the protected API.
+We also need to enhance the test script, test-em-all.bash, so that it acquires access tokens and
+uses them when it performs the tests.
+
+### Changes in both the edge server and the product-composite
+service
+The following changes have been applied in the source code for both the edge server and the
+product-composite service:
+- Spring Security dependencies have been added to build.gradle to support OAuth 2.0
+resource servers:
+```groovy
+implementation 'org.springframework.boot:spring-boot-starter-security'
+implementation 'org.springframework.security:spring-security-oauth2-resource-server'
+implementation 'org.springframework.security:spring-security-oauth2-jose'
+```
+- Security configurations have been added to new SecurityConfig classes in both projects:
+
+
+```java
+
+package se.magnus.springcloud.gateway;
+@Configuration
+@EnableWebFluxSecurity
+public class SecurityConfig {
+
+    @Bean
+    SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) throws Exception {
+        http
+                .csrf(csrf -> csrf.disable()
+                        .authorizeExchange(exchange -> exchange
+                                .pathMatchers("/headerrouting/**").permitAll()
+                                .pathMatchers("/actuator/**").permitAll()
+                                .pathMatchers("/eureka/**").permitAll()
+                                .pathMatchers("/oauth2/**").permitAll()
+                                .pathMatchers("/login/**").permitAll()
+                                .pathMatchers("/error/**").permitAll()
+                                .pathMatchers("/openapi/**").permitAll()
+                                .anyExchange().authenticated()))
+                .oauth2ResourceServer(server -> server
+                        .jwt(Customizer.withDefaults()));
+        return http.build();
+    }
+
+}
+```
+
+```java
+
+package se.magnus.microservices.composite.product;
+@Configuration
+@EnableWebFluxSecurity
+public class SecurityConfig {
+
+    @Bean
+    SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+        http
+                .authorizeExchange(exchange -> exchange
+                        .pathMatchers("/openapi/**").permitAll()
+                        .pathMatchers("/actuator/**").permitAll()
+                        .pathMatchers(POST, "/product-composite/**").hasAuthority("SCOPE_product:write")
+                        .pathMatchers(DELETE, "/product-composite/**").hasAuthority("SCOPE_product:write")
+                        .pathMatchers(GET, "/product-composite/**").hasAuthority("SCOPE_product:read")
+                        .anyExchange().authenticated())
+                .oauth2ResourceServer(server -> server.jwt(Customizer.withDefaults()));
+        return http.build();
+    }
+}
+```
+Explanations for the preceding source code are as follows:
+- The @EnableWebFluxSecurity annotation enables Spring Security support for APIs based on Spring WebFlux.
+- `.pathMatchers("/actuator/**").permitAll()` is used to allow unrestricted access to URLs that should be unprotected – for example, the actuator endpoints,
+in this case. Refer to the source code for URLs that are treated as unprotected. Be careful about which URLs are exposed unprotected. For example, the actuator endpoints should be protected before going to production.
+- `.anyExchange().authenticated()` ensures that the user is authenticated before being allowed access to all other URLs.
+- .`oauth2ResourceServer(…)` specifies that authorization will be based on OAuth 2.0 access tokens encoded as JWTs.
+- The authorization server’s OIDC discovery endpoint has been registered in the configuration file, `application.yml`:
+```yml
+app.auth-server: localhost
+spring.security.oauth2.resourceserver.jwt.issuer-uri: http://${app.auth-server}:9999
+---
+spring.config.activate.on-profile: docker
+app.auth-server: auth-server
+```
+
+Later on in this lab, when the system landscape is started up, you can test the discovery endpoint. You can, for example, find the endpoint that returns the keys required for verifying the digital signature of a token using this command:
+```bash
+docker compose exec auth-server curl localhost:9999/.well-known/openid-configuration -s | jq -r .jwks_uri
+```
+
+### Changes in the product-composite service only
+In addition to the common changes applied in the previous section, the following changes have
+also been applied to the **product-composite** service:
+- The security configuration in the **SecurityConfig** class has been refined by requiring
+OAuth 2.0 scopes in the access token in order to allow access:
+```java
+    .pathMatchers(POST, "/product-composite/**").hasAuthority("SCOPE_product:write")
+    .pathMatchers(DELETE, "/product-composite/**").hasAuthority("SCOPE_product:write")
+    .pathMatchers(GET, "/product-composite/**").hasAuthority("SCOPE_product:read")
+```
+By convention, OAuth 2.0 scopes need to be prefixed with SCOPE_ when checked for authority using Spring Security.
+- A method, `logAuthorizationInfo()`, has been added to log relevant parts from the
+JWT-encoded access token upon each call to the API. The access token can be acquired
+using the standard Spring Security `SecurityContext`, which, in a reactive environment,
+can be acquired using the static helper method, `ReactiveSecurityContextHolder.getContext()`. Refer to the `ProductCompositeServiceImpl` class for details.
+```java
+  @Override
+  public Mono<Void> deleteProduct(int productId) {
+    try {
+
+      LOG.info("Will delete a product aggregate for product.id: {}", productId);
+
+      return Mono.zip(r -> "",
+          getLogAuthorizationInfoMono(),
+          integration.deleteProduct(productId),
+          integration.deleteRecommendations(productId),
+          integration.deleteReviews(productId))
+          .doOnError(ex -> LOG.warn("delete failed: {}", ex.toString()))
+          .log(LOG.getName(), FINE).then();
+
+    } catch (RuntimeException re) {
+      LOG.warn("deleteCompositeProduct failed: {}", re.toString());
+      throw re;
+    }
+  }
+
+  private Mono<SecurityContext> getLogAuthorizationInfoMono() {
+    return getSecurityContextMono().doOnNext(sc -> logAuthorizationInfo(sc));
+  }
+
+  private Mono<SecurityContext> getSecurityContextMono() {
+    return ReactiveSecurityContextHolder.getContext().defaultIfEmpty(nullSecCtx);
+  }
+
+  private void logAuthorizationInfo(SecurityContext sc) {
+    if (sc != null && sc.getAuthentication() != null && sc.getAuthentication() instanceof JwtAuthenticationToken) {
+      Jwt jwtToken = ((JwtAuthenticationToken) sc.getAuthentication()).getToken();
+      logAuthorizationInfo(jwtToken);
+    } else {
+      LOG.warn("No JWT based Authentication supplied, running tests are we?");
+    }
+  }
+
+  private void logAuthorizationInfo(Jwt jwt) {
+    if (jwt == null) {
+      LOG.warn("No JWT supplied, running tests are we?");
+    } else {
+      if (LOG.isDebugEnabled()) {
+        URL issuer = jwt.getIssuer();
+        List<String> audience = jwt.getAudience();
+        Object subject = jwt.getClaims().get("sub");
+        Object scopes = jwt.getClaims().get("scope");
+        Object expires = jwt.getClaims().get("exp");
+
+        LOG.debug("Authorization info: Subject: {}, scopes: {}, expires {}: issuer: {}, audience: {}", subject, scopes,
+            expires, issuer, audience);
+      }
+    }
+  }
+```
+- The use of OAuth has been disabled when running Spring-based integration tests. To
+prevent the OAuth machinery from kicking in when we are running integration tests, we
+disable it as follows:
+- A security configuration, TestSecurityConfig, is added to be used during tests.
+It permits access to all resources:
+```java
+http.csrf(csrf -> csrf.disable().authorizeExchange(
+exchange -> exchange.anyExchange().permitAll()));
+```
+- In each Spring integration test class, we configure TestSecurityConfig to override
+the existing security configuration with the following:
+```java
+@SpringBootTest(webEnvironment = RANDOM_PORT, classes = { TestSecurityConfig.class }, properties = {
+        "spring.security.oauth2.resourceserver.jwt.issuer-uri=",
+        "spring.main.allow-bean-definition-overriding=true",
+        "eureka.client.enabled=false" })
+```
+By convention, OAuth 2.0 scopes need to be prefixed with SCOPE_ when
+checked for authority using Spring Security.

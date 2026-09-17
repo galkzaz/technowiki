@@ -1,0 +1,173 @@
+## overview
+
+
+OAuth 2.0 is a protocol for authorization, it does not cover authentication.
+
+There are four roles defined in OAuth 2.0:
+
+* *Resource owner*: This is typically the end user that owns the resources an application
+wants to access.
+* *Resource server*: This is the service hosting the protected resources.
+* *Client*: This is the application that would like to access the resource.
+* *Authorization server*: This is the server issuing access to the client, which is the role of Keycloak,Openam,etc.
+
+OAuth 2.0 is a widely accepted open standard for authorization that enables a user to give consent
+for a third-party client application to access protected resources in the name of the user. Giving
+a third-party client application the right to act in the name of a user, for example, calling an API,
+is known as authorization delegation.
+
+So, what does this mean? Let’s start by sorting out the concepts used:
+- **Resource owner**: The end user.
+- **Client**: The third-party client application – for example, a web app or a native mobile app
+that wants to call some protected APIs in the name of the end user.
+- **Resource server**: The server that exposes the APIs that we want to protect.
+- **Authorization server**: The authorization server issues tokens to the client after the re-
+source owner, that is, the end user, has been authenticated. The management of user
+information and the authentication of users are typically delegated, behind the scenes,
+to an Identity Provider (IdP).
+
+A client is registered in the authorization server and is given a client ID and a client secret. The
+client secret must be protected by the client, like a password. A client also gets registered with a
+set of allowed redirect URIs that the authorization server will use after a user has been authenticated to send authorization codes and tokens that have been issued back to the client application
+
+The following is an example by way of illustration. Let’s say that a user accesses a third-party
+client application and the client application wants to call a protected API to serve the user. To be
+allowed to access these APIs, the client application needs a way to tell the APIs that it is acting
+in the name of the user. To avoid solutions where the user must share their credentials with the
+client application for authentication, an access token is issued by an authorization server that
+gives the client application limited access to a selected set of APIs in the name of the user.
+This means that the user never has to reveal their credentials to the client application. The user
+can also give consent to the client application to access specific APIs on behalf of the user. An
+access token represents a time-constrained set of access rights, expressed as scopes in OAuth 2.0
+terms. A refresh token can also be issued to a client application by the authorization server. A
+refresh token can be used by the client application to obtain new access tokens without having
+to involve the user.
+## authorization-framework
+## roles
+## OAuth 2 Flows(Grant Types)
+
+In an OAuth 2.0 protocol flow, the client requests access to a resource on behalf of a resource owner from the authorization server. The authorization server issues limited access to the resource in the form of an access token. After receiving the access token, the client can access the resource at the resource server by including the access token in the request.
+
+There are two client types, which are confidential and public clients.
+
+* Confidential clients are applications such as server-side web applications that are able to safely store credentials, which they can use to authenticate with the authorization server.
+* Public clients, on the other hand, are client-side applications that are not able to safely store credentials.
+
+As public clients are not able to authenticate with the authorization server, there are two safeguards in place:
+
+* The authorization server will only send the authorization code to an application hosted on a pre-configured URL, in the form of a previously registered redirect URI.
+* Proof Key for Code Exchange (PKCE, RFC 7636), which is an extension to OAuth 2.0, prevents anyone that intercepts an authorization code from exchanging it for an access token.
+
+Depending on the application type and use case, there are a number of different flows that can be used. To help you decide what flow type you should use for your application, you can use the following simple formula:
+
+* If the application accesses the resource on behalf of itself (the application is the resource owner), use the Client Credentials flow.
+* If the application runs on a device without a browser or is input-constrained, use the Device flow. This could, for example, be a smart TV where it would be difficult for the user to enter the username and password.
+* If none of the preceding conditions are applicable, use the authorization code flow.
+
+### Authorization Code
+
+An authorization code is a temporary credential used to obtain an access token. Instead of the client requesting authorization directly from the resource owner, the client directs the resource owner to an authorization server (via its user agent) which in turn directs the resource owner back to the client with the authorization code. The client can then exchange the authorization code for an access token.
+
+Before directing the resource owner back to the client with the authorization code, the authorization server authenticates the resource owner, and may request the resource owner's consent or otherwise inform them of the client's request. Because the resource owner only authenticates with the authorization server, the resource owner's credentials are never shared with the client, and the client does not need to have knowledge of any additional authentication steps such as multi-factor authentication or delegated accounts.
+
+The authorization code provides a few important security benefits, such as the ability to authenticate the client, as well as the transmission of the access token directly to the client without passing it through the resource owner's user agent and potentially exposing it to others, including the resource owner.
+### Refresh Token
+
+Refresh tokens are credentials used to obtain access tokens. Refresh tokens may be issued to the client by the authorization server and are used to obtain a new access token when the current access token becomes invalid or expires, or to obtain additional access tokens with identical or narrower scope (access tokens may have a shorter lifetime and fewer privileges than authorized by the resource owner). Issuing a refresh token is optional at the discretion of the authorization server, and may be issued based on properties of the client, properties of the request, policies within the authorization server, or any other criteria. If the authorization server issues a refresh token, it is included when issuing an access token (i.e., step (2) in Figure 2). The lifetime of the refresh token is also at the discretion of the authorization server.
+
+A refresh token is a string representing the authorization granted to the client by the resource owner. The string is considered opaque to the client. The refresh token may be an identifier used to retrieve the authorization information or may encode this information into the string itself. Unlike access tokens, refresh tokens are intended for use only with authorization servers and are never sent to resource servers.
+```
++--------+                                           +---------------+
+|        |--(1)------- Authorization Grant --------->|               |
+|        |                                           |               |
+|        |<-(2)----------- Access Token -------------|               |
+|        |               & Refresh Token             |               |
+|        |                                           |               |
+|        |                            +----------+   |               |
+|        |--(3)---- Access Token ---->|          |   |               |
+|        |                            |          |   |               |
+|        |<-(4)- Protected Resource --| Resource |   | Authorization |
+| Client |                            |  Server  |   |     Server    |
+|        |--(5)---- Access Token ---->|          |   |               |
+|        |                            |          |   |               |
+|        |<-(6)- Invalid Token Error -|          |   |               |
+|        |                            +----------+   |               |
+|        |                                           |               |
+|        |--(7)----------- Refresh Token ----------->|               |
+|        |                                           |               |
+|        |<-(8)----------- Access Token -------------|               |
++--------+           & Optional Refresh Token        +---------------+
+```
+Figure 2: Refreshing an Expired Access Token
+
+The flow illustrated in Figure 2 includes the following steps:
+
+    The client requests an access token by authenticating with the authorization server and presenting an authorization grant.
+
+    The authorization server authenticates the client and validates the authorization grant, and if valid, issues an access token and optionally a refresh token.
+
+    The client makes a protected resource request to the resource server by presenting the access token.
+
+    The resource server validates the access token, and if valid, serves the request.
+
+    Steps (3) and (4) repeat until the access token expires. If the client knows the access token expired, it skips to step (7); otherwise, it makes another protected resource request.
+
+    Since the access token is invalid, the resource server returns an invalid token error.
+
+    The client requests a new access token by presenting the refresh token and providing client authentication if it has been issued credentials. The client authentication requirements are based on the client type and on the authorization server policies.
+
+    The authorization server authenticates the client and validates the refresh token, and if valid, issues a new access token (and, optionally, a new refresh token).
+
+Note that there is no need to communicate the lifetime of the refresh token to the client, because the client can't do anything different with the knowledge of the lifetime. Additionally, the authorization server might choose to use dynamic lifetimes (e.g. the refresh token expiry is extended as long as the refresh token is used at least once every 7 days), or the authorization server might revoke the refresh token before its scheduled expiration date for any reason, such as if the user revokes the application's access. This means the client already has to handle the case of a refresh token expiring at an arbitrary time.
+
+Regardless of why or when the refresh token expires, the client has only one path to obtain new tokens, which is to start a new OAuth flow from the beginning. For that reason, there is no property defined to communicate the expiration of a refresh token to the client.
+### Client Credentials
+
+The client credentials or other forms of client authentication (e.g., a private key used to sign a JWT, as described in [RFC7523] and its update [I-D.ietf-oauth-rfc7523bis]) can be used as an authorization grant when the authorization scope is limited to the protected resources under the control of the client, or to protected resources previously arranged with the authorization server. Client credentials are used when the client is requesting access to protected resources based on an authorization previously arranged with the authorization.
+
+:::note
+
+When it comes to automating tests against APIs that are protected by OAuth 2.0, the
+client credentials grant flow is very handy since it doesn’t require manual interaction
+using a web browser.
+
+:::
+## access-tokens
+## refresh-tokens
+## scopes
+Both ID Tokens and Access Tokens can include different information about the user,
+which is formatted as claims in the JWT. Claims are simple key/value pairs in JSON format. For example, OpenID Connect defines several standard claims to carry information about the user, like given_name, family_name, preferred_username, and email.
+
+Access to such claims is controlled through scopes, a mechanism provided by
+OAuth2 to limit what data an OAuth2 Client can access. You can think of scopes as
+roles assigned to applications rather than to users. 
+
+Scopes are an OAuth2 concept for limiting an application’s access to user
+resources. You can think of them as roles, but for applications instead of users. 
+
+Perhaps you have logged in to a third-party website using GitHub or Google (a
+social login based on OAuth2). If you did, you might have noticed that right after
+the authentication step, the service prompted you with a second request about
+what information from your GitHub or Google account you consented to allow the
+third party to access. That consent functionality is based on scopes, granting the third
+party (the OAuth2 Client) specific permissions depending on what scopes have been
+## Tokens
+as the resource servers are  able to directly read the value of the access token,
+they do not always have to make a request to the OAuth 2.0 token introspection endpoint, or the OpenID Connect UserInfo endpoint. This potentially eliminates two additional requests to Aauth2 server for a request to the resource server, reducing latency as well as significantly reducing the number of requests to server.
+
+When a resource server receives an access token, it is able to verify the token in the following ways:
+
+* Retrieving the JWKS URL from the OpenID Connect Discovery endpoint(the OpenID Connect Discovery endpoint advertises an endpoint where the JSON Web Key Set (JWKS) can be retrieved, as well as what signing and encryption mechanisms from the JWA specification are supported).
+* Downloading the public signing keys for the OP from the JWKS URL endpoint. These are
+typically cached/stored at the Resource Server.
+* Verifying the signature of the token using the public signing keys from the OP.
+
+Access Tokens defined as JWTs should be handled with care. They
+are bearer tokens, meaning that any application can use them in an HTTP
+request and get access to an OAuth2 Resource Server. Handling the OIDC/
+OAuth2 flow in the backend rather than in an SPA provides better security
+because we don’t expose any tokens to the browser. However, there might be
+other risks to manage, so carefully consider the trust boundaries of your system.
+## client-types
+## authorization-server
+## resource-server

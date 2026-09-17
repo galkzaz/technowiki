@@ -1,0 +1,875 @@
+---
+id: software-engineering-design-architecture-distributed-systems-service-communication-api-gateways-gateway-design-patterns
+title: "Gateway Design Patterns"
+sidebar_position: 4
+---
+
+## Chapter 4 — Gateway Design Patterns
+
+In the previous chapter, we learned **what an API Gateway is** and **where it fits** in a microservices architecture.
+
+Now we'll answer another important question:
+
+> **How should we design an API Gateway?**
+
+An API Gateway is not just a piece of software—it implements several architectural patterns. These patterns help solve different problems, such as simplifying client communication, reducing network calls, or providing client-specific APIs.
+
+---
+
+## Learning Objectives
+
+After completing this chapter, you should be able to:
+
+* Explain the API Gateway Pattern.
+* Understand the Backend for Frontend (BFF) Pattern.
+* Explain Gateway Aggregation.
+* Understand Request Routing.
+* Explain Request Composition.
+* Choose the appropriate pattern for different scenarios.
+
+---
+
+## 4.1 Why Gateway Patterns?
+
+Consider a modern e-commerce system.
+
+```text
+Services
+
+• Product Service
+• Order Service
+• Inventory Service
+• Payment Service
+• Review Service
+• Shipping Service
+• Notification Service
+```
+
+Different clients need different information.
+
+```text
+Mobile App
+
+Web Browser
+
+Admin Dashboard
+
+Partner API
+```
+
+Should every client call every service directly? **No.**
+
+Different clients have different needs.
+
+Gateway patterns provide structured solutions.
+
+---
+
+## Pattern Overview
+
+| Pattern              | Purpose                                |
+| -------------------- | -------------------------------------- |
+| API Gateway Pattern  | Single entry point                     |
+| Backend for Frontend | Client-specific APIs                   |
+| Gateway Aggregation  | Combine multiple service responses     |
+| Request Routing      | Route requests to appropriate services |
+| Request Composition  | Coordinate multiple backend requests   |
+
+---
+
+## 4.2 API Gateway Pattern
+
+### Problem
+
+Without a gateway:
+
+```text
+                Browser
+              /    |     \
+             /     |      \
+            ▼      ▼       ▼
+      Product   Order   Payment
+       Service  Service  Service
+```
+
+Problems:
+
+* Too many endpoints
+* Duplicate authentication
+* Duplicate logging
+* Duplicate rate limiting
+* Clients know internal architecture
+* Difficult API versioning
+
+---
+
+### Solution
+
+Introduce a single entry point.
+
+```text
+                Browser
+                    │
+                    ▼
+            +---------------+
+            | API Gateway   |
+            +---------------+
+             │      │      │
+             ▼      ▼      ▼
+        Product   Order  Payment
+         Service  Service Service
+```
+
+Clients communicate with only one endpoint.
+
+```text
+https://api.company.com
+```
+
+---
+
+### Responsibilities
+
+The gateway becomes responsible for:
+
+* Authentication
+* Authorization
+* Routing
+* Rate limiting
+* Logging
+* Monitoring
+* TLS termination
+* Request transformation
+* Response transformation
+
+Notice that these are **cross-cutting concerns**, not business logic.
+
+---
+
+### Real Example
+
+Client requests
+
+```http
+GET /products/25
+```
+
+Gateway routes to
+
+```text
+Product Service
+```
+
+Client requests
+
+```http
+POST /orders
+```
+
+Gateway routes to
+
+```text
+Order Service
+```
+
+The client doesn't know where the services actually run.
+
+---
+
+### Advantages
+
+* Simple clients
+* Hidden architecture
+* Centralized security
+* Easier monitoring
+* Easier API evolution
+* Centralized policies
+
+---
+
+### Disadvantages
+
+* Additional network hop
+* Infrastructure complexity
+* Possible bottleneck
+* Single logical entry point (requires redundancy)
+
+---
+
+## 4.3 Backend for Frontend (BFF)
+
+The BFF pattern extends the API Gateway concept.
+
+---
+
+### Problem
+
+Different clients need different APIs.
+
+Suppose we have:
+
+```text
+Web Application
+
+Mobile Application
+
+Smart TV
+
+Admin Dashboard
+```
+
+Do they all need identical data? No.
+
+---
+
+#### Mobile
+
+Needs
+
+```text
+Product Name
+
+Price
+
+Image
+```
+
+Small payload.
+
+---
+
+#### Web
+
+Needs
+
+```text
+Product
+
+Reviews
+
+Inventory
+
+Recommendations
+
+Related Products
+```
+
+Much richer response.
+
+---
+
+#### Admin
+
+Needs
+
+```text
+Cost
+
+Supplier
+
+Inventory
+
+Sales
+
+Audit History
+```
+
+Completely different data.
+
+---
+
+### Without BFF
+
+```text
+              API Gateway
+
+                    │
+
+          Product Service
+```
+
+Every client receives the same API.
+
+This often leads to:
+
+* Over-fetching (too much data)
+* Under-fetching (too little data)
+* Multiple extra requests
+* Complex frontend logic
+
+---
+
+### With BFF
+
+```text
+             Internet
+                  │
+      ┌───────────┼────────────┐
+      ▼           ▼            ▼
+ Web BFF    Mobile BFF    Admin BFF
+      │           │            │
+      └───────────┼────────────┘
+                  ▼
+             Microservices
+```
+
+Each frontend has its own backend optimized for its needs.
+
+---
+
+### Example
+
+#### Mobile
+
+```http
+GET /mobile/products/25
+```
+
+Returns
+
+```json
+{
+  "name":"Laptop",
+  "price":999,
+  "image":"..."
+}
+```
+
+---
+
+#### Web
+
+```http
+GET /web/products/25
+```
+
+Returns
+
+```json
+{
+  "product":{},
+  "inventory":{},
+  "reviews":[],
+  "recommendations":[]
+}
+```
+
+---
+
+#### Admin
+
+```http
+GET /admin/products/25
+```
+
+Returns
+
+```json
+{
+  "product":{},
+  "supplier":{},
+  "inventory":{},
+  "sales":{},
+  "audit":[]
+}
+```
+
+Each client gets exactly what it needs.
+
+---
+
+### Benefits
+
+* Optimized payloads
+* Less frontend code
+* Independent frontend evolution
+* Better performance
+
+---
+
+### Drawback
+
+More backend services to maintain.
+
+---
+
+## 4.4 Gateway Aggregation
+
+Gateway aggregation reduces the number of client requests.
+
+---
+
+### Problem
+
+Displaying one product page requires data from:
+
+```text
+Product Service
+
+Inventory Service
+
+Review Service
+```
+
+Without aggregation
+
+```text
+Browser
+
+↓
+
+Product Service
+
+↓
+
+Inventory Service
+
+↓
+
+Review Service
+```
+
+Three network requests.
+
+---
+
+### With Gateway Aggregation
+
+```text
+Browser
+
+↓
+
+Gateway
+
+↓
+
+Product Service
+
+↓
+
+Inventory Service
+
+↓
+
+Review Service
+
+↓
+
+Gateway merges responses
+
+↓
+
+Browser
+```
+
+Only one client request.
+
+---
+
+### Example
+
+Browser
+
+```http
+GET /product-page/25
+```
+
+Gateway performs internally
+
+```text
+GET Product
+
+GET Inventory
+
+GET Reviews
+```
+
+Combines the results
+
+```json
+{
+   "product":{...},
+   "inventory":{...},
+   "reviews":[...]
+}
+```
+
+---
+
+### Benefits
+
+* Lower latency for clients
+* Fewer network requests
+* Simpler frontend
+* Better user experience
+
+---
+
+### Drawback
+
+Gateway becomes more complex.
+
+Avoid embedding business rules while aggregating data.
+
+---
+
+## 4.5 Request Routing Pattern
+
+Routing is the gateway's primary responsibility.
+
+---
+
+### Problem
+
+Incoming requests must reach the correct service.
+
+```http
+GET /products
+```
+
+↓
+
+Product Service
+
+---
+
+```http
+POST /orders
+```
+
+↓
+
+Order Service
+
+---
+
+```http
+POST /payments
+```
+
+↓
+
+Payment Service
+
+---
+
+### Router
+
+```text
+             Gateway
+
+      Route Matching Engine
+
+     /products/**
+
+        ↓
+
+        Product Service
+
+        -----------------------
+
+        /orders/**
+
+        ↓
+
+        Order Service
+
+        -----------------------
+
+        /payments/**
+
+        ↓
+
+        Payment Service
+```
+
+The routing engine decides where every request should go.
+
+---
+
+### Routing Criteria
+
+Gateways can route based on:
+
+* URL path
+* Host name
+* HTTP method
+* Headers
+* Query parameters
+* API version
+* Client identity
+* Geographic region
+
+These routing strategies will be covered in detail in the next chapter.
+
+---
+
+## 4.6 Request Composition
+
+Aggregation and composition are related but different.
+
+---
+
+### Aggregation
+
+Gateway collects responses.
+
+```text
+Service A
+
+Service B
+
+Service C
+
+↓
+
+Merge
+```
+
+Mostly read operations.
+
+---
+
+### Composition
+
+Gateway coordinates an entire workflow.
+
+---
+
+Example:
+
+Customer submits an order.
+
+Gateway orchestrates:
+
+```text
+Create Order
+
+↓
+
+Reserve Inventory
+
+↓
+
+Calculate Shipping
+
+↓
+
+Create Payment Session
+
+↓
+
+Return Response
+```
+
+This is request composition.
+
+---
+
+### Example
+
+Client sends
+
+```http
+POST /checkout
+```
+
+Gateway performs
+
+```text
+Order Service
+
+↓
+
+Inventory Service
+
+↓
+
+Payment Service
+
+↓
+
+Shipping Service
+```
+
+Finally returns
+
+```json
+{
+    "orderId":123,
+    "paymentUrl":"...",
+    "shippingEstimate":"2 days"
+}
+```
+
+---
+
+### Should Gateways Perform Composition?
+
+This is an important architectural decision.
+
+#### Simple Composition
+
+Acceptable:
+
+```text
+Gateway
+
+↓
+
+Calls Product
+
+↓
+
+Calls Inventory
+
+↓
+
+Merge Responses
+```
+
+---
+
+#### Complex Composition
+
+Bad:
+
+```text
+Gateway
+
+↓
+
+Calculate Discount
+
+↓
+
+Validate Coupon
+
+↓
+
+Reserve Inventory
+
+↓
+
+Update Database
+
+↓
+
+Apply Business Rules
+
+↓
+
+Generate Invoice
+```
+
+Now the gateway contains business logic.
+
+This violates the principle that gateways should focus on infrastructure concerns.
+
+---
+
+### Better Design
+
+```text
+Gateway
+
+↓
+
+Checkout Service
+
+↓
+
+Business Logic
+
+↓
+
+Other Services
+```
+
+The gateway routes to a dedicated orchestration service, which implements the business workflow.
+
+---
+
+## Comparing the Patterns
+
+| Pattern     | Main Purpose         | Typical Use Case                       |
+| ----------- | -------------------- | -------------------------------------- |
+| API Gateway | Single entry point   | All external clients                   |
+| BFF         | Client-specific APIs | Mobile, Web, Admin                     |
+| Aggregation | Combine responses    | Product pages, dashboards              |
+| Routing     | Forward requests     | Every request                          |
+| Composition | Coordinate workflows | Checkout, onboarding, order processing |
+
+---
+
+## Real-World Architecture
+
+A production e-commerce platform might combine several patterns:
+
+```text
+                        Internet
+                            │
+          ┌─────────────────┼─────────────────┐
+          ▼                 ▼                 ▼
+      Web BFF          Mobile BFF        Partner API
+          │                 │                 │
+          └─────────────────┼─────────────────┘
+                            ▼
+                    API Gateway Layer
+                            │
+               ┌────────────┼────────────┐
+               ▼            ▼            ▼
+        Product Service  Order Service  User Service
+               │            │
+               └──────┬─────┘
+                      ▼
+             Checkout Service
+           (Business Orchestration)
+```
+
+In this architecture:
+
+* **BFFs** provide APIs tailored to different clients.
+* The **API Gateway** handles cross-cutting concerns such as authentication, routing, and rate limiting.
+* **Aggregation** is used for read-heavy endpoints (e.g., product pages or dashboards).
+* **Business orchestration** (complex request composition) is delegated to dedicated backend services like `Checkout Service`, keeping the gateway focused on infrastructure responsibilities.
+
+---
+
+## Best Practices
+
+* Use the **API Gateway Pattern** as the standard entry point for external clients.
+* Introduce **BFFs** only when different clients have significantly different data and performance requirements.
+* Use **Aggregation** to reduce client round trips for read operations.
+* Keep **Routing** declarative and easy to maintain.
+* Limit **Request Composition** in the gateway to lightweight orchestration; move business workflows into dedicated services.
+* Keep the gateway **stateless** and focused on cross-cutting concerns.
+
+---
+
+## Anti-Patterns
+
+❌ Putting business logic in the gateway.
+
+❌ Performing long-running workflows inside the gateway.
+
+❌ Creating one giant BFF that serves every client.
+
+❌ Building deeply nested request compositions that make the gateway a bottleneck.
+
+❌ Returning completely different API contracts from the same endpoint based on hidden client behavior.
+
+---
+
+## Key Takeaways
+
+* The **API Gateway Pattern** provides a single, secure entry point for external clients.
+* **Backend for Frontend (BFF)** creates client-specific APIs optimized for different user experiences.
+* **Gateway Aggregation** combines responses from multiple services into a single response to reduce client requests.
+* **Request Routing** directs incoming requests to the correct backend service based on routing rules.
+* **Request Composition** coordinates multiple backend calls but should remain lightweight; complex business workflows belong in dedicated orchestration services.
+* These patterns are complementary and are often used together in production microservices architectures.
+
+The next chapter, **Request Routing**, will examine how gateways make routing decisions using **path-based**, **host-based**, **header-based**, **method-based**, **weighted**, and **version-based** routing strategies, with practical examples from gateways such as Spring Cloud Gateway, NGINX, and Envoy.
+
