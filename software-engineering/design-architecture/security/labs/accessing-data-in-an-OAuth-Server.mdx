@@ -1,0 +1,356 @@
+---
+id: software-engineering-design-architecture-security-labs-accessing-data-in-an-OAuth-Server
+title: Accessing Data in an OAuth Server
+sidebar_position: 1
+---
+
+In this lab, we’ll walk through how to access your data at an existing OAuth 2.0 server. For this example, we’ll use the GitHub API, and build a simple application that will list all repositories the logged-in user has created.
+
+## Create an Application
+
+Before we can begin, we’ll need to create an application on GitHub in order to get a client ID and client secret.
+
+On GitHub.com, from the “Settings” page, click on the “Developer Settings” link in the sidebar. You will end up on [https://github.com/settings/developers](https://github.com/settings/developers). From there, click “New OAuth App” and you will be presented with a short form, as shown below.
+
+Fill out the required information, including the callback URL. If you are developing an application locally, you’ll have to use a local address for the callback URL. Since GitHub allows only one registered callback URL per application, it is useful to create two applications, one for development, and a separate one for production.
+
+![](/docs/assets/software-engineering/design-architecture/security/labs/accessing-data-in-an-OAuth-Server/github_create_new_application.png)
+
+Register a new OAuth application on GitHub
+
+After completing this form, you’ll be taken to a page where you can see the client ID and secret issued to your application, shown below.
+
+The client ID is considered public information, and is used to build authorization URLs, or can be included in the JavaScript source code of a web page. The client secret **must** be kept confidential. Don’t commit this to your git repository or include it in any JavaScript files!
+
+![](/docs/assets/software-engineering/design-architecture/security/labs/accessing-data-in-an-OAuth-Server/github_application_created.png)
+
+GitHub application has been created
+
+
+## Setting up the Environment
+This example code is written in PHP with no external packages required and no framework needed. Hopefully this makes it easy to translate to other languages if desired. To follow along with this example code, you can place it all in a single PHP file.
+
+Create a new folder and create an empty file in that folder called index.php. From the command line, run php -S localhost:8000 from inside that folder, and you’ll be able to visit http://localhost:8000 in your browser to run your code. All the code in the examples below should be added to this index.php file.
+
+To make things easier for us, let’s define a method, apiRequest() which is a simple wrapper around cURL. This function will include the Accept and User-Agent headers that GitHub’s API requires, and automatically decode the JSON response. If we have an access token in the session, it will send the proper OAuth header with the access token as well, in order to make authenticated requests.
+```php
+function apiRequest($url, $post=FALSE, $headers=array()) {
+  $ch = curl_init($url);
+  curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+ 
+  if($post)
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
+ 
+  $headers = [
+    'Accept: application/vnd.github.v3+json, application/json',
+    'User-Agent: https://example-app.com/'
+  ];
+ 
+  if(isset($_SESSION['access_token']))
+    $headers[] = 'Authorization: Bearer '.$_SESSION['access_token'];
+ 
+  curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+ 
+  $response = curl_exec($ch);
+  return json_decode($response, true);
+}
+```
+Now let’s set up a few variables we’ll need for the OAuth process.
+```php
+// Fill these out with the values from GitHub
+$githubClientID = '';
+$githubClientSecret = '';
+ 
+// This is the URL we'll send the user to first
+// to get their authorization
+$authorizeURL = 'https://github.com/login/oauth/authorize';
+ 
+// This is the endpoint we'll request an access token from
+$tokenURL = 'https://github.com/login/oauth/access_token';
+ 
+// This is the GitHub base URL for API requests
+$apiURLBase = 'https://api.github.com/';
+ 
+// The URL for this script, used as the redirect URL
+$baseURL = 'https://' . $_SERVER['SERVER_NAME']
+    . $_SERVER['PHP_SELF'];
+ 
+// Start a session so we have a place to
+// store things between redirects
+session_start();
+```
+First, let’s set up the “logged-in” and “logged-out” views. This will show a simple message indicating whether the user is logged in or logged out.
+```php
+// If there is an access token in the session
+// the user is already logged in
+if(!isset($_GET['action'])) {
+  if(!empty($_SESSION['access_token'])) {
+    echo '<h3>Logged In</h3>';
+    echo '<p><a href="?action=repos">View Repos</a></p>';
+    echo '<p><a href="?action=logout">Log Out</a></p>';
+  } else {
+    echo '<h3>Not logged in</h3>';
+    echo '<p><a href="?action=login">Log In</a></p>';
+  }
+  die();
+}
+```
+The logged-out view contains a link to our login URL which starts the OAuth process.
+## Authorization Request
+Now that we have the necessary variables set up, let’s start the OAuth process.
+
+The first thing we’ll have people do is visit this page with ?action=login in the query string to kick off the process.
+
+Note the scopes we are asking for in this request include user and public_repo. This means the app will be able to read the user profile information as well as have access to public repos.
+```php
+// Start the login process by sending the user
+// to GitHub's authorization page
+if(isset($_GET['action']) && $_GET['action'] == 'login') {
+  unset($_SESSION['access_token']);
+ 
+  // Generate a random hash and store in the session
+  $_SESSION['state'] = bin2hex(random_bytes(16));
+ 
+  $params = array(
+    'response_type' => 'code',
+    'client_id' => $githubClientID,
+    'redirect_uri' => $baseURL,
+    'scope' => 'user public_repo',
+    'state' => $_SESSION['state']
+  );
+ 
+  // Redirect the user to GitHub's authorization page
+  header('Location: '.$authorizeURL.'?'.http_build_query($params));
+  die();
+}
+```
+It’s important to generate a “state” parameter to use to protect the client from CSRF attacks. This is a random string that the client generates and stores in the session. GitHub will redirect the user back here with the state in the query string, so we can verify it matches the state stored in the session before exchanging the authorization code for an access token.
+
+We build up the authorization URL and then send the user there. The URL contains our public client ID, the redirect URL which we previously registered with GitHub, the scope we’re requesting, and the “state” parameter.
+![GitHub’s Authorization Request](/docs/assets/software-engineering/design-architecture/security/labs/accessing-data-in-an-OAuth-Server/github_oauth_prompt.png)
+
+At this point, the user will see GitHub’s OAuth authorization prompt, illustrated above.
+
+When the user approves the request, they will be redirected back to our page with code and state parameters in the request. The next step is to exchange the authorization code for an access token.
+## Obtaining an Access Token
+When the user is redirected back to our app, there will be a code and state parameter in the query string. The state parameter will be the same as the one we set in the initial authorization request, and is meant for our app to check that it matches before continuing. This helps our app avoid being tricked into sending an attacker’s authorization code to GitHub, as well as prevents CSRF attacks.
+```php
+// When GitHub redirects the user back here,
+// there will be a "code" and "state" parameter in the query string
+if(isset($_GET['code'])) {
+  // Verify the state matches our stored state
+  if(!isset($_GET['state'])
+    || $_SESSION['state'] != $_GET['state']) {
+ 
+    header('Location: ' . $baseURL . '?error=invalid_state');
+    die();
+  }
+ 
+  // Exchange the auth code for an access token
+  $token = apiRequest($tokenURL, array(
+    'grant_type' => 'authorization_code',
+    'client_id' => $githubClientID,
+    'client_secret' => $githubClientSecret,
+    'redirect_uri' => $baseURL,
+    'code' => $_GET['code']
+  ));
+  $_SESSION['access_token'] = $token['access_token'];
+ 
+  header('Location: ' . $baseURL);
+  die();
+}
+```
+Here we are sending a request to GitHub’s token endpoint to exchange the authorization code for an access token. The request contains our public client ID as well as the private client secret. We also send the same redirect URL as before along with the authorization code.
+
+If everything checks out, GitHub generates an access token and returns it in the response. We store the access token in the session and redirect to the home page, and the user is logged in.
+
+The response from GitHub will look like the below.
+```
+{
+  "access_token": "e2f8c8e136c73b1e909bb1021b3b4c29",
+  "token_type": "Bearer",
+  "scope": "public_repo,user"
+}
+```
+Our code has extracted the access token and saved it in the session. The next time you visit the page, it recognizes that there’s already an access token and shows the logged-in view we created earlier.
+
+Note: We have not included any error handling code in this example for simplicity’s sake. In reality, you’d check for errors returned from GitHub and display an appropriate message to the user.
+## Making API Requests
+Now that our app has a GitHub access token for the user, we can use it to make API requests. Let’s add a new section to our application that will run when the user clicks the “View Repos” link we created earlier.
+
+Remember the apiRequest function we set up earlier? That’s where the access token is included in the HTTP request. The request this code will make will include the access token in the HTTP Authorization header, as illustrated in the example below.
+```
+GET /user/repos?sort=created&direction=desc HTTP/1.1
+Host: api.github.com
+Accept: application/vnd.github.v3+json
+User-Agent: https://example-app.com/
+Authorization: Bearer e2f8c8e136c73b1e909bb1021b3b4c29
+```
+The code below will take the access token and use it in a request to list the user’s repositories. It will then output a list of repositories and link to each one.
+```php
+if(isset($_GET['action']) && $_GET['action'] == 'repos') {
+  // Find all repos created by the authenticated user
+  $repos = apiRequest($apiURLBase.'user/repos?'.http_build_query([
+    'sort' => 'created', 'direction' => 'desc'
+  ]));
+ 
+  echo '<ul>';
+  foreach($repos as $repo)
+    echo '<li><a href="' . $repo['html_url'] . '">'
+      . $repo['name'] . '</a></li>';
+  echo '</ul>';
+}
+```
+That’s it! You can now use the access token to make API requests to any of the API endpoints on GitHub! You can see the full documentation of GitHub’s API at https://developer.github.com/v3/.
+
+the complete sample code used in this example using the GitHub
+```php
+<?php
+// Fill these out with the values you got from Github
+$githubClientID = '';
+$githubClientSecret = '';
+
+// This is the URL we'll send the user to first to get their authorization
+$authorizationEndpoint = 'https://github.com/login/oauth/authorize';
+
+// This is the endpoint our server will request an access token from
+$tokenEndpoint = 'https://github.com/login/oauth/access_token';
+
+// This is the Github base URL we can use to make authenticated API requests
+$apiURLBase = 'https://api.github.com/';
+
+// The URL for this script, used as the redirect URL
+// If PHP isn't setting these right you can put the full URL here manually
+$protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http';
+$redirectURL = $protocol . '://' . $_SERVER['HTTP_HOST'] . $_SERVER['PHP_SELF'];
+
+
+// Start a session so we have a place to store things between redirects
+session_start();
+
+
+// Start the login process by sending the user
+// to Github's authorization page
+if(isset($_GET['action']) && $_GET['action'] == 'login') {
+  unset($_SESSION['access_token']);
+
+  // Generate a random hash and store in the session
+  $_SESSION['state'] = bin2hex(random_bytes(16));
+  $_SESSION['code_verifier'] = bin2hex(random_bytes(64));
+  $code_challenge = pkce_challenge($_SESSION['code_verifier']);
+
+  $params = array(
+    'response_type' => 'code',
+    'client_id' => $githubClientID,
+    'redirect_uri' => $redirectURL,
+    'scope' => 'user public_repo',
+    'state' => $_SESSION['state'],
+    'code_challenge' => $code_challenge,
+    'code_challenge_method' => 'S256',
+  );
+
+  // Redirect the user to Github's authorization page
+  header('Location: '.$authorizationEndpoint.'?'.http_build_query($params));
+  die();
+}
+
+
+if(isset($_GET['action']) && $_GET['action'] == 'logout') {
+  unset($_SESSION['access_token']);
+  header('Location: '.$redirectURL);
+  die();
+}
+
+// When Github redirects the user back here,
+// there will be a "code" and "state" parameter in the query string
+if(isset($_GET['code'])) {
+  // Verify the state matches our stored state
+  if(!isset($_GET['state'])
+    || $_SESSION['state'] != $_GET['state']) {
+
+    header('Location: ' . $redirectURL . '?error=invalid_state');
+    die();
+  }
+
+  // Exchange the auth code for an access token
+  $token = apiRequest($tokenEndpoint, array(
+    'grant_type' => 'authorization_code',
+    'client_id' => $githubClientID,
+    'client_secret' => $githubClientSecret,
+    'redirect_uri' => $redirectURL,
+    'code' => $_GET['code'],
+    'code_verifier' => $_SESSION['code_verifier'],
+  ));
+  $_SESSION['access_token'] = $token['access_token'];
+
+  header('Location: ' . $redirectURL);
+  die();
+}
+
+
+if(isset($_GET['action']) && $_GET['action'] == 'repos') {
+  // Find all repos created by the authenticated user
+  $repos = apiRequest($apiURLBase.'user/repos?'.http_build_query([
+    'sort' => 'created',
+    'direction' => 'desc'
+  ]));
+
+  echo '<ul>';
+  foreach($repos as $repo) {
+    echo '<li><a href="' . $repo['html_url'] . '">'
+      . $repo['name'] . '</a></li>';
+  }
+  echo '</ul>';
+}
+
+// If there is an access token in the session
+// the user is already logged in
+if(!isset($_GET['action'])) {
+  if(!empty($_SESSION['access_token'])) {
+    echo '<h3>Logged In</h3>';
+    echo '<p><a href="?action=repos">View Repos</a></p>';
+    echo '<p><a href="?action=logout">Log Out</a></p>';
+  } else {
+    echo '<h3>Not logged in</h3>';
+    echo '<p><a href="?action=login">Log In</a></p>';
+  }
+  die();
+}
+
+
+// This helper function will make API requests to GitHub, setting
+// the appropriate headers GitHub expects, and decoding the JSON response
+function apiRequest($url, $post=FALSE, $headers=array()) {
+  $ch = curl_init($url);
+  curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+
+  if($post)
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
+
+  $headers = [
+    'Accept: application/vnd.github.v3+json, application/json',
+    'User-Agent: https://example-app.com/'
+  ];
+
+  if(isset($_SESSION['access_token']))
+    $headers[] = 'Authorization: Bearer ' . $_SESSION['access_token'];
+
+  curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+  $response = curl_exec($ch);
+  return json_decode($response, true);
+}
+
+// This function generates a base64-url-encoded version of 
+// the sha256 hash of the input. This is used to generate the
+// PKCE challenge from the PKCE code verifier.
+function pkce_challenge($plain) {
+  return base64_urlencode(hash('sha256', $plain, true));
+}
+
+// Base64-urlencoding is a simple variation on base64-encoding
+// Instead of +/ we use -_, and the trailing = are removed.
+function base64_urlencode($string) {
+  return rtrim(strtr(base64_encode($string), '+/', '-_'), '=');
+}
+```

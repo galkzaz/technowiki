@@ -1,0 +1,1439 @@
+`java.lang.Object` is the **root class of the Java class hierarchy**.
+
+Every Java class ultimately inherits from `Object`, either directly or indirectly.
+
+```text
+                    Object
+                      │
+          ┌───────────┴───────────┐
+       String                    Person
+                                  │
+                               Employee
+                                  │
+                               Manager
+```
+
+So when you write:
+
+```java
+class Person {
+}
+```
+
+Java effectively treats it as:
+
+```java
+class Person extends Object {
+}
+```
+
+This is why every Java object automatically has methods such as `toString()`, `equals()`, and `hashCode()`.
+
+## Why does `Object` exist?
+
+Java needs a common type that can represent **any object**.
+
+For example:
+
+```java
+String name = "Gamal";
+Integer age = 30;
+Person person = new Person();
+```
+
+All three are different types, but they are all objects:
+
+```java
+Object a = name;
+Object b = age;
+Object c = person;
+```
+
+This is possible because:
+
+```text
+String  ──extends──> Object
+Integer ──extends──> Object
+Person  ──extends──> Object
+```
+
+Therefore, `Object` provides a common supertype for all Java reference types.
+
+## Object Characracteristics
+ALTHOUGH Object is a concrete class, it is designed primarily for extension.
+All of its nonfinal methods (equals, hashCode, toString, clone, and finalize)
+have explicit general contracts because they are designed to be overridden. It is
+the responsibility of any class overriding these methods to obey their general con-
+tracts; failure to do so will prevent other classes that depend on the contracts (such
+as HashMap and HashSet) from functioning properly in conjunction with the class
+### 1. `Object` is a concrete class
+
+Unlike an abstract class, you can directly create an `Object`:
+
+```java
+Object obj = new Object();
+```
+
+So `Object` is **concrete**.
+
+But its purpose isn't primarily to be instantiated directly.
+
+Its more important role is to be the **root superclass of the Java class hierarchy**:
+
+```text
+Object
+  │
+  ├── String
+  ├── Integer
+  ├── ArrayList
+  ├── HashMap
+  ├── Person
+  │    └── Employee
+  └── ...
+```
+
+---
+
+### 2. `Object` is designed primarily for extension
+
+it means that Java expects programmers to create subclasses of `Object`.
+
+In fact, every ordinary Java class automatically extends `Object`:
+
+```java
+class Person {
+}
+```
+
+is effectively:
+
+```java
+class Person extends Object {
+}
+```
+
+Therefore, the methods defined by `Object` become available to essentially every Java object.
+
+---
+
+Suppose
+```java
+@Override
+public boolean equals(Object obj) {
+    ...
+}
+
+@Override
+public int hashCode() {
+    ...
+}
+```
+
+If you decide that:
+
+```text
+Person("Gamal", 30)
+        ==
+Person("Gamal", 30)
+```
+
+then you **must** ensure:
+
+```text
+same logical value
+       ↓
+equals() == true
+       ↓
+same hashCode()
+       ↓
+HashMap / HashSet work correctly
+```
+
+So a major Java design principle:
+
+> **Overriding an `Object` method is not merely changing inherited behavior; it means accepting and implementing the method's established general contract.**
+
+### 3. Its non-final methods are designed to be overridden
+
+`Object` provides methods such as:
+
+```java
+equals()
+hashCode()
+toString()
+clone()
+finalize()
+```
+
+Historically, all of these have been designed to allow subclasses to provide their own behavior.
+
+For example, `Object` provides a general `toString()` implementation.
+
+But `Person` can provide a more useful one:
+
+```java
+@Override
+public String toString() {
+    return "Person{name='" + name + "'}";
+}
+```
+
+Similarly, `String` overrides `equals()` because String needs **value-based equality**.
+
+```java
+String a = new String("Java");
+String b = new String("Java");
+
+a.equals(b); // true
+```
+---
+
+### 4. Object as a "general contract"
+
+A **contract** is a set of rules that an implementation promises to follow.
+
+**When you override a method defined by `Object`, you are implementing a contract that other Java code already depends upon.**
+
+Think of it like an API protocol:
+
+```text
+Object defines a contract
+          │
+          ▼
+Your class overrides the method
+          │
+          ▼
+Your implementation must obey the contract
+          │
+          ▼
+Java libraries can safely use your class
+```
+
+If you violate it:
+
+```text
+Your class
+   │
+   └── broken contract
+          │
+          ▼
+Java library assumptions become invalid
+          │
+          ▼
+unexpected behavior
+```
+
+#### `Object.equals()` as a Contract
+For `equals()`, for example, the contract includes:
+
+```text
+equals()
+   │
+   ├── Reflexive
+   ├── Symmetric
+   ├── Transitive
+   ├── Consistent
+   └── x.equals(null) → false
+```
+
+So if you override:
+
+```java
+equals()
+```
+
+you aren't free to invent arbitrary behavior.
+
+Your implementation must still obey these rules.
+
+---
+
+**Why does this matter?**
+
+Because **other Java classes rely on these contracts**.
+
+This is the most important part of the paragraph.
+
+Consider:
+
+```java
+Set<Person> people = new HashSet<>();
+```
+
+`HashSet` expects objects to obey the relationship between:
+
+```text
+equals()
+   ↕
+hashCode()
+```
+
+Specifically:
+
+```text
+if a.equals(b) == true
+        ↓
+a.hashCode() == b.hashCode()
+```
+
+`HashSet` depends on this rule.
+
+---
+
+**What happens if you violate the contract?**
+
+Suppose you create:
+
+```java
+class Person {
+    String name;
+
+    Person(String name) {
+        this.name = name;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof Person other)) {
+            return false;
+        }
+
+        return name.equals(other.name);
+    }
+
+    // hashCode() NOT overridden
+}
+```
+
+You are saying:
+
+```text
+Person("Gamal").equals(Person("Gamal"))
+             ↓
+            true
+```
+
+But because you didn't override `hashCode()`, the two objects can have different hash codes.
+
+So you have effectively created:
+
+```text
+equals() says:
+
+A == B
+   ↓
+true
+
+
+hashCode() says:
+
+A → 123456
+B → 987654
+```
+
+This violates the contract.
+
+---
+
+**Now `HashSet` gets confused**
+
+Consider:
+
+```java
+Set<Person> people = new HashSet<>();
+
+Person p1 = new Person("Gamal");
+Person p2 = new Person("Gamal");
+
+people.add(p1);
+
+System.out.println(p1.equals(p2));
+System.out.println(people.contains(p2));
+```
+
+You might expect:
+
+```text
+true
+true
+```
+
+because `p1` and `p2` are logically equal.
+
+But because their hash codes can differ, `HashSet` may look in the wrong bucket when searching for `p2`.
+
+Conceptually:
+
+```text
+add(p1)
+
+p1.hashCode()
+      ↓
+   bucket 5
+      ↓
+     p1
+
+
+contains(p2)
+
+p2.hashCode()
+      ↓
+   bucket 12
+      ↓
+   nothing found
+```
+
+So:
+
+```text
+equals() → true
+contains() → false
+```
+
+That is exactly the kind of problem the paragraph is warning about.
+
+---
+
+Think of the Java library as having an agreement with your classes:
+
+```text
+             Object
+               │
+      ┌────────┼────────┐
+      │        │        │
+   equals  hashCode  toString
+      │        │
+      │        │
+      └────┬───┘
+           │
+           ▼
+     Java Collections
+           │
+      ┌────┴─────┐
+      │          │
+   HashMap    HashSet
+```
+
+When you override these methods, you're entering into a **contract with the rest of the Java ecosystem**.
+
+---
+
+**`HashMap` has the same dependency**
+
+Consider:
+
+```java
+Map<Person, String> employees = new HashMap<>();
+
+Person p1 = new Person("Gamal");
+
+employees.put(p1, "Developer");
+```
+
+Later:
+
+```java
+Person p2 = new Person("Gamal");
+
+System.out.println(employees.get(p2));
+```
+
+For this to work based on logical equality, Java needs:
+
+```text
+p1.equals(p2) == true
+
+AND
+
+p1.hashCode() == p2.hashCode()
+```
+
+Conceptually:
+
+```text
+             HashMap
+                │
+                ▼
+          p2.hashCode()
+                │
+                ▼
+            find bucket
+                │
+                ▼
+           p1.equals(p2)
+                │
+                ▼
+             "Developer"
+```
+
+If you violate the `equals()`/`hashCode()` contract, the collection's assumptions break.
+
+---
+
+It's not just `HashMap` and `HashSet`, The same idea applies more broadly.
+
+Java APIs often rely on contracts defined by general-purpose classes and interfaces.
+
+For example:
+
+```text
+Object.equals()
+       │
+       ├── HashSet
+       ├── HashMap
+       ├── List.contains()
+       ├── List.indexOf()
+       ├── Map.containsKey()
+       └── many other APIs
+```
+
+So an incorrect `equals()` implementation doesn't necessarily fail immediately.
+
+It can cause **apparently unrelated code** to behave incorrectly.
+
+---
+
+**Why `toString()` also has a contract**
+
+The contract is different from `equals()`.
+
+If you override:
+
+```java
+toString()
+```
+
+the expectation is that it produces a useful textual representation.
+
+For example:
+
+```java
+@Override
+public String toString() {
+    return "Person{name='" + name + "', age=" + age + "}";
+}
+```
+
+Then:
+
+```java
+System.out.println(person);
+```
+
+becomes useful.
+
+Many tools and libraries use `toString()` for:
+
+* logging
+* debugging
+* error messages
+* diagnostics
+
+The contract is less strict than `equals()`, but overriding it incorrectly can still make debugging and diagnostics much harder.
+
+---
+
+#### `Object.clone()` as a Contract
+
+`Object.clone()` has its own rules.
+
+A class choosing to use the traditional cloning mechanism needs to understand the semantics of:
+
+```java
+super.clone()
+```
+
+including the fact that it performs a **field-for-field shallow copy**.
+
+So you shouldn't override `clone()` and arbitrarily change its expected behavior.
+
+## `Object` and inheritance
+
+Consider:
+
+```java
+class Animal {
+}
+
+class Dog extends Animal {
+}
+```
+
+The actual inheritance hierarchy is:
+
+```text
+Object
+   │
+ Animal
+   │
+  Dog
+```
+
+Even though you didn't explicitly write:
+
+```java
+class Animal extends Object
+```
+
+it is still part of the hierarchy.
+
+You can verify this:
+
+```java
+Animal animal = new Animal();
+
+System.out.println(animal instanceof Object);
+```
+
+Output:
+
+```text
+true
+```
+
+And:
+
+```java
+Dog dog = new Dog();
+
+System.out.println(dog instanceof Object);
+System.out.println(dog instanceof Animal);
+```
+
+Output:
+
+```text
+true
+true
+```
+
+## The methods inherited from `Object`
+
+`Object` defines several fundamental methods. The most important ones are:
+
+| Method           | Purpose                                        |
+| ---------------- | ---------------------------------------------- |
+| `toString()`     | Produces a textual representation of an object |
+| `equals(Object)` | Determines logical equality                    |
+| `hashCode()`     | Produces a hash code for the object            |
+| `getClass()`     | Returns the object's runtime class             |
+| `clone()`        | Supports object copying                        |
+| `finalize()`     | Deprecated; should not be used                 |
+| `wait()`         | Makes a thread wait                            |
+| `notify()`       | Wakes one waiting thread                       |
+| `notifyAll()`    | Wakes all waiting threads                      |
+
+There are also methods related to thread synchronization, which belong to `Object` because **every object can be used as a monitor**.
+
+We'll look at the important categories separately.
+
+### `toString()`
+
+`toString()` returns a string representation of an object.
+
+Example:
+
+```java
+class Person {
+    String name;
+    int age;
+
+    Person(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+}
+```
+
+Now:
+
+```java
+Person person = new Person("Gamal", 30);
+
+System.out.println(person);
+```
+
+When you pass an object to `println`, Java effectively calls:
+
+```java
+person.toString()
+```
+
+If you don't override `toString()`, you get a representation based on the object's class and identity, typically something like:
+
+```text
+Person@5e2de80c
+```
+
+That's usually not very useful.
+
+So you normally override it:
+
+```java
+@Override
+public String toString() {
+    return "Person{name='" + name + "', age=" + age + "}";
+}
+```
+
+Now:
+
+```java
+System.out.println(person);
+```
+
+produces something like:
+
+```text
+Person{name='Gamal', age=30}
+```
+
+`toString()` is primarily intended for **human-readable representation**, debugging, and logging.
+
+It should not normally be treated as a unique identifier or a serialization format.
+
+---
+
+### `equals(Object)`
+
+`equals()` is used to determine whether two objects are logically equal.
+
+For example:
+
+```java
+String a = new String("Java");
+String b = new String("Java");
+
+System.out.println(a == b);
+System.out.println(a.equals(b));
+```
+
+Output:
+
+```text
+false
+true
+```
+
+Why?
+
+`==` compares the references:
+
+```text
+a ──────┐
+        ├──> "Java"
+b ──────┘
+```
+
+Actually, with `new`, they are two different objects:
+
+```text
+a ───> String("Java")
+
+b ───> String("Java")
+```
+
+So:
+
+```java
+a == b
+```
+
+is `false`.
+
+But `String` overrides `equals()` to compare the contents.
+
+Therefore:
+
+```java
+a.equals(b)
+```
+
+is `true`.
+
+---
+
+**The default `Object.equals()`**
+
+If you don't override `equals()`, `Object.equals()` essentially behaves like reference equality.
+
+Conceptually:
+
+```java
+public boolean equals(Object obj) {
+    return this == obj;
+}
+```
+
+So:
+
+```java
+class Person {
+    String name;
+
+    Person(String name) {
+        this.name = name;
+    }
+}
+```
+
+Then:
+
+```java
+Person p1 = new Person("Gamal");
+Person p2 = new Person("Gamal");
+
+System.out.println(p1.equals(p2));
+```
+
+returns:
+
+```text
+false
+```
+
+because they are two different objects.
+
+If you want two `Person` objects with the same data to be logically equal, you need to override `equals()`.
+
+---
+
+### `hashCode()`
+
+`hashCode()` returns an integer associated with the object.
+
+```java
+Person person = new Person("Gamal");
+
+System.out.println(person.hashCode());
+```
+
+It's particularly important for hash-based collections:
+
+```text
+HashMap
+HashSet
+Hashtable
+```
+
+For example:
+
+```java
+Set<Person> people = new HashSet<>();
+```
+
+`HashSet` uses both:
+
+```text
+hashCode()
+    ↓
+find candidate bucket
+    ↓
+equals()
+    ↓
+determine equality
+```
+
+If two objects are equal according to `equals()`:
+
+```java
+a.equals(b) == true
+```
+
+then they **must have the same hash code**:
+
+```java
+a.hashCode() == b.hashCode()
+```
+
+This is one of the most important rules when overriding `equals()`.
+
+---
+
+### `getClass()`
+
+`getClass()` tells you the object's **runtime class**.
+
+Example:
+
+```java
+Object value = "Java";
+
+System.out.println(value.getClass());
+```
+
+Output:
+
+```text
+class java.lang.String
+```
+
+Notice that the variable is declared as:
+
+```java
+Object value
+```
+
+but the actual object is a:
+
+```text
+String
+```
+
+This illustrates the difference between:
+
+```text
+reference type
+      vs
+runtime type
+```
+
+```java
+Object value = "Java";
+```
+
+| Concept        | Value    |
+| -------------- | -------- |
+| Reference type | `Object` |
+| Runtime type   | `String` |
+
+You can also get the class name:
+
+```java
+System.out.println(value.getClass().getName());
+```
+
+Output:
+
+```text
+java.lang.String
+```
+
+This is closely related to Java's reflection APIs.
+
+---
+
+**`getClass()` vs `instanceof`**
+
+These are related but different.
+
+- `instanceof`
+
+Asks:
+
+> Is this object an instance of this type or one of its subclasses?
+
+```java
+Object value = "Java";
+
+System.out.println(value instanceof Object);
+System.out.println(value instanceof String);
+```
+
+Output:
+
+```text
+true
+true
+```
+
+- `getClass()`
+
+Asks:
+
+> What is the object's exact runtime class?
+
+```java
+System.out.println(value.getClass());
+```
+
+Output:
+
+```text
+class java.lang.String
+```
+
+A useful mental model:
+
+```text
+instanceof
+    ↓
+"type compatibility?"
+
+getClass()
+    ↓
+"what exact runtime class?"
+```
+
+---
+
+### `clone()`
+
+`Object` provides a `clone()` mechanism for creating a copy of an object. However, there is an important detail. A class generally needs to implement: `Cloneable`, to support the conventional `Object.clone()` mechanism.
+
+For example:
+
+```java
+class Person implements Cloneable {
+    String name;
+
+    Person(String name) {
+        this.name = name;
+    }
+
+    @Override
+    public Person clone() {
+        try {
+            return (Person) super.clone();
+        } catch (CloneNotSupportedException e) {
+            throw new AssertionError(e);
+        }
+    }
+}
+```
+
+Then:
+
+```java
+Person p1 = new Person("Gamal");
+Person p2 = p1.clone();
+
+System.out.println(p1 == p2);
+```
+
+Output:
+
+```text
+false
+```
+
+You have two separate objects.
+
+However, `clone()` has a number of awkward semantics, especially around shallow versus deep copying. Modern Java code often uses **copy constructors, factory methods, or explicit copying methods** instead.
+
+---
+
+### `wait()`, `notify()`, and `notifyAll()`
+
+These methods are related to Java's built-in monitor synchronization mechanism.
+
+Every Java object can act as a monitor.
+
+For example:
+
+```java
+synchronized (lock) {
+    // critical section
+}
+```
+
+The object:
+
+```java
+lock
+```
+
+acts as the synchronization monitor.
+
+`Object` therefore provides:
+
+```java
+wait()
+notify()
+notifyAll()
+```
+
+A simplified relationship is:
+
+```text
+Object
+  │
+  ├── wait()
+  ├── notify()
+  └── notifyAll()
+       │
+       └── thread coordination
+```
+
+Example:
+
+```java
+synchronized (lock) {
+    lock.wait();
+}
+```
+
+The current thread releases the monitor and waits.
+
+Another thread can do:
+
+```java
+synchronized (lock) {
+    lock.notify();
+}
+```
+
+to wake a waiting thread.
+
+These methods must be used while holding the object's monitor; otherwise Java throws:
+
+```text
+IllegalMonitorStateException
+```
+
+For modern concurrent programming, higher-level utilities from `java.util.concurrent` are often preferable.
+
+---
+
+### `finalize()` — deprecated
+
+Older Java versions had a mechanism called finalization.
+
+`Object` historically provided:
+
+```java
+protected void finalize()
+```
+
+The idea was that the JVM could invoke it before reclaiming an object.
+
+This approach turned out to have significant problems:
+
+* unpredictable execution time
+* performance overhead
+* difficult resource management
+* resurrection problems
+* unreliable cleanup
+
+It has been **deprecated for removal**.
+
+Do not design new Java code around `finalize()`.
+
+For resources such as files, sockets, and database connections, prefer:
+
+```java
+try-with-resources
+```
+
+For example:
+
+```java
+try (FileInputStream input = new FileInputStream("data.txt")) {
+    // use resource
+}
+```
+
+---
+
+## `Object` and primitive types
+
+```text
+Object
+  │
+  └── reference types
+```
+
+Primitive types are **not objects**:
+
+```java
+int
+long
+double
+boolean
+char
+...
+```
+
+You cannot do:
+
+```java
+Object value = 10;
+```
+
+and interpret that as `Object` directly containing a primitive.
+
+Instead, Java performs **boxing**:
+
+```java
+Object value = Integer.valueOf(10);
+```
+
+Conceptually:
+
+```text
+int
+10
+ │
+ │ boxing
+ ▼
+Integer
+ │
+ ▼
+Object
+```
+
+For example:
+
+```java
+Object value = 10;
+
+System.out.println(value.getClass());
+```
+
+Output:
+
+```text
+class java.lang.Integer
+```
+
+The primitive `10` has been boxed into an `Integer`.
+
+---
+
+## `Object` and generics
+
+You may encounter older code such as:
+
+```java
+List<Object> values = new ArrayList<>();
+
+values.add("Java");
+values.add(42);
+values.add(3.14);
+```
+
+This allows different reference types in the same collection.
+
+But `Object` loses type-specific information.
+
+For example:
+
+```java
+Object value = "Java";
+```
+
+You cannot directly call:
+
+```java
+value.length();
+```
+
+because the compiler only knows:
+
+```text
+value : Object
+```
+
+You would need a cast:
+
+```java
+String text = (String) value;
+
+System.out.println(text.length());
+```
+
+This is one reason generics are preferable when you know the expected type:
+
+```java
+List<String> values = new ArrayList<>();
+```
+
+Now the compiler knows that elements are `String`.
+
+---
+
+## `Object` and polymorphism
+
+`Object` is extremely important for polymorphism.
+
+Suppose:
+
+```java
+class Animal {
+}
+
+class Dog extends Animal {
+}
+
+class Cat extends Animal {
+}
+```
+
+You can write:
+
+```java
+Object a = new Dog();
+Object b = new Cat();
+Object c = new String("Java");
+```
+
+All are valid because everything ultimately extends `Object`.
+
+But if you want animal-specific behavior, using `Animal` is more useful:
+
+```java
+Animal animal = new Dog();
+```
+
+So `Object` is the **widest possible reference type**, but that doesn't mean it is always the best type to use.
+
+A useful rule:
+
+> Use the narrowest type that expresses what your code actually needs.
+
+For example:
+
+```java
+Object value
+```
+
+is less informative than:
+
+```java
+Animal animal
+```
+
+which is less informative than:
+
+```java
+Dog dog
+```
+
+when the code specifically requires a `Dog`.
+
+---
+
+## A complete example
+
+Here is a small example showing several `Object` methods:
+
+```java
+import java.util.Objects;
+
+class Person {
+    private final String name;
+    private final int age;
+
+    Person(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    @Override
+    public String toString() {
+        return "Person{name='%s', age=%d}".formatted(name, age);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (!(obj instanceof Person other)) {
+            return false;
+        }
+
+        return age == other.age &&
+               Objects.equals(name, other.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name, age);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Person p1 = new Person("Gamal", 30);
+        Person p2 = new Person("Gamal", 30);
+
+        // Object.toString()
+        System.out.println(p1);
+
+        // Object.equals()
+        System.out.println(p1.equals(p2));
+
+        // Object.hashCode()
+        System.out.println(p1.hashCode());
+        System.out.println(p2.hashCode());
+
+        // Object.getClass()
+        System.out.println(p1.getClass());
+
+        // Object as a reference type
+        Object value = p1;
+
+        System.out.println(value instanceof Person);
+    }
+}
+```
+
+Possible output:
+
+```text
+Person{name='Gamal', age=30}
+true
+...
+...
+class Person
+true
+```
+
+The exact hash-code numbers can differ.
+
+## The `Object` mental model
+
+```text
+                         java.lang.Object
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+   Object identity          Object equality        Type information
+        │                       │                       │
+     == / identity          equals()             getClass()
+                                │
+                           hashCode()
+        │
+        └────────────────────────────────────────────────
+                                │
+                         Object representation
+                                │
+                            toString()
+                                
+                         Object lifecycle
+                                │
+                              clone()
+                                
+                      Thread coordination
+                                │
+                    ┌───────────┼───────────┐
+                  wait()     notify()    notifyAll()
+
+                    Historical lifecycle
+                                │
+                           finalize()
+                         deprecated
+```
+
+The **four methods/concepts you should especially master first** are:
+
+1. **`toString()`** → how an object represents itself as text
+2. **`equals()`** → logical equality
+3. **`hashCode()`** → hash-based collections and the equality contract
+4. **`getClass()`** → runtime type information
+
+And these four are strongly connected:
+
+```text
+             Object
+               │
+       ┌───────┼────────┐
+       │       │        │
+   toString  equals  getClass
+               │
+           hashCode
+               │
+       HashMap / HashSet
+```

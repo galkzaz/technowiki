@@ -1,0 +1,652 @@
+
+## Performance
+### Load Factor
+One of the most important concepts in hash tables is the **load factor**.
+
+It is usually represented as:
+
+```text
+α = n / m
+```
+
+where:
+
+* `n` = number of stored entries
+* `m` = number of buckets/slots
+
+For example:
+
+```text
+n = 6
+m = 10
+```
+
+then:
+
+```text
+α = 6 / 10 = 0.6
+```
+
+So the table is 60% full.
+
+---
+
+**Why Load Factor Matters**
+
+As the table becomes more crowded:
+
+```text
+low load factor
+     ↓
+fewer collisions
+     ↓
+faster operations
+```
+
+while:
+
+```text
+high load factor
+     ↓
+more collisions
+     ↓
+more probing/chaining
+     ↓
+slower operations
+```
+
+Therefore implementations typically resize the table when the load factor becomes too large.
+
+### Complexity
+#### Time Complexity
+
+For a well-designed hash table:
+
+| Operation | Average | Worst Case |
+| --------- | ------: | ---------: |
+| Search    |    O(1) |       O(n) |
+| Insert    |    O(1) |       O(n) |
+| Delete    |    O(1) |       O(n) |
+
+Why can the worst case become `O(n)`?
+
+Because many keys could collide.
+
+For example, with chaining:
+
+```text
+table[3]
+
+10 → 20 → 30 → 40 → 50 → 60 → NULL
+```
+
+If all keys end up in the same bucket, searching can become a linear scan.
+
+So:
+
+> **O(1) is an average-case property, not a guaranteed worst-case property.**
+
+---
+
+#### Insertion
+The number of probes depends heavily on the load factor \(\alpha\).
+
+$$
+\text{higher}\alpha \Rightarrow \text{"more probes"}
+$$
+
+and:
+
+$$
+\text{lower }\alpha \Rightarrow \text{"fewer probes"}
+$$
+
+Assuming we only search through `b` potential bins, the worst-case performance of insert is O(b).
+
+Suppose:
+
+```text
+b = 11
+```
+
+and we're inserting an element.
+
+The probe sequence could potentially examine:
+
+```text
+H[1]
+H[4]
+H[7]
+H[10]
+H[2]
+H[5]
+H[8]
+H[0]
+H[3]
+H[6]
+H[9]
+```
+
+That's all 11 bins.
+
+If every one is occupied:
+
+```text
+11 probes
+    ↓
+no empty slot
+    ↓
+insertion fails
+```
+
+Therefore:
+
+$$
+T_{worst}=O(b)
+$$
+
+Since \(b\) can be related to \(n\), this can become \(O(n)\).
+
+---
+
+but with a low-enough load factor and no clustering, it should require only a fixed number of probes.
+
+Suppose:
+$$
+\alpha=0.5
+$$
+
+Only half of the table is occupied.
+
+A typical probe might look like:
+
+```text
+H[h]     → occupied
+H[next]  → empty
+```
+
+Only two probes.
+
+The number of probes doesn't grow proportionally with the number of elements as long as we keep the table sufficiently sparse and the keys are distributed well.
+
+That's why we can obtain **expected O(1)** search/insertion.
+
+---
+
+the **expected number of probes**.
+
+- Successful search
+
+A successful search means:
+
+> The element is actually in the table.
+
+For example:
+
+```text
+hash(25) = 5
+
+H[5] → 15
+H[6] → 35
+H[7] → 25  ← found
+```
+
+The search takes:
+
+```text
+3 probes
+```
+
+But not every element requires three probes.
+
+Some might be found immediately:
+
+```text
+H[2] = 50
+```
+
+requiring:
+
+```text
+1 probe
+```
+
+Others might require more.
+
+The formula estimates the **average** number of probes.
+
+{`
+$$
+E_{successful} = \frac{1+\frac{1}{1-\alpha}}{2}
+$$
+`}
+
+1. When α = 0
+
+The table is empty.
+{`
+$$
+\frac{1+\frac{1}{1-0}}{2}
+=
+\frac{1+1}{2}
+=
+1
+$$
+`}
+So:
+
+$$
+1\text{probe}
+$$
+
+That makes sense: if the table has no collisions, an element can be found directly at its hash position.
+
+---
+
+1. When α = 0.5
+
+Suppose half the table is occupied:
+
+$$
+\alpha=0.5
+$$
+
+Then:
+
+$$
+1-\alpha=0.5
+$$
+
+and:
+{`
+$$
+\frac{1}{1 - \alpha}
+=
+\frac{1}{0.5}
+=
+2
+$$
+`}
+Therefore:
+{`
+$$
+E_{\text{successful}}
+=
+\frac{1+2}{2}
+=
+1.5
+$$
+`}
+So approximately:
+{`
+$$
+\boxed{1.5\text{ probes}}
+$$
+`}
+on average.
+
+---
+
+2. When α = 0.8
+
+$$
+1-\alpha=0.2
+$$
+
+$$
+\frac{1}{0.2}=5
+$$
+
+Therefore:
+{`
+$$
+E_{\text{successful}}
+=
+\frac{1+5}{2}
+=
+3
+$$
+`}
+Approximately:
+{`
+$$
+\boxed{3\text{ probes}}
+$$
+`}
+
+---
+
+Notice what happens as α gets high
+
+Consider:
+
+| Load factor | Expected successful probes |
+| ----------: | -------------------------: |
+|         0.0 |                       1.00 |
+|        0.25 |                       1.17 |
+|        0.50 |                       1.50 |
+|        0.75 |                       2.50 |
+|        0.80 |                       3.00 |
+|        0.90 |                       5.50 |
+|        0.95 |                      10.50 |
+
+The important thing is what happens near 1.
+
+At:
+
+$$
+\alpha=0.95
+$$
+
+95% of the table is occupied.
+
+Only:
+
+$$
+1-\alpha=0.05
+$$
+
+is empty.
+
+So collisions become much more likely and the number of probes increases rapidly.
+
+- **Unsuccessful search**
+
+An unsuccessful search means:
+
+> The element is **not** in the table.
+
+For example, suppose:
+
+```text
+hash(40) = 5
+```
+
+and the table contains:
+
+```text
+H[5] = 15
+H[6] = 35
+H[7] = 25
+H[8] = empty
+```
+
+The search does:
+
+```text
+H[5] → not 40
+H[6] → not 40
+H[7] → not 40
+H[8] → EMPTY
+```
+
+Therefore:
+
+```text
+4 probes
+```
+
+The search has to continue until it finds an empty slot.
+
+This is why unsuccessful searches can require significantly more probes than successful searches.
+
+The formula is:
+{`
+$$
+E_{unsuccessful}
+=
+\frac\{
+1+\left(\frac{1}\{1-\alpha}\right)^2
+}{2}
+$$
+`}
+Notice the **square**.
+
+---
+
+1. Example: α = 0.5
+
+For:
+
+$$
+\alpha=0.5
+$$
+
+we already know:
+
+$$
+\frac\{1}\{1-\alpha}=2
+$$
+
+Therefore:
+
+$$
+E_\{\text\{unsuccessful}}
+=
+\frac\{1+2^2}\{2}
+$$
+
+$$
+=
+\frac{1+4}{2}
+$$
+
+$$
+=
+2.5
+$$
+
+So:
+
+$$
+\boxed\{2.5\text\{ probes}}
+$$
+
+Compare:
+
+```text
+Successful:    1.5 probes
+Unsuccessful:  2.5 probes
+```
+
+The unsuccessful search needs more probes on average.
+
+---
+
+**Why is unsuccessful search more expensive?**
+
+Because a successful search can stop as soon as it finds the element.
+
+```text
+H[5] → 15
+H[6] → 35
+H[7] → 25 ← FOUND
+
+STOP
+```
+
+But an unsuccessful search must continue until it reaches an empty slot:
+
+```text
+H[5] → 15
+H[6] → 35
+H[7] → 25
+H[8] → EMPTY
+
+STOP
+```
+
+So:
+
+```text
+Successful search
+    ↓
+find element
+    ↓
+STOP
+
+
+Unsuccessful search
+    ↓
+keep looking
+    ↓
+find empty slot
+    ↓
+STOP
+```
+
+Notice:
+
+```text
+Successful:
+
+1 / (1 - α)
+
+
+Unsuccessful:
+
+1 / (1 - α)²
+```
+
+The unsuccessful case grows faster as the table becomes full.
+
+For example:
+
+|    α | Successful | Unsuccessful |
+| ---: | ---------: | -----------: |
+| 0.50 |       1.50 |         2.50 |
+| 0.75 |       2.50 |         8.50 |
+| 0.80 |       3.00 |        13.00 |
+| 0.90 |       5.50 |        50.50 |
+| 0.95 |      10.50 |       200.50 |
+
+This is a very important observation about open addressing:
+
+> **As the load factor approaches 1, unsuccessful searches can become extremely expensive.**
+
+---
+
+## Hash Tables vs Arrays
+
+| Feature            | Array           | Hash Table     |
+| ------------------ | --------------- | -------------- |
+| Access             | O(1)            | O(1) average   |
+| Search by key      | O(n) generally  | O(1) average   |
+| Ordered            | No              | No             |
+| Key-value mapping  | Not directly    | Yes            |
+| Memory             | Usually compact | Extra overhead |
+| Collision handling | No              | Required       |
+| Resizing           | Sometimes       | Common         |
+
+An array is excellent when you already have a numeric index.
+
+A hash table is useful when you have a **key** and need to find its associated value quickly.
+
+---
+
+## Hash Tables vs Binary Search Trees
+
+This comparison is particularly useful when studying data structures.
+
+| Feature           |   Hash Table |               BST |
+| ----------------- | -----------: | ----------------: |
+| Search            | O(1) average | O(log n) balanced |
+| Insert            | O(1) average | O(log n) balanced |
+| Delete            | O(1) average | O(log n) balanced |
+| Sorted data       |            ❌ |                 ✅ |
+| Range queries     |         Poor |              Good |
+| Exact key lookup  |    Excellent |              Good |
+| Worst-case search |         O(n) | O(n) ordinary BST |
+| Ordered traversal |            ❌ |                 ✅ |
+
+A hash table is generally designed around:
+
+> **"Find this exact key quickly."**
+
+A BST is better suited to:
+
+> **"Maintain keys in sorted order."**
+
+---
+
+## Hash Tables vs Heaps
+
+an important distinction is:
+
+| Operation          |      Hash Table |     Heap |
+| ------------------ | --------------: | -------: |
+| Find arbitrary key |        O(1) avg |     O(n) |
+| Insert             |        O(1) avg | O(log n) |
+| Find minimum       |  O(n) generally |     O(1) |
+| Find maximum       |  O(n) generally |     O(1) |
+| Delete min/max     | Not its purpose | O(log n) |
+
+So they solve very different problems.
+
+Hash table
+```text
+"I need to find the value associated with this key."
+```
+
+Heap
+```text
+"I need the smallest/largest priority element."
+```
+
+## Applications
+### Dictionaries / Maps
+### Sets
+### Caches
+### Symbol tables
+### Database indexing
+### Memoization
+### Frequency counting
+## Summary
+Hash Tables are often used to implement Maps and Sets. They allow faster insertions and deletions than tree-based data structures.
+
+However, they require a very large chunk of sequential memory in order to work properly.
+
+The key idea to remember
+
+If you remember only one thing:
+
+```text
+Hash Table
+     │
+     ▼
+   key
+     │
+     ▼
+hash function
+     │
+     ▼
+  array index
+     │
+     ▼
+ key → value
+```
+
+This transformation is what gives hash tables their **O(1) average-time lookup**.
+
+And the central problem you must understand is:
+
+```text
+Different keys
+      │
+      ▼
+same hash/index
+      │
+      ▼
+  COLLISION
+      │
+      ├───────────────┐
+      ▼               ▼
+Chaining        Open Addressing
+                    │
+             ┌──────┼─────────┐
+             ▼      ▼         ▼
+          Linear Quadratic Double
+          Probing Probing  Hashing
+```
+
+That collision-resolution hierarchy is the core of understanding how hash tables actually work internally.

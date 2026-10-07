@@ -1,0 +1,1642 @@
+
+## Authorization Code Flow
+The **Authorization Code Flow** is the standard OAuth 2.0 flow used when an application needs to obtain an **access token on behalf of a user**.
+
+It separates the process into two major stages:
+
+1. **Authorization** — the user authenticates and grants permission.
+2. **Token exchange** — the client exchanges a short-lived authorization code for tokens.
+
+A simplified picture is:
+
+```text
+┌──────────┐                         ┌──────────────────────┐
+│          │                         │                      │
+│   User   │                         │ Authorization Server │
+│          │                         │                      │
+└────┬─────┘                         └──────────┬───────────┘
+     │                                          │
+     │  1. Authorization Request                │
+     │─────────────────────────────────────────>│
+     │                                          │
+     │       Login + Consent                    │
+     │<────────────────────────────────────────>│
+     │                                          │
+     │  2. Authorization Response               │
+     │<─────────────────────────────────────────│
+     │       authorization code                 │
+     │                                          │
+     │                                          │
+┌────┴─────┐                                    │
+│          │                                    │
+│  Client  │                                    │
+│  App     │                                    │
+└────┬─────┘                                    │
+     │                                          │
+     │  3. Token Request                        │
+     │─────────────────────────────────────────>│
+     │                                          │
+     │  4. Token Response                       │
+     │<─────────────────────────────────────────│
+     │       access token                       │
+     │       refresh token                      │
+     │                                          │
+     │
+     │  5. API Request + Access Token
+     ├───────────────────────────────────────> Resource Server
+     │
+```
+
+For modern applications, especially **confidential server-side applications**, Authorization Code Flow is generally used with **PKCE** as well. PKCE adds protection against an intercepted authorization code.
+
+### Flow Overview
+The complete flow can be viewed as these steps:
+
+```text
+1. Client
+      │
+      │ Authorization Request
+      ▼
+2. Authorization Server
+      │
+      │ User authenticates
+      │ User grants consent
+      ▼
+3. Authorization Server
+      │
+      │ Authorization Code
+      ▼
+4. Client
+      │
+      │ Token Request
+      ▼
+5. Authorization Server
+      │
+      │ Access Token
+      │ Refresh Token
+      ▼
+6. Client
+      │
+      │ API Request + Access Token
+      ▼
+7. Resource Server
+```
+
+The important idea is:
+
+> **The authorization code is not the access token.**
+
+The authorization code is a temporary credential that the client exchanges for tokens.
+
+```text
+Authorization Code
+        │
+        │ token request
+        ▼
+Access Token
+        │
+        ▼
+Resource Server
+```
+
+This separation prevents the browser/user-agent from directly receiving the access token in the authorization response.
+
+OAuth 2 provides several "grant types" for different use cases. The grant types defined are:
+
+- Authorization Code for apps running on a web server, browser-based and mobile apps
+- Password for logging in with a username and password (only for first-party apps)
+- Client credentials for application access without a user present
+- Implicit was previously recommended for clients without a secret, but has been superseded by using the Authorization Code grant with PKCE.
+
+#### Web Server Apps
+##### Flow
+This grant flow requires that the user interacts with the authorization server using a web
+browser for authentication and giving consent to the client application, as illustrated by
+the following diagram:
+![OAuth 2.0 – authorization code grant flow](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/OAuth2.0–authorization-code-grant-flow.png)
+Here’s what’s going on in this diagram:
+1. The client application initiates the grant flow by sending the user to the authorization server in the web browser.
+2. The authorization server will authenticate the user and ask for the user’s consent.
+3. The authorization server will redirect the user back to the client application with an authorization code. The authorization server will use a redirect URI specified by the client in step 1 to know where to send the authorization code. Since the authorization code is passed back to the client application using the web browser, that is, to an unsecured environment where malicious JavaScript code can potentially pick up the authorization code, it is only allowed to be used once and only during a short time period.
+4. To exchange the authorization code for an access token, the client application is expected to call the authorization server again. The client application must present its client ID and client secret together with the authorization code for the authorization server. Since the client secret is sensitive and must be protected, this call must be executed from server-side code.
+5. The authorization server issues an access token and sends it back to the client application. The authorization server can also, optionally, issue and return a refresh token.
+6. Using the access token, the client can send a request to the protected API exposed by the resource server.
+7. The resource server validates the access token and serves the request in the event of a successful validation. 
+8. Steps 6 and 7 can be repeated as long as the access token
+is valid. When the lifetime of the access token has expired, the client can use their refresh token to acquire a new access token.
+
+**request authorization from the user**
+The first step of the web flow is to request authorization from the user. This is accomplished by creating an authorization request link for the user to click on.
+
+The authorization URL is usually in a format such as:
+```
+https://authorization-server.com/oauth/authorize
+?client_id=a17c21ed
+&response_type=code
+&state=5ca75bd30
+&redirect_uri=https%3A%2F%2Fexample-app.com%2Fauth
+&scope=photos
+```
+The exact URL endpoint will be specified by the service to which you are connecting, but the parameter names will always be the same.
+
+Note that you will most likely first need to register your redirect URL at the service before it will be accepted. This also means you can’t change your redirect URL per request. Instead, you can use the state parameter to customize the request. See below for more information.
+
+After the user visits the authorization page, the service shows the user an explanation of the request, including application name, scope, etc. (See “approves the request” for an example screenshot.) If the user clicks “approve”, the server will redirect back to the app, with a “code” and the same “state” parameter you provided in the query string parameter. It is important to note that this is not an access token. The only thing you can do with the authorization code is to make a request to get an access token.
+
+Up until 2019, the OAuth 2.0 spec only recommended using the PKCE extension for mobile and JavaScript apps. The latest OAuth Security BCP now recommends using PKCE also for server-side apps, as it provides some additional benefits there as well. It is likely to take some time before common OAuth services adapt to this new recommendation, but if you’re building a server from scratch you should definitely support PKCE for all types of clients.
+
+**Authorization Request Parameters**
+
+The following parameters are used to make the authorization request. You should build a query string with the below parameters, appending that to the application’s authorization endpoint obtained from its documentation.
+
+- **response_type=code**: response_type is set to code indicating that you want an authorization code as the response.
+- **client_id**: The client_id is the identifier for your app. You will have received a client_id when first registering your app with the service.
+- **redirect_uri (optional)**: The redirect_uri may be optional depending on the API, but is highly recommended. This is the URL to which you want the user to be redirected after the authorization is complete. This must match the redirect URL that you have previously registered with the service.
+- **scope (optional)**: Include one or more scope values (space-separated) to request additional levels of access. The values will depend on the particular service.
+- **state**: The state parameter serves two functions. When the user is redirected back to your app, whatever value you include as the state will also be included in the redirect. This gives your app a chance to persist data between the user being directed to the authorization server and back again, such as using the state parameter as a session key. This may be used to indicate what action in the app to perform after authorization is complete, for example, indicating which of your app’s pages to redirect to after authorization.
+The state parameter also serves as a CSRF protection mechanism if it contains a random value per request. When the user is redirected back to your app, double check that the state value matches what you set it to originally.
+- **PKCE**: If the service supports PKCE for web server apps, include the PKCE challenge and challenge method here as well.
+
+Combine all of these query string parameters into the authorization URL, and direct the user’s browser there. Typically apps will put these parameters into a login button, or will send this URL as an HTTP redirect from the app’s own login URL.
+
+
+**The user approves the request**
+
+After the user is taken to the service and sees the request, they will either allow or deny the request. If they allow the request, they will be redirected back to the redirect URL specified along with an authorization code in the query string. The app then needs to exchange this authorization code for an access token.
+
+**Exchange the authorization code for an access token**
+
+To exchange the authorization code for an access token, the app makes a POST request to the service’s token endpoint. The request will have the following parameters.
+- **grant_type (required)**: The grant_type parameter must be set to “authorization_code”. 
+- **code (required)**: This parameter is for the authorization code received from the authorization server which will be in the query string parameter “code” in this request.
+- **redirect_uri (possibly required)**: If the redirect URL was included in the initial authorization request, it must be included in the token request as well, and must be identical. Some services support registering multiple redirect URLs, and some require the redirect URL to be specified on each request. Check the service’s documentation for the specifics.
+- **Client Authentication (required)**: The service will require the client authenticate itself when making the request for an access token. Typically services support client authentication via HTTP Basic Auth with the client’s client_id and client_secret. However, some services support authentication by accepting the client_id and client_secret as POST body parameters. Check the service’s documentation to find out what the service expects, since the OAuth 2.0 spec leaves this decision up to the service.
+
+More advanced OAuth servers may also require other forms of client authentication such as mTLS or private_key_jwt. Refer to the service’s own documentation for those examples.
+PKCE Verifier
+
+If the service supports PKCE for web server apps, then the client will need to include the followup PKCE parameter when exchanging the authorization code as well.
+
+##### Example Flow 
+The high level overview is this:
+
+1. Create a log-in link with the app’s client ID, redirect URL, state, and PKCE code challenge parameters
+1. The user sees the authorization prompt and approves the request
+1. The user is redirected back to the app’s server with an auth code
+1. The app exchanges the auth code for an access token
+
+**The app initiates the authorization request**
+
+The app initiates the flow by crafting a URL containing client ID, scope, state and PKCE code verifier. The app can put this into an \<a href=""\> tag.
+```
+<a href="https://authorization-server.com/oauth/authorize
+?response_type=code&client_id=mRkZGFjM&state=5ca75bd30
+&scope=photos
+&code_challenge_method=S256
+&code_challenge=hKpKupTM391pE10xfQiorMxXarRKAHRhTfH_xkGf7U4">
+Connect Your Account</a>
+```
+Note that this is not an HTTP call your application is making, instead this is a URL that the user will click on to redirect their browser to the OAuth server.
+
+**The user approves the request**
+
+Upon being directed to the authorization server, the user sees the authorization request shown in the illustration below. If the user approves the request, they will be redirected back to the app along with the auth code and state parameters.
+![Example Authorization Request](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/example-authorization -request1.png)
+
+**The service redirects the user back to the app**
+
+The service sends a redirect header redirecting the user’s browser back to the app that made the request. The redirect will include a “code” in the URL and the original “state”.
+```
+https://example-app.com/cb?code=Yzk5ZDczMzRlNDEwY&state=5ca75bd30
+```
+(This will actually be sent back as an HTTP response from the authorization server to the user’s browser, not to your application. The actual HTTP response isn’t shown here because it is not significant to the code you write in your application.)
+
+**The app exchanges the auth code for an access token**
+
+Finally the application uses the authorization code to get an access token by making an HTTPS POST request to the authorization server’s token endpoint.
+```
+POST /oauth/token HTTP/1.1
+Host: authorization-server.com
+ 
+code=Yzk5ZDczMzRlNDEwY
+&grant_type=code
+&redirect_uri=https://example-app.com/cb
+&client_id=mRkZGFjM
+&client_secret=ZGVmMjMz
+&code_verifier=Th7UHJdLswIYQxwSg29DbK1a_d9o41uNMTRmuH0PM8zyoMAQ
+```
+The authorization server validates the request and responds with an access token and optional refresh token if the access token will expire.
+
+Response:
+```
+{
+  "access_token": "AYjcyMzY3ZDhiNmJkNTY",
+  "refresh_token": "RjY2NjM5NzA2OWJjuE7c",
+  "token_type": "Bearer",
+  "expires": 3600
+}
+```
+##### Possible Errors
+There are several cases where you may get an error response during authorization.
+
+Errors are indicated by redirecting back to the provided redirect URL with additional parameters in the query string. There will always be an error parameter, and the redirect may also include error_description and error_uri.
+
+For example,
+https://example-app.com/cb?error=invalid_scope
+
+Despite the fact that servers return an error_description key, the error description is not intended to be displayed to the user. Instead, you should present the user with your own error message. This allows you to tell the user an appropriate action to take to correct the problem, and also gives you a chance to localize the error messages if you’re building a multi-language website.
+
+**Invalid redirect URL**
+
+If the redirect URL provided is invalid, the authorization server will not redirect to it. Instead, it may display a message to the user describing the problem instead.
+Unrecognized client_id
+
+If the client ID is not recognized, the authorization server will not redirect the user. Instead, it may display a message describing the problem.
+
+**The user denies the request**
+
+If the user denies the authorization request, the server will redirect the user back to the redirect URL with error=access_denied in the query string, and no code will be present. It is up to the app to decide what to display to the user at this point.
+
+**Invalid parameters**
+
+If one or more parameters are invalid, such as a required value is missing, or the response_type parameter is wrong, the server will redirect to the redirect URL and include query string parameters describing the problem. The other possible values for the error parameter are:
+
+**invalid_request**: The request is missing a required parameter, includes an invalid parameter value, or is otherwise malformed.
+
+**unauthorized_client**: The client is not authorized to request an authorization code using this method.
+
+**unsupported_response_type**: The authorization server does not support obtaining an authorization code using this method.
+
+**invalid_scope**: The requested scope is invalid, unknown, or malformed.
+
+**server_error**: The authorization server encountered an unexpected condition which prevented it from fulfilling the request.
+
+**temporarily_unavailable**: The authorization server is currently unable to handle the request due to a temporary overloading or maintenance of the server.
+
+In addition, the server may include parameters error_description and error_uri with additional information about the error. 
+
+##### User Experience Considerations
+
+In order for the authorization code grant to be secure, the authorization page must appear in a web browser the user is familiar with, and must not be embedded in an iframe popup or an embedded browser in a mobile app. If it could be embedded in another website, the user would have no way of verifying it is the legitimate service and is not a phishing attempt.
+
+If an app wants to use the authorization code grant but can’t protect its secret (i.e. native mobile apps or single-page JavaScript apps), then the client secret is not required when making a request to exchange the auth code for an access token, and PKCE must be used as well. However, some services still do not support PKCE, so it may not be possible to perform an authorization flow from the single-page app itself, and the client-side JavaScript code may need to have a companion server-side component that performs the OAuth flow instead.
+
+##### Advantages
+
+The authorization code flow offers a few benefits over the other grant types. When the user authorizes the application, they are redirected back to the application with a temporary code in the URL. The application exchanges that code for the access token. When the application makes the request for the access token, that request can be authenticated with the client secret, which reduces the risk of an attacker intercepting the authorization code and using it themselves. This also means the access token is never visible to the user or their browser, so it is the most secure way to pass the token back to the application, reducing the risk of the token leaking to someone else.
+)
+
+Web server apps are the most common type of application you encounter when dealing with OAuth servers. Web apps are written in a server-side language and run on a server where the source code of the application is not available to the public. This means the application is able to use its client secret when communicating with the authorization server, which can help avoid many attack vectors.
+Authorization
+
+Create a "Log In" link sending the user to:
+```
+https://authorization-server.com/auth?response_type=code&
+  client_id=CLIENT_ID&redirect_uri=REDIRECT_URI&scope=photos&state=1234zyx
+```
+    response_type=code - Indicates that your server expects to receive an authorization code
+    client_id - The client ID you received when you first created the application
+    redirect_uri - Indicates the URI to return the user to after authorization is complete
+    scope - One or more scope values indicating which parts of the user's account you wish to access
+    state - A random string generated by your application, which you'll verify later
+
+The user sees the authorization prompt
+
+OAuth Authorization Prompt
+
+If the user clicks "Allow," the service redirects the user back to your site with an authorization code
+```
+https://example-app.com/cb?code=AUTH_CODE_HERE&state=1234zyx
+```
+    code - The server returns the authorization code in the query string
+    state - The server returns the same state value that you passed
+
+You should first compare this state value to ensure it matches the one you started with. You can typically store the state value in a cookie or session, and compare it when the user comes back. This helps ensure your redirection endpoint isn't able to be tricked into attempting to exchange arbitrary authorization codes.
+Getting an Access Token
+
+Your server exchanges the authorization code for an access token by making a POST request to the authorization server's token endpoint:
+```
+POST https://api.authorization-server.com/token
+  grant_type=authorization_code&
+  code=AUTH_CODE_HERE&
+  redirect_uri=REDIRECT_URI&
+  client_id=CLIENT_ID&
+  client_secret=CLIENT_SECRET
+```
+    grant_type=authorization_code - The grant type for this flow is authorization_code
+    code=AUTH_CODE_HERE - This is the code you received in the query string
+    redirect_uri=REDIRECT_URI - Must be identical to the redirect URI provided in the original link
+    client_id=CLIENT_ID - The client ID you received when you first created the application
+    client_secret=CLIENT_SECRET - Since this request is made from server-side code, the secret is included
+
+The server replies with an access token and expiration time
+```
+{
+  "access_token":"RsT5OjbzRn430zqMLgV3Ia",
+  "expires_in":3600
+}
+```
+or if there was an error
+```
+{
+  "error":"invalid_request"
+}
+```
+Security: Note that the service must require apps to pre-register their redirect URIs.
+
+#### Single-Page Apps
+
+Single-page apps (or browser-based apps) run entirely in the browser after loading the source code from a web page. Since the entire source code is available to the browser, they cannot maintain the confidentiality of a client secret, so the secret is not used in this case. The flow is based on the authorization code flow above, but with the addition of a dynamically generated secret used on each request. This is known as the PKCE extension. . Because they can’t use a client secret, the best option is to use the PKCE extension to protect the authorization code in the redirect. This is similar to the solution for mobile apps which also can’t use a client secret.
+
+
+Note: Previously, it was recommended that browser-based apps use the "Implicit" flow, which returns an access token immediately in the redirect and does not have a token exchange step. In the time since the spec was originally written, the industry best practice has changed to recommend that the authorization code flow be used without the client secret. This provides more opportunities to create a secure flow, such as using the PKCE extension. Further reading: OAuth 2.0 Security Best Current Practice (ietf.org), OAuth 2.0 for Browser-Based Apps (ietf.org).
+
+![The user’s browser communicates directly with the API server](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/user_browser_server.png)
+The diagram below illustrates an example where the user interacts with their browser, which in turn makes API requests directly to the service. After first downloading the Javascript and HTML source code from the client, the browser then makes direct API requests to the service. In this case, the app’s server never makes API requests to the service, since everything is handled directly in the browser.
+
+##### Flow
+**Authorization**
+
+The authorization code is a temporary code that the client will exchange for an access token. The code itself is obtained from the authorization server where the user gets a chance to see what the information the client is requesting, and approve or deny the request.
+
+The first step of the web flow is to request authorization from the user. This is accomplished by creating an authorization request link for the user to click on.
+
+Create a random string between 43-128 characters long, then generate the url-safe base64-encoded SHA256 hash of the string. The original random string is known as the code_verifier, and the hashed version is known as the code_challenge.
+
+Create a random string (code verifier), e.g. 5d2309e5bb73b864f989753887fe52f79ce5270395e25862da6940d5
+
+Create the SHA256 hash, then base64-encode the string (code challenge): MChCW5vD-3h03HMGFZYskOSTir7II_MMTb8a9rJNhnI
+
+(You can use the helper utility at example-app.com/pkce to generate a secret and hash.)
+
+Create a "Log In" link like the authorization code flow above, but now include the code challenge in the request:
+```
+https://authorization-server.com/auth?response_type=code&
+  client_id=CLIENT_ID&redirect_uri=REDIRECT_URI&scope=photos&state=1234zyx&code_challenge=CODE_CHALLENGE&code_challenge_method=S256
+```
+    response_type=code - Indicates that your server expects to receive an authorization code
+    client_id - The client ID you received when you first created the application
+    redirect_uri - Indicates the URI to return the user to after authorization is complete
+    scope - One or more scope values indicating which parts of the user's account you wish to access
+    state - A random string generated by your application, which you'll verify later
+    code_challenge - The URL-safe base64-encoded SHA256 hash of the secret
+    code_challenge_method=S256 - Indicate which hashing method you used (S256)
+
+Note that the lack of using a client secret means that using the state parameter is even more important for single-page apps.
+
+The user sees the authorization prompt
+
+**OAuth Authorization Prompt**
+
+After the user visits the authorization page, the service shows the user an explanation of the request, including application name, scope, etc. If the user clicks “approve”, the server will redirect back to the website, with an authorization code and the state value in the URL query string.
+
+If the user clicks "Allow," the service redirects the user back to your site with an auth code
+```
+https://example-app.com/cb?code=AUTH_CODE_HERE&state=1234zyx
+```
+    code - The server returns the authorization code in the query string
+    state - The server returns the same state value that you passed
+
+You should first compare this state value to ensure it matches the one you started with. You can typically store the state value in a cookie, and compare it when the user comes back. This ensures your redirection endpoint isn't able to be tricked into attempting to exchange arbitrary authorization codes.
+
+You can find a complete example of using PKCE in JavaScript in my blog post Is the OAuth Implicit Flow Dead?
+Getting an Access Token
+
+Now you'll need to exchange the authorization code for an access token, but instead of providing a pre-registered client secret, you send the PKCE secret you generated at the beginning of the flow.
+```
+POST https://api.authorization-server.com/token
+  grant_type=authorization_code&
+  code=AUTH_CODE_HERE&
+  redirect_uri=REDIRECT_URI&
+  client_id=CLIENT_ID&
+  code_verifier=CODE_VERIFIER
+```
+    grant_type=authorization_code - The grant type for this flow is authorization_code
+    code=AUTH_CODE_HERE - This is the code you received in the query string
+    redirect_uri=REDIRECT_URI - Must be identical to the redirect URI provided in the original link
+    client_id=CLIENT_ID - The client ID you received when you first created the application
+    code_verifier=CODE_VERIFIER - The random secret you generated at the beginning
+
+The authorization server will hash the verifier and compare it to the challenge sent in the request, and only issue the access token if they match. This ensures that even if someone was able to intercept the authorization code, they will not be able to use it to get an access token since they won't have the secret.
+
+Some services use the alternative Implicit Flow for single-page apps, rather than allow the app to use the Authorization Code flow with no secret.
+
+The Implicit Flow bypasses the code exchange step, and instead the access token is returned in the query string fragment to the client immediately.
+
+In practice, there are only very limited cases in which this is necessary. Several major implementations (Keycloak, Deutsche Telekom, Smart Health IT) have chosen to avoid the Implicit Flow completely and use the Authorization Code flow instead.
+
+In order for a single-page app to use the Authorization Code flow, it must be able to make a POST request to the authorization server. This means if the authorization server is on a different domain, the server will need to support the appropriate CORS headers. If supporting CORS headers is not an option, then the service may use the Implicit Flow instead.
+
+In any case, with both the Implicit Flow as well as the Authorization Code Flow with no secret, the server must require registration of the redirect URL in order to maintain the security of the flow.
+##### Example Flow 
+
+The following step-by-step example illustrates using the authorization grant type for single-page apps.
+
+**The app initiates the authorization request**
+
+The app initiates the flow by crafting a URL containing ID, and optionally scope and state. The app can put this into an \<a href=""\> tag.
+```
+<a href="https://authorization-server.com/authorize?response_type=code
+     &client_id=mRkZGFjM&state=TY2OTZhZGFk">Connect Your Account</a>
+```
+**The user approves the request**
+
+Upon being directed to the auth server, the user sees the authorization request.
+
+![Example Authorization Request](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/example-authorization -request1.png)
+
+After the user is taken to the service and sees the request, they will either allow or deny the request. If they allow the request, they will be redirected back to the redirect URL specified along with an authorization code in the query string. The app then needs to exchange this authorization code for an access token.
+https://example-app.com/cb?code=Yzk5ZDczMzRlNDEwY&state=TY2OTZhZGFk
+
+If you include a “state” parameter in the initial authorization URL, the service will return it to you after the user authorizes your app. Your app should compare the state with the state it created in the initial request. This helps ensure that you only exchange authorization codes that you requested, preventing attackers from redirecting to your callback URL with arbitrary or stolen authorization codes.
+
+**Exchange the authorization code for an access token**
+
+To exchange the authorization code for an access token, the app makes a POST request to the service’s token endpoint. The request will have the following parameters.
+
+grant_type (required): The grant_type parameter must be set to “authorization_code“.
+
+code (required): This parameter is for the authorization code received from the authorization server which will be in the query string parameter “code” in this request.
+
+redirect_uri (possibly required): If the redirect URL was included in the initial authorization request, it must be included in the token request as well, and must be identical. Some services support registering multiple redirect URLs, and some require the redirect URL to be specified on each request. Check the service’s documentation for the specifics.
+
+Client Identification (required): Despite the client secret not being used in this flow, the request requires sending the client ID to identify the application making the request. This means the client must include the client ID as a POST body parameter rather than using HTTP Basic Authentication like it can when including the client secret as well.
+```
+POST /oauth/token HTTP/1.1
+  Host: authorization-endpoint.com
+  grant_type=code
+  &code=Yzk5ZDczMzRlNDEwY
+  &redirect_uri=https://example-app.com/cb
+  &client_id=mRkZGFjM
+```
+##### Security Considerations
+
+The only way the authorization code grant with no client secret can be secure is by using the “state” parameter and restricting the redirect URL to trusted clients. Since the secret is not used, there is no way to verify the identity of the client other than by using a registered redirect URL. This is why you need to pre-register your redirect URL with the OAuth 2.0 service.
+
+With browser-based apps there is always a risk of things like Cross-Site Scripting (XSS) attacks due to the increased attack surface and number of moving parts in websites. Additionally, browsers currently don’t have a secure storage mechanism available to store things like the access token or refresh token. As such, browsers are always considered a higher risk in an OAuth deployment compared to other platforms, and the authorization server will usually have special policies around token lifetimes to mitigate that risk.
+
+**Refresh Tokens**
+
+Historically, with the Implicit flow, there was never any mechanism for returning refresh tokens to JavaScript applications. This made sense at the time, because it was well known that the Implicit flow was less secure, and without a client secret, a refresh token can be used to get new access tokens indefinitely, so this would be an even greater risk than a leaked access token. There was also little need for a refresh token since JavaScript apps would only be running when the user was actively using the browser, so they could redirect to the authorization server to get a new access token if needed.
+
+With the developments over the last few years of adopting PKCE for JavaScript apps, there is now the potential for refresh tokens to be issued to JavaScript apps as well. This ends up being a policy decision of the authorization server as to whether refresh tokens will be issued, depending on the level of risk the authorization server is willing to tolerate.
+
+Additionally, the additions of browser APIs such as ServiceWorkers means that now browser-based apps have the potential to run code when the user isn’t actively using the browser, such as in response to a Background Sync event. This means there is now more potential use for refresh tokens in browser apps.
+
+If the authorization server wishes to allow JavaScript apps to use refresh tokens, then they must also follow the best practices outlined in “OAuth 2.0 Security Best Current Practice” and “OAuth 2.0 for Browser-Based Apps“, two recent documents adopted by the OAuth Working Group. Specifically, refresh tokens must be valid for only one use, and the authorization server must issue a new refresh token each time a new access token is issued in response to a refresh token grant. This provides the authorization server a way to detect if a refresh token has been copied and used by an attacker, since in normal operation of an app a refresh token would be used only once.
+
+Refresh tokens must also either have a set maximum lifetime, or expire if they are not used within some amount of time. This is again another way to help mitigate the risks of a stolen refresh token.
+
+**Storing Tokens**
+
+The browser-based app will need to temporarily store some pieces of information during the authorization flow, and then permanently store the resulting access token and refresh token. This provides some challenges in the browser environment since there are currently no general-purpose secure storage mechanism in browsers.
+
+Generally, the browser’s LocalStorage API is the best place to store this data as it provides the easiest API to store and retrieve data and is about as secure as you can get in a browser. The downside is that any scripts on the page, even from different domains such as your analytics or ad network, will be able to access the LocalStorage of your application. This means anything you store in LocalStorage is potentially visible to third-party scripts on your page.
+
+Because of the risks of data leakage from third-party scripts, it is extremely important to have a good Content-Security Policy configured for your app so that you can be more confident that arbitrary scripts aren’t able to run in the application. A good document on configuring a Content Security Policy is available from OWASP at https://owasp.org/www-project-cheat-sheets/cheatsheets/Content_Security_Policy_Cheat_Sheet.html
+
+##### Choosing an Alternative Architecture
+
+Due to the inherent risks of performing an OAuth flow in a pure JavaScript environment, as well as the risks of storing tokens in a JavaScript app, it is also advisable to consider an alternative architecture where the OAuth flow is handled outside of the JavaScript code by a dynamic backend component. This is a relatively common architectural pattern where an application is served from a dynamic backend such as a .NET or Java app, but it uses a single-page app framework like React or Angular for its UI. If your app falls under this architectural pattern, then the best option is to move all of the OAuth flow to the server component, and keep the access tokens and refresh tokens out of the browser entirely. Note that in this case since your app has a dynamic backend, it is also considered a confidential client and can use a client secret to further protect the OAuth exchanges.
+
+This pattern is described in more detail in “OAuth 2.0 for Browser-Based Apps“.
+#### Mobile Apps
+
+Like single-page apps, mobile apps also cannot maintain the confidentiality of a client secret. Because of this, mobile apps must also use an OAuth flow that does not require a client secret. The current best practice is to use the Authorization Flow with PKCE, along with launching an external browser, in order to ensure the native app cannot modify the browser window or inspect the contents. There are some additional concerns that mobile apps should keep in mind to ensure the security of the OAuth flow.
+
+Many websites provide mobile SDKs which handle the authorization process for you. For those services, you are probably better off using their SDKs directly, since they may have augmented their APIs with non-standard additions. Google provides an open source library called AppAuth which handles the implementation details of the flow described below. It is meant to be able to work with any OAuth 2.0 server that implements the spec. In the case that the service does not a provide their own abstraction, and you have to use their OAuth 2.0 endpoints directly, this section describes how to use the authorization code flow with PKCE to interface with an API.
+
+Note: Previously, it was recommended that mobile and native apps use the Implicit grant. In the time since the spec was originally written, the industry best practice has changed to recommend using the authorization code flow with no secret for native apps. There are some additional recommendations for native apps that are worth reading as well.
+
+##### Flow
+**Authorization**
+
+Create a "Log in" button sending the user to either the native app of the service on the phone, or a mobile web page for the service. 
+
+Create a “Log in” button that will open a secure web browser within the app (ASWebAuthenticationSession or SFSafariViewController on iOS, and “Custom Tabs” on Android). You’ll use the same parameters for the authorization request as described in Server-Side Apps including the PKCE parameters.
+
+
+Apps can register a custom URI scheme such as "example-app://" so the native app is launched whenever a URL with that protocol is visited, or they can register URL patterns which will launch the native app if a URL matching the pattern is visited.
+Using the Service's Native App
+
+The resulting redirect will include the temporary authorization code which the app will exchange for an access token from its native code.
+
+If the user has the native Facebook app installed, direct them to the following URL:
+```
+fbauth2://authorize?response_type=code&client_id=CLIENT_ID
+  &redirect_uri=REDIRECT_URI&scope=email&state=1234zyx
+```
+    response_type=code - indicates that your server expects to receive an authorization code
+    client_id=CLIENT_ID - The client ID you received when you first created the application
+    redirect_uri=REDIRECT_URI - Indicates the URI to return the user to after authorization is complete, such as fb00000000://authorize
+    scope=email - One or more scope values indicating which parts of the user's account you wish to access
+    state=1234zyx - A random string generated by your application, which you'll verify later
+
+For servers that support the PKCE extension (and if you're building a server, you should support the PKCE extension), you'll also include the following parameters. First, create a "code verifier" which is a random string that the app stores locally.
+
+    code_challenge=XXXXXXX - This is a base64-encoded version of the sha256 hash of the code verifier string
+    code_challenge_method=S256 - Indicates the hashing method used to compute the challenge, in this case, sha256.
+
+Note that your redirect URI will probably look like fb00000000://authorize where the protocol is a custom URL scheme that your app has registered with the OS.
+
+##### Example
+In this example we will walk through a simple iPhone application that obtains authorization to access a fictional API.
+
+**Initiate the authorization request**
+
+To begin the authorization process, the app should have a “sign in” button. The link should be constructed as a full URL to the service’s authorization endpoint.
+
+The client first creates what is known as a PKCE “code verifier“. This is a cryptographically random string using the characters A-Z, a-z, 0-9, and the punctuation characters -._~ (hyphen, period, underscore, and tilde), between 43 and 128 characters long.
+
+Once the app has generated the code verifier, it uses that to create the code challenge. The code challenge is a Base64-URL-encoded string of the SHA256 hash of the code verifier. This hashed value is sent in the authorization request, so that the original random string is never exposed to anything outside the app.
+
+The authorization request parameters are used to create the authorization URL, such as:
+```
+https://authorization-server.com/authorize
+?client_id=eKNjzFFjH9A1ysYd
+&response_type=code
+&redirect_uri=com.example.app://auth
+&state=1234zyx
+&scope=photos
+&code_challenge=hKpKupTM381pE10yfQiorMxXarRKAHRhTfH_xkGf7U4
+&code_challenge_method=S256
+```
+Note in this case the custom scheme of the redirect URL. Both iOS and Android provide the ability for apps to register custom URL schemes which can be used as the redirect URL. This is also sometimes called “deep linking” in the platform’s documentation. Both platforms also allow the app to register itself to be launched when a matching URL pattern is visited (“Universal Links” on iOS and “App Links” on Android). Both methods provide approximately the same experience when using an app, but the “Universal/App Links” method provides better fallback behavior when the URL is visited if the user doesn’t have the app installed. The “Universal Links” and “App Links” methods are generally considered more modern and are probably what you should use going forward.
+
+When the user taps the “Sign In” button, the app should open the authorization URL in a secure in-app browser (ASWebAuthenticationSession on iOS, or a “Custom Tab” on Android). Using an embedded WebView window within the app is considered extremely dangerous, as this provides the user no guarantee they are looking at the service’s own website and so is an easy source of a phishing attack. The embedded web view also provides a worse user experience since it does not share system cookies and the user will always have to enter their credentials. By using the platform’s secure browser APIs which share cookies with the system browser, you have the advantage of the user potentially already being signed in to the service as well and not needing to enter their credentials every time.
+
+**The user approves the request**
+
+Upon being directed to the auth server, the user sees an authorization request shown below.
+![An embedded ASWebAuthenticationSession. The “Done” button in the top right corner collapses the view and returns the user to the app.](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/sfsafariviewcontroller-example.png)
+
+**The service redirects the user back to the app**
+
+When the user finishes signing in, the service will redirect back to your app’s redirect URL which will cause the secure browser API to send the resulting URL to your app. The Location header from the redirect will look something like the following, which will be passed to your app.
+```
+com.example.app://auth://auth?state=1234zyx
+&code=lS0KgilpRsT07qT_iMOg9bBSaWqODC1g061nSLsa8gV2GYtyynB6A
+```
+Your app should then parse out the state value and authorization code from the URL, verify the state matches the value it set, and then exchange the authorization code for an access token.
+
+**Exchange the authorization code for an access token**
+
+To exchange the authorization code for an access token, the app makes a POST request to the service’s token endpoint. This happens from the app’s native code rather than from within the browser, since that’s where the PKCE code_verifier was stored. The request will have the following parameters.
+
+grant_type (required): The grant_type parameter must be set to “authorization_code“.
+
+code (required): This parameter is for the authorization code received from the authorization server which will be in the query string parameter “code” in this request.
+redirect_uri (possibly required)
+
+If the redirect URL was included in the initial authorization request, it must be included in the token request as well, and must be identical. Some services support registering multiple redirect URLs, and some require the redirect URL to be specified on each request. Check the service’s documentation for the specifics.
+
+code_verifier (required): Since the client included a code_challenge parameter in the initial request, it must now prove it has the secret used to generate the hash by sending it in the POST request. This is the plaintext string that was used to calculate the hash that was previously sent in the code_challenge parameter.
+
+Client Identification (required): Despite the client secret not being used in this flow, the request requires sending the client ID to identify the application making the request. This means the client must include the client ID as a POST body parameter rather than using HTTP Basic Authentication like it can when including the client secret as well.
+```
+POST /oauth/token HTTP/1.1
+Host: authorization-endpoint.com
+ 
+grant_type=code
+&code=Yzk5ZDczMzRlNDEwY
+&redirect_uri=com.example.app://auth
+&client_id=eKNjzFFjH9A1ysYd
+&code_verifier=Th7UHJdLswIYQxwSg29DbK1a_d9o41uNMTRmuH0PM8zyoMAQ
+```
+
+##### Using a Web Browser
+
+If the service does not have a native application, you can launch a mobile browser to the standard web authorization URL. Note that you should never use an embedded web view in your own application, as this provides the user no guarantee that they are actually are entering their password in the service's website rather than a phishing site.
+
+You should either launch the native mobile browser, or use the new iOS "SafariViewController" to launch an embedded browser in your application. This API was added in iOS 9, and provides a mechanism to launch a browser inside the application that both shows the address bar so the user can confirm they're on the correct website, and also shares cookies with the real Safari browser. It also prevents the application from inspecting and modifying the contents of the browser, so can be considered secure.
+```
+https://facebook.com/dialog/oauth?response_type=code&client_id=CLIENT_ID
+  &redirect_uri=REDIRECT_URI&scope=email&state=1234zyx
+```
+Again, if the service supports PKCE, then those parameters should be included as well as described above.
+
+    response_type=code - indicates that your server expects to receive an authorization code
+    client_id=CLIENT_ID - The client ID you received when you first created the application
+    redirect_uri=REDIRECT_URI - Indicates the URI to return the user to after authorization is complete, such as fb00000000://authorize
+    scope=email - One or more scope values indicating which parts of the user's account you wish to access
+    state=1234zyx - A random string generated by your application, which you'll verify later
+
+The user will see the authorization prompt
+```
+Facebook Authorization Prompt
+Getting an Access Token
+```
+After clicking "Approve", the user will be redirected back to your application with a URL like
+```
+fb00000000://authorize?code=AUTHORIZATION_CODE&state=1234zyx
+```
+Your mobile application should first verify that the state corresponds to the state that was used in the initial request, and can then exchange the authorization code for an access token.
+
+The token exchange will look the same as exchanging the code in the web server app case, except that the secret is not sent. If the server supports PKCE, then you will need to include an additional parameter as described below.
+```
+POST https://api.authorization-server.com/token
+  grant_type=authorization_code&
+  code=AUTH_CODE_HERE&
+  redirect_uri=REDIRECT_URI&
+  client_id=CLIENT_ID&
+  code_verifier=VERIFIER_STRING
+```
+    grant_type=authorization_code - The grant type for this flow is authorization_code
+    code=AUTH_CODE_HERE - This is the code you received in the query string
+    redirect_uri=REDIRECT_URI - Must be identical to the redirect URI provided in the original link
+    client_id=CLIENT_ID - The client ID you received when you first created the application
+    code_verifier=VERIFIER_STRING - The plaintext string that you previously hashed to create the code_challenge
+
+The authorization server will verify this request and return an access token.
+
+If the server supports PKCE, then the authorization server will recognize that this code was generated with a code challenge, and will hash the provided plaintext and confirm that the hashed version corresponds with the hashed string that was sent in the initial authorization request. This ensures the security of using the authorization code flow with clients that don't support a secret.
+
+##### Security Considerations 
+
+Always use the secure embedded browser APIs, or launch a native browser
+
+It is critical that the application use the appropriate browser APIs on the platforms rather than use embedded web views. On iOS, this is either ASWebAuthenticationSession or SFSafariViewController, and on Android this is known as “Custom Tabs”.
+
+Using an embedded web view has many downsides, resulting in a higher likelihood of the user falling for a phishing attack since it provides no way for the user to verify the origin of the web page they’re looking at. It would be trivial for an attacker to create a web page that looks just like the authorization web page and embed it in their own malicious app, giving them the ability to steal usernames and passwords.
+
+On the user experience side, using an embedded web view also has the downside of the web view not sharing system cookies so the user will be forced to enter their credentials every time. Instead, using the appropriate secure browser APIs will provide the opportunity for the user to bypass entering their credentials in the app if they’re already logged in to the authorization server in their browser.
+
+### Authorization Request
+The client begins by redirecting the user's browser to the **authorization endpoint**.
+
+Conceptually:
+
+```http
+GET /authorize?
+    response_type=code
+    &client_id=my-client
+    &redirect_uri=https://client.example.com/callback
+    &scope=openid profile email
+    &state=xyz123
+```
+
+Typical parameters include:
+
+| Parameter               | Purpose                                           |
+| ----------------------- | ------------------------------------------------- |
+| `response_type=code`    | Requests an authorization code                    |
+| `client_id`             | Identifies the OAuth client                       |
+| `redirect_uri`          | Where the authorization server sends the response |
+| `scope`                 | Permissions requested by the client               |
+| `state`                 | Binds the response to the original request        |
+| `code_challenge`        | PKCE challenge                                    |
+| `code_challenge_method` | PKCE method, usually `S256`                       |
+
+For example:
+
+```text
+Client
+  │
+  │ GET /authorize
+  │
+  │ client_id=123
+  │ response_type=code
+  │ redirect_uri=https://app.example.com/callback
+  │ scope=read:products
+  │ state=abc123
+  │ code_challenge=...
+  │
+  ▼
+Authorization Server
+```
+
+The authorization server then handles user authentication and authorization.
+### Authorization Response
+After the user authenticates and grants the requested permissions, the authorization server redirects the browser back to the client's `redirect_uri`.
+
+For example:
+
+```http
+HTTP/1.1 302 Found
+Location: https://app.example.com/callback?
+    code=SplxlOBeZQQYbYS6WxSbIA
+    &state=abc123
+```
+
+The response contains:
+
+```text
+code
+state
+```
+
+The important part is:
+
+```text
+code=SplxlOBeZQQYbYS6WxSbIA
+```
+
+The client does **not** yet have an access token.
+
+Instead:
+
+```text
+Authorization Server
+        │
+        │ code
+        ▼
+Client callback
+```
+
+The client then exchanges that code for tokens.
+
+#### Authorization Code Response
+
+If the request is valid and the user grants the authorization request, the authorization server generates an authorization code and redirects the user back to the application, adding the authorization code and the application’s “state” value to the redirect URL.
+
+The parameters to be added to the query string of the redirect URL are as follows:
+code
+
+This parameter contains the authorization code which the client will later exchange for an access token.
+state
+
+If the initial request contained a state parameter, the response must also include the exact value from the request. The client will be using this to associate this response with the initial request.
+
+For example, the authorization server redirects the user by sending the following HTTP response.
+```
+HTTP/1.1 302 Found
+Location: https://example-app.com/redirect?code=g0ZGZmNjVmOWI&state=dkZmYxMz
+```
+#### Implicit Grant Type Response
+With the Implicit grant (response_type=token) the authorization server generates an access token immediately and redirects to the callback URL with the token and other access token attributes in the fragment.
+
+For example, the authorization server redirects the user by sending the following HTTP response (extra line breaks for display purposes).
+```
+HTTP/1.1 302 Found
+Location: https://example-app.com/redirect#access_token=MyMzFjNTk2NTk4ZTYyZGI3
+ &state=dkZmYxMzE2
+ &token_type=Bearer
+ &expires_in=86400
+```
+You can see that this is much more dangerous than issuing a temporary one-time-use authorization code. Since there are many more ways an attacker can steal data out of an HTTP redirect compared to intercepting an HTTPS request, it’s much riskier using this option compared to the authorization code flow.
+
+From the authorization server’s point of view, at the point it creates the access token and sends the HTTP redirect, it has no way of knowing whether or not the redirect was successful and the correct application has received the access token. It’s kind of tossing the access token up into the air and crossing its fingers that the app catches it. This is in contrast to the authorization code method, where even though the authorization server can’t guarantee the authorization code wasn’t stolen, it can at least prevent a stolen authorization code from being useful by requiring a client secret or the PKCE code verifier. This provides a much greater level of security since the authorization server can now be more confident that it won’t be giving access tokens away to attackers.
+
+For these reasons as well as more documented in OAuth 2.0 for Browser-Based Apps, it is recommended that the Implicit flow no longer be used.
+
+#### Error Response
+
+There are two different kinds of errors to handle. The first kind of error is when the developer did something wrong when creating the authorization request. The other kind of error is when the user rejects the request (clicks the “Deny” button).
+
+If there is something wrong with the syntax of the request, such as the redirect_uri or client_id is invalid, then it’s important not to redirect the user and instead you should show the error message directly. This is to avoid letting your authorization server be used as an open redirector.
+
+If the redirect_uri and client_id are both valid, but there is still some other problem, it’s okay to redirect the user back to the redirect URI with the error in the query string.
+
+When redirecting back to the application to indicate an error, the server adds the following parameters to the redirect URL:
+- **error**
+
+a single ASCII error code from the following list:
+
+- invalid_request – the request is missing a parameter, contains - an invalid parameter, includes a parameter more than once, or - is otherwise invalid.
+- access_denied – the user or authorization server denied the - request
+- unauthorized_client – the client is not allowed to request an - authorization code using this method, for example if a - confidential client attempts to use the implicit grant type.
+- unsupported_response_type – the server does not support - obtaining an authorization code using this method, for example - if the authorization server never implemented the implicit - grant type.
+- invalid_scope – the requested scope is invalid or unknown.
+- server_error – instead of displaying a 500 Internal Server - Error page to the user, the server can redirect with this - error code.
+- temporarily_unavailable – if the server is undergoing - maintenance, or is otherwise unavailable, this error code can - be returned instead of responding with a 503 Service - Unavailable status code.
+ 
+- **error_description**
+
+The authorization server can optionally include a human-readable description of the error. This parameter is intended for the developer to understand the error, and is not meant to be displayed to the end user. The valid characters for this parameter are the ASCII character set except for the double quote and backslash, specifically, hex codes 20-21, 23-5B and 5D-7E.
+- **error_uri**
+
+The server can also return a URL to a human-readable web page with information about the error. This is intended for the developer to get more information about the error, and is not meant to be displayed to the end user.
+state
+
+If the request contained a state parameter, the error response must also include the exact value from the request. The client may use this to associate this response with the initial request.
+
+**Example**
+
+For example, if the user denied the authorization request, the server would construct the following URL and send an HTTP redirect response like the below (newlines in the URL are for illustration purposes).
+```
+HTTP/1.1 302 Found
+Location: https://example-app.com/redirect?error=access_denied
+ &error_description=The+user+denied+the+request
+ &error_uri=https%3A%2F%2Foauth2server.com%2Ferror%2Faccess_denied
+ &state=wxyz1234
+```
+### Authorization Code
+The **authorization code** is a temporary credential issued by the authorization server.
+
+Think of it as:
+
+```text
+Authorization Code
+        │
+        │ temporary
+        │ single-use
+        ▼
+Token Endpoint
+        │
+        ▼
+Access Token
+```
+
+It typically has properties such as:
+
+* short lifetime
+* single use
+* bound to the client
+* associated with the authorization request
+* associated with the redirect URI
+* associated with PKCE information when PKCE is used
+
+For example:
+
+```text
+code = 4/0AfJohX...
+```
+
+The client should not treat this code as an API credential.
+
+It cannot normally be used like:
+
+```http
+GET /api/products
+Authorization: Bearer 4/0AfJohX...
+```
+
+Instead, it must be exchanged at the token endpoint.
+
+#### Generating the Authorization Code
+
+The authorization code must expire shortly after it is issued. The OAuth 2.0 spec recommends a maximum lifetime of 10 minutes, but in practice, most services set the expiration much shorter, around 30-60 seconds. The authorization code itself can be of any length, but the length of the codes should be documented.
+
+Because authorization codes are meant to be short-lived and single-use, you could implement them as self encoded tokens. With this technique, you can avoid storing authorization codes in a database, and instead, encode all of the necessary information into the authorization code itself. You can use either a built-in encryption library of your server-side environment, or a standard such as JSON Web Signature (JWS). However, since this authorization code is only meant to be used by the authorization server, it can often be simpler to implement them as short strings stored in a server-side cache that’s accessible to the authorization endpoint and token endpoint.
+
+In any case, the information that will need to be associated with the authorization code is the following.
+
+- client_id – The client ID (or other client identifier) that - requested this code
+- redirect_uri – The redirect URL that was used. This needs to - be stored since the access token request must contain the same - redirect URL for verification when issuing the access token.
+- User info – Some way to identify the user that this - authorization code is for, such as a user ID.
+- Expiration Date – The code needs to include an expiration date - so that it only lasts a short time.
+- Unique ID – The code needs its own unique ID of some sort in - order to be able to check if the code has been used before. A - database ID or a random string is sufficient.
+- PKCE: code_challenge and code_challenge_method – When - supporting PKCE, these two values provided by the application - need to be stored so that they can be verified when issuing - the access token later.
+
+Once you’ve generated the authorization code, either by creating a JWS-encoded string, or by generating a random string and storing the associated information in a database, you’ll need to redirect the user to the application’s redirect URL specified. The parameters to be added to the query string of the redirect URL are as follows:
+code
+
+This parameter contains the authorization code which the client will later exchange for an access token.
+state
+
+If the initial request contained a state parameter, the response must also include the exact value from the request. The client will be using this to associate this response with the initial request.
+
+For example, the authorization server redirects the user by sending the following HTTP response.
+```
+HTTP/1.1 302 Found
+Location: https://example-app.com/redirect?code=g0ZGZmNjVmOWI&state=dkZmYxMz
+```
+### Token Request
+The authorization code grant is used when an application exchanges an authorization code for an access token. After the user returns to the application via the redirect URL, the application will get the authorization code from the URL and use it to request an access token. This request will be made to the token endpoint.
+
+The client sends the authorization code to the **token endpoint**.
+
+For a confidential client, the request can look conceptually like:
+
+```http
+POST /token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&code=SplxlOBeZQQYbYS6WxSbIA
+&redirect_uri=https://app.example.com/callback
+&client_id=my-client
+&client_secret=...
+```
+
+With PKCE, the client also sends:
+
+```text
+code_verifier=...
+```
+
+So conceptually:
+
+```text
+Client
+   │
+   │ POST /token
+   │
+   │ authorization_code
+   │ client authentication
+   │ redirect_uri
+   │ code_verifier
+   │
+   ▼
+Authorization Server
+```
+
+The authorization server validates the request.
+
+It checks things such as:
+
+```text
+Is the code valid?
+       │
+       ├── No → reject
+       │
+       └── Yes
+             │
+             ▼
+Is the code expired?
+       │
+       ├── Yes → reject
+       │
+       └── No
+             │
+             ▼
+Does it belong to this client?
+       │
+       ├── No → reject
+       │
+       └── Yes
+             │
+             ▼
+Does redirect_uri match?
+       │
+       ├── No → reject
+       │
+       └── Yes
+             │
+     The client sends the authorization code to the **token endpoint**.
+```
+For a confidential client, the request can look conceptually like:
+
+```http
+POST /token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&code=SplxlOBeZQQYbYS6WxSbIA
+&redirect_uri=https://app.example.com/callback
+&client_id=my-client
+&client_secret=...
+```
+
+With PKCE, the client also sends:
+
+```text
+code_verifier=...
+```
+
+So conceptually:
+
+```text
+Client
+   │
+   │ POST /token
+   │
+   │ authorization_code
+   │ client authentication
+   │ redirect_uri
+   │ code_verifier
+   │
+   ▼
+Authorization Server
+```
+
+The authorization server validates the request.
+
+It checks things such as:
+
+```text
+Is the code valid?
+       │
+       ├── No → reject
+       │
+       └── Yes
+             │
+             ▼
+Is the code expired?
+       │
+       ├── Yes → reject
+       │
+       └── No
+             │
+             ▼
+Does it belong to this client?
+       │
+       ├── No → reject
+             ▼
+Does PKCE verification succeed?
+       │
+       ├── No → reject
+       │
+       └── Yes
+             │
+             ▼
+       Issue tokens
+```
+
+#### Request Parameters
+
+The access token request will contain the following parameters.
+- grant_type (required)
+
+The grant_type parameter must be set to “authorization_code”.
+- code (required)
+
+This parameter is the authorization code that the client previously received from the authorization server.
+- redirect_uri (possibly required)
+
+If the redirect URI was included in the initial authorization request, the service must require it in the token request as well. The redirect URI in the token request must be an exact match of the redirect URI that was used when generating the authorization code. The service must reject the request otherwise.
+- code_verifier (required for PKCE support)
+
+If the client included a code_challenge parameter in the initial authorization request, it must now prove it has the secret used to generate the hash by sending it in the POST request. This is the plaintext string that was used to calculate the hash that was previously sent in the code_challenge parameter.
+- client_id (required if no other client authentication is present)
+
+If the client is authenticating via HTTP Basic Auth or some other method, then this parameter is not required. Otherwise, this parameter is required.
+
+If the client was issued a client secret, then the server must authenticate the client. One way to authenticate the client is to accept another parameter in this request, client_secret. Alternately the authorization server can use HTTP Basic Auth. Technically the spec allows the authorization server to support any form of client authentication, and mentions public/private key pair as an option. In practice, most consumer servers support the simpler methods of authenticating clients using either or both of the methods mentioned here. For more advanced methods of authenticating the client, refer to RFC 7523 which defines a method of using a signed JWT as client authentication.
+
+#### Verifying the authorization code grant
+
+After checking for all required parameters, and authenticating the client if the client was issued credentials, the authorization server can continue verifying the other parts of the request.
+
+The server then checks if the authorization code is valid, and has not expired. The service must then verify that the authorization code provided in the request was issued to the client identified. Lastly, the service must ensure the redirect URI parameter present matches the redirect URI that was used to request the authorization code.
+
+For PKCE support, the authorization server should calculate the SHA256 hash of the code_verifier presented in this token request, and compare that with the code_challenge presented in the authorization request. If they match, the authorization server can be confident that it’s the same client making this token request that made the original authorization request.
+
+If everything checks out, the service can generate an access token and respond.
+
+#### Security Considerations
+##### Preventing replay attacks
+
+If an authorization code is used more than once, the authorization server must deny the subsequent requests. This is easy to accomplish if the authorization codes are stored in a database, since they can simply be marked as used.
+
+If you are implementing self-encoded authorization codes, as in our example code, you’ll need to keep track of the tokens that have been used for the lifetime of the token. One way to accomplish this by caching the code in a cache for the lifetime of the code. This way when verifying codes, we can first check if they have already been used by checking the cache for the code. Once the code reaches its expiration date, it will no longer be in the cache, but we can reject it based on the expiration date anyway.
+
+If a code is used more than once, it should be treated as an attack. If possible, the service should revoke the previous access tokens that were issued from this authorization code.
+
+### Token Response
+If the authorization code exchange succeeds, the authorization server returns a token response.
+
+For example:
+
+```json
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIs...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "8xLOxBtZp8",
+  "scope": "read:products"
+}
+```
+
+If the request for an access token is valid, the authorization server needs to generate an access token (and optional refresh token) and return these to the client, typically along with some additional properties about the authorization.
+
+The response with an access token should contain the following properties:
+
+- access_token (required) The access token string as issued by the authorization server.
+- token_type (required) The type of token this is, typically just the string “Bearer”.
+- expires_in (recommended) If the access token expires, the server should reply with the duration of time the access token is granted for.
+- refresh_token (optional) If the access token will expire, then it is useful to return a refresh token which applications can use to obtain - another access token. However, tokens issued with the implicit grant cannot be issued a refresh token.
+- scope (optional) If the scope the user granted is identical to the scope the app requested, this parameter is optional. If the granted scope - is different from the requested scope, such as if the user modified the scope, then this parameter is required.
+
+When responding with an access token, the server must also include the additional Cache-Control: no-store HTTP header to ensure clients do not cache this request.
+
+For example, a successful token response may look like the following:
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-store
+ 
+{
+  "access_token":"MTQ0NjJkZmQ5OTM2NDE1ZTZjNGZmZjI3",
+  "token_type":"Bearer",
+  "expires_in":3600,
+  "refresh_token":"IwOGYzYTlmM2YxOTQ5MGE3YmNmMDFkNTVk",
+  "scope":"create"
+}
+```
+The important values are:
+
+- Access token
+
+```text
+access_token
+```
+
+Used to access protected resources.
+
+- Refresh token
+
+```text
+refresh_token
+```
+
+Used to obtain a new access token when the current one expires, when issued.
+
+- `expires_in`
+
+```text
+3600
+```
+
+Means the access token is valid for approximately 3600 seconds.
+
+The relationship is:
+
+```text
+Authorization Code
+       │
+       │ exchange
+       ▼
+┌─────────────────┐
+│ Token Response  │
+├─────────────────┤
+│ Access Token    │
+│ Refresh Token   │
+│ expires_in      │
+│ scope           │
+└─────────────────┘
+```
+
+
+### Access Token Usage
+**Making Authenticated Requests**
+
+The end result of all the grant types is obtaining an access token.
+
+Now that you have an access token, you can make requests to the API. You can quickly make an API request using cURL as follows:
+```
+curl -H "Authorization: Bearer RsT5OjbzRn430zqMLgV3Ia" \
+https://api.authorization-server.com/1/me
+```
+That's it! Make sure you always send requests over HTTPS and never ignore invalid certificates. HTTPS is the only thing protecting requests from being intercepted or modified.
+
+Once the client has an access token, it can call the **resource server**.
+
+For example:
+
+```http
+GET /api/products
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+```
+
+The architecture is:
+
+```text
+                  Access Token
+Client ──────────────────────────> Resource Server
+                                      │
+                                      │ validate token
+                                      ▼
+                                  Protected API
+```
+
+The resource server validates the access token.
+
+Depending on the token architecture, it might:
+
+* validate a JWT locally
+* call an introspection endpoint
+* verify issuer
+* verify audience
+* verify expiration
+* verify signature
+* verify scopes/permissions
+
+For example:
+
+```text
+Access Token
+
+iss = https://auth.example.com
+sub = user123
+aud = products-api
+exp = ...
+scope = read:products
+```
+
+The API can then determine whether the requested operation is permitted.
+Once the client has an access token, it can call the **resource server**.
+
+For example:
+
+```http
+GET /api/products
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+```
+
+The architecture is:
+
+```text
+                  Access Token
+Client ──────────────────────────> Resource Server
+                                      │
+                                      │ validate token
+                                      ▼
+                                  Protected API
+```
+
+The resource server validates the access token.
+
+Depending on the token architecture, it might:
+
+* validate a JWT locally
+* call an introspection endpoint
+* verify issuer
+* verify audience
+* verify expiration
+* verify signature
+* verify scopes/permissions
+
+For example:
+
+```text
+Access Token
+
+iss = https://auth.example.com
+sub = user123
+aud = products-api
+exp = ...
+scope = read:products
+```
+
+The API can 
+For example:
+
+```text
+GET /products
+
+required scope:
+    read:products
+
+token scope:
+    read:products
+
+→ allow
+```
+
+### Refresh Token Usage
+Access tokens are normally short-lived.
+
+For example:
+
+```text
+Access Token
+    │
+    │ valid for 1 hour
+    ▼
+expires
+```
+
+The client can use a refresh token to obtain a new access token without asking the user to authenticate again.
+
+The client sends:
+
+```http
+POST /token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=refresh_token
+&refresh_token=8xLOxBtZp8
+```
+
+The authorization server may respond:
+
+```json
+{
+  "access_token": "new-access-token",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "new-refresh-token"
+}
+```
+
+The flow becomes:
+
+```text
+                    ┌───────────────┐
+                    │ Access Token  │
+                    └───────┬───────┘
+                            │
+                         expires
+                            │
+                            ▼
+                    ┌───────────────┐
+                    │ Refresh Token │
+                    └───────┬───────┘
+                            │
+                     token request
+                            │
+                            ▼
+                    Authorization
+                       Server
+                            │
+                            ▼
+                    New Access Token
+```
+
+A particularly important security practice is **refresh-token rotation**, where the authorization server issues a new refresh token and invalidates the previous one.
+
+### Redirect URI Validation
+The `redirect_uri` is one of the most security-sensitive parts of the flow.
+
+Suppose the client registered:
+
+```text
+https://app.example.com/oauth/callback
+```
+
+The authorization request must use the registered redirect URI.
+
+```text
+Registered:
+
+https://app.example.com/oauth/callback
+
+Request:
+
+https://app.example.com/oauth/callback
+              │
+              ▼
+             MATCH
+```
+
+An attacker should not be able to change it to:
+
+```text
+https://attacker.example.com/callback
+```
+
+Otherwise, the authorization code could be sent to the attacker.
+
+Conceptually:
+
+```text
+                    Authorization Server
+                           │
+                           │
+                redirect_uri validation
+                           │
+                ┌──────────┴──────────┐
+                │                     │
+             matches               doesn't match
+                │                     │
+                ▼                     ▼
+             continue               reject
+```
+
+This is why OAuth clients normally **register their redirect URIs in advance**.
+
+For example:
+
+```text
+Client Registration
+
+client_id:
+    product-web
+
+redirect_uris:
+    https://product.example.com/oauth/callback
+```
+
+The authorization server should apply strict validation rules rather than accepting arbitrary redirect destinations supplied by the client.
+
+### State Parameter
+The `state` parameter protects the authorization response from being incorrectly associated with another browser session/request.
+
+The client generates a random value:
+
+```text
+state = X7f92KpLm31...
+```
+
+It stores the expected value in the user's session.
+
+Then:
+
+```text
+Client
+   │
+   │ state=X7f92KpLm31
+   ▼
+Authorization Server
+```
+
+After authorization:
+
+```text
+Authorization Server
+   │
+   │ code=ABC
+   │ state=X7f92KpLm31
+   ▼
+Client
+```
+
+The client checks:
+
+```text
+received state
+       ==
+expected state
+```
+
+If:
+
+```text
+X7f92KpLm31
+       ==
+X7f92KpLm31
+```
+
+continue.
+
+If:
+
+```text
+X7f92KpLm31
+       !=
+AttackerValue
+```
+
+reject the response.
+
+The basic idea is:
+
+> `state` binds the authorization response to the authorization request initiated by the client.
+
+This helps defend against **CSRF/login-request forgery** attacks.
+
+### Summary
+
+Here is the complete Authorization Code Flow:
+
+```text
+┌──────────────┐
+│     User     │
+└──────┬───────┘
+       │
+       │ visits application
+       ▼
+┌──────────────┐
+│    Client    │
+│     App      │
+└──────┬───────┘
+       │
+       │ 1. Authorization Request
+       │
+       │ response_type=code
+       │ client_id
+       │ redirect_uri
+       │ scope
+       │ state
+       │ code_challenge
+       ▼
+┌────────────────────────┐
+│ Authorization Server   │
+│                        │
+│ Login + Consent        │
+└───────────┬────────────┘
+            │
+            │ 2. Authorization Response
+            │
+            │ code
+            │ state
+            ▼
+┌────────────────────────┐
+│        Client          │
+│                        │
+│ Validate state         │
+│ Validate response     │
+└───────────┬────────────┘
+            │
+            │ 3. Token Request
+            │
+            │ grant_type=authorization_code
+            │ code
+            │ redirect_uri
+            │ client authentication
+            │ code_verifier
+            ▼
+┌────────────────────────┐
+│ Authorization Server   │
+│                        │
+│ Validate code          │
+│ Validate client        │
+│ Validate redirect URI  │
+│ Validate PKCE          │
+└───────────┬────────────┘
+            │
+            │ 4. Token Response
+            │
+            │ access_token
+            │ refresh_token
+            │ expires_in
+            ▼
+┌────────────────────────┐
+│        Client          │
+└───────────┬────────────┘
+            │
+            │ 5. API Request
+            │ Authorization:
+            │ Bearer access_token
+            ▼
+┌────────────────────────┐
+│   Resource Server      │
+│                        │
+│ Validate access token  │
+│ Check scopes           │
+└────────────────────────┘
+```
+
+If the access token expires:
+
+```text
+Client
+   │
+   │ refresh_token
+   ▼
+Authorization Server
+   │
+   │ new access_token
+   │ possibly new refresh_token
+   ▼
+Client
+   │
+   │ API request
+   ▼
+Resource Server
+```
+
+**The role of each item**
+
+| Topic                     | Main purpose                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------- |
+| `flow-overview`           | Describes the complete authorization process                                    |
+| `authorization-request`   | Asks the authorization server to authorize the client                           |
+| `authorization-response`  | Returns the authorization result, normally containing a code                    |
+| `authorization-code`      | Temporary credential exchanged for tokens                                       |
+| `token-request`           | Exchanges the code for tokens                                                   |
+| `token-response`          | Returns access/refresh tokens                                                   |
+| `access-token-usage`      | Uses the access token to call protected APIs                                    |
+| `refresh-token-usage`     | Obtains new access tokens without repeating user authorization                  |
+| `redirect-uri-validation` | Prevents codes from being redirected to an unauthorized destination             |
+| `state-parameter`         | Associates the response with the original client request and helps prevent CSRF |
+
+**One important distinction**
+
+It's useful to keep these three credentials conceptually separate:
+
+```text
+┌─────────────────────┐
+│ Authorization Code  │
+│                     │
+│ Temporary           │
+│ One-time exchange   │
+└──────────┬──────────┘
+           │
+           │ token exchange
+           ▼
+┌─────────────────────┐
+│ Access Token        │
+│                     │
+│ API authorization   │
+│ Short-lived         │
+└──────────┬──────────┘
+           │
+           │ expires
+           ▼
+┌─────────────────────┐
+│ Refresh Token       │
+│                     │
+│ Obtain new tokens   │
+│ Longer-lived        │
+└─────────────────────┘
+```
+
+And **PKCE** fits naturally between `authorization-request` and `token-request`:
+
+```text
+Authorization Request
+        │
+        │ code_challenge
+        ▼
+Authorization Server
+        │
+        │ authorization code
+        ▼
+Client
+        │
+        │ code_verifier
+        ▼
+Token Request
+        │
+        ▼
+Authorization Server
+        │
+        │ verify:
+        │ code_challenge ↔ code_verifier
+        ▼
+Tokens
+```
+
+So, for your OAuth 2.0 Docusaurus structure, I would treat **PKCE as a closely related subtopic of Authorization Code Flow**, rather than as part of the basic authorization-code terminology itself.

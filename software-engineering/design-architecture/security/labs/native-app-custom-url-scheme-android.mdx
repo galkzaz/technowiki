@@ -1,0 +1,2209 @@
+---
+id: software-engineering-design-architecture-security-labs-native-app-custom-url-scheme-android
+title: OAuth Native App with Android Custom URL Scheme
+sidebar_position: 6
+---
+
+{/* ## Lab: OAuth Native App with Android Custom URL Scheme */}
+
+In the previous lab, the redirect was:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+and Android used **HTTPS URL matching + App Links**.
+
+In this lab we replace that with a **custom URL scheme**:
+
+```text
+shoppingapp://oauth/callback
+```
+
+The important difference is:
+
+```text
+Previous lab:
+HTTPS URL
+    ↓
+Android URL matching
+    ↓
+Verified App Link
+    ↓
+Ionic App
+
+This lab:
+Custom URL scheme
+    ↓
+Android intent filter
+    ↓
+Ionic App
+```
+
+There is **no `assetlinks.json`**, no HTTPS domain verification, and no App Links.
+
+We'll still use:
+
+* Ionic Angular
+* Capacitor
+* Android
+* Keycloak
+* OAuth 2.0 Authorization Code Flow
+* PKCE
+* `state`
+* System Browser
+* Custom URL Scheme
+
+---
+
+## 1. What We Are Building
+
+Our application will be:
+
+```text
+ShoppingApp
+```
+
+with Android application ID:
+
+```text
+com.example.shopping
+```
+
+Our custom OAuth redirect URI will be:
+
+```text
+shoppingapp://oauth/callback
+```
+
+The complete architecture is:
+
+```text
+┌──────────────────────┐
+│   Ionic Android App  │
+│                      │
+│   ShoppingApp        │
+│   com.example...     │
+└──────────┬───────────┘
+           │
+           │ 1. Generate PKCE
+           │
+           │ 2. Open browser
+           ▼
+┌──────────────────────┐
+│    System Browser    │
+└──────────┬───────────┘
+           │
+           │ OAuth authorization
+           ▼
+┌──────────────────────┐
+│       Keycloak       │
+│ Authorization Server │
+└──────────┬───────────┘
+           │
+           │ redirect_uri =
+           │ shoppingapp://oauth/callback
+           ▼
+┌──────────────────────┐
+│     Android OS       │
+│                      │
+│ Custom URL Scheme    │
+└──────────┬───────────┘
+           │
+           ▼
+┌──────────────────────┐
+│   ShoppingApp        │
+│                      │
+│ code + state         │
+└──────────┬───────────┘
+           │
+           │ code + code_verifier
+           ▼
+┌──────────────────────┐
+│       Keycloak       │
+│      /token          │
+└──────────┬───────────┘
+           │
+           ▼
+      Access Token
+```
+
+---
+
+## 2. What Changes from the App Links Lab?
+
+The previous lab had:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+and required:
+
+```text
+AndroidManifest.xml
+        +
+assetlinks.json
+        +
+HTTPS domain
+        +
+certificate fingerprint
+```
+
+This lab uses:
+
+```text
+shoppingapp://oauth/callback
+```
+
+and requires only:
+
+```text
+AndroidManifest.xml
+        +
+custom scheme registration
+```
+
+So:
+
+|                                       | HTTPS App Link                            | Custom URL Scheme              |
+| ------------------------------------- | ----------------------------------------- | ------------------------------ |
+| Redirect                              | `https://shop.example.com/oauth/callback` | `shoppingapp://oauth/callback` |
+| HTTPS                                 | Yes                                       | No                             |
+| Domain                                | Required                                  | No                             |
+| `assetlinks.json`                     | Required                                  | No                             |
+| Certificate verification              | Yes                                       | No                             |
+| Android intent filter                 | Yes                                       | Yes                            |
+| PKCE                                  | Yes                                       | Yes                            |
+| Risk of another app claiming redirect | Lower                                     | Higher                         |
+
+That last row is why **PKCE is especially important** with custom schemes.
+
+---
+
+## 3. Create the Ionic Application
+
+If you're starting from scratch:
+
+```bash
+ionic start shopping-mobile blank --type=angular --capacitor
+```
+
+Enter the project:
+
+```bash
+cd shopping-mobile
+```
+
+Install Android:
+
+```bash
+npm install @capacitor/android
+```
+
+Add Android:
+
+```bash
+npx cap add android
+```
+
+Install the Capacitor Browser plugin:
+
+```bash
+npm install @capacitor/browser
+```
+
+Synchronize:
+
+```bash
+npx cap sync android
+```
+
+Open Android Studio:
+
+```bash
+npx cap open android
+```
+
+---
+
+## 4. Configure the Android Application ID
+
+Open:
+
+```text
+android/app/build.gradle
+```
+
+You should have an application ID similar to:
+
+```gradle
+android {
+    namespace = "com.example.shopping"
+
+    defaultConfig {
+        applicationId = "com.example.shopping"
+    }
+}
+```
+
+Our application identity is therefore:
+
+```text
+com.example.shopping
+```
+
+The custom URL scheme will be:
+
+```text
+shoppingapp
+```
+
+These are completely different concepts:
+
+```text
+Application ID:
+com.example.shopping
+
+Custom URL Scheme:
+shoppingapp
+```
+
+---
+
+## 5. What Is a Custom URL Scheme?
+
+A normal HTTPS URL looks like:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+A custom-scheme URL looks like:
+
+```text
+shoppingapp://oauth/callback
+```
+
+Break it down:
+
+```text
+shoppingapp://oauth/callback
+│           │    │
+│           │    └── path
+│           └─────── host
+└─────────────────── scheme
+```
+
+The scheme is:
+
+```text
+shoppingapp
+```
+
+Android will be configured to say:
+
+> "I can handle URLs whose scheme is `shoppingapp`."
+
+---
+
+## 6. Configure the Android Intent Filter
+
+Open:
+
+```text
+android/app/src/main/AndroidManifest.xml
+```
+
+Find the `MainActivity`.
+
+Configure it like this:
+
+```xml
+<activity
+    android:name=".MainActivity"
+    android:exported="true"
+    android:launchMode="singleTask">
+
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent-filter>
+
+    <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+
+        <data
+            android:scheme="shoppingapp"
+            android:host="oauth"
+            android:path="/callback" />
+
+    </intent-filter>
+
+</activity>
+```
+
+The important part is:
+
+```xml
+<data
+    android:scheme="shoppingapp"
+    android:host="oauth"
+    android:path="/callback" />
+```
+
+This tells Android:
+
+```text
+shoppingapp://oauth/callback
+        │       │
+        │       └── path = /callback
+        └────────── host = oauth
+```
+
+---
+
+## 7. Compare It with HTTPS Matching
+
+In the previous lab we had:
+
+```xml
+<data
+    android:scheme="https"
+    android:host="shop.example.com"
+    android:pathPrefix="/oauth" />
+```
+
+Now we have:
+
+```xml
+<data
+    android:scheme="shoppingapp"
+    android:host="oauth"
+    android:path="/callback" />
+```
+
+So Android is still doing **URL matching**.
+
+The only difference is the scheme.
+
+#### HTTPS
+
+```text
+https://shop.example.com/oauth/callback
+│       │                 │
+scheme  host              path
+```
+
+#### Custom scheme
+
+```text
+shoppingapp://oauth/callback
+│             │    │
+scheme        host path
+```
+
+Therefore:
+
+> **Custom URL schemes still use Android URL matching.**
+
+What they don't have is the **verified HTTPS domain association** that App Links provide.
+
+---
+
+## 8. Build and Install
+
+Build:
+
+```bash
+ionic build
+```
+
+Synchronize:
+
+```bash
+npx cap sync android
+```
+
+Run:
+
+```bash
+npx cap run android
+```
+
+Or run from Android Studio.
+
+---
+
+## 9. Test the Custom URL Scheme Directly
+
+Before introducing Keycloak, test the URL mechanism.
+
+Run:
+
+```bash
+adb devices
+```
+
+Then:
+
+```bash
+adb shell am start \
+  -a android.intent.action.VIEW \
+  -c android.intent.category.BROWSABLE \
+  -d "shoppingapp://oauth/callback"
+```
+
+Android receives:
+
+```text
+shoppingapp://oauth/callback
+```
+
+and matches:
+
+```text
+scheme = shoppingapp
+host   = oauth
+path   = /callback
+```
+
+against:
+
+```xml
+<data
+    android:scheme="shoppingapp"
+    android:host="oauth"
+    android:path="/callback" />
+```
+
+So:
+
+```text
+ADB
+ │
+ │ shoppingapp://oauth/callback
+ ▼
+Android
+ │
+ │ Intent filter matches
+ ▼
+ShoppingApp
+```
+
+---
+
+## 10. Receive the URL in Ionic
+
+Capacitor exposes incoming app URLs through `appUrlOpen`.
+
+Open:
+
+```text
+src/app/app.component.ts
+```
+
+Use:
+
+```typescript
+import { Component, OnInit } from '@angular/core';
+import { App } from '@capacitor/app';
+
+@Component({
+  selector: 'app-root',
+  templateUrl: 'app.component.html',
+})
+export class AppComponent implements OnInit {
+
+  receivedUrl = '';
+
+  async ngOnInit() {
+
+    App.addListener(
+      'appUrlOpen',
+      event => {
+
+        console.log(
+          'Received URL:',
+          event.url
+        );
+
+        this.receivedUrl = event.url;
+
+        this.handleDeepLink(event.url);
+      }
+    );
+
+    const launch =
+      await App.getLaunchUrl();
+
+    if (launch?.url) {
+
+      console.log(
+        'Application launched with:',
+        launch.url
+      );
+
+      this.receivedUrl =
+        launch.url;
+
+      this.handleDeepLink(
+        launch.url
+      );
+    }
+  }
+
+  private handleDeepLink(
+    url: string
+  ) {
+
+    const parsed =
+      new URL(url);
+
+    console.log(
+      'Scheme:',
+      parsed.protocol
+    );
+
+    console.log(
+      'Host:',
+      parsed.host
+    );
+
+    console.log(
+      'Path:',
+      parsed.pathname
+    );
+  }
+}
+```
+
+---
+
+## 11. Display the Received URL
+
+Change:
+
+```text
+src/app/app.component.html
+```
+
+to:
+
+```html
+<ion-app>
+
+  <ion-header>
+    <ion-toolbar>
+      <ion-title>
+        Shopping App
+      </ion-title>
+    </ion-toolbar>
+  </ion-header>
+
+  <ion-content class="ion-padding">
+
+    <h1>
+      Custom URL Scheme Lab
+    </h1>
+
+    <p>
+      Received URL:
+    </p>
+
+    <pre>{{ receivedUrl }}</pre>
+
+  </ion-content>
+
+</ion-app>
+```
+
+Run the ADB test again:
+
+```bash
+adb shell am start \
+  -a android.intent.action.VIEW \
+  -c android.intent.category.BROWSABLE \
+  -d "shoppingapp://oauth/callback"
+```
+
+You should see:
+
+```text
+Received URL:
+
+shoppingapp://oauth/callback
+```
+
+Congratulations: **Android custom URL scheme matching works.**
+
+---
+
+## 12. Test Query Parameters
+
+OAuth redirects will contain parameters.
+
+For example:
+
+```text
+shoppingapp://oauth/callback?code=ABC123&state=XYZ
+```
+
+Test:
+
+```bash
+adb shell am start \
+  -a android.intent.action.VIEW \
+  -c android.intent.category.BROWSABLE \
+  -d "shoppingapp://oauth/callback?code=ABC123&state=XYZ"
+```
+
+Your application receives:
+
+```text
+shoppingapp://oauth/callback?code=ABC123&state=XYZ
+```
+
+Parse it:
+
+```typescript
+private handleDeepLink(
+  url: string
+) {
+
+  const parsed =
+    new URL(url);
+
+  if (
+    parsed.protocol !==
+    'shoppingapp:'
+  ) {
+    return;
+  }
+
+  if (
+    parsed.hostname !==
+    'oauth'
+  ) {
+    return;
+  }
+
+  if (
+    parsed.pathname !==
+    '/callback'
+  ) {
+    return;
+  }
+
+  const code =
+    parsed.searchParams.get('code');
+
+  const state =
+    parsed.searchParams.get('state');
+
+  console.log(
+    'Authorization code:',
+    code
+  );
+
+  console.log(
+    'State:',
+    state
+  );
+}
+```
+
+Notice that:
+
+```typescript
+parsed.protocol
+```
+
+is:
+
+```text
+shoppingapp:
+```
+
+not:
+
+```text
+shoppingapp://
+```
+
+because `URL.protocol` includes the trailing colon.
+
+---
+
+## 13. Now Add Keycloak
+
+Now we'll replace the ADB-generated URL with a real OAuth redirect.
+
+Start Keycloak:
+
+```bash
+docker run \
+  --name keycloak \
+  -p 127.0.0.1:8080:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+  -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+  quay.io/keycloak/keycloak:26.8.0 \
+  start-dev
+```
+
+Open:
+
+```text
+http://localhost:8080
+```
+
+Log in:
+
+```text
+username: admin
+password: admin
+```
+
+---
+
+## 14. Create the `shop` Realm
+
+Create a realm:
+
+```text
+shop
+```
+
+Our issuer is now:
+
+```text
+http://localhost:8080/realms/shop
+```
+
+The OpenID Connect discovery endpoint is:
+
+```text
+http://localhost:8080/realms/shop/.well-known/openid-configuration
+```
+
+---
+
+## 15. Create a Test User
+
+Create:
+
+```text
+Username:
+alice
+```
+
+Set:
+
+```text
+Password:
+alice123
+```
+
+and make sure the password isn't temporary for this simple lab.
+
+---
+
+## 16. Create the Native OAuth Client
+
+Create a client:
+
+```text
+Client ID:
+shopping-mobile
+```
+
+Protocol:
+
+```text
+OpenID Connect
+```
+
+This is a **public client**.
+
+Do **not** put a client secret in the Ionic application.
+
+Why?
+
+Because:
+
+```text
+Native application
+       │
+       ▼
+APK
+       │
+       ▼
+User's device
+```
+
+The application binary cannot keep a secret confidential.
+
+---
+
+## 17. Configure the Custom Redirect URI
+
+This is the most important Keycloak setting.
+
+Set the valid redirect URI to:
+
+```text
+shoppingapp://oauth/callback
+```
+
+So:
+
+```text
+Client ID:
+
+shopping-mobile
+
+
+Valid Redirect URI:
+
+shoppingapp://oauth/callback
+```
+
+Compare this with the previous lab:
+
+```text
+Previous:
+https://shop.example.com/oauth/callback
+
+Current:
+shoppingapp://oauth/callback
+```
+
+There is no domain.
+
+There is no HTTPS.
+
+There is no `assetlinks.json`.
+
+---
+
+## 18. Configure PKCE
+
+For the client, configure PKCE using:
+
+```text
+S256
+```
+
+Conceptually:
+
+```text
+Native App
+    │
+    │ code_challenge
+    ▼
+Keycloak
+```
+
+Later:
+
+```text
+Native App
+    │
+    │ code + code_verifier
+    ▼
+Keycloak /token
+```
+
+The authorization server verifies:
+
+```text
+SHA256(code_verifier)
+       ==
+code_challenge
+```
+
+---
+
+## 19. Generate PKCE in Ionic
+
+Create:
+
+```text
+src/app/oauth.service.ts
+```
+
+```typescript
+import { Injectable } from '@angular/core';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class OAuthService {
+
+  private readonly clientId =
+    'shopping-mobile';
+
+  private readonly authorizationEndpoint =
+    'http://localhost:8080/realms/shop/protocol/openid-connect/auth';
+
+  private readonly tokenEndpoint =
+    'http://localhost:8080/realms/shop/protocol/openid-connect/token';
+
+  private readonly redirectUri =
+    'shoppingapp://oauth/callback';
+
+
+  async createLoginUrl(): Promise<string> {
+
+    const codeVerifier =
+      this.generateCodeVerifier();
+
+    const codeChallenge =
+      await this.generateCodeChallenge(
+        codeVerifier
+      );
+
+    const state =
+      this.generateRandomString(32);
+
+    localStorage.setItem(
+      'oauth_code_verifier',
+      codeVerifier
+    );
+
+    localStorage.setItem(
+      'oauth_state',
+      state
+    );
+
+    const params =
+      new URLSearchParams({
+        client_id: this.clientId,
+
+        response_type: 'code',
+
+        redirect_uri:
+          this.redirectUri,
+
+        scope:
+          'openid profile',
+
+        state,
+
+        code_challenge:
+          codeChallenge,
+
+        code_challenge_method:
+          'S256'
+      });
+
+    return (
+      `${this.authorizationEndpoint}?${params}`
+    );
+  }
+
+
+  private generateCodeVerifier():
+    string {
+
+    const bytes =
+      new Uint8Array(32);
+
+    crypto.getRandomValues(
+      bytes
+    );
+
+    return this.base64UrlEncode(
+      bytes
+    );
+  }
+
+
+  private async generateCodeChallenge(
+    verifier: string
+  ): Promise<string> {
+
+    const data =
+      new TextEncoder()
+        .encode(verifier);
+
+    const digest =
+      await crypto.subtle.digest(
+        'SHA-256',
+        data
+      );
+
+    return this.base64UrlEncode(
+      new Uint8Array(digest)
+    );
+  }
+
+
+  private generateRandomString(
+    length: number
+  ): string {
+
+    const bytes =
+      new Uint8Array(length);
+
+    crypto.getRandomValues(
+      bytes
+    );
+
+    return this.base64UrlEncode(
+      bytes
+    );
+  }
+
+
+  private base64UrlEncode(
+    bytes: Uint8Array
+  ): string {
+
+    let binary = '';
+
+    bytes.forEach(
+      byte => {
+        binary +=
+          String.fromCharCode(byte);
+      }
+    );
+
+    return btoa(binary)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+  }
+
+
+  async exchangeCode(
+    code: string
+  ): Promise<any> {
+
+    const codeVerifier =
+      localStorage.getItem(
+        'oauth_code_verifier'
+      );
+
+    if (!codeVerifier) {
+      throw new Error(
+        'Missing code_verifier'
+      );
+    }
+
+    const body =
+      new URLSearchParams({
+        grant_type:
+          'authorization_code',
+
+        client_id:
+          this.clientId,
+
+        code,
+
+        redirect_uri:
+          this.redirectUri,
+
+        code_verifier:
+          codeVerifier
+      });
+
+    const response =
+      await fetch(
+        this.tokenEndpoint,
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type':
+              'application/x-www-form-urlencoded'
+          },
+
+          body
+        }
+      );
+
+    if (!response.ok) {
+
+      throw new Error(
+        await response.text()
+      );
+    }
+
+    return response.json();
+  }
+}
+```
+
+---
+
+## 20. Why We Store `code_verifier`
+
+When login begins:
+
+```text
+Native App
+    │
+    ├── code_verifier = SECRET
+    │
+    └── code_challenge = SHA256(verifier)
+```
+
+Only this is sent to Keycloak initially:
+
+```text
+code_challenge
+```
+
+The verifier stays with the application.
+
+Later:
+
+```text
+Keycloak
+    │
+    │ authorization code
+    ▼
+shoppingapp://oauth/callback
+    │
+    ▼
+Native App
+    │
+    │ code + code_verifier
+    ▼
+Keycloak
+```
+
+This protects against authorization-code interception.
+
+---
+
+## 21. Open the System Browser
+
+Use Capacitor's Browser API.
+
+Update:
+
+```text
+src/app/app.component.ts
+```
+
+```typescript
+import { Component, OnInit } from '@angular/core';
+import { App } from '@capacitor/app';
+import { Browser } from '@capacitor/browser';
+import { OAuthService } from './oauth.service';
+
+@Component({
+  selector: 'app-root',
+  templateUrl: 'app.component.html',
+})
+export class AppComponent
+  implements OnInit {
+
+  receivedUrl = '';
+
+  constructor(
+    private oauth: OAuthService
+  ) {}
+
+
+  async ngOnInit() {
+
+    App.addListener(
+      'appUrlOpen',
+      async event => {
+
+        console.log(
+          'OAuth redirect:',
+          event.url
+        );
+
+        this.receivedUrl =
+          event.url;
+
+        await this.handleOAuthRedirect(
+          event.url
+        );
+      }
+    );
+
+
+    const launch =
+      await App.getLaunchUrl();
+
+    if (launch?.url) {
+
+      await this.handleOAuthRedirect(
+        launch.url
+      );
+    }
+  }
+
+
+  async login() {
+
+    const url =
+      await this.oauth
+        .createLoginUrl();
+
+    await Browser.open({
+      url
+    });
+  }
+
+
+  private async handleOAuthRedirect(
+    url: string
+  ) {
+
+    const parsed =
+      new URL(url);
+
+    if (
+      parsed.protocol !==
+      'shoppingapp:'
+    ) {
+      return;
+    }
+
+    if (
+      parsed.hostname !==
+      'oauth'
+    ) {
+      return;
+    }
+
+    if (
+      parsed.pathname !==
+      '/callback'
+    ) {
+      return;
+    }
+
+    const error =
+      parsed.searchParams
+        .get('error');
+
+    if (error) {
+
+      console.error(
+        'OAuth error:',
+        error
+      );
+
+      return;
+    }
+
+    const code =
+      parsed.searchParams
+        .get('code');
+
+    const returnedState =
+      parsed.searchParams
+        .get('state');
+
+    const expectedState =
+      localStorage.getItem(
+        'oauth_state'
+      );
+
+    if (
+      !returnedState ||
+      returnedState !== expectedState
+    ) {
+
+      throw new Error(
+        'Invalid OAuth state'
+      );
+    }
+
+    if (!code) {
+
+      throw new Error(
+        'Missing authorization code'
+      );
+    }
+
+    await Browser.close();
+
+    const tokens =
+      await this.oauth
+        .exchangeCode(code);
+
+    console.log(
+      'Access token:',
+      tokens.access_token
+    );
+  }
+}
+```
+
+---
+
+## 22. Add the Login Button
+
+```html
+<ion-app>
+
+  <ion-header>
+    <ion-toolbar>
+      <ion-title>
+        Shopping App
+      </ion-title>
+    </ion-toolbar>
+  </ion-header>
+
+  <ion-content class="ion-padding">
+
+    <h1>
+      Native OAuth Lab
+    </h1>
+
+    <ion-button
+      expand="block"
+      (click)="login()">
+
+      Login with Keycloak
+
+    </ion-button>
+
+    <h2>
+      Redirect URI
+    </h2>
+
+    <pre>{{ receivedUrl }}</pre>
+
+  </ion-content>
+
+</ion-app>
+```
+
+---
+
+## 23. Build Again
+
+```bash
+ionic build
+```
+
+Then:
+
+```bash
+npx cap sync android
+```
+
+Then install:
+
+```bash
+npx cap run android
+```
+
+---
+
+## 24. The Login Flow
+
+Tap:
+
+```text
+Login with Keycloak
+```
+
+The application generates:
+
+```text
+code_verifier
+```
+
+and:
+
+```text
+code_challenge
+```
+
+Then opens the system browser:
+
+```text
+ShoppingApp
+     │
+     │ Browser.open()
+     ▼
+System Browser
+```
+
+The browser goes to Keycloak:
+
+```text
+http://localhost:8080/realms/shop/protocol/openid-connect/auth
+```
+
+with parameters like:
+
+```text
+client_id=shopping-mobile
+
+response_type=code
+
+redirect_uri=shoppingapp://oauth/callback
+
+scope=openid profile
+
+state=XYZ
+
+code_challenge=ABC
+
+code_challenge_method=S256
+```
+
+---
+
+## 25. User Logs In
+
+Keycloak displays:
+
+```text
+┌───────────────────────────────┐
+│          Keycloak             │
+│                               │
+│ Username:                     │
+│ [ alice                  ]    │
+│                               │
+│ Password:                     │
+│ [ ********              ]     │
+│                               │
+│          [ Sign In ]          │
+└───────────────────────────────┘
+```
+
+Enter:
+
+```text
+alice
+alice123
+```
+
+---
+
+## 26. Keycloak Creates the Authorization Code
+
+After authentication and consent, Keycloak generates:
+
+```text
+authorization_code
+```
+
+For example:
+
+```text
+ABC123
+```
+
+It then redirects:
+
+```text
+shoppingapp://oauth/callback?code=ABC123&state=XYZ
+```
+
+This is the critical point.
+
+---
+
+## 27. Android Receives the Custom URL
+
+Android sees:
+
+```text
+shoppingapp://oauth/callback
+```
+
+It looks at installed applications.
+
+Our manifest contains:
+
+```xml
+<data
+    android:scheme="shoppingapp"
+    android:host="oauth"
+    android:path="/callback" />
+```
+
+So:
+
+```text
+scheme:
+shoppingapp
+        │
+        ▼
+matches
+
+host:
+oauth
+        │
+        ▼
+matches
+
+path:
+/callback
+        │
+        ▼
+matches
+```
+
+Therefore Android launches:
+
+```text
+ShoppingApp
+```
+
+---
+
+## 28. Capacitor Receives the Redirect
+
+Capacitor invokes:
+
+```typescript
+App.addListener(
+    'appUrlOpen',
+    ...
+)
+```
+
+with:
+
+```text
+shoppingapp://oauth/callback?code=ABC123&state=XYZ
+```
+
+Our code extracts:
+
+```typescript
+const code =
+  parsed.searchParams.get('code');
+
+const returnedState =
+  parsed.searchParams.get('state');
+```
+
+We then check:
+
+```text
+returnedState
+      ==
+originalState
+```
+
+If it doesn't match:
+
+```text
+REJECT
+```
+
+---
+
+## 29. Exchange the Code
+
+If `state` is valid:
+
+```text
+code
++
+code_verifier
+```
+
+are sent to:
+
+```text
+POST /realms/shop/protocol/openid-connect/token
+```
+
+Conceptually:
+
+```http
+POST /realms/shop/protocol/openid-connect/token
+
+Content-Type:
+application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&client_id=shopping-mobile
+&code=ABC123
+&redirect_uri=shoppingapp://oauth/callback
+&code_verifier=XYZ...
+```
+
+Keycloak checks:
+
+```text
+SHA256(code_verifier)
+        ==
+original code_challenge
+```
+
+If correct:
+
+```text
+HTTP 200
+```
+
+and returns tokens.
+
+For example:
+
+```json
+{
+  "access_token": "...",
+  "expires_in": 300,
+  "refresh_token": "...",
+  "token_type": "Bearer",
+  "id_token": "..."
+}
+```
+
+---
+
+## 30. Complete Flow
+
+You now have:
+
+```text
+┌─────────────────────────────┐
+│       ShoppingApp           │
+│                             │
+│ generate code_verifier      │
+│ generate code_challenge     │
+└──────────────┬──────────────┘
+               │
+               │ authorization request
+               ▼
+┌─────────────────────────────┐
+│       System Browser        │
+└──────────────┬──────────────┘
+               │
+               │
+               ▼
+┌─────────────────────────────┐
+│          Keycloak           │
+│                             │
+│ authenticate user           │
+│ obtain consent              │
+└──────────────┬──────────────┘
+               │
+               │ authorization code
+               ▼
+┌─────────────────────────────┐
+│ System Browser              │
+│                             │
+│ shoppingapp://oauth/        │
+│ callback?code=ABC&state=XYZ │
+└──────────────┬──────────────┘
+               │
+               │ custom scheme
+               ▼
+┌─────────────────────────────┐
+│       Android OS            │
+│                             │
+│ match scheme                │
+│ match host                  │
+│ match path                  │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│       ShoppingApp           │
+│                             │
+│ receive code                │
+│ validate state              │
+└──────────────┬──────────────┘
+               │
+               │ code +
+               │ code_verifier
+               ▼
+┌─────────────────────────────┐
+│          Keycloak           │
+│           /token            │
+└──────────────┬──────────────┘
+               │
+               ▼
+          Access Token
+```
+
+---
+
+## 31. The Security Problem with This Approach
+
+Now we reach the most important difference from App Links.
+
+Suppose another application installs:
+
+```text
+MaliciousApp
+```
+
+and declares:
+
+```xml
+<data
+    android:scheme="shoppingapp"
+    android:host="oauth"
+    android:path="/callback" />
+```
+
+Now both applications claim:
+
+```text
+shoppingapp://oauth/callback
+```
+
+Conceptually:
+
+```text
+             shoppingapp://oauth/callback
+                         │
+                 ┌───────┴───────┐
+                 │               │
+                 ▼               ▼
+           ShoppingApp      MaliciousApp
+```
+
+There is no HTTPS domain that Android can verify against.
+
+That's the fundamental weakness of custom URL schemes.
+
+---
+
+## 32. Why PKCE Matters Even More Here
+
+Suppose the malicious app intercepts:
+
+```text
+shoppingapp://oauth/callback?code=ABC
+```
+
+It gets:
+
+```text
+authorization_code = ABC
+```
+
+But the legitimate application generated:
+
+```text
+code_verifier = SECRET
+```
+
+and the malicious application doesn't know it.
+
+The attacker tries:
+
+```text
+POST /token
+
+code=ABC
+code_verifier=???
+```
+
+Keycloak checks:
+
+```text
+SHA256(???)
+       ≠
+original code_challenge
+```
+
+and rejects the request.
+
+Therefore:
+
+```text
+Custom Scheme
+     +
+PKCE
+     ↓
+Interception doesn't automatically
+give attacker the access token
+```
+
+This is one of the major reasons **PKCE is mandatory/strongly expected for native applications**.
+
+---
+
+## 33. App Links vs Custom Scheme
+
+Now you can directly compare both labs.
+
+### App Links
+
+```text
+Authorization Server
+       │
+       │
+       ▼
+https://shop.example.com/oauth/callback
+       │
+       ▼
+Android
+       │
+       ├── URL matches
+       │
+       ├── domain verified
+       │
+       └── app identity verified
+              │
+              ▼
+        ShoppingApp
+```
+
+### Custom URL Scheme
+
+```text
+Authorization Server
+       │
+       │
+       ▼
+shoppingapp://oauth/callback
+       │
+       ▼
+Android
+       │
+       ├── scheme matches
+       ├── host matches
+       └── path matches
+              │
+              ▼
+        ShoppingApp
+```
+
+The missing piece is:
+
+```text
+Custom Scheme:
+
+domain ownership verification
+             ✗
+```
+
+Whereas:
+
+```text
+App Links:
+
+domain ownership verification
+             ✓
+```
+
+---
+
+## 34. What We Don't Need in This Lab
+
+Notice what disappeared.
+
+We **do not need**:
+
+```text
+shop.example.com
+```
+
+We **do not need**:
+
+```text
+/.well-known/assetlinks.json
+```
+
+We **do not need**:
+
+```text
+sha256_cert_fingerprints
+```
+
+We **do not need**:
+
+```xml
+android:autoVerify="true"
+```
+
+We only need:
+
+```xml
+<data
+    android:scheme="shoppingapp"
+    android:host="oauth"
+    android:path="/callback" />
+```
+
+---
+
+## 35. The Android Manifest Is the Key
+
+The entire custom URL registration boils down to:
+
+```xml
+<intent-filter>
+
+    <action
+        android:name=
+        "android.intent.action.VIEW" />
+
+    <category
+        android:name=
+        "android.intent.category.DEFAULT" />
+
+    <category
+        android:name=
+        "android.intent.category.BROWSABLE" />
+
+    <data
+        android:scheme="shoppingapp"
+        android:host="oauth"
+        android:path="/callback" />
+
+</intent-filter>
+```
+
+This means:
+
+```text
+shoppingapp://oauth/callback
+        │       │       │
+        │       │       └── /callback
+        │       └────────── oauth
+        └────────────────── shoppingapp
+```
+
+---
+
+## 36. Testing Without Keycloak
+
+It's useful to keep this test because it isolates Android from OAuth.
+
+```bash
+adb shell am start \
+  -a android.intent.action.VIEW \
+  -c android.intent.category.BROWSABLE \
+  -d "shoppingapp://oauth/callback?code=TEST&state=123"
+```
+
+If your app receives:
+
+```text
+shoppingapp://oauth/callback?code=TEST&state=123
+```
+
+then:
+
+```text
+Android custom URL matching
+```
+
+is working.
+
+If Keycloak login fails after that, you know the problem is OAuth configuration rather than Android URL routing.
+
+---
+
+## 37. Testing the Complete OAuth Flow
+
+Your final test should be:
+
+#### Step 1
+
+Start Keycloak:
+
+```bash
+docker start keycloak
+```
+
+#### Step 2
+
+Start Android app:
+
+```bash
+npx cap run android
+```
+
+#### Step 3
+
+Tap:
+
+```text
+Login with Keycloak
+```
+
+#### Step 4
+
+Browser opens:
+
+```text
+Keycloak
+```
+
+#### Step 5
+
+Login:
+
+```text
+alice
+alice123
+```
+
+#### Step 6
+
+Keycloak redirects:
+
+```text
+shoppingapp://oauth/callback?code=...&state=...
+```
+
+#### Step 7
+
+Android matches:
+
+```text
+shoppingapp
++
+oauth
++
+/callback
+```
+
+#### Step 8
+
+Ionic receives:
+
+```text
+appUrlOpen
+```
+
+#### Step 9
+
+Validate:
+
+```text
+state
+```
+
+#### Step 10
+
+Exchange:
+
+```text
+authorization_code
++
+code_verifier
+```
+
+#### Step 11
+
+Keycloak returns:
+
+```text
+access_token
+```
+
+---
+
+## 38. The Most Important Conceptual Diagram
+
+This lab demonstrates exactly where **Custom URL Schemes** fit into your OAuth Native Apps TOC:
+
+```text
+OAuth for Native Apps
+│
+├── Architecture
+│
+├── External User-Agent
+│   └── System Browser
+│
+├── Redirect URIs
+│   │
+│   ├── HTTPS URL Matching
+│   │   │
+│   │   └── App-Claimed URLs
+│   │       ├── Android App Links
+│   │       └── iOS Universal Links
+│   │
+│   └── Custom URL Schemes
+│       │
+│       └── shoppingapp://oauth/callback
+│
+└── PKCE
+```
+
+And the security comparison is:
+
+```text
+                   Redirect URI
+                       │
+             ┌─────────┴──────────┐
+             │                    │
+       HTTPS URL             Custom Scheme
+             │                    │
+             ▼                    ▼
+      https://...          shoppingapp://...
+             │                    │
+             ▼                    ▼
+       URL matching          URL matching
+             │                    │
+             ▼                    │
+      Domain verification         │
+             │                    │
+             ▼                    │
+       App Links             No domain
+       Universal Links       verification
+             │                    │
+             └─────────┬──────────┘
+                       │
+                       ▼
+                      PKCE
+                       │
+                       ▼
+               Authorization Code
+                  Protection
+```
+
+### The key lesson
+
+**Custom URL Scheme** and **App Link** both ultimately use Android's URL/intent matching to get the OAuth response back into the application.
+
+The difference is **how strongly the operating system can establish that the receiving app is the legitimate application**:
+
+```text
+Custom URL Scheme
+─────────────────
+shoppingapp://...
+       │
+       ▼
+"I registered this scheme."
+
+No domain ownership verification.
+
+
+App Link
+────────
+https://shop.example.com/...
+       │
+       ▼
+"I registered this URL pattern."
+       +
+       │
+       ▼
+"Android verified that I am authorized
+to associate with shop.example.com."
+```
+
+And because a custom scheme can potentially be claimed by another app, **PKCE is critical**:
+
+```text
+Custom Scheme
+      +
+PKCE
+      ↓
+Intercepted authorization code
+      ≠
+Access token
+```
+
+That is the central security model you should retain for **OAuth Native Apps → Custom URL Schemes**.

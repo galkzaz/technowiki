@@ -1,0 +1,1649 @@
+---
+id: software-systems-algorithms-data-structures-algorithms-concepts-searching-hash-based-search-implementaions
+title: Hash-Based Searching
+description: Hash-based searching is a search technique that uses a hash function to transform a search key into an array position in a hash table
+sidebar_position: 14
+---
+
+## Implementaions
+the solution for Hash-Based Search contains two
+parts. 
+1. The first is to create the hash table(Build / Load the Hash Table)
+2. Search the Hash Table
+
+The complete Hash-Based Search algorithm
+
+```text
+             Collection C
+                  │
+                  │
+                  ▼
+          ┌───────────────┐
+          │ Build Table   │
+          └───────┬───────┘
+                  │
+       for each element v
+                  │
+                  ▼
+              hash(v)
+                  │
+                  ▼
+             table[h]
+                  │
+                  ▼
+           linked-list bin
+                  │
+                  ▼
+              add(v)
+                  │
+                  ▼
+            Hash Table
+                  │
+                  │
+                  │ search(v)
+                  ▼
+              hash(v)
+                  │
+                  ▼
+              table[h]
+                  │
+            ┌─────┴─────┐
+            │           │
+          empty       non-empty
+            │           │
+          false     search chain
+                        │
+                   ┌────┴────┐
+                   │         │
+                 found     absent
+                   │         │
+                 true      false
+```
+
+So the two parts are:
+1. Part 1 — Preprocessing
+
+```text
+C → hash each element → place into appropriate bin
+```
+2. Part 2 — Searching
+
+```text
+target → hash target → go directly to bin → search its chain
+```
+
+And this is why **Hash-Based Search** is more than simply "using a hash function." The search algorithm consists of **preprocessing the collection into a hash table and then using the same hash function to locate the relevant bin during each query**.
+
+
+### C
+#### Simple implementation
+Below is a simple **C implementation of Hash-Based Search using a hash table with separate chaining**.
+
+It focuses on the **searching aspect** rather than building a production-quality hash table. The example stores integers and supports:
+
+* hash function
+* insertion
+* hash-based search
+* collision handling with linked lists
+* a test case in `main()`
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
+#define TABLE_SIZE 10
+
+// A node in a hash-table chain
+typedef struct Node {
+    int key;
+    struct Node *next;
+} Node;
+
+// Hash table: each entry points to the first node in a chain
+Node *hashTable[TABLE_SIZE];
+
+/*
+ * Hash function.
+ *
+ * Maps an integer key to a table index:
+ *
+ *     0 <= index < TABLE_SIZE
+ */
+int hash(int key) {
+    return key % TABLE_SIZE;
+}
+
+/*
+ * Insert a key into the hash table.
+ *
+ * We insert at the beginning of the linked list,
+ * so insertion is O(1).
+ */
+void insert(int key) {
+    int index = hash(key);
+
+    Node *newNode = malloc(sizeof(Node));
+
+    if (newNode == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    newNode->key = key;
+
+    // Insert at the beginning of the chain
+    newNode->next = hashTable[index];
+    hashTable[index] = newNode;
+}
+
+/*
+ * Hash-Based Search
+ *
+ * Returns true if key exists in the hash table.
+ * Returns false otherwise.
+ *
+ * Expected complexity: O(1)
+ * Worst-case complexity: O(n)
+ */
+bool search(int key) {
+    int index = hash(key);
+
+    // Search only the chain corresponding to this key
+    Node *current = hashTable[index];
+
+    while (current != NULL) {
+        if (current->key == key) {
+            return true;
+        }
+
+        current = current->next;
+    }
+
+    return false;
+}
+
+/*
+ * Display the hash table.
+ */
+void display(void) {
+    printf("Hash Table:\n");
+
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        printf("[%d] ", i);
+
+        Node *current = hashTable[i];
+
+        while (current != NULL) {
+            printf("%d -> ", current->key);
+            current = current->next;
+        }
+
+        printf("NULL\n");
+    }
+}
+
+/*
+ * Free all nodes in the hash table.
+ */
+void destroy(void) {
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        Node *current = hashTable[i];
+
+        while (current != NULL) {
+            Node *next = current->next;
+            free(current);
+            current = next;
+        }
+
+        hashTable[i] = NULL;
+    }
+}
+
+int main(void) {
+
+    // The global hashTable is initially initialized to NULL.
+    // Insert some values.
+    insert(15);
+    insert(25);
+    insert(35);
+
+    insert(7);
+    insert(17);
+
+    insert(42);
+
+    display();
+
+    printf("\nSearch tests:\n");
+
+    int targets[] = {25, 17, 42, 99};
+
+    int count = sizeof(targets) / sizeof(targets[0]);
+
+    for (int i = 0; i < count; i++) {
+
+        int target = targets[i];
+
+        if (search(target)) {
+            printf("%d: found\n", target);
+        } else {
+            printf("%d: not found\n", target);
+        }
+    }
+
+    destroy();
+
+    return 0;
+}
+```
+
+**How the search works**
+
+Suppose we insert:
+
+```text
+15
+25
+35
+```
+
+With:
+
+```c
+#define TABLE_SIZE 10
+```
+
+the hash function is:
+
+```c
+index = key % TABLE_SIZE;
+```
+
+Therefore:
+
+```text
+15 % 10 = 5
+25 % 10 = 5
+35 % 10 = 5
+```
+
+All three keys collide:
+
+```text
+H[5]
+ │
+ ▼
+35 → 25 → 15 → NULL
+```
+
+Now search for `25`:
+
+```text
+search(25)
+     │
+     ▼
+hash(25)
+     │
+     ▼
+25 % 10
+     │
+     ▼
+    5
+     │
+     ▼
+H[5]
+     │
+     ▼
+35 → 25 → 15
+      ↑
+     found
+```
+
+The important point is that **we don't search the entire collection**.
+
+We calculate the hash first and go directly to the appropriate bin:
+
+```text
+target
+   │
+   ▼
+hash(target)
+   │
+   ▼
+table index
+   │
+   ▼
+selected chain
+   │
+   ▼
+search chain
+```
+
+#### Load and Search
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
+#define TABLE_SIZE 10
+
+/*
+ * One node in a collision chain.
+ */
+typedef struct Node {
+    int value;
+    struct Node *next;
+} Node;
+
+/*
+ * Hash table.
+ *
+ * Each table entry points to the first node
+ * in a linked list.
+ */
+Node *table[TABLE_SIZE];
+
+/*
+ * Hash function.
+ *
+ * Ensures:
+ *
+ *     0 <= index < TABLE_SIZE
+ */
+int hash(int value) {
+    int h = value % TABLE_SIZE;
+
+    /*
+     * C's % operator can produce a negative result
+     * when value is negative.
+     */
+    if (h < 0) {
+        h += TABLE_SIZE;
+    }
+
+    return h;
+}
+
+/*
+ * Load the hash table.
+ *
+ * This corresponds to the Java load() method.
+ */
+void load(const int values[], int count) {
+
+    for (int i = 0; i < count; i++) {
+
+        int value = values[i];
+
+        // Find the desired bin.
+        int h = hash(value);
+
+        /*
+         * Create a new node.
+         *
+         * This is equivalent to:
+         *
+         * if (table[h] == null)
+         *     table[h] = new LinkedList<V>();
+         */
+        Node *newNode = malloc(sizeof(Node));
+
+        if (newNode == NULL) {
+            fprintf(stderr, "Memory allocation failed\n");
+            exit(EXIT_FAILURE);
+        }
+
+        newNode->value = value;
+
+        /*
+         * Add the element to the beginning
+         * of the linked list.
+         */
+        newNode->next = table[h];
+
+        table[h] = newNode;
+    }
+}
+
+/*
+ * Search for a value in the hash table.
+ *
+ * Returns true if found.
+ * Returns false otherwise.
+ */
+bool search(int value) {
+
+    // Calculate the hash-table index.
+    int h = hash(value);
+
+    /*
+     * Get the linked list for this bin.
+     */
+    Node *current = table[h];
+
+    /*
+     * Empty bin.
+     */
+    if (current == NULL) {
+        return false;
+    }
+
+    /*
+     * Search only this linked list.
+     */
+    while (current != NULL) {
+
+        if (current->value == value) {
+            return true;
+        }
+
+        current = current->next;
+    }
+
+    return false;
+}
+
+/*
+ * Display the hash table.
+ */
+void display(void) {
+
+    printf("Hash Table:\n");
+
+    for (int i = 0; i < TABLE_SIZE; i++) {
+
+        printf("[%d] ", i);
+
+        Node *current = table[i];
+
+        while (current != NULL) {
+            printf("%d -> ", current->value);
+            current = current->next;
+        }
+
+        printf("NULL\n");
+    }
+}
+
+/*
+ * Free all nodes.
+ */
+void destroy(void) {
+
+    for (int i = 0; i < TABLE_SIZE; i++) {
+
+        Node *current = table[i];
+
+        while (current != NULL) {
+
+            Node *next = current->next;
+
+            free(current);
+
+            current = next;
+        }
+
+        table[i] = NULL;
+    }
+}
+
+int main(void) {
+
+    /*
+     * Collection C.
+     */
+    int values[] = {
+        15, 25, 35,
+        7, 17,
+        42
+    };
+
+    int count = sizeof(values) / sizeof(values[0]);
+
+    /*
+     * Load the collection into the hash table.
+     */
+    load(values, count);
+
+    display();
+
+    /*
+     * Test searches.
+     */
+    printf("\nSearch results:\n");
+
+    int targets[] = {
+        25,
+        17,
+        42,
+        99
+    };
+
+    int targetCount =
+        sizeof(targets) / sizeof(targets[0]);
+
+    for (int i = 0; i < targetCount; i++) {
+
+        int target = targets[i];
+
+        if (search(target)) {
+            printf("%d: found\n", target);
+        } else {
+            printf("%d: not found\n", target);
+        }
+    }
+
+    /*
+     * Release allocated memory.
+     */
+    destroy();
+
+    return 0;
+}
+```
+**Understanding `load()`**
+
+The most important part is:
+
+```c
+void load(const int values[], int count) {
+
+    for (int i = 0; i < count; i++) {
+
+        int value = values[i];
+
+        int h = hash(value);
+
+        Node *newNode = malloc(sizeof(Node));
+
+        newNode->value = value;
+        newNode->next = table[h];
+
+        table[h] = newNode;
+    }
+}
+```
+
+Suppose:
+
+```text
+C = {15, 25, 35, 7, 17, 42}
+```
+
+and:
+
+```text
+TABLE_SIZE = 10
+```
+
+The hash function is:
+
+```text
+hash(x) = x % 10
+```
+
+Therefore:
+
+```text
+15 → 5
+25 → 5
+35 → 5
+ 7 → 7
+17 → 7
+42 → 2
+```
+
+The resulting table is approximately:
+
+```text
+Index       Chain
+────────────────────────────
+  0         NULL
+  1         NULL
+  2         42
+  3         NULL
+  4         NULL
+  5         35 → 25 → 15
+  6         NULL
+  7         17 → 7
+  8         NULL
+  9         NULL
+```
+**Why does C look slightly different from Java?**
+
+The Java version has:
+
+```java
+LinkedList<V>[] table;
+```
+
+So each table entry is a `LinkedList<V>` object:
+
+```text
+table
+ │
+ ├── LinkedList
+ ├── null
+ ├── LinkedList
+ ├── null
+ └── ...
+```
+
+In C, we don't have a built-in `LinkedList` class.
+
+Instead, we represent the same thing with:
+
+```c
+Node *table[TABLE_SIZE];
+```
+
+Each element is a pointer to the first node:
+
+```text
+table
+ │
+ ├── NULL
+ ├── NULL
+ ├── Node → Node → NULL
+ ├── NULL
+ ├── Node → Node → Node → NULL
+ └── ...
+```
+
+So:
+
+```text
+Java                         C
+─────────────────────────────────────
+LinkedList<V>                Node *
+LinkedList node              struct Node
+table[h].add(v)              table[h] = newNode
+list.contains(v)             while (...) search
+null                         NULL
+```
+
+---
+
+**Why does the hash function need to handle negative values?**
+
+Our C implementation used:
+
+```c
+int hash(int value) {
+
+    int h = value % TABLE_SIZE;
+
+    if (h < 0) {
+        h += TABLE_SIZE;
+    }
+
+    return h;
+}
+```
+
+This is slightly different from simply doing:
+
+```c
+abs(value) % TABLE_SIZE
+```
+
+and is generally preferable for mapping a signed integer modulo into:
+
+```text
+[0, TABLE_SIZE)
+```
+
+For example:
+
+```text
+value = -17
+
+-17 % 10 = -7
+
+-7 + 10 = 3
+```
+
+Therefore:
+
+```text
+hash(-17) = 3
+```
+
+---
+
+### Java
+The code bellow shows how to
+use linked lists to hold the elements that hash into a specific table element. The
+input elements from collection C are retrieved using an Iterator.
+
+Note that listTable is composed of tableSize bins, each of which is of type
+`LinkedList<V>` to store the elements.
+
+Searching the table for elements now becomes trivial. The search function does
+the job. Once the hash function returns an index into the hash table, we look to see
+whether the table bin is empty. If it’s empty, we return false, indicating the
+searched-for string is not in the collection. Otherwise, we search the linked list for
+that bin to determine the presence or absence of the searched-for string.
+
+The important distinction is that the solution has **two major parts**:
+
+```text
+Hash-Based Search
+│
+├── 1. Build / Load the Hash Table
+│
+└── 2. Search the Hash Table
+```
+
+1. Part One — Create the Hash Table
+
+The Java code:
+
+```java
+public void load (Iterator<V> it) {
+    table = (LinkedList<V>[]) new LinkedList[tableSize];
+
+    while (it.hasNext()) {
+        V v = it.next();
+        int h = hashMethod.hash(v);
+
+        if (table[h] == null) {
+            table[h] = new LinkedList<V>();
+        }
+
+        table[h].add(v);
+        count++;
+    }
+}
+```
+
+is doing this:
+
+```text
+Collection C
+    │
+    │ iterate through every element
+    ▼
+   value
+    │
+    │ hash(value)
+    ▼
+ table index
+    │
+    ▼
+ table[index]
+    │
+    ├── empty → create list
+    │
+    └── existing list → add value
+```
+2. Part Two — Search
+
+The Java search code is:
+
+```java
+public boolean search(V v) {
+
+    int h = hashMethod.hash(v);
+
+    LinkedList<V> list =
+        (LinkedList<V>) listTable[h];
+
+    if (list == null) {
+        return false;
+    }
+
+    return list.contains(v);
+}
+```
+
+The C equivalent is:
+
+```c
+bool search(int value) {
+
+    int h = hash(value);
+
+    Node *current = table[h];
+
+    if (current == NULL) {
+        return false;
+    }
+
+    while (current != NULL) {
+
+        if (current->value == value) {
+            return true;
+        }
+
+        current = current->next;
+    }
+
+    return false;
+}
+```
+
+The important thing is that **search does not scan the entire hash table**.
+
+Example: searching for `25`
+
+We have:
+
+```text
+H[5] → 35 → 25 → 15
+```
+
+Search:
+
+```text
+search(25)
+```
+1. Step 1 — Hash the target
+
+```text
+hash(25)
+    ↓
+25 % 10
+    ↓
+5
+```
+
+2. Step 2 — Go directly to bin 5
+
+```text
+H[5]
+ │
+ ▼
+35 → 25 → 15
+```
+
+3. Step 3 — Search the chain
+
+```text
+35 == 25 ?  NO
+25 == 25 ?  YES
+```
+
+Return:
+
+```text
+true
+```
+
+Notice what we **didn't** do:
+
+```text
+H[0]
+H[1]
+H[2]
+H[3]
+H[4]
+```
+
+We immediately jumped to:
+
+```text
+H[5]
+```
+
+That's the fundamental idea behind **Hash-Based Search**.
+
+---
+
+** What if the bin is empty?**
+
+Suppose we search:
+
+```text
+search(99)
+```
+
+Calculate:
+
+```text
+99 % 10 = 9
+```
+
+Then:
+
+```text
+H[9] → NULL
+```
+
+So we immediately return:
+
+```text
+false
+```
+
+We don't have to inspect any other bin.
+
+```Java
+import java.util.Iterator;
+import java.util.LinkedList;
+
+public class HashBasedSearch<V> {
+
+    /*
+     * Number of bins in the hash table.
+     */
+    private final int tableSize;
+
+    /*
+     * Hash table.
+     *
+     * Each position contains either:
+     *   - null
+     *   - a LinkedList containing elements that hash
+     *     to this bin.
+     */
+    private LinkedList<V>[] table;
+
+    /*
+     * Number of elements stored in the table.
+     */
+    private int count;
+
+    /*
+     * Constructor.
+     */
+    @SuppressWarnings("unchecked")
+    public HashBasedSearch(int tableSize) {
+
+        if (tableSize <= 0) {
+            throw new IllegalArgumentException(
+                "Table size must be greater than zero"
+            );
+        }
+
+        this.tableSize = tableSize;
+        this.table = (LinkedList<V>[]) new LinkedList<?>[tableSize];
+        this.count = 0;
+    }
+
+    /*
+     * Hash function.
+     *
+     * floorMod guarantees:
+     *
+     *     0 <= index < tableSize
+     *
+     * even when hashCode() returns a negative value.
+     */
+    private int hash(V value) {
+
+        if (value == null) {
+            throw new IllegalArgumentException(
+                "Cannot hash null value"
+            );
+        }
+
+        return Math.floorMod(
+            value.hashCode(),
+            tableSize
+        );
+    }
+
+    /*
+     * Load the hash table from an Iterator.
+     *
+     * This corresponds to the book's load() method.
+     *
+     * For every value:
+     *
+     *     1. Calculate its hash.
+     *     2. Find the appropriate bin.
+     *     3. Create a LinkedList if necessary.
+     *     4. Add the value to that list.
+     */
+    public void load(Iterator<V> it) {
+
+        if (it == null) {
+            throw new IllegalArgumentException(
+                "Iterator cannot be null"
+            );
+        }
+
+        while (it.hasNext()) {
+
+            V value = it.next();
+
+            int h = hash(value);
+
+            /*
+             * The bin does not have a list yet.
+             */
+            if (table[h] == null) {
+                table[h] = new LinkedList<>();
+            }
+
+            /*
+             * Add the value to the collision chain.
+             */
+            table[h].add(value);
+
+            count++;
+        }
+    }
+
+    /*
+     * Search for an element.
+     *
+     * Returns:
+     *     true  -> element exists
+     *     false -> element does not exist
+     */
+    public boolean search(V value) {
+
+        if (value == null) {
+            return false;
+        }
+
+        /*
+         * Calculate the same hash used when
+         * the table was constructed.
+         */
+        int h = hash(value);
+
+        /*
+         * Get the linked list for this bin.
+         */
+        LinkedList<V> list = table[h];
+
+        /*
+         * Empty bin means the value cannot exist
+         * in the table.
+         */
+        if (list == null) {
+            return false;
+        }
+
+        /*
+         * Search only this collision chain.
+         */
+        return list.contains(value);
+    }
+
+    /*
+     * Return the number of stored elements.
+     */
+    public int size() {
+        return count;
+    }
+
+    /*
+     * Display the hash table.
+     *
+     * Useful for understanding collisions.
+     */
+    public void display() {
+
+        System.out.println("Hash Table:");
+        System.out.println("-------------------------");
+
+        for (int i = 0; i < tableSize; i++) {
+
+            System.out.print("[" + i + "] ");
+
+            if (table[i] == null) {
+                System.out.println("empty");
+            } else {
+                System.out.println(table[i]);
+            }
+        }
+
+        System.out.println("-------------------------");
+    }
+
+    /*
+     * Return the number of elements in a particular bin.
+     */
+    public int binSize(int index) {
+
+        if (index < 0 || index >= tableSize) {
+            throw new IndexOutOfBoundsException(
+                "Invalid bin index: " + index
+            );
+        }
+
+        if (table[index] == null) {
+            return 0;
+        }
+
+        return table[index].size();
+    }
+
+    /*
+     * Demonstration / testing.
+     */
+    public static void main(String[] args) {
+
+        /*
+         * Create the collection C.
+         *
+         * Notice that several values deliberately
+         * produce collisions when TABLE_SIZE = 10:
+         *
+         * 15 % 10 = 5
+         * 25 % 10 = 5
+         * 35 % 10 = 5
+         *
+         * 7 % 10 = 7
+         * 17 % 10 = 7
+         */
+        LinkedList<Integer> collection = new LinkedList<>();
+
+        collection.add(15);
+        collection.add(25);
+        collection.add(35);
+        collection.add(7);
+        collection.add(17);
+        collection.add(42);
+
+        /*
+         * Create the hash-based search structure.
+         */
+        HashBasedSearch<Integer> search =
+            new HashBasedSearch<>(10);
+
+        /*
+         * Load the collection into the hash table.
+         */
+        search.load(collection.iterator());
+
+        /*
+         * Display the resulting hash table.
+         */
+        search.display();
+
+        /*
+         * Verify number of stored elements.
+         */
+        System.out.println(
+            "Number of elements: " + search.size()
+        );
+
+        System.out.println();
+
+        /*
+         * Search tests.
+         */
+        int[] targets = {
+            15,
+            25,
+            35,
+            7,
+            17,
+            42,
+            99,
+            100
+        };
+
+        System.out.println("Search Results:");
+        System.out.println("-------------------------");
+
+        for (int target : targets) {
+
+            boolean found = search.search(target);
+
+            System.out.printf(
+                "%d -> %s%n",
+                target,
+                found ? "found" : "not found"
+            );
+        }
+    }
+}
+```
+Below is a complete Java version that closely follows the book's `load()` + `search()` design, using **separate chaining with `LinkedList`**. It includes a `main()` method for testing.
+
+```java
+import java.util.Iterator;
+import java.util.LinkedList;
+
+public class HashBasedSearch<V> {
+
+    /*
+     * Number of bins in the hash table.
+     */
+    private final int tableSize;
+
+    /*
+     * Hash table.
+     *
+     * Each position contains either:
+     *   - null
+     *   - a LinkedList containing elements that hash
+     *     to this bin.
+     */
+    private LinkedList<V>[] table;
+
+    /*
+     * Number of elements stored in the table.
+     */
+    private int count;
+
+    /*
+     * Constructor.
+     */
+    @SuppressWarnings("unchecked")
+    public HashBasedSearch(int tableSize) {
+
+        if (tableSize <= 0) {
+            throw new IllegalArgumentException(
+                "Table size must be greater than zero"
+            );
+        }
+
+        this.tableSize = tableSize;
+        this.table = (LinkedList<V>[]) new LinkedList<?>[tableSize];
+        this.count = 0;
+    }
+
+    /*
+     * Hash function.
+     *
+     * floorMod guarantees:
+     *
+     *     0 <= index < tableSize
+     *
+     * even when hashCode() returns a negative value.
+     */
+    private int hash(V value) {
+
+        if (value == null) {
+            throw new IllegalArgumentException(
+                "Cannot hash null value"
+            );
+        }
+
+        return Math.floorMod(
+            value.hashCode(),
+            tableSize
+        );
+    }
+
+    /*
+     * Load the hash table from an Iterator.
+     *
+     * This corresponds to the book's load() method.
+     *
+     * For every value:
+     *
+     *     1. Calculate its hash.
+     *     2. Find the appropriate bin.
+     *     3. Create a LinkedList if necessary.
+     *     4. Add the value to that list.
+     */
+    public void load(Iterator<V> it) {
+
+        if (it == null) {
+            throw new IllegalArgumentException(
+                "Iterator cannot be null"
+            );
+        }
+
+        while (it.hasNext()) {
+
+            V value = it.next();
+
+            int h = hash(value);
+
+            /*
+             * The bin does not have a list yet.
+             */
+            if (table[h] == null) {
+                table[h] = new LinkedList<>();
+            }
+
+            /*
+             * Add the value to the collision chain.
+             */
+            table[h].add(value);
+
+            count++;
+        }
+    }
+
+    /*
+     * Search for an element.
+     *
+     * Returns:
+     *     true  -> element exists
+     *     false -> element does not exist
+     */
+    public boolean search(V value) {
+
+        if (value == null) {
+            return false;
+        }
+
+        /*
+         * Calculate the same hash used when
+         * the table was constructed.
+         */
+        int h = hash(value);
+
+        /*
+         * Get the linked list for this bin.
+         */
+        LinkedList<V> list = table[h];
+
+        /*
+         * Empty bin means the value cannot exist
+         * in the table.
+         */
+        if (list == null) {
+            return false;
+        }
+
+        /*
+         * Search only this collision chain.
+         */
+        return list.contains(value);
+    }
+
+    /*
+     * Return the number of stored elements.
+     */
+    public int size() {
+        return count;
+    }
+
+    /*
+     * Display the hash table.
+     *
+     * Useful for understanding collisions.
+     */
+    public void display() {
+
+        System.out.println("Hash Table:");
+        System.out.println("-------------------------");
+
+        for (int i = 0; i < tableSize; i++) {
+
+            System.out.print("[" + i + "] ");
+
+            if (table[i] == null) {
+                System.out.println("empty");
+            } else {
+                System.out.println(table[i]);
+            }
+        }
+
+        System.out.println("-------------------------");
+    }
+
+    /*
+     * Return the number of elements in a particular bin.
+     */
+    public int binSize(int index) {
+
+        if (index < 0 || index >= tableSize) {
+            throw new IndexOutOfBoundsException(
+                "Invalid bin index: " + index
+            );
+        }
+
+        if (table[index] == null) {
+            return 0;
+        }
+
+        return table[index].size();
+    }
+
+    /*
+     * Demonstration / testing.
+     */
+    public static void main(String[] args) {
+
+        /*
+         * Create the collection C.
+         *
+         * Notice that several values deliberately
+         * produce collisions when TABLE_SIZE = 10:
+         *
+         * 15 % 10 = 5
+         * 25 % 10 = 5
+         * 35 % 10 = 5
+         *
+         * 7 % 10 = 7
+         * 17 % 10 = 7
+         */
+        LinkedList<Integer> collection = new LinkedList<>();
+
+        collection.add(15);
+        collection.add(25);
+        collection.add(35);
+        collection.add(7);
+        collection.add(17);
+        collection.add(42);
+
+        /*
+         * Create the hash-based search structure.
+         */
+        HashBasedSearch<Integer> search =
+            new HashBasedSearch<>(10);
+
+        /*
+         * Load the collection into the hash table.
+         */
+        search.load(collection.iterator());
+
+        /*
+         * Display the resulting hash table.
+         */
+        search.display();
+
+        /*
+         * Verify number of stored elements.
+         */
+        System.out.println(
+            "Number of elements: " + search.size()
+        );
+
+        System.out.println();
+
+        /*
+         * Search tests.
+         */
+        int[] targets = {
+            15,
+            25,
+            35,
+            7,
+            17,
+            42,
+            99,
+            100
+        };
+
+        System.out.println("Search Results:");
+        System.out.println("-------------------------");
+
+        for (int target : targets) {
+
+            boolean found = search.search(target);
+
+            System.out.printf(
+                "%d -> %s%n",
+                target,
+                found ? "found" : "not found"
+            );
+        }
+    }
+}
+```
+
+---
+
+**Why does the hash function need to handle negative values?**
+
+The Java code from the book does:
+
+```java
+int h = v.hashCode();
+
+if (h < 0) {
+    h = 0 - h;
+}
+
+return h % tableSize;
+```
+
+The reason is that Java's `hashCode()` returns an `int`, which can be negative.
+
+For example:
+
+```text
+hashCode = -5
+```
+
+Java gives:
+
+```text
+-5 % 3 = -2
+```
+
+But a hash-table index cannot be:
+
+```text
+-2
+```
+
+because valid indices are:
+
+```text
+0 ... tableSize - 1
+```
+
+So the book converts the hash to a non-negative value before `%`.
+
+---
+
+One subtle Java issue with `abs()`
+
+The book's code:
+
+```java
+if (h < 0) {
+    h = 0 - h;
+}
+```
+
+has a subtle edge case.
+
+Java's `int` range is:
+
+```text
+-2,147,483,648
+to
+ 2,147,483,647
+```
+
+There is no positive `int` representation for:
+
+```text
+-2,147,483,648
+```
+
+because `+2,147,483,648` is outside the `int` range.
+
+So negating that value overflows.
+
+The same issue exists with:
+
+```java
+Math.abs(Integer.MIN_VALUE)
+```
+
+Therefore, a modern robust implementation would usually use something like:
+
+```java
+Math.floorMod(hashCode, tableSize)
+```
+
+instead of manually taking the absolute value.
+
+For example:
+
+```java
+int h = Math.floorMod(v.hashCode(), tableSize);
+```
+
+This guarantees:
+
+```text
+0 <= h < tableSize
+```
+
+---
+
+**Expected output**
+
+The exact order inside a `LinkedList` depends on how values are inserted, but the table will conceptually look like:
+
+```text
+Hash Table:
+-------------------------
+[0] empty
+[1] empty
+[2] [42]
+[3] empty
+[4] empty
+[5] [15, 25, 35]
+[6] empty
+[7] [7, 17]
+[8] empty
+[9] empty
+-------------------------
+Number of elements: 6
+
+Search Results:
+-------------------------
+15 -> found
+25 -> found
+35 -> found
+7 -> found
+17 -> found
+42 -> found
+99 -> not found
+100 -> not found
+```
+
+The overall algorithm is:
+
+```text
+             Collection C
+                  │
+                  │ load()
+                  ▼
+        ┌───────────────────┐
+        │   Hash Table      │
+        │                   │
+        │ [0] → ...         │
+        │ [1] → ...         │
+        │ [2] → 42          │
+        │ [3] → ...         │
+        │ [5] → 15 → 25 → 35│
+        │ [7] → 7 → 17      │
+        └───────────────────┘
+                  │
+                  │ search(target)
+                  ▼
+             hash(target)
+                  │
+                  ▼
+              table[h]
+                  │
+                  ▼
+            search chain
+                  │
+             ┌────┴────┐
+             │         │
+           found     not found
+             │         │
+           true      false
+```
+
+This is a very direct implementation of the **Hash-Based Search → preprocessing + search process** described in the book.

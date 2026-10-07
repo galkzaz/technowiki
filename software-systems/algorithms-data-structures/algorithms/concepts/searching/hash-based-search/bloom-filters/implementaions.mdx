@@ -1,0 +1,1869 @@
+
+## C
+Below is a complete C implementation of a Bloom Filter, including creation, insertion, membership testing, multiple hash functions, and a test program.
+```C
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+
+#define BIT_ARRAY_SIZE 64
+#define NUM_HASH_FUNCTIONS 3
+
+typedef struct {
+    uint8_t bits[BIT_ARRAY_SIZE / 8];
+} BloomFilter;
+
+/* ---------------------------------------------------------
+ * Bit operations
+ * --------------------------------------------------------- */
+
+/* Set a bit to 1 */
+void set_bit(uint8_t bits[], size_t position)
+{
+    bits[position / 8] |= (uint8_t)(1 << (position % 8));
+}
+
+/* Check whether a bit is 1 */
+int get_bit(const uint8_t bits[], size_t position)
+{
+    return (bits[position / 8] &
+            (uint8_t)(1 << (position % 8))) != 0;
+}
+
+/* ---------------------------------------------------------
+ * Hash functions
+ * --------------------------------------------------------- */
+
+/*
+ * Hash function 1: djb2
+ */
+uint64_t hash1(const char *value)
+{
+    uint64_t hash = 5381;
+
+    while (*value) {
+        hash = ((hash << 5) + hash) + (unsigned char)*value;
+        value++;
+    }
+
+    return hash;
+}
+
+/*
+ * Hash function 2: FNV-1a
+ */
+uint64_t hash2(const char *value)
+{
+    uint64_t hash = 14695981039346656037ULL;
+
+    while (*value) {
+        hash ^= (unsigned char)*value;
+        hash *= 1099511628211ULL;
+        value++;
+    }
+
+    return hash;
+}
+
+/*
+ * Hash function 3
+ */
+uint64_t hash3(const char *value)
+{
+    uint64_t hash = 0;
+
+    while (*value) {
+        hash = hash * 31 + (unsigned char)*value;
+        value++;
+    }
+
+    return hash;
+}
+
+/* ---------------------------------------------------------
+ * Bloom Filter
+ * --------------------------------------------------------- */
+
+/* Initialize Bloom Filter */
+void bloom_create(BloomFilter *filter)
+{
+    memset(filter->bits, 0, sizeof(filter->bits));
+}
+
+/*
+ * Add a value to the Bloom Filter.
+ */
+void bloom_add(BloomFilter *filter, const char *value)
+{
+    uint64_t hashes[NUM_HASH_FUNCTIONS];
+
+    hashes[0] = hash1(value);
+    hashes[1] = hash2(value);
+    hashes[2] = hash3(value);
+
+    for (int i = 0; i < NUM_HASH_FUNCTIONS; i++) {
+
+        size_t position =
+            hashes[i] % BIT_ARRAY_SIZE;
+
+        set_bit(filter->bits, position);
+    }
+}
+
+/*
+ * Search for a value.
+ *
+ * Returns:
+ *     0 -> definitely not present
+ *     1 -> possibly present
+ */
+int bloom_search(const BloomFilter *filter, const char *value)
+{
+    uint64_t hashes[NUM_HASH_FUNCTIONS];
+
+    hashes[0] = hash1(value);
+    hashes[1] = hash2(value);
+    hashes[2] = hash3(value);
+
+    for (int i = 0; i < NUM_HASH_FUNCTIONS; i++) {
+
+        size_t position =
+            hashes[i] % BIT_ARRAY_SIZE;
+
+        /*
+         * If ANY required bit is 0,
+         * the value definitely was not inserted.
+         */
+        if (!get_bit(filter->bits, position)) {
+            return 0;
+        }
+    }
+
+    /*
+     * All required bits are 1.
+     *
+     * The value MAY be present.
+     */
+    return 1;
+}
+
+/* ---------------------------------------------------------
+ * Display
+ * --------------------------------------------------------- */
+
+void bloom_print(const BloomFilter *filter)
+{
+    for (size_t i = 0; i < BIT_ARRAY_SIZE; i++) {
+        printf("%d", get_bit(filter->bits, i));
+
+        if ((i + 1) % 8 == 0)
+            printf(" ");
+    }
+
+    printf("\n");
+}
+
+/* ---------------------------------------------------------
+ * Test program
+ * --------------------------------------------------------- */
+
+int main(void)
+{
+    BloomFilter filter;
+
+    /* Create an empty Bloom Filter */
+    bloom_create(&filter);
+
+    printf("Initial Bloom Filter:\n");
+    bloom_print(&filter);
+
+    /* Insert values */
+    bloom_add(&filter, "alice");
+    bloom_add(&filter, "bob");
+    bloom_add(&filter, "charlie");
+
+    printf("\nAfter inserting alice, bob, charlie:\n");
+    bloom_print(&filter);
+
+    /* Search for inserted values */
+    printf("\nSearch results:\n");
+
+    printf("alice   -> %s\n",
+           bloom_search(&filter, "alice")
+               ? "possibly present"
+               : "definitely absent");
+
+    printf("bob     -> %s\n",
+           bloom_search(&filter, "bob")
+               ? "possibly present"
+               : "definitely absent");
+
+    printf("charlie -> %s\n",
+           bloom_search(&filter, "charlie")
+               ? "possibly present"
+               : "definitely absent");
+
+    /* Search for values that were not inserted */
+    printf("\nSearch for values not inserted:\n");
+
+    printf("david   -> %s\n",
+           bloom_search(&filter, "david")
+               ? "possibly present"
+               : "definitely absent");
+
+    printf("eve     -> %s\n",
+           bloom_search(&filter, "eve")
+               ? "possibly present"
+               : "definitely absent");
+
+    return 0;
+}
+```
+**How the C implementation maps to the algorithm**
+
+The core Bloom Filter operations are:
+
+| Algorithm        | C implementation                |
+| ---------------- | ------------------------------- |
+| Create bit array | `bloom_create()`                |
+| Add value        | `bloom_add()`                   |
+| Hash functions   | `hash1()`, `hash2()`, `hash3()` |
+| Set bit          | `set_bit()`                     |
+| Check bit        | `get_bit()`                     |
+| Search           | `bloom_search()`                |
+
+The important part of insertion is:
+
+```c
+size_t position = hashes[i] % BIT_ARRAY_SIZE;
+
+set_bit(filter->bits, position);
+```
+
+This corresponds to the pseudocode:
+
+```text
+position ← hf(value)
+setbit ← 1 << position
+bits ← bits | setbit
+```
+
+The C version stores the bits in bytes, so instead of directly doing:
+
+```c
+bits |= 1 << position;
+```
+
+we locate the appropriate byte:
+
+```c
+bits[position / 8]
+```
+
+and the bit inside that byte:
+
+```c
+position % 8
+```
+
+Then:
+
+```c
+bits[position / 8] |= 1 << (position % 8);
+```
+
+**Search**
+
+The most important part is:
+
+```c
+if (!get_bit(filter->bits, position)) {
+    return 0;
+}
+```
+
+This corresponds to:
+
+```text
+if (bits & checkbit) = 0
+    return false
+```
+
+If **one required bit is zero**, the value is definitely absent.
+If **all required bits are one**:
+
+```c
+return 1;
+```
+
+the result means: **possibly present** —not definitely present.
+
+### Code walkthrough
+For the walkthrough, we’ll use a **16-bit Bloom Filter** to keep the bit positions easy to see.
+
+Assume:
+
+```text
+BIT_ARRAY_SIZE = 16
+NUM_HASH_FUNCTIONS = 3
+```
+
+And suppose:
+
+```text
+hash1("alice") % 16 = 2
+hash2("alice") % 16 = 7
+hash3("alice") % 16 = 12
+```
+
+#### `bloom_add()` — Adding `"alice"`
+
+The C function is:
+
+```c
+void bloom_add(BloomFilter *filter, const char *value)
+{
+    uint64_t hashes[NUM_HASH_FUNCTIONS];
+
+    hashes[0] = hash1(value);
+    hashes[1] = hash2(value);
+    hashes[2] = hash3(value);
+
+    for (int i = 0; i < NUM_HASH_FUNCTIONS; i++) {
+
+        size_t position =
+            hashes[i] % BIT_ARRAY_SIZE;
+
+        set_bit(filter->bits, position);
+    }
+}
+```
+
+Initially, all bits are `0`:
+
+```text
+Position:  15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+           ---------------------------------------------------
+Bits:       0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+```
+
+##### Step-by-step
+
+| Step | Operation        | Hash result | Position | Bit operation | Bit array after operation |
+| ---- | ---------------- | ----------: | -------: | ------------- | ------------------------- |
+| 1    | `hash1("alice")` |  `% 16 = 2` |        2 | Set bit 2     | `0000000000000100`        |
+| 2    | `hash2("alice")` |  `% 16 = 7` |        7 | Set bit 7     | `0000000010000100`        |
+| 3    | `hash3("alice")` | `% 16 = 12` |       12 | Set bit 12    | `0001000010000100`        |
+
+So after inserting `"alice"`:
+
+```text
+Position:  15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+           ---------------------------------------------------
+Bits:       0  0  0  1  0  0  0  0  1  0  0  0  0  1  0  0
+                     ↑              ↑              ↑
+                  12                7              2
+```
+
+The important thing is that **one value sets multiple bits**.
+
+---
+
+**What happens inside `set_bit()`?**
+
+The function is:
+
+```c
+void set_bit(uint8_t bits[], size_t position)
+{
+    bits[position / 8] |=
+        (uint8_t)(1 << (position % 8));
+}
+```
+
+For position `7`:
+
+```text
+position / 8 = 0
+position % 8 = 7
+```
+
+So:
+
+```c
+bits[0] |= 1 << 7;
+```
+
+which gives:
+
+```text
+00000000
+OR
+10000000
+----------
+10000000
+```
+
+For position `12`:
+
+```text
+position / 8 = 1
+position % 8 = 4
+```
+
+So:
+
+```c
+bits[1] |= 1 << 4;
+```
+
+This shows how the 16-bit logical array is actually stored in **two bytes**.
+
+| Position | `position / 8` | `position % 8` | Operation            | Bit mask   | Result               |
+| -------: | -------------: | -------------: | -------------------- | ---------- | -------------------- |
+|      `7` |    `7 / 8 = 0` |    `7 % 8 = 7` | `bits[0] \|= 1 << 7` | `10000000` | `bits[0] = 10000000` |
+|     `12` |   `12 / 8 = 1` |   `12 % 8 = 4` | `bits[1] \|= 1 << 4` | `00010000` | `bits[1] = 00010000` |
+|      `2` |    `2 / 8 = 0` |    `2 % 8 = 2` | `bits[0] \|= 1 << 2` | `00000100` | `bits[0] = 10000100` |
+
+---
+
+#### `bloom_search()` 
+
+1. **Searching for `"alice"`**
+
+The search function is:
+
+```c
+int bloom_search(const BloomFilter *filter, const char *value)
+{
+    uint64_t hashes[NUM_HASH_FUNCTIONS];
+
+    hashes[0] = hash1(value);
+    hashes[1] = hash2(value);
+    hashes[2] = hash3(value);
+
+    for (int i = 0; i < NUM_HASH_FUNCTIONS; i++) {
+
+        size_t position =
+            hashes[i] % BIT_ARRAY_SIZE;
+
+        if (!get_bit(filter->bits, position)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+```
+
+We search for `"alice"` again.
+
+The hash functions produce the same positions:
+
+```text
+hash1("alice") % 16 = 2
+hash2("alice") % 16 = 7
+hash3("alice") % 16 = 12
+```
+
+The current filter is:
+
+```text
+Position:  15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+           ---------------------------------------------------
+Bits:       0  0  0  1  0  0  0  0  1  0  0  0  0  1  0  0
+                     ↑                    ↑              ↑
+                    12                    7              2
+```
+
+##### Search walkthrough
+
+| Step | Hash function    | Calculated position | Bit at position | Result           | Action     |
+| ---- | ---------------- | ------------------: | --------------: | ---------------- | ---------- |
+| 1    | `hash1("alice")` |                   2 |             `1` | Bit exists       | Continue   |
+| 2    | `hash2("alice")` |                   7 |             `1` | Bit exists       | Continue   |
+| 3    | `hash3("alice")` |                  12 |             `1` | Bit exists       | Continue   |
+| 4    | All bits checked |                   — |     All are `1` | Possibly present | `return 1` |
+
+So:
+
+```c
+bloom_search(&filter, "alice")
+```
+
+returns: `1`
+
+which means: **possibly present**
+
+---
+
+**Searching for `"bob"`**
+
+Now suppose `"bob"` was **not inserted**.
+
+Assume its hashes produce:
+
+```text
+hash1("bob") % 16 = 3
+hash2("bob") % 16 = 7
+hash3("bob") % 16 = 10
+```
+
+Remember our current filter:
+
+```text
+Position:  15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+           ---------------------------------------------------
+Bits:       0  0  0  1  0  0  0  0  1  0  0  0  0  1  0  0
+```
+
+Notice:
+
+* position `3` → `0`
+* position `7` → `1`
+* position `10` → `0`
+
+The search checks position `3` first.
+
+| Step | Hash function  | Position |  Bit | Result            | Action                     |
+| ---- | -------------- | -------: | ---: | ----------------- | -------------------------- |
+| 1    | `hash1("bob")` |        3 |  `0` | Definitely absent | **Return `0` immediately** |
+| 2    | `hash2("bob")` |        7 |    — | Not checked       | Stop                       |
+| 3    | `hash3("bob")` |       10 |    — | Not checked       | Stop                       |
+
+Therefore:
+
+```c
+bloom_search(&filter, "bob")
+```
+
+returns: `0`
+
+meaning: **definitely absent**
+
+This is why the search can terminate early.
+
+---
+
+#### False Positive Example
+
+Now let's consider an important case.
+
+Suppose `"charlie"` was **never inserted**, but its hash functions happen to produce:
+
+```text
+hash1("charlie") % 16 = 2
+hash2("charlie") % 16 = 7
+hash3("charlie") % 16 = 12
+```
+
+Those are exactly the positions already set by `"alice"`.
+
+Our filter contains:
+
+```text
+Position:  15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+           ---------------------------------------------------
+Bits:       0  0  0  1  0  0  0  0  1  0  0  0  0  1  0  0
+                     ↑                    ↑              ↑
+                    12                    7              2
+```
+
+Search:
+
+| Step | Hash function      | Position |     Bit | Result     |
+| ---- | ------------------ | -------: | ------: | ---------- |
+| 1    | `hash1("charlie")` |        2 |     `1` | Continue   |
+| 2    | `hash2("charlie")` |        7 |     `1` | Continue   |
+| 3    | `hash3("charlie")` |       12 |     `1` | Continue   |
+| 4    | All bits checked   |        — | All `1` | `return 1` |
+
+The Bloom Filter returns:
+
+```text
+1 → possibly present
+```
+
+But `"charlie"` was never inserted.
+
+That's a **false positive**.
+
+---
+
+#### Complete Example
+
+Putting the three cases together:
+
+| Value       | Inserted? | Hash positions | Bits checked | Bloom Filter result | Meaning            |
+| ----------- | --------- | -------------- | ------------ | ------------------- | ------------------ |
+| `"alice"`   | Yes       | 2, 7, 12       | 1, 1, 1      | `true`              | Possibly present   |
+| `"bob"`     | No        | 3, 7, 10       | 0, —, —      | `false`             | Definitely absent  |
+| `"charlie"` | No        | 2, 7, 12       | 1, 1, 1      | `true`              | **False positive** |
+
+The key rule is:
+
+| Search result | Meaning                     |
+| ------------- | --------------------------- |
+| `false`       | **Definitely not inserted** |
+| `true`        | **Possibly inserted**       |
+
+So the Bloom Filter is best used as a **filter before an expensive exact search**:
+
+```text
+                    Search request
+                         |
+                         v
+                  +-------------+
+                  | Bloom Filter|
+                  +-------------+
+                    /         \
+                 false         true
+                   |             |
+                   v             v
+             Definitely      Exact search
+               absent          required
+                                 |
+                         +-------+-------+
+                         |               |
+                       Found          Not found
+```
+
+The Bloom Filter's `false` result saves us from performing the expensive search, while a `true` result means **"you need to check the real data structure/database."**
+
+## Java
+### implementation 1
+Below is the Java equivalent of the C Bloom Filter implementation, keeping the same structure: bit array, multiple hash functions, `add()`, `search()`, and a test in `main()`.
+
+```java
+public class BloomFilter {
+
+    private static final int BIT_ARRAY_SIZE = 64;
+    private static final int NUM_HASH_FUNCTIONS = 3;
+
+    /*
+     * Each long contains 64 bits.
+     *
+     * BIT_ARRAY_SIZE = 64
+     * Therefore, one long is enough.
+     */
+    private long bits;
+
+
+    // ---------------------------------------------------------
+    // Create / Initialize
+    // ---------------------------------------------------------
+
+    public BloomFilter() {
+        bits = 0L;
+    }
+
+
+    // ---------------------------------------------------------
+    // Bit operations
+    // ---------------------------------------------------------
+
+    /*
+     * Set a bit to 1.
+     */
+    private void setBit(int position) {
+
+        bits |= 1L << position;
+    }
+
+
+    /*
+     * Check whether a bit is 1.
+     */
+    private boolean getBit(int position) {
+
+        return (bits & (1L << position)) != 0;
+    }
+
+
+    // ---------------------------------------------------------
+    // Hash functions
+    // ---------------------------------------------------------
+
+    /*
+     * Hash function 1: djb2
+     */
+    private long hash1(String value) {
+
+        long hash = 5381;
+
+        for (int i = 0; i < value.length(); i++) {
+
+            hash = ((hash << 5) + hash)
+                    + value.charAt(i);
+        }
+
+        return hash;
+    }
+
+
+    /*
+     * Hash function 2: FNV-1a
+     */
+    private long hash2(String value) {
+
+        long hash = 0xcbf29ce484222325L;
+
+        for (int i = 0; i < value.length(); i++) {
+
+            hash ^= value.charAt(i);
+
+            hash *= 0x100000001b3L;
+        }
+
+        return hash;
+    }
+
+
+    /*
+     * Hash function 3
+     */
+    private long hash3(String value) {
+
+        long hash = 0;
+
+        for (int i = 0; i < value.length(); i++) {
+
+            hash = hash * 31 + value.charAt(i);
+        }
+
+        return hash;
+    }
+
+
+    // ---------------------------------------------------------
+    // Add
+    // ---------------------------------------------------------
+
+    /*
+     * Add a value to the Bloom Filter.
+     */
+    public void add(String value) {
+
+        long[] hashes = {
+            hash1(value),
+            hash2(value),
+            hash3(value)
+        };
+
+        for (int i = 0; i < NUM_HASH_FUNCTIONS; i++) {
+
+            /*
+             * Convert hash value into
+             * a valid bit position [0, 63].
+             */
+            int position =
+                    (int) Math.floorMod(hashes[i], BIT_ARRAY_SIZE);
+
+            /*
+             * Set the corresponding bit.
+             */
+            setBit(position);
+        }
+    }
+
+
+    // ---------------------------------------------------------
+    // Search
+    // ---------------------------------------------------------
+
+    /*
+     * Search for a value.
+     *
+     * false -> definitely absent
+     * true  -> possibly present
+     */
+    public boolean search(String value) {
+
+        long[] hashes = {
+            hash1(value),
+            hash2(value),
+            hash3(value)
+        };
+
+        for (int i = 0; i < NUM_HASH_FUNCTIONS; i++) {
+
+            int position =
+                    (int) Math.floorMod(hashes[i], BIT_ARRAY_SIZE);
+
+            /*
+             * If ANY required bit is 0,
+             * the value definitely was not inserted.
+             */
+            if (!getBit(position)) {
+                return false;
+            }
+        }
+
+        /*
+         * All required bits are 1.
+         *
+         * The value may be present.
+         */
+        return true;
+    }
+
+
+    // ---------------------------------------------------------
+    // Display
+    // ---------------------------------------------------------
+
+    public void printBits() {
+
+        for (int i = BIT_ARRAY_SIZE - 1; i >= 0; i--) {
+
+            System.out.print(getBit(i) ? "1" : "0");
+
+            if (i % 8 == 0) {
+                System.out.print(" ");
+            }
+        }
+
+        System.out.println();
+    }
+
+
+    // ---------------------------------------------------------
+    // Test
+    // ---------------------------------------------------------
+
+    public static void main(String[] args) {
+
+        BloomFilter filter = new BloomFilter();
+
+        System.out.println("Initial Bloom Filter:");
+        filter.printBits();
+
+
+        // Add values
+        filter.add("alice");
+        filter.add("bob");
+        filter.add("charlie");
+
+
+        System.out.println("\nAfter inserting:");
+        filter.printBits();
+
+
+        // Search for inserted values
+        System.out.println("\nSearch results:");
+
+        System.out.println(
+                "alice   -> " +
+                (filter.search("alice")
+                        ? "possibly present"
+                        : "definitely absent")
+        );
+
+        System.out.println(
+                "bob     -> " +
+                (filter.search("bob")
+                        ? "possibly present"
+                        : "definitely absent")
+        );
+
+        System.out.println(
+                "charlie -> " +
+                (filter.search("charlie")
+                        ? "possibly present"
+                        : "definitely absent")
+        );
+
+
+        // Search for values that were not inserted
+        System.out.println("\nSearch for values not inserted:");
+
+        System.out.println(
+                "david   -> " +
+                (filter.search("david")
+                        ? "possibly present"
+                        : "definitely absent")
+        );
+
+        System.out.println(
+                "eve     -> " +
+                (filter.search("eve")
+                        ? "possibly present"
+                        : "definitely absent")
+        );
+    }
+}
+```
+
+#### How `add()` works
+
+The important part is:
+
+```java
+int position =
+        (int) Math.floorMod(hashes[i], BIT_ARRAY_SIZE);
+
+setBit(position);
+```
+
+For example, suppose `"alice"` produces:
+
+```text
+hash1 → position 2
+hash2 → position 7
+hash3 → position 12
+```
+
+The three bits are set:
+
+| Position | Java operation | Bit set     |                    |
+| -------: | -------------- | ----------- | ------------------ |
+|      `2` | `bits          | = `1L << 2`  | `00000100`         |
+|      `7` | `bits          | = `1L << 7`  | `10000000`         |
+|     `12` | `bits          | = `1L << 12` | `0001000000000000` |
+
+The final `bits` value has all three positions set.
+
+#### How `search()` works
+
+The search performs the same hash calculations:
+
+```java
+int position =
+        (int) Math.floorMod(hashes[i], BIT_ARRAY_SIZE);
+
+if (!getBit(position)) {
+    return false;
+}
+```
+
+So if `"alice"` hashes to:
+
+```text
+2, 7, 12
+```
+
+the filter checks:
+
+```text
+bit 2  → 1
+bit 7  → 1
+bit 12 → 1
+```
+
+All are `1`, so:
+
+```java
+return true;
+```
+
+means **possibly present**.
+
+But if `"david"` produces:
+
+```text
+3, 10, 20
+```
+
+and bit `3` is `0`:
+
+```text
+bit 3 → 0
+```
+
+the function immediately returns:
+
+```java
+return false;
+```
+
+meaning **definitely absent**.
+
+#### C → Java correspondence
+
+| Concept          | C                               | Java                            |
+| ---------------- | ------------------------------- | ------------------------------- |
+| Bit storage      | `uint8_t bits[]`                | `long bits`                     |
+| Set bit          | `bits[...] \|= ...`             | `bits \|= ...`                  |
+| Check bit        | `bits[...] & ...`               | `bits & ...`                    |
+| Add              | `bloom_add()`                   | `add()`                         |
+| Search           | `bloom_search()`                | `search()`                      |
+| Hash functions   | `hash1()`, `hash2()`, `hash3()` | `hash1()`, `hash2()`, `hash3()` |
+| Absent           | `return 0`                      | `return false`                  |
+| Possibly present | `return 1`                      | `return true`                   |
+
+One difference from the C version is that Java's `long` gives us a convenient **64-bit bit array**, so we can implement the entire small example with a single `long`.
+
+### Using BitSet and multiple hash iterations
+you can build a lightweight version using Java's built-in java.util.BitSet and multiple hash iterations.
+To simulate multiple hash functions without the overhead of initializing distinct hashing algorithms, this implementation uses a seed multiplier technique:
+```
+import java.util.BitSet;
+import java.util.Objects;
+
+public class CustomBloomFilter<T> {
+    private final BitSet bitSet;
+    private final int bitSetSize;
+    private final int numHashFunctions;
+
+    // Constructor to set size of bit array and number of hash functions
+    public CustomBloomFilter(int bitSetSize, int numHashFunctions) {
+        this.bitSetSize = bitSetSize;
+        this.numHashFunctions = numHashFunctions;
+        this.bitSet = new BitSet(bitSetSize);
+    }
+
+    // Generate pseudo-distinct hashes using Object.hash() with changing seeds
+    private int getHash(T element, int seed) {
+        int hash = Objects.hash(element, seed);
+        return Math.abs(hash % bitSetSize);
+    }
+
+    // Add an item by setting all corresponding bits to true
+    public void add(T element) {
+        for (int i = 0; i < numHashFunctions; i++) {
+            int bitIndex = getHash(element, i);
+            bitSet.set(bitIndex);
+        }
+    }
+
+    // Check membership: returns false if ANY bit is 0
+    public boolean mightContain(T element) {
+        for (int i = 0; i < numHashFunctions; i++) {
+            int bitIndex = getHash(element, i);
+            if (!bitSet.get(bitIndex)) {
+                return false; // Definitely not in the set
+            }
+        }
+        return true; // Probably in the set
+    }
+
+    public static void main(String[] args) {
+        // Create filter with a 10,000-bit array and 5 hash iterations
+        CustomBloomFilter<String> filter = new CustomBloomFilter<>(10000, 5);
+
+        filter.add("apple");
+        filter.add("banana");
+
+        System.out.println(filter.mightContain("apple"));  // Output: true
+        System.out.println(filter.mightContain("cherry")); // Output: false (most likely)
+    }
+}
+
+```
+
+## Python
+A Bloom Filter needs m bits of storage. following implementation uses
+Python’s ability to work with arbitrarily large “bignum” values.
+```python
+"""
+Demonstrate Bloom Filter using native Python.
+
+Uses a Python integer as the underlying bit array.
+"""
+
+class BloomFilter:
+
+    def __init__(self, size=1000, hashFunctions=None):
+        """
+        Construct a Bloom Filter with `size` bits.
+
+        If no hash functions are provided, a single hash function
+        based on hash(value) % size is used.
+        """
+
+        # Python integer used as the bit array.
+        #
+        # Example:
+        #     00000000
+        #
+        # Initially all bits are 0.
+        self.bits = 0
+
+        self.size = size
+
+        if hashFunctions is None:
+            self.k = 1
+
+            self.hashFunctions = [
+                lambda value, size: hash(value) % size
+            ]
+
+        else:
+            self.k = len(hashFunctions)
+            self.hashFunctions = hashFunctions
+
+
+    def add(self, value):
+        """
+        Insert value into the Bloom Filter.
+
+        For every hash function:
+            1. Calculate a bit position.
+            2. Create a bit mask.
+            3. Set that bit to 1.
+        """
+
+        for hf in self.hashFunctions:
+
+            position = hf(value, self.size)
+
+            # Create a mask with bit `position` set to 1.
+            #
+            # Example:
+            #     position = 3
+            #
+            #     1 << 3
+            #     00001000
+            mask = 1 << position
+
+            # Set the bit.
+            self.bits |= mask
+
+
+    def countbits(self):
+        """
+        Count the number of bits currently set to 1.
+        """
+
+        n = self.bits
+        num = 0
+
+        while n > 0:
+
+            # Check the least significant bit.
+            num += n % 2
+
+            # Shift all bits one position to the right.
+            n = n >> 1
+
+        return num
+
+
+    def fingerprint(self, value):
+        """
+        Return the bit positions generated by all hash functions.
+
+        Useful for debugging and understanding the Bloom Filter.
+        """
+
+        return [
+            hf(value, self.size)
+            for hf in self.hashFunctions
+        ]
+
+
+    def __contains__(self, value):
+        """
+        Determine whether value is possibly present.
+
+        Returns:
+
+            False -> definitely absent
+            True  -> possibly present
+
+        A Bloom Filter can produce false positives,
+        but it does not produce false negatives.
+        """
+
+        for hf in self.hashFunctions:
+
+            position = hf(value, self.size)
+
+            # Create a mask for the required bit.
+            mask = 1 << position
+
+            # Check whether the bit is 0.
+            if self.bits & mask == 0:
+                return False
+
+        # All required bits are 1.
+        #
+        # The value may be present.
+        return True
+
+
+    def print_bits(self):
+        """
+        Print the Bloom Filter bits.
+        """
+
+        print(format(self.bits, f"0{self.size}b"))
+
+
+# ---------------------------------------------------------
+# Hash functions for testing
+# ---------------------------------------------------------
+
+def hash1(value, size):
+    """
+    Simple hash function.
+    """
+    return hash(value) % size
+
+
+def hash2(value, size):
+    """
+    Second hash function.
+    """
+    return (hash(value) * 31 + 17) % size
+
+
+def hash3(value, size):
+    """
+    Third hash function.
+    """
+    return (hash(value) * 131 + 7) % size
+
+
+# ---------------------------------------------------------
+# Test
+# ---------------------------------------------------------
+
+if __name__ == "__main__":
+
+    # Use a small filter so we can easily see the bits.
+    size = 16
+
+    filter = BloomFilter(
+        size=size,
+        hashFunctions=[
+            hash1,
+            hash2,
+            hash3
+        ]
+    )
+
+
+    # -----------------------------------------------------
+    # Initial state
+    # -----------------------------------------------------
+
+    print("Initial Bloom Filter:")
+    filter.print_bits()
+
+
+    # -----------------------------------------------------
+    # Add values
+    # -----------------------------------------------------
+
+    filter.add("alice")
+    filter.add("bob")
+    filter.add("charlie")
+
+
+    print("\nAfter inserting:")
+    print("alice, bob, charlie")
+
+    filter.print_bits()
+
+
+    # -----------------------------------------------------
+    # Fingerprints
+    # -----------------------------------------------------
+
+    print("\nFingerprints:")
+
+    print("alice  :", filter.fingerprint("alice"))
+    print("bob    :", filter.fingerprint("bob"))
+    print("charlie:", filter.fingerprint("charlie"))
+    print("david  :", filter.fingerprint("david"))
+
+
+    # -----------------------------------------------------
+    # Number of bits set
+    # -----------------------------------------------------
+
+    print("\nNumber of bits set:")
+    print(filter.countbits())
+
+
+    # -----------------------------------------------------
+    # Search
+    # -----------------------------------------------------
+
+    print("\nSearch results:")
+
+    print(
+        "alice   ->",
+        "possibly present"
+        if "alice" in filter
+        else "definitely absent"
+    )
+
+    print(
+        "bob     ->",
+        "possibly present"
+        if "bob" in filter
+        else "definitely absent"
+    )
+
+    print(
+        "charlie ->",
+        "possibly present"
+        if "charlie" in filter
+        else "definitely absent"
+    )
+
+    print(
+        "david   ->",
+        "possibly present"
+        if "david" in filter
+        else "definitely absent"
+    )
+
+    print(
+        "eve     ->",
+        "possibly present"
+        if "eve" in filter
+        else "definitely absent"
+    )
+```
+This implementation assumes the existence of k hash functions, each of which takes
+the value to be inserted and the size of the bit array. 
+```python
+self.hashFunctions = [
+    hash1,
+    hash2,
+    hash3
+]
+
+self.k = len(self.hashFunctions)
+```
+
+If we have:
+
+```text
+k = 3
+```
+
+then every value is processed by **3 hash functions**.
+
+For example, suppose we add `"alice"`:
+
+| Hash function    | Calculated position |
+| ---------------- | ------------------: |
+| `hash1("alice")` |                 `2` |
+| `hash2("alice")` |                 `7` |
+| `hash3("alice")` |                `12` |
+
+Therefore, adding `"alice"` sets **three bits**:
+
+```text
+bit 2 = 1
+bit 7 = 1
+bit 12 = 1
+```
+Each hash function receives two arguments
+
+The hash functions have this form:
+
+```python
+def hash1(value, size):
+    return hash(value) % size
+```
+
+So the hash function receives:
+
+```text
+value → the value being inserted
+size  → size of the Bloom Filter
+```
+
+For example:
+
+```python
+hash1("alice", 16)
+```
+
+might produce:
+
+```text
+2
+```
+
+The `% size` ensures that the position is within the bit array:
+
+```text
+0 ≤ position < size
+```
+
+---
+
+Whenever a value is added, k
+bits are set in the bit array, based on the individual bit positions computed by the
+hash functions. 
+Suppose:
+
+```text
+size = 16
+```
+
+and `"alice"` produces:
+
+```text
+hash1 → 2
+hash2 → 7
+hash3 → 12
+```
+
+The process is:
+
+| Hash function | Position | `1 << position`    | Bit set |
+| ------------- | -------: | ------------------ | ------: |
+| `hash1`       |        2 | `0000000000000100` |       2 |
+| `hash2`       |        7 | `0000000010000000` |       7 |
+| `hash3`       |       12 | `0001000000000000` |      12 |
+
+After all three operations:
+
+```text
+Position:  15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+           -------------------------------------------
+Bits:       0  0  0  1  0  0  0  0 1 0 0 0 0 1 0 0
+                       ↑              ↑           ↑
+                      12              7           2
+```
+This code uses the bitwise shift operator `<<` to shift a `1` to the appropriate bit position, and the bitwise or operator (|) to set that bit value. 
+For example:
+
+```python
+1 << 2
+```
+
+means:
+
+```text
+00000001
+   ↓ shift left 2 positions
+00000100
+```
+
+For position `7`:
+
+```python
+1 << 7
+```
+
+produces:
+
+```text
+00000001
+   ↓↓↓↓↓↓↓
+10000000
+```
+
+For position `12`:
+
+```python
+1 << 12
+```
+
+produces:
+
+```text
+0000000000000001
+            ↓↓↓↓
+0001000000000000
+```
+
+So:
+
+```python
+mask = 1 << position
+```
+
+creates a **bit mask** containing exactly one `1`.
+
+The next operation is:
+
+```python
+self.bits |= mask
+```
+
+which is equivalent to:
+
+```python
+self.bits = self.bits | mask
+```
+
+Suppose the current bits are:
+
+```text
+0000000000000100
+```
+
+and we want to set bit `7`:
+
+```text
+mask = 0000000010000000
+```
+
+The OR operation is:
+
+```text
+  0000000000000100
+| 0000000010000000
+------------------
+  0000000010000100
+```
+
+Both bits are now `1`.
+
+This is why the paragraph says:
+
+> the bitwise or operator (`|`) to set that bit value
+
+---
+
+To determine
+whether a value has been added, check the same `k` bits from these hash functions
+using the bitwise and operator (`&`); if any bit position is set to `0`, you know the value
+could not have been added, so it returns False. However, if these `k` bit positions are
+all set to `1`, you can only state that the value “might” have been added.
+
+Suppose we search for `"alice"`.
+
+The hash functions must produce the same positions:
+
+```text
+hash1 → 2
+hash2 → 7
+hash3 → 12
+```
+
+Then we check:
+
+```text
+bit 2
+bit 7
+bit 12
+```
+
+`&` checks whether a bit is set
+
+This is the important difference:
+
+1. Adding
+
+```python
+self.bits |= mask
+```
+
+uses **OR** to set a bit.
+
+2. Searching
+
+```python
+self.bits & mask
+```
+uses **AND** to check a bit.
+
+Suppose we want to check bit `7`.
+
+The mask is:
+
+```text
+10000000
+```
+
+Suppose the Bloom Filter currently contains:
+
+```text
+10100100
+```
+
+We perform:
+
+```text
+  10100100
+& 10000000
+----------
+  10000000
+```
+
+The result is non-zero.
+
+Therefore:
+
+```text
+bit 7 = 1
+```
+If any bit is `0`, return `False`
+
+Suppose we're searching for `"david"`.
+
+Assume its hash functions produce:
+
+```text
+3
+7
+12
+```
+
+But the Bloom Filter has:
+
+```text
+bit 3 = 0
+bit 7 = 1
+bit 12 = 1
+```
+
+The first check might be:
+
+```text
+  bits
+& 0000000000001000
+------------------
+  0000000000000000
+```
+
+The result is `0`.
+
+Therefore:
+
+```python
+if self.bits & mask == 0:
+    return False
+```
+
+We immediately know:
+
+```text
+"david" → definitely absent
+```
+
+Why?
+
+Because if `"david"` had actually been inserted, its hash function would have set bit `3` to `1`.
+
+A Bloom Filter therefore gives us a **guarantee** when it returns `False`.
+
+If all `k` bits are `1`, it might be present
+
+Now suppose we search for `"charlie"`.
+
+Imagine `"charlie"` was **never inserted**, but its hash functions happen to produce positions that were already set by other values:
+
+```text
+bit 2  → 1
+bit 7  → 1
+bit 12 → 1
+```
+
+The search sees:
+
+```text
+bit 2  → 1
+bit 7  → 1
+bit 12 → 1
+```
+
+Therefore the loop finishes:
+
+```python
+return True
+```
+
+But `True` does **not** mean:
+
+```text
+"charlie definitely exists"
+```
+
+It means:
+
+```text
+"charlie might exist"
+```
+
+This is the **false-positive** behavior of Bloom Filters.
+
+The whole idea can be summarized as:
+
+```text
+                     ADD
+                      |
+                   "alice"
+                      |
+             +--------+--------+
+             |        |        |
+           hash1    hash2    hash3
+             |        |        |
+             2        7       12
+             |        |        |
+             v        v        v
+           set bit  set bit  set bit
+```
+
+For searching:
+
+```text
+                   SEARCH
+                      |
+                   "alice"
+                      |
+             +--------+--------+
+             |        |        |
+           hash1    hash2    hash3
+             |        |        |
+             2        7       12
+             |        |        |
+             v        v        v
+          check     check     check
+             |        |        |
+             1        1        1
+             |        |        |
+             +--------+--------+
+                      |
+                  TRUE
+                      |
+             "possibly present"
+```
+
+But if even one bit is `0`:
+
+```text
+           1        0        1
+           |        |        |
+           +--------+--------+
+                    |
+                  FALSE
+                    |
+           "definitely absent"
+```
+**The key idea**
+
+| Operation      | Operator        | Purpose                      |
+| -------------- | --------------- | ---------------------------- |
+| Create mask    | `1 << position` | Move `1` to the desired bit  |
+| Add            | `bits \|= mask` | Set the bit to `1`           |
+| Search         | `bits & mask`   | Check whether the bit is `1` |
+| Any bit = `0`  | —               | **Definitely absent**        |
+| All bits = `1` | —               | **Possibly present**         |
+
+So the entire Bloom Filter mechanism boils down to:
+
+```text
+ADD:
+    hash → position → 1 << position → OR → set bit
+
+SEARCH:
+    hash → position → 1 << position → AND → check bit
+```
+
+That's the core idea behind the implementation.
+### `add()`
+
+Your original code:
+
+```python
+for hf in self.hashFunctions:
+    self.bits |= 1 << hf(value, self.size)
+```
+
+is correct. I expanded it to make each step visible:
+
+```python
+for hf in self.hashFunctions:
+
+    position = hf(value, self.size)
+
+    mask = 1 << position
+
+    self.bits |= mask
+```
+
+For example, suppose:
+
+```text
+hash function → position 7
+```
+
+Then:
+
+| Step | Operation       | Result     |                   |
+| ---- | --------------- | ---------- | ----------------- |
+| 1    | `position = 7`  | `7`        |                   |
+| 2    | `mask = 1 << 7` | `10000000` |                   |
+| 3    | `self.bits      | = mask`    | Sets bit 7 to `1` |
+
+If the next hash function produces position `12`:
+
+| Step | Operation        | Result             |                    |
+| ---- | ---------------- | ------------------ | ------------------ |
+| 1    | `position = 12`  | `12`               |                    |
+| 2    | `mask = 1 << 12` | `0001000000000000` |                    |
+| 3    | `self.bits       | = mask`            | Sets bit 12 to `1` |
+
+So the Python integer itself acts like the entire bit array.
+
+---
+
+### `__contains__()`
+
+This lets you write:
+
+```python
+"alice" in filter
+```
+
+instead of:
+
+```python
+filter.search("alice")
+```
+
+The implementation:
+
+```python
+def __contains__(self, value):
+
+    for hf in self.hashFunctions:
+
+        position = hf(value, self.size)
+
+        mask = 1 << position
+
+        if self.bits & mask == 0:
+            return False
+
+    return True
+```
+
+The search process is:
+
+| Step | Operation          | Meaning                    |
+| ---- | ------------------ | -------------------------- |
+| 1    | Calculate hash     | Find required bit position |
+| 2    | `1 << position`    | Create mask                |
+| 3    | `self.bits & mask` | Check whether bit is set   |
+| 4    | Result is `0`      | Definitely absent          |
+| 5    | Result is non-zero | Continue checking          |
+| 6    | All bits are `1`   | Possibly present           |
+
+So:
+
+```text
+                    Search "alice"
+                          |
+                    hash functions
+                          |
+              +-----------+-----------+
+              |           |           |
+             bit 2       bit 7      bit 12
+              |           |           |
+              v           v           v
+              1           1           1
+              |           |           |
+              +-----------+-----------+
+                          |
+                     True
+                "possibly present"
+```
+
+The key distinction remains:
+
+```text
+False → definitely absent
+True  → possibly present
+```

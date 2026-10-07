@@ -1,0 +1,871 @@
+
+## Authorization Endpoint
+Clients will direct a user’s browser to the authorization server to begin the OAuth process. Clients may use either the authorization code grant type or the implicit grant. Along with the type of grant specified by the response_type parameter, the request will have a number of other parameters to indicate the specifics of the request.
+
+The first time the authorization server sees the user will be this authorization request, the user will be directed to the server with the query parameters the client has set. At this point, the authorization server will need to validate the request and present the authorization interface, allowing the user to approve or deny the request.
+
+The **Authorization Endpoint** is the OAuth 2.0 endpoint where the **client sends the user to request authorization**.
+
+It is usually hosted by the **Authorization Server**.
+
+For example:
+
+```text
+https://auth.example.com/authorize
+```
+
+The authorization endpoint is primarily concerned with:
+
+```text
+Client
+   │
+   │ Authorization Request
+   ▼
+Authorization Endpoint
+   │
+   ├── authenticate user
+   ├── determine requested scopes
+   ├── obtain consent
+   ├── validate request
+   │
+   ▼
+Authorization Response
+   │
+   ├── authorization code
+   │       or
+   └── error
+```
+
+It is important to distinguish the **Authorization Endpoint** from the **Token Endpoint**:
+
+| Endpoint               | Main responsibility                   |
+| ---------------------- | ------------------------------------- |
+| Authorization Endpoint | User authorization                    |
+| Token Endpoint         | Exchange credentials/codes for tokens |
+
+For Authorization Code Flow:
+
+```text
+Browser
+   │
+   │ authorization request
+   ▼
+Authorization Endpoint
+   │
+   │ authorization response
+   ▼
+Browser
+   │
+   │ code
+   ▼
+Client
+   │
+   │ token request
+   ▼
+Token Endpoint
+```
+
+### Authorization Request
+The **authorization request** is a request sent to the authorization endpoint asking the Authorization Server to authorize a client.
+
+A typical request looks like:
+
+```http
+GET /authorize?
+    response_type=code
+    &client_id=web-client
+    &redirect_uri=https%3A%2F%2Fapp.example.com%2Fcallback
+    &scope=openid%20profile%20email
+    &state=abc123
+```
+
+The request contains information such as:
+
+```text
+response_type
+client_id
+redirect_uri
+scope
+state
+```
+
+With PKCE, it also commonly contains:
+
+```text
+code_challenge
+code_challenge_method
+```
+
+Conceptually:
+
+```text
+┌──────────────┐
+│    Client    │
+└──────┬───────┘
+       │
+       │ Authorization Request
+       │
+       │ response_type=code
+       │ client_id=web-client
+       │ redirect_uri=...
+       │ scope=openid profile
+       │ state=abc123
+       │ code_challenge=...
+       ▼
+┌────────────────────────┐
+│ Authorization Endpoint │
+└────────────────────────┘
+```
+
+The authorization server then validates the request.
+
+#### Verifying the Authorization Request
+
+The authorization server must first verify that the client_id in the request corresponds to a valid application.
+
+If your server allows applications to register more than one redirect URL, then there are two steps to validating the redirect URL. If the request contains a redirect_uri parameter, the server must confirm it is a valid redirect URL for this application. If there is no redirect_uri parameter in the request, and only one URL was registered, the server uses the redirect URL that was previously registered. Otherwise, if no redirect URL is in the request, and no redirect URL has been registered, this is an error.
+
+If the client_id is invalid, the server should reject the request immediately and display the error to the user rather than redirecting the user back to the application.
+### Response Types
+`response_type` tells the authorization endpoint **what kind of authorization response the client is requesting**.
+
+For the Authorization Code Flow:
+
+```text
+response_type=code
+```
+
+means:
+
+> "After the user authorizes this request, return an authorization code."
+
+For example:
+
+```http
+GET /authorize?
+    response_type=code
+    &client_id=web-client
+    ...
+```
+
+The response is then approximately:
+
+```text
+https://app.example.com/callback?
+    code=SplxlOBeZQQYbYS6WxSbIA
+    &state=abc123
+```
+#### `code`
+
+The important modern use is:
+
+```text
+response_type=code
+```
+
+which gives:
+
+```text
+Authorization Request
+        │
+        │ response_type=code
+        ▼
+Authorization Endpoint
+        │
+        │ code
+        ▼
+Client
+```
+
+The authorization endpoint **does not normally return the access token in this response** for Authorization Code Flow.
+
+Instead:
+
+```text
+authorization code
+       │
+       ▼
+Token Endpoint
+       │
+       ▼
+access token
+```
+
+This is one of the fundamental characteristics of Authorization Code Flow.
+
+### Redirect URI
+Redirect URLs are a critical part of the OAuth flow. After a user successfully authorizes an application, the authorization server will redirect the user back to the application. Because the redirect URL will contain sensitive information, it is critical that the service doesn’t redirect the user to arbitrary locations.
+
+The best way to ensure the user will only be redirected to appropriate locations is to require the developer to register one or more redirect URLs when they create the application.
+
+The `redirect_uri` tells the authorization server:
+
+> "After authorization, send the browser back to this location."
+
+For example:
+
+```text
+https://app.example.com/oauth/callback
+```
+
+The request contains:
+
+```http
+redirect_uri=https://app.example.com/oauth/callback
+```
+
+The client should have registered this URI with the authorization server.
+
+For example:
+
+```text
+Client Registration
+
+client_id:
+    web-client
+
+redirect_uri:
+    https://app.example.com/oauth/callback
+```
+
+The authorization server compares the URI in the request with the registered URI.
+
+```text
+Registered URI
+      │
+      │ compare
+      ▼
+Requested URI
+      │
+ ┌────┴────┐
+ │         │
+match    mismatch
+ │         │
+ ▼         ▼
+continue  error
+```
+
+If authorization succeeds:
+
+```text
+Authorization Server
+        │
+        │ redirect
+        ▼
+https://app.example.com/oauth/callback
+        ?
+        code=ABC123
+        &state=xyz
+```
+
+**Why is this important?**
+
+The authorization code is sensitive.
+
+If an attacker could freely specify:
+
+```text
+redirect_uri=https://attacker.example/callback
+```
+
+the authorization server might send the code to the attacker.
+
+Therefore, **redirect URI validation is an important security property of the authorization endpoint**.
+
+In order to avoid exposing users to open redirector attacks, you must require developers register one or more redirect URLs for the application. The authorization server must never redirect to any other location. Registering a New Application covers creating a registration form to allow developers to register redirect URLs for their applications.
+
+If an attacker can manipulate the redirect URL before the user reaches the authorization server, they could cause the server to redirect the user to a malicious server which would send the authorization code to the attacker. This is one way attackers can try to intercept an OAuth exchange and steal access tokens. If the authorization endpoint does not limit the URLs that it will redirect to, then it’s considered an “open redirector”, and can be used in combination with other things to launch attacks that aren’t even related to OAuth necessarily.
+
+#### Valid Redirect URLs
+
+When you build the form to allow developers to register redirect URLs, you should do some basic validation of the URL that they enter.
+
+Registered redirect URLs may contain query string parameters, but must not contain anything in the fragment. The registration server should reject the request if the developer tries to register a redirect URL that contains a fragment.
+
+Note that for native and mobile apps, the platform may allow a developer to register a URL scheme such as myapp:// which can then be used in the redirect URL. This means the authorization server should allow arbitrary URL schemes to be registered in order to support registering redirect URLs for native apps.
+
+#### Per-Request Customization
+
+Often times a developer will think that they need to be able to use a different redirect URL on each authorization request, and will try to change the query string parameters per request. This is not the intended use of the redirect URL, and should not be allowed by the authorization server. The server should reject any authorization requests with redirect URLs that are not an exact match of a registered URL.
+
+If a client wishes to include request-specific data in the redirect URL, it can instead use the “state” parameter to store data that will be included after the user is redirected. It can either encode the data in the state parameter itself, or use the state parameter as a session ID to store the state on the server.
+
+####  Redirect URLs for Native Apps 
+Native applications are clients installed on a device, such as a desktop application or native mobile application. There are a few things to keep in mind when supporting native apps related to security and user experience.
+
+The authorization endpoint normally redirects the user back to the client’s registered redirect URL. Depending on the platform, native apps can either claim a URL pattern, or register a custom URL scheme that will launch the application. For example, an iOS application may register a custom protocol such as `myapp://` and then use a redirect_uri of `myapp://callback`.
+
+##### App-Claimed https URL Redirection
+
+Some platforms, (Android, and iOS as of iOS 9), allow the app to override specific URL patterns to launch the native application instead of a web browser. For example, an application could register `https://app.example.com/auth` and whenever the web browser attempts to redirect to that URL, the operating system launches the native app instead.
+
+If the operating system does support claiming URLs, this method should be used. If the operating system does some level of validation that the developer had control over this web URL, then this allows the identity of the native application to be guaranteed by the operating system. If the operating system does not support this, then the app will have to use a custom URL scheme instead.
+
+##### Custom URL Scheme
+
+Most mobile and desktop operating systems allow apps to register a custom URL scheme that will launch the app when a URL with that scheme is visited from the system browser.
+
+Using this method, the native app starts the OAuth flow as normal, by launching the system browser with the standard authorization code parameters. The only difference is that the redirect URL will be a URL with the app’s custom scheme.
+
+When the authorization server sends the Location header intending to redirect the user to myapp://callback#token=...., the phone will launch the application and the app will be able to resume the authorization process, parsing the access token from the URL and storing it internally.
+
+##### Custom URL Scheme Namespaces
+
+Since there is no centralized method of registering URL schemes, apps have to do their best to choose URL schemes that won’t conflict with each other.
+
+Your service can help by requiring the URL scheme to follow a certain pattern, and only allow the developer to register a custom scheme that matches that pattern.
+
+For example, Facebook generates a URL scheme for every app based on the app’s client ID. For example, fb00000000:// where the numbers correspond to the app’s client ID. This provides a reasonably sure method of generating globally unique URL schemes, since other apps are unlikely to use a URL scheme with this pattern.
+
+Another option for apps is to use the reverse domain name pattern with a domain that is under the control of the app’s publisher, resulting in a URL scheme of com.example.myapp for example. This is also something that can be enforced by the service if you wish.
+
+#### Redirect URL Validation 
+There are three cases when you’ll need to validate redirect URLs.
+
+- When the developer registers the redirect URL as part of creating an application
+- In the authorization request (both authorization code and implicit grant types)
+- When the application exchanges an authorization code for an access token
+
+##### Redirect URL Registration
+
+As discussed in Creating an Application, the service should allow developers to register one or more redirect URLs when creating the application. The only restriction on the redirect URL is that it cannot contain a fragment component. The service must allow developers to register redirect URLs with custom URL schemes, in order to support native applications on some platforms.
+##### Authorization Request
+
+When the application starts the OAuth flow, it will direct the user to your service’s authorization endpoint. The request will have several parameters in the URL, including a redirect URL.
+
+At this point, the authorization server must validate the redirect URL to ensure the URL in the request matches one of the registered URLs for the application. The request will also have a client_id parameter, so the service should look up the redirect URLs based on that. It is entirely possible for an attacker to craft an authorization request with one app’s client ID and the attacker’s redirect URL, which is why registration is required.
+
+The service should look for an exact match of the URL, and avoid matching on only part of the specific URL. (The client can use the state parameter if it needs to customize each request.) Simple string matching is sufficient since the redirect URL can’t be customized per request. All the server needs to do is check that the redirect URL in the request matches one of the redirect URLs the developer entered when registering their application.
+
+If the redirect URL is not one of the registered redirect URLs, then the server must immediately show an error indicating such, and not redirect the user. This avoids having your authorization server be used as an open redirector.
+##### Granting Access Tokens
+
+The token endpoint will get a request to exchange an authorization code for an access token. This request will contain a redirect URL as well as the authorization code. As an added measure of security, the server should verify that the redirect URL in this request matches exactly the redirect URL that was included in the initial authorization request for this authorization code. If the redirect URL does not match, the server rejects the request with an error.
+### State
+The `state` parameter allows the client to associate the authorization response with the authorization request that initiated it.
+
+The client generates a random value:
+
+```text
+state = X7f92KpLm31
+```
+
+It sends:
+
+```http
+GET /authorize?
+    response_type=code
+    &client_id=web-client
+    &redirect_uri=https://app.example.com/callback
+    &state=X7f92KpLm31
+```
+
+After authorization, the server redirects:
+
+```text
+https://app.example.com/callback?
+    code=ABC123
+    &state=X7f92KpLm31
+```
+
+The client checks:
+
+```text
+received state
+       ==
+original state
+```
+
+So:
+
+```text
+X7f92KpLm31
+       ==
+X7f92KpLm31
+
+       ↓
+
+Continue
+```
+
+But:
+
+```text
+X7f92KpLm31
+       !=
+AttackerValue
+
+       ↓
+
+Reject
+```
+
+The purpose is to prevent an authorization response from being incorrectly associated with a different client session/request, helping protect against **CSRF and login-request forgery**.
+
+A useful mental model is:
+
+```text
+Authorization Request
+        │
+        │ state = XYZ
+        ▼
+Authorization Server
+        │
+        │ state = XYZ
+        ▼
+Authorization Response
+
+        Client verifies:
+
+        XYZ == XYZ
+```
+
+`state` is therefore mainly a **client-side correlation/security mechanism**.
+
+### Scopes
+The `scope` parameter tells the authorization server **what permissions the client is requesting**.
+
+For example:
+
+```text
+scope=read:products write:products
+```
+
+means the client is asking for permissions represented by:
+
+```text
+read:products
+write:products
+```
+
+Another example:
+
+```text
+scope=openid profile email
+```
+
+is common when OAuth 2.0 is being used together with OpenID Connect.
+
+A request could therefore look like:
+
+```http
+GET /authorize?
+    response_type=code
+    &client_id=web-client
+    &redirect_uri=https://app.example.com/callback
+    &scope=openid%20profile%20email
+    &state=XYZ
+```
+
+The authorization server examines the requested scopes.
+
+```text
+Client requests:
+
+openid
+profile
+email
+      │
+      ▼
+Authorization Server
+      │
+      ▼
+User Consent
+```
+
+The user might be shown something like:
+
+```text
+Application "Example App" is requesting:
+
+☑ View your basic profile
+☑ View your email address
+
+        [Allow] [Deny]
+```
+
+The final authorization may grant the requested scopes, potentially with a different set depending on the authorization server's rules and the user's authorization.
+
+The resulting token can then carry the authorized scopes.
+
+For example:
+
+```text
+access token
+
+scope:
+    read:products
+```
+
+The resource server can check:
+
+```text
+Request:
+    DELETE /products/10
+
+Required:
+    delete:products
+
+Token:
+    read:products
+
+→ insufficient scope
+```
+
+So the relationship is:
+
+```text
+scope requested
+      │
+      ▼
+authorization
+      │
+      ▼
+scope granted
+      │
+      ▼
+access token
+      │
+      ▼
+API authorization
+```
+
+### Consent
+**Consent** is the point where the user is given an opportunity to approve the requested access. its The first thing the user will see after clicking the application’s “sign in” or “connect” button is your authorization server UI.
+
+For example:
+
+```text
+┌─────────────────────────────┐
+│       Example App            │
+│                              │
+│ This application requests:   │
+│                              │
+│ ✓ View your profile          │
+│ ✓ View your email            │
+│                              │
+│       [Deny]   [Allow]       │
+└─────────────────────────────┘
+```
+
+The authorization server generally performs authentication first:
+
+```text
+User
+ │
+ │ Login
+ ▼
+Authorization Server
+ │
+ │ User authenticated
+ ▼
+Consent
+```
+
+Then the user's decision determines whether authorization succeeds.
+
+1. If the user approves
+
+```text
+User
+ │
+ │ Allow
+ ▼
+Authorization Server
+ │
+ │ authorization granted
+ ▼
+redirect_uri
+ │
+ │ code + state
+ ▼
+Client
+```
+
+2. If the user denies
+
+```text
+User
+ │
+ │ Deny
+ ▼
+Authorization Server
+ │
+ │ authorization denied
+ ▼
+redirect_uri
+ │
+ │ error=access_denied
+ ▼
+Client
+```
+
+Consent does not necessarily mean that every request always displays a consent screen. An authorization server may have policies for previously granted consent, trusted clients, organizational policies, or other circumstances.
+
+It’s up to the authorization server to decide whether to require the user log in each time they visit the authorization screen, or keep the user signed in for some period of time. If the authorization server remembers the user in between requests, then it may still need to ask the user’s permission to authorize the application on future visits.
+
+Typically sites like Twitter or Facebook expect their users are signed in most of the time, so they provide a way for their authorization screens to give the user a streamlined experience by not requiring them to log in each time. However, based on the security requirements of your service as well as that of the third-party applications, it may be desirable to require or give developers the option to require the user to log in each time they visit the authorization screen.
+
+In Google’s API, applications can add prompt=login to the authorization request, which causes the authorization server to force the user to sign in again before it will show the authorization prompt.
+
+In any case, if the user is signed out, or doesn’t yet have an account on your service, you’ll need to provide a way for them to sign in or create an account on this screen.
+
+![Logged-out view of Twitter’s authorization screen](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/twitter_logged_out_auth_screen.png)
+
+Authenticating the user can be done any way you wish, as this is not specified in the OAuth 2.0 spec. Most services use a traditional username/password login to authenticate their users, but this is by no means the only way you can approach the problem. In enterprise environments, a common technique is to use SAML to leverage an existing authentication mechanism at the organization, while avoiding creating another username/password database.
+
+This is also the opportunity the authorization server has to require multifactor authentication from the user. After authenticating with the user’s primary username and password, the authorization server can require a second factor such as WebAuthn or a USB security key. The benefit of this pattern is the applications do not need to be aware of whether multifactor authentication is being used or required, since that happens entirely between the user and the authorization server without being visible to the application.
+
+Once the user authenticates with the authorization server, it can continue to process the authorization request and redirect the user back to the application. Sometimes the server will consider a successful login to also mean that the user authorized the application. In this case, the authorization screen with the login prompt would need to include text that describes the fact that by signing in, the user is approving this authorization request. This would result in the following user flow.
+
+![User flow for logged-in vs not-logged-in](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/okta_oauth-diagrams_20170622-04.png)
+
+If the authorization server needs to authenticate the user via SAML or with some other internal system, the user flow would look like the following
+
+![User flow for separate authentication server](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/okta_oauth-diagrams_20170622-05.png)
+
+In this flow, the user is directed back to the authorization server after signing in, where they see the authorization request as they would if they had already been signed in.
+
+#### The Authorization Interface 
+The authorization interface is the screen users will see when they are presented with an authorization request from a third-party app. This is often also referred to as the “consent screen” or “permission prompt”. Since the user is being asked to grant some level of access to a third-party app, you need to ensure the user has all the information they need to make an informed decision about authorizing the application.
+
+![Example OAuth Authorization Screen](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/oauth_authorization_screen.png)
+
+This is typically only needed when the user is logging in to a third-party application rather than a first-party application. For example, when logging in to Gmail, you wouldn’t expect Google to ask you whether it’s okay for Gmail to know your account info, since both the application (Gmail) and the OAuth server are part of the same company’s product. However if you are logging in to a third-party mailing list application that will send emails from your Gmail account, it becomes critical that you as the user are informed about what this third-party application will be granted access to and what it will be able to do with your account.
+
+An authorization interface typically has the following components:
+
+1. **Website name and logo**
+
+The service should be easily recognizable by the user, since they need to know which service they are granting access to. However you identify your website on your main pages should be consistent with the authorization interface. Typically this is done by showing the application name and logo in a consistent location of the screen, and/or by using a consistent color scheme across the entire website.
+2. **User identification**
+
+If the user is already signed in, you should indicate this to the user. This may be something like showing their name and photo in the top corner of the screen, as you would in the rest of your website.
+
+It is important that the user knows which account they are currently signed in as, in case they manage multiple accounts, so that they don’t mistakenly authorize a different user account.
+3. **Application details**
+
+The authorization interface should clearly identify the application that is making the request. In addition to the developer-provided application name, it is usually a good idea to show the website and application’s logo as well. This is information you will have collected when the developer registered the application. We discussed this in detail in Client Registration.
+
+4. **The requested scope**
+
+The scope values provided in the authorization request should be clearly displayed to the user. The scope values are typically short strings representing certain access, so a more human-readable version should be shown to the user.
+
+For example, if a service defines a scope of “private” to mean read access to private profile data, then the authorization server should say something along the lines of “this application will be able to view your private profile data.” If the scope explicitly allows write access, that should also be identified in the description, such as “this application will be able to edit your profile data.”
+
+If no scope is present, but your service still grants some basic level of access to a user’s account, you should include a message describing what the app will get access to. If omitting scope means the only thing the app gets is user identification, you can include a message to the effect of “this application would like you to sign in” or “this application would like to know your basic profile information.”
+
+See Scope for more information on how to effectively use scope in your service.
+
+5. **The requested or effective lifetime**
+
+The authorization server has to make a decision about how long the authorization will be valid, how long the access tokens will last and how long refresh tokens will last.
+
+Most services do not automatically expire authorizations, and instead expect the user to periodically review and revoke access to apps they no longer want to use. However some services provide limited token lifetime by default, and either allow the application to request a longer duration, or force users to re-authorize the app after the authorization is expired.
+
+Whatever your decision about the lifetime of the authorization, you should make it clear to the user how long the app will be able to act on the user’s behalf. This can be something as simple as a sentence that says “this application will be able to access your account until you revoke access,” or “this application will be able to access your account for one week.” See Access Token Lifetime for more information about token lifetimes.
+6. **Allow / Deny**
+
+Lastly, the authorization server should provide two buttons to the user, to allow or deny the request. If the user is not logged in, you should provide a login prompt instead of an “allow” button.
+
+If the user approves the request, the authorization server will create a temporary authorization code and redirect the user back to the application. If the user clicks “deny,” the server will redirect back to the application with an error code in the URL.
+
+### Authorization Errors
+The authorization endpoint can reject an authorization request.
+
+Instead of returning:
+
+```text
+code=ABC123
+```
+
+it can redirect the user back to the client's registered redirect URI with an error.
+
+For example:
+
+```text
+https://app.example.com/callback?
+    error=access_denied
+    &state=XYZ
+```
+
+Some important OAuth authorization errors include:
+
+| Error                       | Meaning                                                          |
+| --------------------------- | ---------------------------------------------------------------- |
+| `invalid_request`           | Request is missing or contains an invalid parameter              |
+| `unauthorized_client`       | Client is not authorized to use the requested flow               |
+| `access_denied`             | User or authorization server denied the request                  |
+| `unsupported_response_type` | Requested response type isn't supported                          |
+| `invalid_scope`             | Requested scope is invalid, unknown, or malformed                |
+| `server_error`              | Unexpected authorization-server error                            |
+| `temporarily_unavailable`   | Authorization server is temporarily unable to handle the request |
+
+For example:
+
+```http
+Location: https://app.example.com/callback?
+    error=invalid_scope
+    &state=XYZ
+```
+
+The client should inspect the error and handle it appropriately.
+
+#### Invalid Redirect URL
+
+If the authorization server detects a problem with the redirect URL, it needs to inform the user of the problem instead of redirecting the user. The redirect URL could be invalid for a number of reasons, including:
+
+- the redirect URL parameter is missing
+- the redirect URL parameter was invalid, such as if it was a string that does not parse as - a URL
+- the redirect URL does not match one of the registered redirect URLs for the application
+
+In these cases, the authorization server should display an error to the user informing them of the problem. The server must not redirect the user back to the application. This avoids what is known as an “open redirector attack.” The server should only redirect the user to the redirect URL if the redirect URL has been registered.
+
+#### Other Errors
+
+All other errors should be handled by redirecting the user to the redirect URL with an error code in the query string. See the Authorization Response section for details on how to respond with an error.
+
+If the request is missing the response_type parameter, or the value of that parameter is anything besides code or token, the server can return an invalid_request error.
+
+Since the authorization server may require clients to specify if they are public or confidential, it can reject authorization requests that aren’t allowed. For example, if the client specified they are a confidential client, the server can reject a request that uses the token grant type. When rejecting for this reason, use the error code unauthorized_client.
+
+The authorization server should reject the request if there are scope values that it doesn’t recognize. In this case, the server can redirect to the callback URL with the invalid_scope error code.
+
+The authorization server needs to store the “state” value (and PKCE values) for this request in order to include it in the authorization response. The server must not modify or make any assumptions about what the state value contains, since it is purely for the benefit of the client.
+
+### Complete Authorization Endpoint Flow
+
+Putting all seven topics together:
+
+```text
+                     ┌──────────────┐
+                     │    Client    │
+                     └──────┬───────┘
+                            │
+                            │ Authorization Request
+                            │
+                            │ response_type=code
+                            │ client_id=123
+                            │ redirect_uri=...
+                            │ scope=openid profile
+                            │ state=XYZ
+                            │ code_challenge=...
+                            │
+                            ▼
+                ┌────────────────────────┐
+                │ Authorization Endpoint │
+                └───────────┬────────────┘
+                            │
+                    Validate Request
+                            │
+                            ▼
+                    Authenticate User
+                            │
+                            ▼
+                         Consent
+                            │
+                 ┌──────────┴──────────┐
+                 │                     │
+               Allow                  Deny
+                 │                     │
+                 ▼                     ▼
+          Authorization Code      access_denied
+                 │                     │
+                 └──────────┬──────────┘
+                            │
+                            ▼
+                       redirect_uri
+                            │
+                            ▼
+                         Client
+                            │
+                     Validate state
+                            │
+                            ▼
+                  Process authorization
+                            │
+                            ▼
+                      Token Endpoint
+```
+
+---
+
+**How the Parameters Work Together**
+
+Consider this authorization request:
+
+```http
+GET /authorize?
+    response_type=code
+    &client_id=web-client
+    &redirect_uri=https://app.example.com/callback
+    &scope=openid%20profile%20email
+    &state=X7f92KpLm31
+```
+
+Each parameter answers a different question:
+
+```text
+response_type
+    │
+    └── What should I receive?
+        → authorization code
+
+client_id
+    │
+    └── Who is requesting authorization?
+        → web-client
+
+redirect_uri
+    │
+    └── Where should the response go?
+        → app.example.com/callback
+
+scope
+    │
+    └── What access is being requested?
+        → openid, profile, email
+
+state
+    │
+    └── Which authorization request does this response belong to?
+        → X7f92KpLm31
+```
+
+Then the authorization endpoint performs approximately:
+
+```text
+                    Authorization Request
+                            │
+                            ▼
+                   Validate client_id
+                            │
+                            ▼
+                  Validate response_type
+                            │
+                            ▼
+                 Validate redirect_uri
+                            │
+                            ▼
+                    Validate scopes
+                            │
+                            ▼
+                  Authenticate user
+                            │
+                            ▼
+                        Consent
+                            │
+                  ┌─────────┴─────────┐
+                  │                   │
+                Allow                Deny
+                  │                   │
+                  ▼                   ▼
+          Authorization Code    authorization error
+                  │                   │
+                  └─────────┬─────────┘
+                            ▼
+                      redirect_uri
+                            │
+                            ▼
+                          Client
+```

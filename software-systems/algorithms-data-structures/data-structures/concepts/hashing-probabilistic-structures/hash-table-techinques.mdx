@@ -1,0 +1,1983 @@
+
+## Hash Table Techinques
+
+This section covers different ways a hash table can be designed depending on **whether the set of keys is fixed or changing**, and whether we want to optimize for **memory, lookup speed, or update operations**.
+
+The main question is:
+
+> **Do we know the keys in advance, and will they change?**
+
+That gives us this picture:
+
+```text
+                         Hash Tables
+                              │
+             ┌────────────────┴────────────────┐
+             │                                 │
+        Mostly fixed                       Changing
+             │                                 │
+      Static Hash Tables               Dynamic Hash Tables
+             │                                 │
+      ┌──────┴──────┐                   resize / rehash
+      │             │
+Perfect        Minimal Perfect
+Hashing          Hashing
+```
+
+---
+
+### Perfect Hashing
+When the word list is fixed and not likely to change, we can do better by creating a perfect hash function. A perfect hash function is one that guarantees no collisions for a specific set of keys.
+
+The key idea is:
+
+> Instead of trying to handle collisions when they occur, perfect hashing constructs the hash table so that **collisions do not occur at all**.
+
+A normal hash table uses a hash function like:
+
+```text
+word
+  ↓
+hash function
+  ↓
+hash code
+  ↓
+table index
+  ↓
+H[index]
+```
+
+The problem is that ordinary hash functions can produce **collisions**:
+
+```text
+"cat" ───────┐
+             ├──→ H[42]
+"dog" ───────┘
+```
+
+Both words map to the same bin.
+
+Therefore, the hash table needs a collision-handling mechanism such as separate chaining:
+
+```text
+H[42] → "cat" → "dog" → "house"
+```
+
+Searching for `"dog"` then requires additional comparisons.
+
+Suppose we have:
+
+```text
+213,557 English words
+```
+and this collection **doesn't change**. We know all the keys in advance:
+
+```text
+apple
+banana
+computer
+database
+...
+```
+We don't need to support arbitrary future words. That allows us to design a hash function specifically for **this particular set of words**. This is where a **perfect hash function** becomes interesting.
+
+A **perfect hash function** is a hash function that produces **no collisions for a specific known set of keys**.
+
+Suppose we have:
+
+```text
+K = {cat, dog, house, tree}
+```
+
+A perfect hash function could map:
+
+```text
+cat   → 7
+dog   → 2
+house → 9
+tree  → 4
+```
+
+No two keys map to the same position.
+
+```text
+cat   ─────→ H[7]
+dog   ─────→ H[2]
+house ─────→ H[9]
+tree  ─────→ H[4]
+```
+
+Therefore:
+
+```text
+collision count = 0
+```
+
+There are **zero collisions**. for this particular set.
+
+**Compare with ordinary hashing**
+
+Ordinary hash function:
+
+```text
+cat   → 4
+dog   → 7
+house → 4
+tree  → 2
+```
+
+Now:
+
+```text
+H[4] → cat → house
+```
+
+There is a collision.
+
+With perfect hashing:
+
+```text
+cat   → 7
+dog   → 2
+house → 9
+tree  → 4
+```
+
+No collision-handling structure is needed for those keys.
+
+---
+
+--
+
+**What does "perfect" mean?**
+
+A **perfect hash function** maps every key in a fixed set to a unique table position.
+
+For example, suppose our keys are:
+
+```text
+apple
+banana
+cat
+dog
+```
+
+A perfect hash function might produce:
+
+```text
+apple   → 0
+banana  → 1
+cat     → 2
+dog     → 3
+```
+
+There are no collisions:
+
+```text
+apple   ──→ 0
+banana  ──→ 1
+cat     ──→ 2
+dog     ──→ 3
+```
+
+Compare this with an ordinary hash function:
+
+```text
+apple   ──→ 2
+banana  ──→ 0
+cat     ──→ 2  ← collision
+dog     ──→ 3
+```
+
+The ordinary hash table needs a collision-resolution strategy.
+
+The perfect hash table doesn't.
+
+---
+
+**Why is this particularly useful for a fixed word list?**
+
+Because creating a perfect hash function can require **preprocessing**. You may have to spend significant computational effort finding a function that works perfectly for the known keys. For a dynamic collection:
+
+```text
+insert new word
+       ↓
+       ?
+```
+
+the previously constructed perfect hash function might no longer work. For example, suppose we constructed:
+
+```text
+cat   → 0
+dog   → 1
+house → 2
+tree  → 3
+```
+
+Then someone adds:
+
+```text
+computer
+```
+
+Our perfect mapping was designed for the original set. We may need to construct a new function. So perfect hashing is particularly attractive when:
+
+```text
+Keys known in advance
+        +
+Keys rarely change
+        ↓
+Perfect hashing becomes practical
+```
+
+#### Two-level hashing
+When  a fixed set of strings for the hash table, it is possible to achieve optimal performance by using perfect hashing, which uses **two hash functions**. A standard `hash()` function indexes into the primary table, `H`. Each bin, `H[i]`, then points to a smaller secondary hash table, `Si`, that
+has an associated hash function $hash_i$. If there are `k` keys that hash to bin `H[i]`, `Si` will
+contain $k^2$ bins.
+
+
+Conceptually:
+
+```text
+                 Primary hash
+                     hash()
+                       │
+                       ↓
+                ┌─────────────┐
+                │ Primary H   │
+                ├─────────────┤
+            0 → │ S₀          │
+            1 → │ S₁          │
+            2 → │ S₂          │
+            3 → │ S₃          │
+            4 → │ S₄          │
+                └─────────────┘
+```
+
+Each primary bin points to its own **secondary hash table**.
+
+So we have:
+
+$$
+H[i] \rightarrow S_i
+$$
+
+---
+
+** First level: the primary hash table**
+
+The first hash function is the ordinary:
+
+```text
+hash()
+```
+
+It maps a key to a primary bin.
+
+For example:
+
+```text
+hash("apple")  → 2
+hash("banana") → 0
+hash("cat")    → 2
+hash("dog")    → 3
+```
+
+Notice that:
+
+```text
+apple → 2
+cat   → 2
+```
+
+collide.
+
+But **this is okay**.
+
+Perfect hashing does not necessarily mean there are no collisions in the primary table.
+
+Instead, the collisions are handled by the **secondary tables**.
+
+---
+
+** Each primary bin gets a secondary table**
+
+Suppose the primary table looks like this:
+
+```text
+Primary table H
+
+index
+  0 ──→ S₀
+  1 ──→ S₁
+  2 ──→ S₂
+  3 ──→ S₃
+  4 ──→ S₄
+```
+
+Suppose:
+
+```text
+hash("apple") = 2
+hash("cat")   = 2
+```
+
+Then both keys go into:
+
+```text
+H[2]
+ ↓
+S₂
+```
+
+So:
+
+```text
+                  H[2]
+                   │
+                   ↓
+                  S₂
+              ┌─────────┐
+              │         │
+           apple       cat
+```
+
+The secondary table has its **own hash function**:
+
+```text
+hash₂
+```
+
+---
+
+** Why does the secondary table have \(k^2\) bins?**
+
+Suppose `k` keys landed in one primary bin.
+
+For example:
+
+```text
+H[2]
+ ↓
+S₂
+
+apple
+cat
+car
+computer
+```
+
+There are:
+
+$$
+k=4
+$$
+
+keys.
+
+The secondary table is allocated:
+
+$$
+k^2 = 4^2 = 16
+$$
+
+bins.
+
+So:
+
+```text
+S₂
+
+[ ][ ][ ][ ][ ][ ][ ][ ]
+[ ][ ][ ][ ][ ][ ][ ][ ]
+```
+
+16 bins for only 4 keys. That seems wasteful. But there is a reason for doing this.
+
+---
+
+** Why \(k^2\) bins?**
+
+The extra space gives us enough freedom to find a secondary hash function that maps the `k` keys to **different positions**.
+
+For example, suppose:
+
+```text
+k = 4
+```
+
+and we allocate:
+
+```text
+k² = 16
+```
+
+positions.
+
+We try a secondary hash function:
+
+```text
+hash₂(key)
+```
+
+If it produces:
+
+```text
+apple    → 5
+cat      → 11
+car      → 2
+computer → 14
+```
+
+then:
+
+```text
+5 ≠ 11 ≠ 2 ≠ 14
+```
+
+so there are no collisions.
+
+The secondary table becomes:
+
+```text
+S₂
+
+index:
+ 0  [ ]
+ 1  [ ]
+ 2  [car]
+ 3  [ ]
+ 4  [ ]
+ 5  [apple]
+ 6  [ ]
+ 7  [ ]
+ 8  [ ]
+ 9  [ ]
+10  [ ]
+11  [cat]
+12  [ ]
+13  [ ]
+14  [computer]
+15  [ ]
+```
+
+Perfect.
+
+---
+
+** What happens during a search?**
+
+This is where the \(O(1)\) performance comes from.
+
+Suppose we're searching for:
+
+```text
+"cat"
+```
+
+1. Step 1 — primary hash
+
+    Calculate:
+
+    ```text
+    hash("cat")
+    ```
+
+    Suppose:
+
+    ```text
+    hash("cat") = 2
+    ```
+
+    So:
+
+    ```text
+    H[2]
+    ```
+
+2. Step 2 — secondary hash
+
+    `H[2]` points to `S₂`.
+
+    Now calculate:
+
+    ```text
+    hash₂("cat")
+    ```
+
+    Suppose:
+
+    ```text
+    hash₂("cat") = 11
+    ```
+
+    So:
+
+    ```text
+    S₂[11]
+    ```
+
+    contains `"cat"`.
+
+The complete process is:
+
+```text
+"cat"
+  │
+  │ hash()
+  ↓
+H[2]
+  │
+  │ hash₂()
+  ↓
+S₂[11]
+  │
+  ↓
+ "cat"
+```
+
+There is no searching through a chain. There is no probing sequence. There is no collision to resolve.
+
+---
+
+** Why is this \(O(1)\)?**
+
+The search performs a fixed number of operations:
+
+```text
+1. Calculate primary hash
+2. Access H[i]
+3. Calculate secondary hash
+4. Access Sᵢ[j]
+```
+
+So:
+
+$$
+\boxed{O(1)}
+$$
+
+And importantly, this is not merely the **expected** case. It is guaranteed for the constructed hash structure.
+
+** Compare ordinary hashing with perfect hashing**
+
+1. Ordinary hash table
+
+    ```text
+    key
+    ↓
+    hash()
+    ↓
+    bucket
+    ↓
+    collision?
+    ├── no → found
+    └── yes
+        ↓
+    chain/probing
+        ↓
+    potentially more work
+    ```
+
+    Performance:
+
+    $$
+    \text{expected } O(1)
+    $$
+
+    but the worst case can be worse.
+
+2. Perfect hashing
+
+    ```text
+    key
+    ↓
+    primary hash
+    ↓
+    H[i]
+    ↓
+    secondary hash
+    ↓
+    Sᵢ[j]
+    ↓
+    element
+    ```
+
+    Performance:
+
+    $$
+    \boxed{O(1)}
+    $$
+
+    with no collision-resolution search in the secondary table.
+
+---
+
+** Why doesn't \(k^2\) waste too much memory?**
+
+At first, this seems terrible.
+
+Suppose every primary bin contains only one key:
+
+```text
+k = 1
+```
+
+Then:
+
+$$
+k^2 = 1
+$$
+
+No problem.
+
+Suppose a bin contains:
+
+```text
+k = 2
+```
+
+Then:
+
+$$
+k^2 = 4
+$$
+
+Four bins for two keys.
+
+For:
+
+```text
+k = 10
+```
+
+we get:
+
+$$
+k^2 = 100
+$$
+
+That seems expensive.
+
+But here's the important point:
+
+> **The primary hash function is chosen specifically to avoid having too many keys collide in the same primary bin.**
+
+So most secondary tables remain small.
+
+---
+
+** Choosing the primary hash function**
+
+judicious choice of the initial hash function can reduce this to an amount similar to previous variations.
+
+We want the primary hash function to distribute the keys approximately evenly:
+
+```text
+Bad distribution:
+
+H[0] → 20 keys
+H[1] → 0
+H[2] → 0
+H[3] → 0
+H[4] → 0
+...
+```
+
+This would be terrible because:
+
+$$
+20^2 = 400
+$$
+
+secondary bins are needed for one primary bucket.
+
+Instead, we want something like:
+
+```text
+Good distribution:
+
+H[0] → 2 keys
+H[1] → 1 key
+H[2] → 3 keys
+H[3] → 2 keys
+H[4] → 1 key
+...
+```
+
+Then:
+
+```text
+2² = 4
+1² = 1
+3² = 9
+2² = 4
+1² = 1
+```
+
+The total secondary storage remains manageable.
+
+---
+
+** The key mathematical idea**
+
+Suppose the primary table has \(m\) bins and the number of keys in each bin is:
+
+$$
+k_0,k_1,k_2,\ldots,k_{m-1}
+$$
+
+The secondary table for bin \(i\) has:
+
+$$
+k_i^2
+$$
+
+positions.
+
+Therefore, the total secondary storage is approximately:
+
+$$
+\sum_{i=0}^{m-1} k_i^2
+$$
+
+This explains why **distribution matters**.
+
+If the keys are distributed evenly, this sum stays relatively small.
+
+If one bin receives a huge number of keys, its square becomes huge.
+
+For example:
+
+```text
+Even:
+
+5 + 5 + 5 + 5
+
+squares:
+25 + 25 + 25 + 25 = 100
+```
+
+versus:
+
+```text
+Uneven:
+
+20 + 0 + 0 + 0
+
+squares:
+400 + 0 + 0 + 0 = 400
+```
+
+Both cases contain:
+
+```text
+20 keys
+```
+
+but the second requires much more secondary storage.
+
+---
+
+** Construction vs. lookup**
+
+There is another important distinction.
+
+Perfect hashing requires some work **when constructing the hash table**.
+
+The algorithm needs to:
+
+1. Choose a primary hash function.
+2. Distribute the keys.
+3. Create secondary tables.
+4. Find a suitable secondary hash function for each bin.
+5. Verify that there are no collisions.
+
+This construction process can be relatively expensive.
+
+But once the structure has been constructed:
+
+```text
+lookup
+   ↓
+primary hash
+   ↓
+secondary hash
+   ↓
+direct access
+```
+
+is:
+
+$$
+\boxed{O(1)}
+$$
+
+This is why perfect hashing is particularly attractive for **static dictionaries**.
+
+---
+
+** Static vs. dynamic hash tables**
+
+This is the most important context.
+
+1. Dynamic hash table
+
+    Keys change:
+
+    ```text
+    insert
+    delete
+    insert
+    insert
+    delete
+    ...
+    ```
+
+    Perfect hashing is less convenient because adding a new key may require reconstructing the structure.
+
+2. Static hash table
+
+    The set of keys is fixed:
+
+    ```text
+    Build once
+    ↓
+    search
+    search
+    search
+    search
+    ...
+    ```
+
+    Perfect hashing is ideal here.
+
+    For example:
+
+    ```text
+    Reserved words of a programming language
+
+    if
+    else
+    while
+    for
+    return
+    class
+    public
+    private
+    ...
+    ```
+
+    The language designer knows the set of keywords in advance.
+
+    A perfect hash can provide very fast lookup.
+
+---
+
+** Compare the three approaches you've studied**
+
+You can now connect this paragraph with the previous ones.
+
+| Technique       | Collision handling | Expected lookup | Worst-case lookup | Dynamic?         |
+| --------------- | ------------------ | --------------: | ----------------: | ---------------- |
+| Chaining        | Linked list/chain  |        \(O(1)\) |          \(O(n)\) | Yes              |
+| Open addressing | Probe sequence     |        \(O(1)\) |          \(O(n)\) | Yes              |
+| Perfect hashing | Designed away      |        \(O(1)\) |          \(O(1)\) | Primarily static |
+
+The major difference is:
+
+```text
+Chaining
+    ↓
+collisions allowed
+    ↓
+follow chain
+
+Open addressing
+    ↓
+collisions allowed
+    ↓
+probe other bins
+
+Perfect hashing
+    ↓
+collisions eliminated
+    ↓
+direct access
+```
+
+---
+
+** The complete two-level structure**
+
+The whole mechanism can be visualized as:
+
+```text
+                         KEY
+                          │
+                          │
+                    primary hash()
+                          │
+                          ↓
+                    ┌───────────┐
+                    │ Primary H │
+                    └───────────┘
+                     │    │    │
+                     │    │    │
+                    H[0] H[1] H[2]
+                     │    │    │
+                     ↓    ↓    ↓
+                    S₀   S₁   S₂
+                         │
+                    secondary hash
+                         │
+                         ↓
+                       S₁[j]
+                         │
+                         ↓
+                       KEY
+```
+
+For a particular key:
+
+$$
+\boxed{
+i = hash(key)
+}
+$$
+
+then:
+
+$$
+\boxed{
+j = hash_i(key)
+}
+$$
+
+and finally:
+
+$$
+\boxed\{
+H[i] \rightarrow S_i[j]
+}
+$$
+
+Both accesses are constant-time array accesses.
+
+---
+
+** The central idea**
+
+The paragraph is essentially saying:
+
+> **For a fixed set of keys, we can spend extra work and possibly extra memory during construction to create a two-level hash structure in which every key has a unique location. Once constructed, lookup always takes a constant number of operations, giving guaranteed \(O(1)\) lookup time.**
+
+The key trade-off is:
+
+```text
+             PERFECT HASHING
+
+        construction is harder
+                  +
+        potentially extra memory
+                  ↓
+          no collisions
+                  ↓
+       guaranteed O(1) lookup
+```
+
+So when you see **perfect hashing**, remember these four ideas:
+
+1. **Fixed/static set of keys**
+2. **Two-level hashing**
+3. **Secondary table size = \(k^2\)**
+4. **Collision-free lookup → guaranteed \(O(1)\)**
+
+Details on the analysis of perfect hashing can be found in (Cormen et al., 2009).
+Doug Schmidt (1990) has written an excellent paper on perfect hashing generation
+and there are freely available perfect hash function generators in various program‐
+ming languages. GPERF for C and C++ can be downloaded from http://
+www.gnu.org/software/gperf, and JPERF for Java can be downloaded from http://
+www.anarres.org/projects/jperf.
+#### Advantages
+
+**Why is perfect hashing useful?**
+
+It is especially useful when:
+
+* the complete set of keys is known beforehand,
+* the set rarely changes,
+* lookup speed is important.
+
+Examples include:
+
+```text
+Compiler keywords
+HTTP status names
+Reserved protocol identifiers
+Fixed command names
+Dictionary words
+Configuration keys
+```
+
+For example, suppose a compiler needs to recognize:
+
+```text
+if
+else
+while
+for
+return
+switch
+class
+public
+private
+```
+
+These keywords are known in advance. A perfect hash function can map each keyword to a unique location.
+
+---
+
+**Important limitation**
+
+Perfect hashing is **not universally collision-free**. It is perfect only for the specific key set. Suppose:
+
+```text
+K = {cat, dog, house}
+```
+
+and:
+
+```text
+h(cat)   = 0
+h(dog)   = 1
+h(house) = 2
+```
+
+Now we add:
+
+```text
+computer
+```
+
+The function was not necessarily designed for it.
+
+It could produce:
+
+```text
+h(computer) = 1
+```
+
+which collides with `dog`.
+
+So:
+
+```text
+Perfect for K
+       ≠
+Perfect for every possible key
+```
+
+---
+
+### Minimal Perfect Hashing
+
+A **minimal perfect hash function** goes one step further. It produces no collisions **and** maps exactly `n` keys to exactly `n` table positions. Suppose:
+
+```text
+n = 4
+```
+
+and:
+
+```text
+K = {cat, dog, house, tree}
+```
+
+A minimal perfect hash function could produce:
+
+```text
+cat   → 0
+dog   → 1
+house → 2
+tree  → 3
+```
+
+Notice:
+
+```text
+number of keys = 4
+number of positions = 4
+```
+
+and every position is used.
+
+```text
+┌─────┬─────┬───────┬──────┐
+│  0  │  1  │   2   │  3   │
+├─────┼─────┼───────┼──────┤
+│ cat │ dog │ house │ tree │
+└─────┴─────┴───────┴──────┘
+```
+
+There are:
+
+* no collisions,
+* no unused table positions.
+
+#### Perfect vs Minimal Perfect
+
+The distinction is easiest to see this way.
+
+1. **Perfect**
+
+    Suppose we have 4 keys but 7 table positions:
+
+    ```text
+    cat   → 0
+    dog   → 2
+    house → 4
+    tree  → 6
+    ```
+
+    ```text
+       0    1    2    3    4    5    6
+    ┌────┬────┬────┬────┬─────┬────┬────┐
+    │cat │    │dog │    │house│    │tree│
+    └────┴────┴────┴────┴─────┴────┴────┘
+    ```
+    No collisions, so it is **perfect**. But there are unused positions.
+
+2. Minimal perfect
+
+    ```text
+       0    1     2       3
+    ┌────┬────┬───────┬──────┐
+    │cat │dog │ house │ tree │
+    └────┴────┴───────┴──────┘
+    ```
+
+    Every position is used. Therefore:
+    $$
+    \text{"Minimal Perfect Hashing"} =
+    \text{"Perfect Hashing"} + \text{"minimum table size"}
+    $$
+
+    More precisely, for `n` distinct keys, the range contains exactly `n` positions.
+
+### Static Hash Tables
+
+A **static hash table** is designed for a key set that is known in advance and does not change, or changes very rarely. Think:
+
+```text
+Build once
+   ↓
+Use many times
+   ↓
+Almost no updates
+```
+
+For example:
+
+```text
+Dictionary
+   ↓
+Build hash table
+   ↓
+Search millions of times
+```
+
+The construction process might be expensive:
+
+```text
+Known keys
+    ↓
+analyze keys
+    ↓
+construct hash function
+    ↓
+build table
+    ↓
+freeze structure
+```
+
+But after construction, searches can be extremely efficient.
+
+#### Example
+
+Suppose we have:
+
+```text
+HTTP methods
+```
+
+```text
+GET
+POST
+PUT
+DELETE
+PATCH
+HEAD
+OPTIONS
+```
+
+These are a relatively small and well-known set.
+
+We can construct a specialized table:
+
+```text
+GET     → 0
+POST    → 1
+PUT     → 2
+DELETE  → 3
+PATCH   → 4
+HEAD    → 5
+OPTIONS → 6
+```
+
+Then lookup is essentially:
+
+```text
+method
+   ↓
+hash
+   ↓
+index
+   ↓
+H[index]
+```
+
+No linked-list traversal is necessary if the mapping is collision-free.
+
+#### Static vs ordinary hash table
+
+A normal hash table is designed around:
+
+```text
+insert
+search
+delete
+```
+
+A static hash table is more like:
+
+```text
+build
+  ↓
+search
+search
+search
+search
+...
+```
+
+Updates are not the primary concern.
+
+This allows the implementation to spend more effort during construction to optimize lookup.
+
+---
+
+### Dynamic Hash Tables
+
+A **dynamic hash table** is designed for a collection whose size or contents change over time.
+
+For example:
+
+```text
+Initially:
+100 elements
+
+        ↓ insert
+
+500 elements
+
+        ↓ insert
+
+10,000 elements
+
+        ↓ delete
+
+8,000 elements
+```
+
+The table must adapt. The most common technique is **resizing and rehashing**.
+
+---
+
+**Why resize?**
+
+Suppose:
+
+```text
+n = 1,000
+b = 100
+```
+
+Then:
+
+$$
+\alpha = \frac{n}{b}=10
+$$
+
+That's a high load factor for many hash-table designs.
+
+We might increase the table:
+
+```text
+b = 2,000
+```
+
+Now:
+
+$$
+\alpha = \frac{1000}{2000}=0.5
+$$
+
+The table has more space and generally fewer collisions.
+
+---
+
+**Resizing requires rehashing**
+
+This is important. You cannot usually just copy the old array into the new array. Why? Because the table index often depends on the table size:
+
+$$
+index = hash(key) \bmod b
+$$
+
+Suppose:
+
+```text
+hash("cat") = 98262
+```
+
+With:
+
+```text
+b = 100
+```
+
+we get:
+
+$$
+98262 \bmod 100 = 62
+$$
+
+So:
+
+```text
+cat → H[62]
+```
+
+Now resize:
+
+```text
+b = 200
+```
+
+Then:
+
+$$
+98262 \bmod 200 = 62
+$$
+
+In this particular example the position happens to remain the same, but that's not generally true.
+
+For another key:
+
+```text
+hash(key) = 12345
+```
+
+we get:
+
+```text
+12345 % 100 = 45
+12345 % 200 = 145
+```
+
+So the element must move. Therefore:
+
+```text
+Old table
+    ↓
+increase table size
+    ↓
+create new array
+    ↓
+recalculate positions
+    ↓
+insert elements into new positions
+    ↓
+new table
+```
+
+This is called **rehashing**.
+
+---
+
+#### Static vs Dynamic
+
+The distinction is very important:
+
+| Property              | Static Hash Table         | Dynamic Hash Table   |
+| --------------------- | ------------------------- | -------------------- |
+| Keys known beforehand | Usually yes               | Not necessarily      |
+| Number of keys        | Mostly fixed              | Changes              |
+| Insertions            | Rare/none                 | Common               |
+| Deletions             | Rare/none                 | Common               |
+| Resizing              | Usually unnecessary       | Often required       |
+| Perfect hashing       | Very suitable             | Generally unsuitable |
+| Construction cost     | Can be relatively high    | Usually incremental  |
+| Lookup optimization   | Can be highly specialized | General-purpose      |
+
+---
+
+### Compariosn
+
+**How the Four Concepts Relate**
+
+These four concepts aren't really four completely independent hash-table types. Think of them as different dimensions:
+
+```text
+                    HASH TABLE
+                        │
+              ┌─────────┴─────────┐
+              │                   │
+           STATIC              DYNAMIC
+              │                   │
+              │                   ├── resize
+              │                   ├── rehash
+              │                   └── adapt
+              │
+       ┌──────┴──────┐
+       │             │
+   Perfect       Minimal
+   Hashing       Perfect
+                  Hashing
+```
+
+Perfect hashing is particularly useful for static tables:
+
+```text
+Known fixed keys
+       ↓
+Static table
+       ↓
+Perfect hash
+       ↓
+No collisions
+       ↓
+Very fast lookup
+```
+
+Dynamic tables take a different approach:
+
+```text
+Changing keys
+      ↓
+Dynamic hash table
+      ↓
+Monitor load factor
+      ↓
+Resize when necessary
+      ↓
+Rehash elements
+```
+
+---
+
+### Example
+
+Imagine a dictionary containing 213,557 words.
+
+1. Ordinary dynamic hash table
+
+    ```text
+    213,557 words
+        ↓
+    hash function
+        ↓
+    hash table
+        ↓
+    collisions
+        ↓
+    separate chaining / probing
+    ```
+
+    The dictionary can potentially accept new words.
+
+2. Static perfect hash table
+
+If those 213,557 words are known and fixed:
+
+    ```text
+    213,557 known words
+            ↓
+    construct specialized hash function
+            ↓
+    perfect/minimal perfect hash
+            ↓
+    fixed table
+            ↓
+    very fast lookup
+    ```
+
+    The construction may take considerably more effort, but once constructed, lookup can be extremely efficient.
+
+---
+
+**The Most Important Distinction**
+
+```text
+                 Are the keys fixed?
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+            YES                  NO
+             │                   │
+          STATIC              DYNAMIC
+             │                   │
+             │              resize/rehash
+             │                   
+       Can specialize?           
+             │                   
+       ┌─────┴─────┐             
+       │           │             
+    Perfect    Minimal           
+    Hashing    Perfect           
+               Hashing           
+```
+
+So
+
+* **Perfect Hashing:** no collisions for a specific known set of keys.
+* **Minimal Perfect Hashing:** no collisions and exactly `n` positions for `n` keys.
+* **Static Hash Tables:** optimized for a fixed or rarely changing collection.
+* **Dynamic Hash Tables:** designed to handle insertions/deletions and adapt their size.
+
+For your **Hash Tables** chapter, this section works well **after the basic operations, collision handling, resizing, and memory organization**, because it introduces specialized alternatives to the general-purpose hash-table design.
+
+## Cuckoo Hashing
+
+## Static vs Dynamic Hash Tables
+This paragraph is explaining **why the design of a hash table depends heavily on whether the data is static or dynamic**.
+
+The major force affecting the implementation is whether the collection is static or dynamic.
+
+The important idea is:
+
+> A hash table designed for a fixed collection can make different trade-offs from one that must constantly support insertion and deletion.
+
+Think of it this way:
+
+```text
+                    Hash Table
+                        │
+             Is the collection changing?
+                  /               \
+                No                 Yes
+                │                   │
+             Static              Dynamic
+                │                   │
+       build once/use many      insert/delete often
+                │                   │
+       can optimize search      must optimize updates
+```
+
+### Static collection
+
+A **static collection** is one whose elements are known in advance and don't change much.
+
+The word list is an example:
+
+```text
+213,557 words
+       │
+       ▼
+build hash table
+       │
+       ▼
+search many times
+       │
+       ▼
+almost no insert/delete
+```
+
+For example, a dictionary containing a fixed set of English words.
+
+Since the data doesn't change, you can spend more effort during construction to optimize the resulting structure.
+
+This is where techniques such as **perfect hashing** can become attractive.
+
+---
+
+### Dynamic collection
+
+A **dynamic collection** changes over time.
+
+For example:
+
+```text
+Hash Table
+    │
+    ├── insert customer
+    ├── insert customer
+    ├── delete customer
+    ├── insert customer
+    ├── update customer
+    └── delete customer
+```
+
+A Java `HashMap` is typically used in this kind of situation.
+
+The important question becomes:
+
+> How efficiently can we insert and delete elements?
+
+So the implementation needs to support operations such as:
+
+```text
+search
+insert
+delete
+```
+
+efficiently.
+
+---
+
+### Why does collision handling matter?
+
+Suppose we use **separate chaining**.
+
+Our table looks like:
+
+```text
+H[0] → null
+
+H[1] → Node → Node → Node → null
+
+H[2] → Node → null
+
+H[3] → null
+
+H[4] → Node → Node → null
+```
+
+Each table position is a **bin/bucket**, and collisions are stored in a linked list.
+
+For example:
+
+```text
+key1 ──hash──→ 5
+key2 ──hash──→ 5
+key3 ──hash──→ 5
+```
+
+produces:
+
+```text
+H[5] → key1 → key2 → key3 → null
+```
+
+---
+
+The collision handling in the word example works quite well because inserting an
+item into a linked list can be done in constant time, and deleting an item is proportional to the length of the list
+
+The book says:
+
+Suppose the list is:
+
+```text
+H[5] → A → B → C → null
+```
+
+If we insert `D` at the beginning:
+
+```text
+H[5] → D → A → B → C → null
+```
+
+We only need to:
+
+```text
+D.next = H[5]
+H[5] = D
+```
+
+That's a fixed number of operations.
+
+Therefore:
+
+```text
+Insertion = O(1)
+```
+
+It doesn't matter whether the list has:
+
+```text
+3 nodes
+30 nodes
+3,000 nodes
+```
+
+if we're simply inserting at the head.
+
+---
+
+But deletion is different
+
+Suppose:
+
+```text
+H[5] → A → B → C → D → null
+```
+
+and we want to delete `D`.
+
+We don't automatically know where `D` is.
+
+We have to search the list:
+
+```text
+H[5]
+  ↓
+ A ?   no
+  ↓
+ B ?   no
+  ↓
+ C ?   no
+  ↓
+ D ?   yes
+```
+
+Therefore deletion requires searching through the chain.
+
+If the chain contains `k` elements:
+
+```text
+Deletion = O(k)
+```
+
+In the worst case:
+
+```text
+k = n
+```
+
+so:
+
+```text
+Worst-case deletion = O(n)
+```
+
+---
+
+deletion is "proportional to the length of the list"
+
+If:
+
+```text
+H[10] → A → B
+```
+
+deletion may inspect only a few elements:
+
+```text
+O(2) ≈ O(1)
+```
+
+But if:
+
+```text
+H[10] → A → B → C → D → E → F → G → ...
+```
+
+then deletion may require many comparisons.
+
+So:
+
+```text
+chain length = k
+
+search/delete = O(k)
+```
+
+The key question therefore becomes:
+
+> How long are the chains?
+
+---
+
+**This is where the hash function becomes important**
+
+Suppose we have 10 elements and 10 bins.
+
+A good hash function might produce:
+
+```text
+H[0] → A
+H[1] → F
+H[2] → C
+H[3] → J
+H[4] → B
+H[5] → H
+H[6] → D
+H[7] → I
+H[8] → E
+H[9] → G
+```
+
+The chains are very short.
+
+But a poor hash function could produce:
+
+```text
+H[0] → A → B → C → D → E → F → G → H → I → J
+
+H[1] → null
+H[2] → null
+H[3] → null
+...
+```
+
+Now almost everything is in one chain.
+
+Searching/deleting becomes:
+
+```text
+O(n)
+```
+
+---
+
+**if the hash function distributes the elements evenly,
+the individual lists are relatively short**
+
+A good hash function tries to distribute keys across the bins:
+
+```text
+             Good distribution
+
+H[0] → A
+H[1] → B → C
+H[2] → D
+H[3] → E → F
+H[4] → G
+H[5] → H → I
+H[6] → J
+```
+
+Instead of:
+
+```text
+             Poor distribution
+
+H[0] → A → B → C → D → E → F → G → H → I → J
+H[1] → null
+H[2] → null
+H[3] → null
+...
+```
+
+Good distribution means:
+
+```text
+short chains
+    ↓
+less searching within a chain
+    ↓
+faster operations
+```
+
+---
+
+**Connecting this to load factor**
+
+This also connects directly to the **load factor** you were studying.
+
+Let:
+
+```text
+n = number of elements
+b = number of bins
+```
+
+Then:
+
+```text
+α = n / b
+```
+
+For example:
+
+```text
+n = 1000
+b = 1000
+
+α = 1
+```
+
+With a reasonably good hash function, the average chain length is around the load factor:
+
+```text
+average chain length ≈ α
+```
+
+So if:
+
+```text
+α = 1
+```
+
+chains are generally short.
+
+If:
+
+```text
+α = 10
+```
+
+you should expect substantially longer chains.
+
+---
+
+```text
+             Static or Dynamic?
+                    │
+          ┌─────────┴─────────┐
+          │                   │
+       Static              Dynamic
+          │                   │
+   optimize search       optimize updates
+          │                   │
+   build once             insert/delete
+                              │
+                              ▼
+                     choose collision strategy
+                              │
+                              ▼
+                       Separate chaining
+                              │
+                     ┌────────┴────────┐
+                     │                 │
+                  Insert             Delete
+                     │                 │
+                   O(1)              O(k)
+                                       │
+                                       ▼
+                              k = chain length
+                                       │
+                                       ▼
+                            good hash distribution
+                                       │
+                                       ▼
+                              short chains
+                                       │
+                                       ▼
+                              fast operations
+```
+
+**If your data rarely changes, you can optimize the hash table for searching. If your data changes frequently, you need a design that makes insertion and deletion efficient. With separate chaining, insertion is cheap, while deletion requires searching the relevant chain. Therefore, a good hash function is important because evenly distributing keys keeps those chains short.**

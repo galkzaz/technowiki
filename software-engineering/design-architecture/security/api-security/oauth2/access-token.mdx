@@ -1,0 +1,3534 @@
+
+
+In OAuth 2.0, an **access token** is the credential that a client presents to a **resource server** to obtain access to protected resources.
+
+Access tokens are the thing that applications use to make API requests on behalf of a user. The access token represents the authorization of a specific application to access specific parts of a user’s data.
+
+Access tokens do not have to be of any particular format, although there are different considerations for different options which will be discussed later in this chapter. As far as the client application is concerned, the access token is an opaque string, and it will take whatever the string is and use it in an HTTP request. The resource server will need to understand what the access token means and how to validate it, but applications will never be concerned with understanding what an access token means.
+
+Access tokens must be kept confidential in transit and in storage. The only parties that should ever see the access token are the application itself, the authorization server, and resource server. The application should ensure the storage of the access token is not accessible to other applications on the same device. The access token can only be used over an HTTPS connection, since passing it over a non-encrypted channel would make it trivial for third parties to intercept.
+
+The token endpoint is where apps make a request to get an access token for a user.
+
+## Token Purpose
+
+The **purpose of an access token** is to allow a client to access protected resources on behalf of a resource owner, within a defined scope and lifetime.
+
+The basic flow is:
+
+```text
+User
+ │
+ │ authorizes
+ ▼
+Client
+ │
+ │ access token
+ ▼
+Authorization Server
+ │
+ │
+ ▼
+Resource Server
+ │
+ │ validates token
+ ▼
+Protected Resource
+```
+
+More precisely, the authorization server issues the token, and the **client sends it to the resource server**.
+
+```text
+┌──────────────┐
+│     User     │
+└──────┬───────┘
+       │ authorization
+       ▼
+┌──────────────┐
+│   Client     │
+└──────┬───────┘
+       │
+       │ access token
+       ▼
+┌──────────────┐
+│   Resource   │
+│    Server    │
+└──────────────┘
+```
+
+An access token represents authorization granted to the client.
+
+For example:
+
+```text
+scope = orders.read orders.write
+```
+
+The token may allow the client to:
+
+```text
+GET  /orders
+POST /orders
+```
+
+but not:
+
+```text
+DELETE /orders
+```
+
+if `orders.delete` was not granted.
+
+Regardless of which grant type you used or whether you used a client secret, you now have an OAuth 2.0 Bearer Token you can use with the API.
+
+The access token is sent to the service in the HTTP Authorization header prefixed by the text Bearer. Historically, some services allowed the token to be sent in the post body parameter or even the GET query string, but there are downsides to these approaches and for the most part modern implementations will use only the HTTP header method.
+
+When passing in the access token in an HTTP header, you should make a request like the following:
+```
+POST /resource/1/update HTTP/1.1
+Authorization: Bearer RsT5OjbzRn430zqMLgV3Ia"
+Host: api.authorization-server.com
+ 
+description=Hello+World
+```
+The access token is not intended to be parsed or understood by your application. The only thing your application should do with it is use it to make API requests. Some services will use structured tokens like JWTs as their access tokens, described in Self-Encoded Access Tokens but the client does not need to worry about decoding the token in this case.
+
+In fact, attempting to decode the access token is dangerous, as the server makes no guarantees that access tokens will always continue to be in the same format. It’s entirely possible that the next time you get an access token from the service, it will be in a different format. The thing to keep in mind is that access tokens are opaque to the client, and should only be used to make API requests and not interpreted themselves.
+
+If you are trying to find out whether your access token has expired, you can either store the expiration lifetime that was returned when you first got the access token, or just try to make the request anyway, and get a new access token if the current one has expired. In practice, there isn’t much of a difference. While preemptively refreshing the access token can save an HTTP request, you still need to handle the case when an API call reports an expired token before you were expecting it to expire, since access tokens can expire for many reasons beyond just their expected lifetime.
+
+If you’re trying to find out more information about the user who signed in, you should read the API docs of the particular service to find out their recommendation. For example, Google’s API uses OpenID Connect to provide a userinfo endpoint that can return info about the user given an access token, or you can get the user’s information from an ID token instead.
+
+
+An access token is **not normally the user's password** and is not itself proof of the user's identity in the same sense as an ID token.
+
+## Token Types
+
+OAuth access tokens can differ in how they are presented and how possession of them is demonstrated.
+
+At a high level:
+
+```text
+Access Token
+│
+├── Bearer Token
+│
+└── Sender-Constrained Token
+```
+
+The distinction is about **who can use the token**.
+
+### Bearer Tokens
+
+A **bearer token** is an access token where the party presenting the token is assumed to be authorized to use it.
+
+Possession is enough:
+
+```text
+Whoever possesses token
+        │
+        ▼
+   can present it
+```
+
+The idea is similar to a physical bearer instrument:
+
+> Whoever possesses it can use it.
+
+For example:
+
+```http
+GET /api/orders HTTP/1.1
+Host: api.example.com
+Authorization: Bearer eyJhbGciOi...
+```
+
+The resource server receives:
+
+```text
+Bearer <access-token>
+```
+
+and validates it.
+
+If an attacker obtains the token:
+
+```text
+Client
+   │
+   │ stolen token
+   ▼
+Attacker
+   │
+   │ Bearer token
+   ▼
+Resource Server
+```
+
+the attacker may be able to use it until the token expires or is otherwise invalidated.
+
+Therefore, bearer tokens require strong protection against:
+
+* token theft
+* accidental disclosure
+* insecure storage
+* insecure transmission
+* logging
+* browser leakage
+
+Bearer tokens are widely used because they are relatively simple.
+
+---
+
+### Sender-Constrained Tokens
+
+A **sender-constrained access token** is bound to a particular client or cryptographic key.
+
+The client must additionally prove that it possesses a particular cryptographic key or other binding credential:
+```
+Token + proof of key possession
+              │
+              ▼
+       Resource Server
+```
+This is important because stealing a sender-constrained token alone should not be sufficient to use it.
+
+Possessing the token alone is insufficient.
+
+Conceptually:
+
+```text
+Access Token
+     +
+Proof of possession
+     │
+     ▼
+Resource Server
+```
+
+Suppose the authorization server binds a token to key `K`.
+
+The legitimate client possesses:
+
+```text
+Private Key K
+```
+
+An attacker steals:
+
+```text
+Access Token
+```
+
+but does not possess:
+
+```text
+Private Key K
+```
+
+Therefore:
+
+```text
+Attacker
+   │
+   │ token only
+   ▼
+Resource Server
+   │
+   X
+   │
+Proof of key possession required
+```
+
+This reduces the usefulness of a stolen token.
+
+Common approaches include technologies such as:
+
+* mTLS-bound access tokens
+* DPoP-bound access tokens
+
+The important conceptual distinction is:
+
+| Token              | Requirement                 |
+| ------------------ | --------------------------- |
+| Bearer             | Possession of token         |
+| Sender-constrained | Token + proof of possession |
+
+## Token Format
+
+The **token format** describes the representation of the access token.
+
+The format for OAuth 2.0 Bearer tokens is actually described in a separate spec, `RFC 6750`. There is no defined structure for the token required by the spec, so you can generate a string and implement tokens however you want. The valid characters in a bearer token are alphanumeric, and the following punctuation characters: `-._~+/`
+
+A simple implementation of Bearer Tokens is to generate a random string and store it in a database along with the associated user and scope information, or more advanced systems may use self-encoded tokens where the token string itself contains all the necessary info.
+
+Two important categories are:
+
+```text
+Access Token
+│
+├── Opaque token
+│
+└── Structured token
+```
+
+### Opaque token
+
+An opaque token does not expose meaningful information to the client.
+
+For example:
+
+```text
+8f92c71a3c8d4e9f...
+```
+
+The resource server may need to contact the authorization server to discover what the token represents.
+
+For example:
+
+```text
+Client
+  │
+  │ token
+  ▼
+Resource Server
+  │
+  │ introspection
+  ▼
+Authorization Server
+```
+
+### Structured token
+
+A structured token contains encoded information.
+
+A **structured token** has a defined internal format that allows its contents to be parsed.
+
+A common example is a JWT:
+
+```text
+header.payload.signature
+```
+
+The payload might contain:
+
+```json
+{
+  "iss": "https://auth.example.com",
+  "sub": "user123",
+  "aud": "orders-api",
+  "scope": "orders.read",
+  "exp": 1790000000
+}
+```
+
+The resource server can extract these claims from the token.
+
+For example:
+
+```text
+Access Token
+   │
+   ├── issuer
+   ├── subject
+   ├── audience
+   ├── scope
+   ├── expiration
+   └── signature
+```
+
+#### JWT Access Token Encoding
+
+The code below is written in PHP and uses the Firebase PHP-JWT library to encode and verify tokens. You’ll need to include that library in order to run the sample code
+
+In practice, the authorization server will have a private key it uses for signing tokens, and the resource server would fetch the public key from the authorization server metadata to use to validate the tokens. In this example we generate a new private key each time and validate tokens in the same script. In reality you’d need to store the private key somewhere to use the same key to sign tokens consistently.
+```php
+<?php
+use \Firebase\JWT\JWT;
+ 
+# Generate a private key to sign the token.
+# The public key would need to be published at the authorization
+# server if a separate resource server needs to validate the JWT
+ 
+$private_key = openssl_pkey_new([
+  'digest_alg' => 'sha256',
+  'private_key_bits' => 1024,
+  'private_key_type' => OPENSSL_KEYTYPE_RSA
+]);
+ 
+# Set the user ID of the user this token is for
+$user_id = "1000";
+ 
+# Set the client ID of the app that is generating this token
+$client_id = 'https://example-app.com';
+ 
+# Provide the list of scopes this token is valid for
+$scope = 'read write';
+ 
+$token_data = array(
+ 
+  # Issuer (the authorization server identifier)
+  'iss' => 'https://' . $_SERVER['PHP_SELF'],
+ 
+  # Expires At
+  'exp' => time()+7200, // Valid for 2 hours
+ 
+  # Audience (The identifier of the resource server)
+  'aud' => 'api://default',
+ 
+  # Subject (The user ID)
+  'sub' => $user_id,
+ 
+  # Client ID
+  'client_id' => $client_id,
+ 
+  # Issued At
+  'iat' => time(),
+ 
+  # Identifier of this token
+  'jti' => microtime(true).'.'.bin2hex(random_bytes(10)),
+ 
+  # The list of OAuth scopes this token includes
+  'scope' => $scope
+);
+$token_string = JWT::encode($token_data, $private_key, 'RS256');
+```
+This will result in a string such as:
+```
+eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodH
+RwczovL2F1dGhvcml6YXRpb24tc2VydmVyLmNvbS8iLCJleHAiO
+jE2MzczNDQ1NzIsImF1ZCI6ImFwaTovL2RlZmF1bHQiLCJzdWIi
+OiIxMDAwIiwiY2xpZW50X2lkIjoiaHR0cHM6Ly9leGFtcGxlLWF
+wcC5jb20iLCJpYXQiOjE2MzczMzczNzIsImp0aSI6IjE2MzczMz
+czNzIuMjA1MS42MjBmNWEzZGMwZWJhYTA5NzMxMiIsInNjb3BlI
+joicmVhZCB3cml0ZSJ9.SKDO_Gu96WeHkR_Tv0d8gFQN1SEdpN8
+S_h0IJQyl_5syvpIRA5wno0VDFi34k5jbnaY5WHn6Y912IOmg6t
+MO91KlYOU1MNdVhHUoPoNUzYtl_nNab7Ywe29kxgrekm-67ZInD
+I8RHbSkL7Z_N9eZz_J8c3EolcsoIf-Dd5n9y_Y
+```
+This token is made up of three components, separated by periods. The first part describes the signature method used. The second part contains the token data. The third part is the signature.
+
+For example, this token’s first component is this JSON object:
+```
+{
+   "typ":"JWT",
+   "alg":"RS256"
+ }
+```
+The second component contains the actual data the API endpoint needs in order to process the request, such as user identification and scope access.
+```
+{
+  "iss": "https://authorization-server.com/",
+  "exp": 1637344572,
+  "aud": "api://default",
+  "sub": "1000",
+  "client_id": "https://example-app.com",
+  "iat": 1637337372,
+  "jti": "1637337372.2051.620f5a3dc0ebaa097312",
+  "scope": "read write"
+}
+```
+The two components are then base64-encoded, and the JWT library calculates the RS256 signature of the two strings, then joins all three parts with a period.
+
+#### Decoding
+
+Verifying the access token can be done by using the same JWT library. The library will decode and verify the signature at the same time, and throws an exception if the signature was invalid, or if the expiration date of the token has already passed.
+
+You’ll need the public key corresponding to the private key that signed the token. Typically you can fetch this from the authorization server’s metadata document, but in this example we will derive the public key from the private key generated earlier.
+Note: Anyone can read the token information by base64-decoding the middle section of the token string. For this reason, it’s important that you do not store private information or information you do not want a user or developer to see in the token. If you want to hide the token information, you can use the JSON Web Encryption spec to encrypt the data in the token.
+```php
+$public_key = openssl_pkey_get_details($private_key)['key'];
+ 
+try {
+  # Note: You must provide the list of supported algorithms in order to prevent 
+  # an attacker from bypassing the signature verification. See:
+  # https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/
+  $token = JWT::decode($token_string, $jwt_key, ['RS256']);
+  $error = false;
+} catch(\Firebase\JWT\ExpiredException $e) {
+  $token = false;
+  $error = 'expired';
+  $error_description = 'The token has expired';
+} catch(\Firebase\JWT\SignatureInvalidException $e) {
+  $token = false;
+  $error = 'invalid';
+  $error_description = 'The token provided was malformed';
+} catch(Exception $e) {
+  $token = false;
+  $error = 'unauthorized';
+  $error_description = $e->getMessage();
+}
+ 
+if($error) {
+  header('HTTP/1.1 401 Unauthorized');
+  echo json_encode(array(
+    'error'=>$error, 
+    'error_description'=>$error_description
+  ));
+  die();
+} else {
+  // Now $token has all the data that we encoded in it originally
+  print_r($token);
+}
+```
+At this point, the service has all the information it needs such as the user ID, scope, etc, available to it, and didn’t have to do a database lookup. Next it can check to make sure the access token hasn’t expired, can verify the scope is sufficient to perform the requested operation, and can then process the request.
+
+#### Invalidating
+
+Because the token can be verified without doing a database lookup, there is no way to invalidate a token until it expires. You’ll need to take additional steps to invalidate tokens that are self-encoded, such as temporarily storing a list of revoked tokens, which is one use of the jti claim in the token. See Refreshing Access Tokens for more information.
+
+### Self-encoded token
+**Self-encoded** emphasizes something slightly different: the token contains enough information for the resource server to determine its authorization properties **without needing to look up the token's state at the authorization server**.
+
+A self-encoded token contains the information needed to validate itself.
+
+A common example is a signed JWT:
+
+```text
+eyJhbGciOiJIUzI1NiJ9.
+eyJzdWIiOiIxMjMiLCJzY29wZSI6Im9yZGVycy5yZWFkIiwiZXhwIjoxNzAwMDAwMDAwfQ.
+SIGNATURE
+```
+
+For example:
+
+```text
+JWT
+ │
+ ├── identity/subject
+ ├── scope
+ ├── audience
+ ├── expiration
+ └── signature
+          │
+          ▼
+Resource Server
+      │
+      └── validates locally
+```
+
+Conceptually:
+
+```text
+┌──────────────────────────────┐
+│       Access Token           │
+├──────────────────────────────┤
+│ subject = user123            │
+│ scope   = orders.read        │
+│ issuer  = auth.example.com   │
+│ expires = 10:30              │
+│ signature                    │
+└──────────────────────────────┘
+```
+
+The resource server can validate it locally:
+
+```text
+Client
+  │
+  │ JWT
+  ▼
+Resource Server
+  │
+  ├── verify signature
+  ├── check expiration
+  ├── check issuer
+  ├── check audience
+  └── check scope
+```
+
+It doesn't necessarily need to contact the authorization server.
+
+So:
+
+> **Structured** describes the token's representation/format, while **self-encoded** describes how the token carries and exposes its authorization state.
+
+**Structured token** and **Self-encoded token** are often treated as the same, In OAuth discussions, a JWT access token is usually both:
+
+```text
+Structured
+     +
+Self-encoded
+```
+
+because its claims are structured and the resource server can validate those claims locally. But conceptually, don't make them synonyms.
+
+However, **JWT is a token format, not synonymous with OAuth access tokens**. OAuth does not require access tokens to be JWTs.
+
+Self-encoded tokens provide a way to avoid storing tokens in a database by encoding all of the necessary information in the token string itself. The main benefit of this is that API servers are able to verify access tokens without doing a database lookup on every API request, making the API much more easily scalable.
+
+The benefit of OAuth 2.0 Bearer Tokens is that applications don’t need to be aware of how you’ve decided to implement access tokens in your service. This means it’s possible to change your implementation later without affecting clients.
+
+If you already have a distributed database system that is horizontally scalable, then you may not gain any benefits by using self-encoded tokens. In fact, using self-encoded tokens if you’ve already solved the distributed database problem will only introduce new issues, as invalidating self-encoded tokens becomes an additional hurdle.
+
+There are many ways to self-encode tokens. The actual method you choose is only important to your implementation, since the token information is not exposed to external developers.
+
+The most common way to implement self-encoded tokens is to use the JWS spec, creating a JSON-serialized representation of all the data you want to include in the token, and signing the resulting string with a private key known only to your authorization server.
+
+RFC 9068 defines a standard way to use JWTs as access tokens, based on the real-world deployment experience of a number of large OAuth providers. This spec defines a data structure to use when including claims about authentication, authorization, and identity. See `https://oauth.net/2/jwt-access-tokens/` for further details.
+
+### jwt-access-tokens
+
+### Reference token vs Self-encoded token 
+**Self-encoded token** 
+```text
+┌─────────────────────────┐
+│ JWT                     │
+│                         │
+│ user = 123              │
+│ scope = orders.read     │
+│ exp = 11:00             │
+│ signature               │
+└─────────────────────────┘
+
+Resource Server
+      │
+      └── validates locally
+```
+
+The token contains its own information.
+
+**Reference token**
+
+```text
+┌─────────────────┐
+│ token123        │
+└────────┬────────┘
+         │
+         │ reference
+         ▼
+┌─────────────────────────┐
+│ Authorization Server DB │
+│                         │
+│ token123                │
+│ user = 123              │
+│ scope = orders.read     │
+│ status = ACTIVE         │
+└─────────────────────────┘
+```
+
+The token points to server-side state.
+
+## Token Lifetime
+
+Access tokens should generally have a limited lifetime.
+
+For example:
+
+```text
+issued_at = 10:00
+expires_at = 11:00
+```
+
+After expiration:
+
+```text
+10:00 ─────────────── 11:00
+       valid token
+                         │
+                         ▼
+                      expired
+```
+
+The resource server checks the expiration information when validating the token.
+
+Shorter lifetimes reduce the useful lifetime of a stolen token.
+
+For example:
+
+```text
+Token A
+Lifetime: 5 minutes
+
+Token B
+Lifetime: 24 hours
+```
+
+If either token is stolen, the attacker has a potentially useful credential for its remaining lifetime.
+
+When your service issues access tokens, you’ll need to make some decisions as to how long you want the tokens to last. Unfortunately there is no blanket solution for every service. There are various tradeoffs that come with the different options, so you should choose the option (or combination of options) that best suit your application’s need.
+
+### Short-lived access tokens
+A **short-lived access token** expires relatively soon after it is issued.
+
+For example:
+
+```text id="z6h0xk"
+Issued:  10:00
+Expires: 10:15
+
+10:00 ───────────── 10:15
+       VALID
+                       │
+                       ▼
+                    EXPIRED
+```
+
+The client cannot normally use the token after `10:15`.
+
+A common architecture is:
+
+```text id="d7s9ra"
+                 Access Token
+                    │
+                    │ short lifetime
+                    ▼
+                 expires
+                    │
+                    ▼
+              Refresh Token
+                    │
+                    │ request new token
+                    ▼
+              New Access Token
+```
+
+#### Example
+
+```text
+Access Token:
+    expires_in = 900
+    scope = orders.read
+```
+
+The client uses it:
+
+```http id="3q1d0b"
+GET /orders
+Authorization: Bearer ACCESS_TOKEN
+```
+
+After expiration, the client obtains a new access token using the refresh token, when applicable.
+
+### Non-expiring access tokens
+
+A **non-expiring access token** does not have a normal expiration time.
+
+Conceptually:
+
+```text id="8w8q2h"
+Issued
+  │
+  ├───────────────────────────────>
+  │             valid
+  │
+  └───────────────────────────────> indefinitely
+```
+
+The token remains usable until some other event invalidates it.
+
+For example:
+
+```text id="z2v4qb"
+Access Token
+       │
+       ├── no expiration
+       │
+       └── revoked manually
+```
+
+This means that if the token is stolen:
+
+```text id="t6q9uk"
+Token stolen
+     │
+     ▼
+Attacker
+     │
+     ├── today
+     ├── tomorrow
+     ├── next month
+     └── ...
+```
+
+it can potentially remain useful until the authorization system detects and revokes it.
+
+---
+
+**The important security difference**
+
+Consider two tokens:
+
+```text id="fx1w9j"
+Token A:
+    lifetime = 10 minutes
+
+Token B:
+    lifetime = indefinite
+```
+
+If both are stolen:
+
+```text id="m6yk8d"
+             Stolen
+               │
+       ┌───────┴────────┐
+       │                │
+    Token A          Token B
+       │                │
+       ▼                ▼
+  expires soon       remains valid
+```
+
+The short-lived token naturally limits the period during which the stolen credential can be used.
+
+The non-expiring token requires **effective revocation** to stop its use.
+
+#### Security advantage
+
+Suppose an attacker steals the token at 10:10:
+
+```text id="wz4t8m"
+10:10
+  │
+  │ token stolen
+  ▼
+Attacker
+  │
+  │ potentially usable
+  ▼
+10:15
+  │
+  ▼
+expired
+```
+
+The attacker's useful window is limited by the remaining lifetime.
+
+---
+
+
+**Revocation becomes much more important**
+
+With short-lived tokens:
+
+```text id="0m3j8c"
+Token
+ │
+ ├── valid
+ │
+ └── expires relatively soon
+```
+
+Even if revocation isn't immediate, expiration provides a natural upper bound on its lifetime.
+
+With a non-expiring token:
+
+```text id="s9n1ad"
+Token
+ │
+ └── valid indefinitely
+          │
+          ▼
+       revoked?
+          │
+       YES → stop
+       NO  → continue
+```
+
+Therefore, a non-expiring token places much greater importance on the ability to revoke it reliably.
+
+### Short-lived vs Non-expiring access token Comparison
+
+| Property                    | Short-lived access token | Non-expiring access token     |
+| --------------------------- | ------------------------ | ----------------------------- |
+| Expiration                  | Yes                      | No normal expiration          |
+| Stolen-token exposure       | Limited by lifetime      | Potentially indefinite        |
+| Revocation importance       | Important                | **Critical**                  |
+| Requires refresh mechanism  | Often                    | Not necessarily               |
+| Operational complexity      | Requires renewal         | Simpler issuance/use          |
+| Long-term API access        | Requires renewal         | Directly possible             |
+| Effect of missed revocation | Eventually expires       | May remain valid indefinitely |
+| Typical security model      | Short validity + renewal | Strong reliance on revocation |
+
+### Token Lifetime Options
+#### Short-lived access tokens and long-lived refresh tokens
+
+A common method of granting tokens is to use a combination of access tokens and refresh tokens for maximum security and flexibility. The OAuth 2.0 spec recommends this option, and several of the larger implementations have gone with this approach.
+
+A common design separates two credentials:
+
+```text id="1c4w8p"
+┌─────────────────┐
+│  Access Token   │
+│                 │
+│ short-lived     │
+└────────┬────────┘
+         │
+         │ API requests
+         ▼
+┌─────────────────┐
+│ Resource Server │
+└─────────────────┘
+
+
+┌─────────────────┐
+│  Refresh Token  │
+│                 │
+│ longer-lived    │
+└────────┬────────┘
+         │
+         │ obtain new access token
+         ▼
+┌─────────────────────┐
+│ Authorization Server│
+└─────────────────────┘
+```
+
+For example:
+
+```text id="lq9v3b"
+Access Token:
+    10 minutes
+
+Refresh Token:
+    potentially much longer
+```
+
+The client does **not** send the refresh token to the resource server.
+
+Instead:
+
+```text id="y7z8bc"
+Client
+  │
+  │ refresh token
+  ▼
+Authorization Server
+  │
+  │ new access token
+  ▼
+Client
+```
+
+This gives you a relatively short lifetime for the credential used frequently against APIs.
+
+Typically services using this method will issue access tokens that last anywhere from several hours to a couple weeks. When the service issues the access token, it also generates a refresh token that never expires and returns that in the response as well. (Note that refresh tokens can’t be issued using the Implicit grant.)
+
+When the access token expires, the application can use the refresh token to obtain a new access token. It can do this behind the scenes, and without the user’s involvement, so that it’s a seamless process to the user.
+
+The main benefit of this approach is that the service can use self-encoded access tokens which can be verified without a database lookup. However, this means there is no way to expire those tokens directly, so instead, the tokens are issued with a short expiration time so that the application is forced to continually refresh them, giving the service a chance to revoke an application’s access if needed.
+
+From the third-party developer’s perspective, it is often frustrating to have to deal with refresh tokens. Developers strongly prefer access tokens that don’t expire, since it’s much less code to deal with. In order to help mitigate these concerns, services will often build the token refreshing logic into their SDK, so that the process is transparent to developers.
+
+In summary, use short-lived access tokens and long-lived refresh tokens when:
+
+- you want to use self-encoded access tokens
+- you want to limit the risk of leaked access tokens
+- you will be providing SDKs that can handle the refresh logic transparently to developers
+#### Short-lived access tokens and no refresh tokens
+
+If you want to ensure users are aware of applications that are accessing their account, the service can issue relatively short-lived access tokens without refresh tokens. The access tokens may last anywhere from the current application session to a couple weeks. When the access token expires, the application will be forced to make the user sign in again, so that you as the service know the user is continually involved in re-authorizing the application.
+
+Typically this option is used by services where there is a high risk of damage if a third-party application were to accidentally or maliciously leak access tokens. By requiring that users are constantly re-authorizing the application, the service can ensure that potential damage is limited if an attacker were to steal access tokens from the service.
+
+By not issuing refresh tokens, this makes it impossible to applications to use the access token on an ongoing basis without the user in front of the screen. Applications that need access in order to continually sync data will be unable to do so under this method.
+
+From the user’s perspective, this is the option most likely to frustrate people, since it will look like the user has to continually re-authorize the application.
+
+In summary, use short-lived access tokens with no refresh tokens when:
+
+- you want to the most protection against the risk of leaked access tokens
+- you want to force users to be aware of third-party access they are granting
+- you don’t want third-party apps to have offline access to users’ data
+
+#### Non-expiring access tokens
+
+Non-expiring access tokens are the easiest method for developers. If you choose this option, it is important to consider the trade-offs you are making.
+
+It isn’t practical to use self-encoded tokens if you want to be able to revoke them arbitrarily. As such, you’ll need to store these tokens in some sort of database, so they can be deleted or marked as invalid as needed.
+
+Note that even if the service intends on issuing non-expiring access tokens for normal use, you’ll still need to provide a mechanism to expire them under exceptional circumstances, such as if the user explicitly wants to revoke an application’s access, or if a user account is deleted.
+
+Non-expiring access tokens are much easier for developers testing their own applications. You can even pre-generate one or more non-expiring access tokens for developers and show it to them on the application details screen. This way they can immediately start making API requests with the token, and not worry about setting up an OAuth flow in order to start testing your API.
+
+There are cases where long-lived credentials can be useful, particularly for certain machine-to-machine or automation scenarios.
+
+For example:
+
+```text id="y6k3qm"
+Monitoring System
+       │
+       │ credential
+       ▼
+Monitoring API
+```
+
+But a long-lived credential should be protected carefully because compromise can have a long-lasting effect.
+
+Often, instead of making an **access token itself** non-expiring, systems use another credential that can obtain new access tokens.
+
+In summary, use non-expiring access tokens when:
+
+-  you have a mechanism to revoke access tokens arbitrarily
+-  you don’t have a huge risk if tokens are leaked
+-  you want to provide an easy authentication mechanism to your developers
+-  you want third-party applications to have offline access to users’ data
+S
+#### Access-token lifetime vs refresh-token lifetime
+
+These should not be confused.
+
+```text
+Access Token
+    │
+    └── used to access API
+
+Refresh Token
+    │
+    └── used to obtain new access tokens
+```
+
+Typically:
+
+```text
+Access Token
+   short-lived
+       │
+       ▼
+expires
+       │
+       ▼
+Refresh Token
+       │
+       ▼
+new Access Token
+```
+
+## Token Storage
+
+**Token storage** concerns where the client keeps the access token after receiving it.
+
+For example:
+
+```text
+Authorization Server
+        │
+        │ access token
+        ▼
+      Client
+        │
+        ├── memory
+        ├── secure OS storage
+        ├── browser-managed storage
+        └── application storage
+```
+
+The security requirements depend heavily on the type of application.
+
+For example:
+
+#### Server-side application
+
+A server can generally keep tokens in protected server-side memory or secure storage.
+
+```text
+Browser
+   │
+   │ session
+   ▼
+Backend
+   │
+   └── access token
+```
+
+#### Browser-based application
+
+Storage is more difficult because JavaScript running in the browser can potentially access application data.
+
+This is why token storage is an important part of OAuth security architecture.
+
+The general principle is:
+
+> Store access tokens where unauthorized code has as little opportunity as possible to obtain them.
+
+You should also avoid putting access tokens into:
+
+```text
+URLs
+logs
+error messages
+analytics data
+```
+
+unless there is a very specific reason and appropriate protection.
+
+## Token Transmission
+
+**Token transmission** describes how the access token travels from the client to the resource server.
+
+The standard HTTP mechanism is the `Authorization` header:
+
+```http
+GET /api/profile HTTP/1.1
+Host: api.example.com
+Authorization: Bearer ACCESS_TOKEN
+```
+
+The token should be transmitted over **TLS/HTTPS**.
+
+Conceptually:
+
+```text
+Client
+  │
+  │ HTTPS
+  │ Authorization: Bearer TOKEN
+  ▼
+Resource Server
+```
+
+Avoid transmitting access tokens through URLs such as:
+
+```text
+https://api.example.com/profile?access_token=TOKEN
+```
+
+URLs can appear in:
+
+* browser history
+* proxy logs
+* server logs
+* analytics systems
+* referrer information
+
+Therefore, the HTTP `Authorization` header is normally preferable.
+
+## Token Validation
+
+The **resource server** must determine whether an access token is acceptable before allowing access to a protected resource.
+
+Conceptually:
+
+```text
+Client
+  │
+  │ access token
+  ▼
+Resource Server
+  │
+  ├── Is token valid?
+  ├── Is it expired?
+  ├── Was it issued by trusted AS?
+  ├── Is it intended for this resource?
+  ├── Does it have required scope?
+  └── Is it revoked?
+       │
+       ├── YES → allow
+       │
+       └── NO  → reject
+```
+
+For a JWT-like token, validation may include:
+
+1. Signature
+
+```text
+signature valid?
+```
+
+2. Issuer
+
+```text
+iss == trusted authorization server
+```
+
+3. Audience
+
+```text
+aud == this resource server
+```
+
+4. Expiration
+
+```text
+exp > current_time
+```
+
+5. Scope
+
+For example, the endpoint requires:
+
+```text
+orders.read
+```
+
+and the token contains:
+
+```text
+scope = orders.read orders.write
+```
+
+Therefore access can be granted.
+
+But if:
+
+```text
+scope = profile.read
+```
+
+then:
+
+```text
+GET /orders
+```
+
+should be rejected.
+
+:::note Important distinction
+
+Authentication of the client and authorization represented by the access token are related but different concepts.
+
+:::
+
+## Token Introspection
+
+**Token introspection** allows a resource server to ask the authorization server about an access token.
+
+This is particularly useful with **opaque tokens**.
+
+For example:
+
+```text
+Client
+  │
+  │ access token
+  ▼
+Resource Server
+  │
+  │ introspection request
+  ▼
+Authorization Server
+  │
+  │ token information
+  ▼
+Resource Server
+```
+
+The authorization server might respond conceptually with:
+
+```json
+{
+  "active": true,
+  "client_id": "my-client",
+  "scope": "orders.read orders.write",
+  "sub": "user-123",
+  "aud": "orders-api",
+  "exp": 1790697600
+}
+```
+
+The important field is:
+
+```text
+active
+```
+
+If:
+
+```json
+{
+  "active": true
+}
+```
+
+the resource server can continue validating the other authorization information.
+
+If:
+
+```json
+{
+  "active": false
+}
+```
+
+the token should not be accepted.
+
+**Why introspection?**
+
+It gives the resource server current information about the token.
+
+This can be useful when tokens need centralized status checking.
+
+
+## Token Revocation
+
+**Token revocation** means invalidating a token before its normal expiration time.
+
+For example:
+
+```text
+10:00  token issued
+10:30  token stolen
+10:31  token revoked
+11:00  natural expiration
+```
+
+Without revocation:
+
+```text
+10:31 ───────── 11:00
+       potentially usable
+```
+
+With effective revocation:
+
+```text
+10:31
+ │
+ ▼
+revoked
+ │
+ ▼
+no longer accepted
+```
+
+---
+
+There are a few reasons you might need to revoke an application’s access to a user’s account.
+
+- The user explicitly wishes to revoke the application’s access, such as if they’ve found an application they no longer want to use listed on their authorizations page
+- The developer wants to revoke all user tokens for their application
+- The developer deleted their application
+- You as the service provider have determined an application is compromised or malicious, and want to disable it
+
+Depending on how you’ve implemented generating access tokens, revoking them will work in different ways.
+
+---
+
+Revocation can be important when:
+
+* a user logs out
+* a client is compromised
+* credentials are compromised
+* authorization is withdrawn
+* an administrator disables access
+* a security incident occurs
+
+However, there is an important architectural issue.
+
+A self-contained JWT may have a validity period such as:
+
+```text
+exp = 11:00
+```
+
+If a resource server only validates its signature and expiration locally, it may not automatically know that the token was revoked at 10:31.
+
+This is one reason systems may use mechanisms such as:
+
+```text
+JWT + short lifetime
+```
+
+or:
+
+```text
+Opaque token + introspection
+```
+
+or additional revocation/status mechanisms.
+
+You will also need to invalidate the application’s refresh tokens that were issued along with an access token. Revoking the refresh token means the next time the application attempts to refresh the access token, the request for a new access token will be denied.
+### reference/opaque token
+In **reference/opaque token**, Instead of putting all the information into the token:
+
+```text
+Client receives:
+
+8f92c71a3c8d4e9f
+```
+
+the authorization server stores the actual token state:
+
+```text
+Database
+────────────────────────────────────
+token_hash       user       scope
+────────────────────────────────────
+8f92...          user123    orders.read
+```
+
+The token itself is just a reference to server-side state.
+
+Now revocation becomes straightforward.
+
+If you store access tokens in a database, then it is relatively easy to revoke all tokens that belong to a particular user. You can easily write a query that finds and deletes tokens belonging to the user, such as looking in the token table for their `user_id`. Assuming your resource server validates access tokens by looking them up in the database, then the next time the revoked client makes a request, their token will fail to validate.
+
+Initially:
+
+```text
+Database
+
+token123 → ACTIVE
+```
+
+The client sends:
+
+```http
+Authorization: Bearer token123
+```
+
+The resource server can ask the authorization server:
+
+```text
+Is token123 active?
+```
+
+The authorization server checks:
+
+```text
+token123 → ACTIVE
+```
+
+and responds:
+
+```text
+active = true
+```
+
+The request is accepted.
+
+---
+
+Now suppose the authorization server wants to revoke it.
+
+It changes:
+
+```text
+token123 → ACTIVE
+```
+
+to:
+
+```text
+token123 → REVOKED
+```
+
+or deletes the record entirely:
+
+```text
+token123 → [deleted]
+```
+
+Now:
+
+```text
+Client
+  │
+  │ token123
+  ▼
+Resource Server
+  │
+  │ introspection
+  ▼
+Authorization Server
+  │
+  │ lookup
+  ▼
+Database
+  │
+  ▼
+REVOKED
+```
+
+The authorization server returns:
+
+```json
+{
+  "active": false
+}
+```
+
+The resource server rejects the request.
+
+---
+
+### Self-Encoded Tokens
+If you have a truly stateless mechanism of verifying tokens, and your resource server is validating tokens without sharing information with another system, then the only option is to wait for all outstanding tokens to expire, and prevent the application from being able to generate new tokens for that user by blocking any refresh token requests from that client ID.
+
+Suppose your authorization server creates a self-encoded access token, such as a signed JWT:
+
+```text id="5o4x9m"
+Access Token
+┌─────────────────────────────┐
+│ sub = user123               │
+│ scope = orders.read         │
+│ exp = 10:15                  │
+│ signature                    │
+└─────────────────────────────┘
+```
+
+The resource server validates it **completely by itself**:
+
+```text id="h6j2xz"
+Client
+  │
+  │ JWT
+  ▼
+Resource Server
+  │
+  ├── verify signature
+  ├── check expiration
+  ├── check issuer
+  ├── check audience
+  └── check scope
+```
+
+There is no call to:
+
+```text id="m2d8q4"
+Authorization Server
+```
+
+and no shared database:
+
+```text id="0r1t7x"
+Resource Server ──X── Authorization Server
+         │
+         X
+     no shared state
+```
+
+That's what **truly stateless** means here.
+
+The resource server's decision depends only on:
+
+```text id="8t5qk2"
+Token itself
++
+Trusted cryptographic configuration
++
+Current time
+```
+Now suppose the user must be revoked
+
+Imagine:
+
+```text id="4m9j1a"
+10:00 → token issued
+10:05 → user should be revoked
+10:15 → token expires
+```
+
+The authorization server says:
+
+```text id="0i5b6z"
+"user123 must no longer have access"
+```
+
+But the resource server doesn't know this.
+
+Why?
+
+Because it is completely stateless.
+
+It sees:
+
+```text id="1y6t8w"
+JWT
+ │
+ ├── signature ✓
+ ├── issuer ✓
+ ├── audience ✓
+ ├── expiration ✓
+ └── scope ✓
+```
+
+Everything still checks out.
+
+Therefore:
+
+```text id="g1t7e2"
+Resource Server
+       │
+       │ "This token is valid."
+       ▼
+      API
+```
+
+The authorization server cannot simply tell the resource server:
+
+> "Reject this particular token."
+
+The resource server has nowhere to store or obtain that information.
+
+**Why can't we simply revoke the JWT?**
+
+Suppose the authorization server maintains:
+
+```text id="6d5w4s"
+revoked_tokens = {
+    "abc123"
+}
+```
+
+That doesn't solve the problem if the resource server never checks that information.
+
+The resource server is doing:
+
+```text id="f0w1q7"
+JWT
+ │
+ ├── signature
+ ├── exp
+ ├── iss
+ ├── aud
+ └── scope
+```
+
+It isn't doing:
+
+```text id="s5n9x2"
+JWT
+ │
+ └── "Is this token revoked?"
+              │
+              ▼
+       Authorization Server
+```
+
+because that would no longer be truly stateless.
+
+So the existing token has to expire naturally, and the resource server will continue to accept it until that time.
+
+Suppose the user's current token is:
+
+```text id="u4q8m2"
+issued = 10:00
+expires = 10:15
+```
+
+At 10:05, you revoke the user.
+
+You cannot immediately invalidate the existing token through the stateless validation mechanism.
+
+So you wait:
+
+```text id="n5y6p3"
+10:00          10:05             10:15
+ │               │                 │
+ │ token issued  │ revoke user     │
+ │               │                 │
+ ├───────────────┼─────────────────┤
+ │   token valid │                 │
+ │               │                 ▼
+ │               │              expires
+```
+
+After 10:15:
+
+```text id="7c4v8n"
+Token
+  │
+  ▼
+expired
+  │
+  ▼
+Resource Server rejects it
+```
+
+This is the fundamental limitation of purely stateless self-encoded tokens.
+
+But what about getting a new token? Suppose the user has:
+
+```text id="j7n0q4"
+Access Token
+    expires in 15 minutes
+
+Refresh Token
+    longer-lived
+```
+
+If you only wait for the access token to expire but continue allowing refreshes, the client could simply do:
+
+```text id="9k2m6p"
+Old Access Token
+      │
+      ▼
+   expires
+      │
+      ▼
+Refresh Token
+      │
+      ▼
+Authorization Server
+      │
+      ▼
+New Access Token
+```
+
+Then the revocation would be ineffective.
+
+So the authorization server needs to prevent the client from obtaining new access tokens.
+
+**Blocking refresh requests**
+
+Suppose the authorization server knows:
+
+```text id="4z8w1y"
+client_id = shopping-app
+user = user123
+status = revoked
+```
+
+The client tries:
+
+```http id="n7c3x9"
+POST /token
+
+grant_type=refresh_token
+refresh_token=...
+client_id=shopping-app
+```
+
+The authorization server refuses:
+
+```text id="x5d8q2"
+Refresh request
+      │
+      ▼
+Authorization Server
+      │
+      ├── user revoked?
+      │       YES
+      │
+      └── reject
+```
+
+So:
+
+```text id="q2r8m4"
+Existing access token
+       │
+       └── remains usable until expiration
+
+New access token
+       │
+       └── cannot be obtained
+```
+
+Eventually:
+
+```text id="p9w3k1"
+existing token expires
+        +
+refresh requests blocked
+        │
+        ▼
+user can no longer access API
+```
+
+This is the primary reason to use extremely short-lived tokens when you are using self-encoded tokens. uppose access tokens live for:
+
+1. 24 hours
+
+  ```text id="z3m6q1"
+  User revoked at 10:05
+
+  Token expires:
+  next day at 10:00
+  ```
+
+  The old token could potentially remain usable for almost **24 hours**.
+
+Now suppose access tokens live for:
+
+2. 5 minutes
+
+```text id="b6k8w2"
+User revoked at 10:05
+
+Token expires:
+10:10
+```
+
+The maximum remaining lifetime is much smaller.
+
+So:
+
+```text id="e5v7n3"
+Long-lived self-encoded token
+        │
+        ▼
+Long revocation delay
+
+Short-lived self-encoded token
+        │
+        ▼
+Short revocation delay
+```
+
+The short lifetime isn't primarily about making the JWT itself more secure cryptographically. It is about **limiting the time during which an already-issued token can remain valid after the authorization state has changed**.
+
+**trade-off**
+
+Self-encoded tokens give you an important advantage:
+
+```text id="q8m3v1"
+Client
+  │
+  ▼
+Resource Server
+  │
+  └── validate locally
+```
+
+You don't need:
+
+```text id="p5k7d2"
+Resource Server
+       │
+       ▼
+Authorization Server
+       │
+       ▼
+Database
+```
+
+This can simplify request processing and avoid an authorization-server lookup on every API request.
+
+But you give up some centralized control over already-issued tokens.
+
+So there is a trade-off:
+
+| Self-encoded token                                | Centralized/reference token                            |
+| ------------------------------------------------- | ------------------------------------------------------ |
+| Resource server can validate locally              | Resource server can check server-side state            |
+| Little/no per-request authorization-server lookup | May require introspection/state lookup                 |
+| Easy to scale validation                          | Centralized status information                         |
+| Revocation of already-issued tokens is harder     | Revocation can be reflected centrally                  |
+| Short lifetime becomes especially important       | Lifetime can be combined with introspection/revocation |
+
+With truly stateless self-encoded access tokens, you generally cannot immediately revoke an already-issued token unless you introduce some external state or checking mechanism. Short access-token lifetimes limit how long that token can remain usable, while blocking refresh prevents the client from continuously obtaining new tokens.
+
+---
+
+It isn’t practical to use self-encoded tokens if you want to be able to revoke them arbitrarily. As such, you’ll need to store these tokens in some sort of database, so they can be deleted or marked as invalid as needed.
+
+Suppose the authorization server issues this token at 10:00:
+
+```text
+Access Token
+    expires: 11:00
+```
+
+At 10:15, something happens and the authorization server wants to revoke it.
+
+For example:
+
+```text
+10:00  token issued
+10:15  token should be revoked
+11:00  token naturally expires
+```
+
+The problem is that the JWT itself still says:
+
+```text
+exp = 11:00
+```
+
+and its signature is still valid. So the resource server may do:
+
+```text
+JWT
+ │
+ ├── signature ✓
+ ├── issuer ✓
+ ├── expiration ✓
+ └── scope ✓
+       │
+       ▼
+     ACCEPT
+```
+
+even though the authorization server wants the token revoked.  The resource server doesn't automatically know that the authorization server changed its mind.
+
+---
+
+**Why deleting the token doesn't work**
+
+Suppose the authorization server originally stored information saying:
+
+```text
+token123 → valid
+```
+
+and later deletes:
+
+```text
+token123
+```
+
+That doesn't necessarily help with a self-encoded JWT. Why? Because the resource server may never look in that database. It can simply do:
+
+```text
+receive JWT
+      │
+      ▼
+verify signature
+      │
+      ▼
+check exp
+      │
+      ▼
+accept
+```
+
+The JWT carries its own authorization information. So deleting a database record doesn't invalidate the cryptographic token unless the resource server also checks that database or another revocation mechanism.
+
+---
+
+"It isn’t practical to use self-encoded tokens if you want to be able to revoke them arbitrarily", doesn't mean that self-encoded tokens **cannot** be revoked. They can.
+
+For example, you could maintain a revocation list:
+
+```text
+Revoked Tokens
+────────────────
+jwt-abc
+jwt-def
+jwt-xyz
+```
+
+Then the resource server checks:
+
+```text
+Is JWT signature valid?
+        │
+        ▼
+Is JWT expired?
+        │
+        ▼
+Is JWT revoked?
+        │
+        ▼
+     ACCEPT
+```
+
+But now you've introduced centralized state that the self-encoded-token design was trying to avoid.
+
+You might also use:
+
+* short-lived access tokens
+* token versioning
+* authorization/session state checks
+* distributed revocation lists
+* introspection
+
+So the trade-off is roughly:
+
+```text
+Self-encoded token
+        │
+        ├── + local validation
+        ├── + no database lookup for every request
+        ├── + good scalability
+        │
+        └── - immediate revocation is harder
+
+
+Reference/opaque token
+        │
+        ├── + centralized control
+        ├── + straightforward revocation
+        ├── + current authorization state
+        │
+        └── - requires server-side state / lookup
+```
+So, If the access token contains all of its own authorization information, the resource server can continue trusting it until it expires. If you need to revoke individual tokens immediately, you need some way for the resource server to discover that the token is no longer valid. A common solution is to use an opaque/reference token whose state is stored server-side, allowing the authorization server to delete or mark that token as revoked.
+
+
+---
+
+If you can afford some level of statefulness, you could push a revocation list of token identifiers to your resource servers, and your resource servers can check that list when validating a token. 
+
+So a proposed solution is to give resource servers a small amount of shared state(Add a revocation list):
+
+```text
+Authorization Server
+        │
+        │ publish revoked JTIs
+        ▼
+┌──────────────────────┐
+│ Revocation List      │
+│                      │
+│ a8f3c21e...           │
+│ 91bc72aa...           │
+└──────────────────────┘
+        │
+        │ distributed/synchronized
+        ▼
+┌──────────────────────┐
+│ Resource Server      │
+└──────────────────────┘
+```
+
+The resource server now performs an additional check.
+
+The access token can contain a unique ID (e.g. the jti claim) which can be used to keep track of individual tokens. 
+
+`jti` is a JWT claim that can identify a particular token(Think of `jti` as the token's unique identifier).
+
+For example:
+
+```json
+{
+  "iss": "https://auth.example.com",
+  "sub": "user-123",
+  "aud": "orders-api",
+  "scope": "orders.read",
+  "exp": 1790697600,
+  "jti": "a8f3c21e-7b2a-4f9c-91d2-123456789abc"
+}
+```
+It allows you to say: "Revoke **this particular access token**.", rather than: "Revoke every token belonging to this user."
+
+If you want to revoke a particular token, you would need to put that token’s jti into a list somewhere that can be checked by your resource servers. 
+
+Imagine the authorization server issued:
+
+```text
+Token A
+jti = AAA
+expires = 10:30
+
+Token B
+jti = BBB
+expires = 10:45
+```
+
+At 10:10, Token A is compromised.
+
+The authorization server adds its `jti` to the revocation list:
+
+```text
+Revocation List
+
+AAA  ← revoked
+```
+
+The resource server receives/synchronizes this information.
+
+Now when Token A arrives:
+
+```text
+Request
+   │
+   ▼
+JWT validation
+   │
+   ├── Signature valid ✓
+   ├── exp valid ✓
+   └── jti = AAA
+             │
+             ▼
+       Revocation list
+             │
+             └── AAA found ✗
+                    │
+                    ▼
+                REJECT
+```
+
+Token B can still work:
+
+```text
+jti = BBB
+    │
+    ▼
+Revocation list?
+    │
+    └── Not found ✓
+          │
+          ▼
+       ACCEPT
+```
+
+This is an important advantage of `jti`-based revocation: **you can revoke an individual token without necessarily invalidating other tokens.**
+
+
+Of course this means your resource servers are no longer doing a purely stateless check, so this may not be an option available for every situation.
+
+With purely stateless validation:
+
+```text
+Request
+   │
+   ▼
+JWT
+   │
+   ▼
+Resource Server
+   │
+   ├── signature
+   ├── claims
+   └── expiration
+   │
+   ▼
+Decision
+```
+
+Everything needed for the decision is contained in the token plus the resource server's configuration.
+
+There is no external lookup.
+
+With a revocation list:
+
+```text
+Request
+   │
+   ▼
+JWT
+   │
+   ▼
+Resource Server
+   │
+   ├── signature
+   ├── claims
+   ├── expiration
+   │
+   └── jti ──────► Revocation List
+                         │
+                         ▼
+                    revoked?
+                         │
+                         ▼
+                      Decision
+```
+
+Now the resource server depends on **external state**.
+
+Therefore: It is no longer purely stateless.
+
+But this is different from introspection
+
+There are two different approaches:
+
+1. A. Token introspection
+
+The resource server asks the authorization server:
+
+```text
+Resource Server
+      │
+      │ Is token ABC active?
+      ▼
+Authorization Server
+      │
+      ▼
+   "active": false
+```
+
+The authorization server maintains the authoritative token state.
+
+2. B. Distributed revocation list
+
+The authorization server distributes revoked identifiers:
+
+```text
+Authorization Server
+        │
+        │ revoked jti values
+        ▼
+Resource Server
+```
+
+The resource server can then make the decision locally.
+
+So the comparison is:
+
+| Approach                       | Resource server state        | Network lookup per request | Immediate centralized revocation |
+| ------------------------------ | ---------------------------- | -------------------------- | -------------------------------- |
+| Self-encoded, purely stateless | None                         | No                         | No                               |
+| Self-encoded + revocation list | Yes                          | Not necessarily            | Depends on propagation           |
+| Opaque + introspection         | Usually no local token state | Usually yes                | Yes                              |
+| Opaque + local state           | Yes                          | Not necessarily            | Depends on synchronization       |
+
+**trade-off**
+
+The revocation list gives you more control, but introduces complexity.
+
+Suppose the authorization server revokes:
+
+```text
+jti = AAA
+```
+
+But the resource server hasn't received the update yet.
+
+For a short period:
+
+```text
+Authorization Server
+      │
+      └── AAA = revoked
+
+Resource Server
+      │
+      └── local list doesn't contain AAA yet
+```
+
+The resource server might still accept the token.
+
+Therefore, revocation is only as effective as the **distribution/propagation mechanism**.
+
+You now have to think about:
+
+* How are revocations distributed?
+* How quickly do resource servers receive updates?
+* What happens if synchronization fails?
+* How large can the revocation list become?
+* When can old `jti` values be removed?
+* How is the list protected from tampering?
+
+
+**Why token expiration still matters**
+
+Notice something interesting.
+
+Suppose you have:
+
+```text
+Access token lifetime = 10 minutes
+Revocation list = distributed
+```
+
+You don't need to keep every revoked `jti` forever.
+
+Once the token would have naturally expired, its `jti` no longer needs to be tracked for access-token validation.
+
+For example:
+
+```text
+Token:
+issued     10:00
+expires    10:10
+
+revoked    10:03
+```
+
+You need the revocation entry from:
+
+```text
+10:03 ───────────────► 10:10
+       revocation       natural
+                         expiration
+```
+
+After 10:10, the token should already fail the `exp` check.
+
+This is another reason **short-lived access tokens simplify revocation management**.
+
+You can think of the three models like this:
+
+```text
+                 ACCESS TOKEN VALIDATION
+                          │
+          ┌───────────────┼────────────────┐
+          │               │                │
+          ▼               ▼                ▼
+     Stateless       Revocation List    Introspection
+          │               │                │
+          │               │                │
+       JWT only        JWT + jti       Token + server
+          │               │                │
+          ▼               ▼                ▼
+      No state       Some state       Central state
+          │               │                │
+          ▼               ▼                ▼
+   No revocation     Individual       Centralized
+   knowledge        revocation        status
+```
+If completely stateless JWT validation cannot give you the revocation behavior you need, you can add a small amount of state by maintaining a revocation list keyed by each token's `jti`.
+
+---
+
+### Access Token Expiration vs Revocation
+
+One particularly important distinction is:
+
+> **Expiration is time-based invalidation; revocation is administrator/authorization-state-based invalidation.**
+
+A token can therefore be **valid but revoked before its expiration**, while an expired token is invalid because its lifetime has ended.
+
+## Token Lifetime Security
+
+**Token lifetime security** is about choosing and enforcing how long an access token remains usable so that you balance **security, usability, and system behavior**.
+
+The basic principle is:
+
+> The longer an access token remains valid, the longer an attacker can potentially use it if the token is stolen.
+
+### Why token lifetime matters
+
+Consider an access token issued at 10:00.
+
+1. **Short-lived token**
+
+```text
+10:00                         10:15
+ │                              │
+ ├────────── VALID ─────────────┤
+                                ▼
+                             EXPIRED
+```
+
+If an attacker steals it at 10:10:
+
+```text
+10:10
+  │
+  │ stolen
+  ▼
+Attacker
+  │
+  │ can potentially use token
+  ▼
+10:15
+  │
+  ▼
+EXPIRED
+```
+
+The attacker has only a limited window.
+
+2. **Long-lived token**
+
+```text
+10:00                                      18:00
+ │                                           │
+ ├──────────────── VALID ────────────────────┤
+```
+
+A stolen token potentially remains useful for much longer.
+
+Therefore:
+
+```text
+Longer lifetime
+      │
+      ▼
+Longer exposure window
+      │
+      ▼
+Greater impact if token is stolen
+```
+
+###  `token-theft-and-exposure-window`
+
+This explains **what happens if an access token is stolen and how token lifetime limits the damage**.
+
+Suppose the authorization server issues:
+
+```text
+Issued:  10:00
+Expires: 10:15
+```
+
+The token is valid for 15 minutes:
+
+```text
+10:00                         10:15
+ │                              │
+ ├────────── VALID ─────────────┤
+                                ▼
+                             EXPIRED
+```
+
+Now imagine an attacker obtains the token at 10:05:
+
+```text
+10:00        10:05              10:15
+ │             │                  │
+ │             │ stolen           │
+ │             ▼                  │
+ │          Attacker ──────────────┤
+ │             │                   │
+ │             │ 10 minutes        │
+ │             │ potential use     │
+ │             ▼                   ▼
+```
+
+The **exposure window** is the period during which the stolen token may still be usable.
+
+In this example:
+
+```text
+Token lifetime       = 15 minutes
+Time of theft        = 10:05
+Remaining lifetime   = 10 minutes
+```
+
+So the attacker potentially has a **10-minute window**.
+
+**Why this matters**
+
+Compare:
+
+```text
+Token A: expires after 5 minutes
+Token B: expires after 1 hour
+Token C: does not expire
+```
+
+If all three are stolen immediately:
+
+```text
+Token A → approximately 5-minute exposure window
+Token B → approximately 1-hour exposure window
+Token C → potentially indefinite exposure
+```
+
+Therefore:
+
+> **Shorter token lifetimes reduce the maximum time a stolen token can remain usable.**
+
+But they don't prevent theft.
+
+You still need:
+
+```text
+HTTPS
++
+secure storage
++
+limited scopes
++
+token validation
++
+revocation
++
+possibly sender-constrained tokens
+```
+
+### Lifetime is a security control
+
+Token lifetime is not just an operational setting.
+
+It is one of the controls used to limit the consequences of token theft.
+
+For example:
+
+```text
+Access Token A
+Lifetime = 5 minutes
+
+Access Token B
+Lifetime = 60 minutes
+```
+
+If both are stolen immediately after issuance, the potential exposure periods are approximately:
+
+```text
+Token A → 5 minutes
+Token B → 60 minutes
+```
+
+This doesn't mean a 5-minute token is automatically "secure" or that a 60-minute token is automatically "insecure." The appropriate lifetime depends on the application and threat model.
+
+### Short lifetime does not eliminate token theft
+
+A common misunderstanding is:
+
+> "If the access token expires quickly, token theft doesn't matter."
+
+It still matters.
+
+Suppose:
+
+```text
+Token lifetime = 5 minutes
+```
+
+An attacker steals it after 30 seconds:
+
+```text
+Issued       Stolen             Expires
+  │             │                  │
+  ▼             ▼                  ▼
+10:00          10:00:30           10:05
+                │
+                └── ~4.5 minutes
+                    of potential use
+```
+
+The attacker may still make many requests during those remaining minutes.
+
+So short lifetime **limits the window**, but does not prevent misuse.
+
+You still need:
+
+* secure token storage
+* HTTPS
+* appropriate scopes
+* token validation
+* protection against token leakage
+* sender-constrained tokens where appropriate
+* revocation mechanisms where needed
+
+---
+
+### Expiration vs revocation
+
+These are different security mechanisms.
+
+1. **Expiration**
+
+The token becomes invalid because its lifetime ends.
+
+```text
+10:00 ─────────────── 10:15
+       valid              │
+                          ▼
+                       expired
+```
+
+2. **Revocation**
+
+The authorization system explicitly invalidates the token before its expiration.
+
+```text
+10:00 ───── 10:07 ─────────── 10:15
+             │
+             ▼
+          revoked
+```
+
+So:
+
+```text
+Token lifetime
+      │
+      ├── expiration → automatic time-based invalidation
+      │
+      └── revocation → explicit invalidation
+```
+
+This is particularly important when discussing long-lived or non-expiring tokens.
+
+### Short-lived access tokens + refresh tokens
+
+A common architecture is:
+
+```text
+                 Authorization Server
+                         │
+                         │
+             ┌───────────┴───────────┐
+             │                       │
+      Access Token             Refresh Token
+      short-lived              longer-lived
+             │                       │
+             │ API requests           │
+             ▼                       │
+      Resource Server                │
+                                     │
+                                     │
+                         obtain new access token
+                                     │
+                                     ▼
+                           Authorization Server
+```
+
+For example:
+
+```text
+Access Token
+    lifetime = 10 minutes
+
+Refresh Token
+    lifetime = much longer
+```
+
+The client uses the access token for API requests:
+
+```http
+Authorization: Bearer ACCESS_TOKEN
+```
+
+When it expires:
+
+```text
+Client
+  │
+  │ refresh token
+  ▼
+Authorization Server
+  │
+  │ new access token
+  ▼
+Client
+```
+
+This allows the frequently transmitted API credential to have a relatively short lifetime without forcing the user to authenticate again every few minutes.
+
+### Why refresh tokens need different protection
+
+A refresh token can be more sensitive because it can be used to obtain new access tokens.
+
+For example:
+
+```text
+Attacker steals access token
+        │
+        ▼
+Limited by access-token lifetime
+```
+
+But:
+
+```text
+Attacker steals refresh token
+        │
+        ▼
+Can potentially obtain new access tokens
+        │
+        ▼
+Potentially much longer exposure
+```
+
+Therefore, the security model should not simply be: Access tokens are short-lived, so everything is safe.
+
+Instead:
+
+```text
+Short-lived Access Token
+        +
+Protected Refresh Token
+        +
+Refresh-token controls
+        +
+Revocation
+        +
+Secure storage
+```
+
+### Token lifetime should reflect the risk
+
+Different APIs can have different sensitivity.
+
+Consider:
+
+```text
+API A
+GET /public-profile
+```
+
+versus:
+
+```text
+API B
+POST /bank-transfer
+```
+
+A token that can perform highly sensitive operations deserves more careful consideration regarding:
+
+* lifetime
+* scopes
+* sender constraints
+* revocation
+* client authentication
+* monitoring
+
+You shouldn't think of lifetime independently from the permissions represented by the token.
+
+For example:
+
+```text
+Token A:
+scope = profile.read
+
+Token B:
+scope = payments.write
+```
+
+Even if both have the same lifetime, the consequences of compromise can be very different.
+
+### Lifetime and Scope 
+Scope and lifetime work together
+
+You can think of access-token security as two dimensions:
+
+```text
+                Permission
+                    │
+                    │
+              broad │       High exposure
+                    │
+                    │
+              narrow│
+                    │
+                    └────────────────── Lifetime
+                       short       long
+```
+
+A token with:
+
+```text
+broad scopes
++
+long lifetime
+```
+
+represents a larger potential exposure if compromised than a narrowly scoped, short-lived token.
+
+This leads to an important security principle:
+
+> **Grant the minimum necessary authority for the minimum practical duration.**
+
+This combines **scope** and **token lifetime**.
+
+###  `lifetime-and-token-format`
+
+This topic explains how **token lifetime interacts with the way the token is represented and validated**.
+
+The important comparison is:
+
+```text
+Access Token
+│
+├── Self-encoded / structured
+│
+└── Opaque / reference
+```
+
+1. **Self-encoded token**
+
+For example, a JWT:
+
+```json
+{
+  "sub": "user123",
+  "scope": "orders.read",
+  "exp": 1790000000
+}
+```
+
+The resource server can validate it locally:
+
+```text
+Client
+  │
+  │ JWT
+  ▼
+Resource Server
+  │
+  ├── verify signature
+  ├── check issuer
+  ├── check audience
+  ├── check expiration
+  └── check scope
+```
+
+The `exp` claim is particularly important.
+
+If:
+
+```text
+exp = 10:15
+```
+
+the resource server can determine locally that the token is no longer valid after 10:15.
+
+But what about revocation? Suppose the authorization server wants to revoke the JWT at 10:05:
+
+```text
+Issued       Revoked             Expires
+10:00         10:05               10:15
+  │             │                   │
+  ├─────────────┼───────────────────┤
+                │
+             revoked
+```
+
+The JWT itself still contains:
+
+```text
+exp = 10:15
+```
+
+and its signature remains valid. If the resource server only performs local validation, it may continue accepting it. That's why short lifetimes are particularly useful with self-encoded tokens:
+
+```text
+Self-encoded token
+       │
+       ▼
+short lifetime
+       │
+       ▼
+limits the validity window
+       │
+       ▼
+reduces dependence on immediate revocation
+```
+
+This does **not** mean self-encoded tokens cannot be revoked. It means immediate centralized revocation requires an additional mechanism.
+
+
+2. **Opaque/reference token**
+
+With an opaque token:
+
+```text
+Client
+  │
+  │ 8f92c71a...
+  ▼
+Resource Server
+  │
+  │ introspection
+  ▼
+Authorization Server
+  │
+  ▼
+Token Database
+```
+
+The authorization server can maintain:
+
+```text
+token123 → active
+```
+
+and later:
+
+```text
+token123 → revoked
+```
+
+So the resource server can discover the current state.
+
+{/* <!-- ##### The relationship --> */}
+
+Therefore:
+
+```text
+Self-encoded token
+    │
+    ├── local validation
+    ├── expiration is important
+    └── immediate revocation requires extra mechanism
+
+Opaque token
+    │
+    ├── server-side state
+    ├── introspection possible
+    └── centralized revocation is straightforward
+```
+
+### Lifetime and self-encoded tokens
+
+Suppose you have a self-encoded JWT:
+
+```json
+{
+  "sub": "user123",
+  "scope": "orders.read",
+  "exp": 1790000000
+}
+```
+
+The resource server can validate it locally:
+
+```text
+JWT
+ │
+ ├── signature ✓
+ ├── issuer ✓
+ ├── audience ✓
+ └── expiration ✓
+        │
+        ▼
+      ACCEPT
+```
+
+If you make it short-lived, then expiration provides a natural limit on how long a stolen token can be used.
+
+```text
+JWT
+ │
+ └── exp = 10 minutes
+          │
+          ▼
+       expires
+```
+
+But if you make it non-expiring:
+
+```text
+JWT
+ │
+ └── no expiration
+          │
+          ▼
+     potentially valid indefinitely
+```
+
+Now immediate revocation becomes much more difficult unless the resource server checks external state.
+
+### Clock considerations
+
+Token expiration depends on time.
+
+Suppose:
+
+```text
+Authorization Server:
+    exp = 10:15
+
+Resource Server:
+    current time = 10:15
+```
+
+In distributed systems, clocks aren't always perfectly synchronized. Therefore, implementations sometimes account for a small amount of **clock skew**.
+
+Conceptually:
+
+```text
+Authorization Server
+        │
+        │ token says exp = 10:15
+        ▼
+Resource Server
+        │
+        └── clock may differ slightly
+```
+
+The important point is that token lifetime validation must account for the realities of distributed systems without creating an unnecessarily large acceptance window.
+
+###  Access-token lifetime and session lifetime
+
+These are different concepts.
+
+For example:
+
+```text
+User Session
+     │
+     │ potentially hours
+     ▼
+Application
+```
+
+while:
+
+```text
+Access Token
+     │
+     │ 10 minutes
+     ▼
+Resource Server
+```
+
+The user can remain signed in to the application while the application periodically obtains new access tokens.
+
+So:
+
+```text
+User authentication/session
+        ≠
+Access-token lifetime
+```
+
+This distinction is particularly useful when designing OAuth/OIDC systems.
+
+
+
+###  `lifetime-and-token-revocation`
+
+This topic answers:
+
+> **How do expiration and revocation work together?**
+
+They are not the same thing.
+
+1. Expiration
+
+Expiration happens automatically when the token reaches its expiration time.
+
+```text
+10:00                         10:15
+ │                              │
+ ├────────── VALID ─────────────┤
+                                ▼
+                             EXPIRED
+```
+
+2. Revocation
+
+Revocation is an explicit decision to invalidate the token before its normal expiration.
+
+```text
+10:00       10:05               10:15
+ │            │                    │
+ │            │ revoked            │
+ │            ▼                    │
+ ├────────────X────────────────────┤
+              │
+              ▼
+          INVALID
+```
+
+Suppose:
+
+```text
+Token:
+    issued = 10:00
+    expires = 11:00
+```
+
+At 10:10, the user or administrator wants it invalidated.
+
+The authorization server marks it revoked:
+
+```text
+10:10
+  │
+  ▼
+REVOKED
+```
+
+Even though:
+
+```text
+exp = 11:00
+```
+
+the token should no longer be accepted **if the resource server has a way to learn about the revocation**.
+
+**Why lifetime affects revocation**
+
+Consider:
+
+```text
+Short-lived:
+10:00 → 10:10
+
+Long-lived:
+10:00 → 18:00
+```
+
+If revocation information temporarily fails to reach a resource server:
+
+```text
+Short-lived token
+    │
+    └── naturally expires relatively soon
+
+Long-lived token
+    │
+    └── could remain usable much longer
+```
+
+So shorter lifetimes provide an additional safety boundary.
+
+**Important principle**
+
+```text
+Expiration = "time says the token is no longer valid"
+
+Revocation = "authorization state says the token is no longer valid"
+```
+
+You often want both.
+
+
+###  Clock Skew
+
+This is a subtle but important issue in distributed systems.
+
+Token expiration depends on clocks.
+
+Imagine the authorization server issues:
+
+```text
+exp = 10:15:00
+```
+
+But the authorization server and resource server don't have perfectly synchronized clocks.
+
+```text
+Authorization Server
+       │
+       │ clock = 10:15:00
+       ▼
+Resource Server
+       │
+       │ clock = 10:14:58
+       ▼
+```
+
+The resource server thinks the token has **2 seconds remaining**.
+
+Another server might have a clock that's slightly ahead:
+
+```text
+Authorization Server
+       │
+       │ 10:15:00
+       ▼
+Resource Server
+       │
+       │ 10:15:02
+       ▼
+```
+
+That resource server might consider the token expired slightly earlier.
+
+This difference is called **clock skew**.
+
+---
+
+**Why it matters**
+
+Suppose:
+
+```text
+Token expiration:
+    10:15:00
+```
+
+Resource server's clock:
+
+```text
+10:15:01
+```
+
+If it strictly compares:
+
+```text
+current_time > expiration_time
+```
+
+it rejects the token.
+
+That's technically reasonable, but distributed systems need to account for small clock differences.
+
+Implementations can therefore allow a carefully controlled amount of clock tolerance.
+
+Conceptually:
+
+```text
+Actual expiration
+       │
+       ▼
+10:15:00
+       │
+       ├── small clock tolerance
+       │
+       ▼
+validation boundary
+```
+
+The important point is:
+
+> Clock tolerance should be small and deliberate. Excessive tolerance effectively extends the token's lifetime.
+
+For example, if a token should live for 10 minutes but your validation rules effectively allow another 5 minutes, you've created a significantly larger exposure window.
+
+### Token Lifetime Design Principles
+
+The goal is not: "Always make access tokens as short as possible."
+
+Instead, you choose a lifetime based on the application's requirements and security model.
+
+#### Principle 1: Limit the exposure window
+
+If the token is stolen:
+
+```text
+short lifetime
+      │
+      ▼
+smaller exposure window
+```
+
+So avoid unnecessarily long access-token lifetimes.
+
+---
+
+#### Principle 2: Consider the token's privileges
+
+A token with:
+
+```text
+scope = profile.read
+```
+
+is different from:
+
+```text
+scope = payments.write
+```
+
+The latter may justify more restrictive security controls.
+
+Think of:
+
+```text
+Token Risk
+    │
+    ├── scope
+    ├── lifetime
+    ├── audience
+    ├── token type
+    └── client type
+```
+
+Lifetime should therefore be considered together with scope.
+
+---
+
+#### Principle 3: Don't rely on expiration alone
+
+Expiration helps:
+
+```text
+10-minute token
+      │
+      ▼
+automatically expires
+```
+
+But you may also need:
+
+```text
+revocation
++
+token validation
++
+secure storage
++
+secure transmission
+```
+
+Expiration is one security layer, not the entire security model.
+
+---
+
+#### Principle 4: Use refresh tokens when appropriate
+
+Instead of making an access token extremely long-lived:
+
+```text
+Bad conceptual model:
+
+Access Token
+───────────────────────────────
+          very long
+```
+
+you can separate the credentials:
+
+```text
+Access Token
+───────
+short-lived
+```
+
+and:
+
+```text
+Refresh Token
+────────────────────────
+longer-lived
+```
+
+The client uses the access token frequently and uses the refresh token to obtain a new access token when necessary.
+
+---
+
+#### Principle 5: Match lifetime to the application's risk
+
+For example:
+
+```text
+Low-risk API
+    │
+    └── may tolerate a different lifetime
+
+Sensitive API
+    │
+    └── may require stronger controls
+```
+
+There isn't one universal OAuth access-token lifetime that is correct for every application.
+
+---
+
+#### Principle 6: Consider the token format
+
+For self-encoded tokens:
+
+```text
+JWT
+ │
+ └── local validation
+       │
+       └── expiration becomes particularly important
+```
+
+For opaque tokens:
+
+```text
+Opaque
+ │
+ └── introspection
+       │
+       └── current server-side state can be checked
+```
+
+Therefore, token lifetime decisions should be considered alongside the token's validation architecture.
+
+---
+
+#### Principle 7: Don't accidentally extend the lifetime
+
+Be careful with:
+
+```text
+clock skew
++
+caching
++
+refresh behavior
++
+revocation delays
+```
+
+For example:
+
+```text
+Token says:
+expires at 10:15
+
+But:
+
+clock tolerance      + 30 sec
+cache                 + 60 sec
+revocation delay      + 30 sec
+```
+
+The effective security window may be larger than the nominal `10:15` expiration time.
+
+### A practical security model
+
+A typical architecture might look like:
+
+```text
+                Authorization Server
+                       │
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+       Access Token        Refresh Token
+       short-lived         longer-lived
+             │                   │
+             ▼                   │
+       Resource Server           │
+             │                   │
+             │ validation        │
+             │                   │
+             ▼                   │
+          API access             │
+                                 │
+                     ────────────┘
+                         refresh
+```
+
+Security controls around this architecture include:
+
+```text
+Access Token
+├── short lifetime
+├── limited scope
+├── audience restriction
+├── secure transmission
+├── secure storage
+└── validation
+
+Refresh Token
+├── stronger storage protection
+├── rotation where appropriate
+├── revocation
+└── restricted use
+```
+
+The central idea to remember is:
+
+```text
+                 Token Lifetime
+                      │
+        ┌─────────────┴─────────────┐
+        │                           │
+     Shorter                     Longer
+        │                           │
+        ▼                           ▼
+Smaller exposure              Larger exposure
+window if stolen              window if stolen
+        │                           │
+        └─────────────┬─────────────┘
+                      │
+              Security trade-off
+                      │
+                      ▼
+          Choose lifetime based on
+          application + risk + scope
+```
+
+So **token lifetime security is not simply "make tokens short-lived."** It is about using expiration as one layer of defense and considering it together with **scope, revocation, refresh tokens, storage, transmission, and token validation**.
+
+## A concrete example
+
+Suppose you have:
+
+```text
+Client:
+    shopping-web-app
+
+Authorization Server:
+    auth.example.com
+
+Resource Server:
+    api.example.com
+```
+
+The user authorizes:
+
+```text
+shopping-web-app
+```
+
+for:
+
+```text
+orders.read
+orders.write
+```
+
+The authorization server issues:
+
+```text
+Access Token
+    type: Bearer
+    format: opaque
+    lifetime: 15 minutes
+    scope: orders.read orders.write
+```
+
+The client then sends:
+
+```http
+GET /orders HTTP/1.1
+Host: api.example.com
+Authorization: Bearer 8f92c71a...
+```
+
+The resource server validates it, potentially through introspection:
+
+```text
+api.example.com
+       │
+       │ Is 8f92c71a... active?
+       ▼
+auth.example.com
+       │
+       ▼
+active = true
+scope = orders.read orders.write
+exp = ...
+```
+
+The API sees that the request requires:
+
+```text
+orders.read
+```
+
+and the token has that scope, so the request can proceed.
+
+If the token is subsequently revoked:
+
+```text
+Client ── token ──> API
+                     │
+                     │ introspection
+                     ▼
+                  Auth Server
+                     │
+                     ▼
+                 active=false
+                     │
+                     ▼
+                   401
+```
+
+This gives you a complete lifecycle:
+
+**issue → store → transmit → validate → use → introspect/revoke → expire**.
+
+## Summary
+
+You can think about an access token's complete lifecycle like this:
+
+```text
+                 Authorization Server
+                         │
+                         │ issues
+                         ▼
+                  ┌──────────────┐
+                  │ Access Token │
+                  └──────┬───────┘
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+          Token format          Token lifetime
+              │                     │
+        JWT / opaque            expires
+              │
+              ▼
+            Client
+              │
+              │ storage
+              │
+              │ HTTPS
+              │ Authorization header
+              ▼
+       Resource Server
+              │
+              │ validation
+              ▼
+        ┌──────────────┐
+        │ Accept/Reject│
+        └──────┬───────┘
+               │
+       ┌───────┴────────┐
+       │                │
+  introspection      revocation
+       │                │
+       ▼                ▼
+Authorization      Authorization
+   Server              Server
+```
+
+And the security model can be summarized as:
+
+| Topic                         | Main question                                                      |
+| ----------------------------- | ------------------------------------------------------------------ |
+| **Token Purpose**             | What is the access token for?                                      |
+| **Token Types**               | What kinds of access tokens exist?                                 |
+| **Bearer Tokens**             | Is possession enough to use the token?                             |
+| **Sender-Constrained Tokens** | Must the presenter prove possession of a key?                      |
+| **Token Format**              | How is the token represented?                                      |
+| **Token Lifetime**            | How long is it valid?                                              |
+| **Token Storage**             | Where does the client keep it?                                     |
+| **Token Transmission**        | How does the client send it?                                       |
+| **Token Validation**          | How does the resource server verify it?                            |
+| **Token Introspection**       | How can the resource server ask the authorization server about it? |
+| **Token Revocation**          | How can it be invalidated before expiration?                       |
+
+
+{/* For your OAuth TOC, I would keep **`token-introspection` and `token-revocation` under `access-tokens/`**, but cross-reference them from the **Authorization Server** section because the authorization server typically provides the introspection/revocation functionality.
+ */}

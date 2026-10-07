@@ -28,7 +28,7 @@ const sharedDocsConfig = {
       rehypeKatex,
       {
         // TODO remove this and fix all issues
-        //strict: false, // This will ignore the newLineInDisplayMode warning
+        strict: false, // This will ignore the newLineInDisplayMode warning
       },
     ],
   ],
@@ -374,6 +374,11 @@ const config: Config = {
               label: "Distributed Systems",
               sidebarId: "DistributedSystemsSidebar",
               to: "/software-engineering/design-architecture/distributed-systems",
+            },
+            {
+              label: "Security",
+              sidebarId: "SecuritySidebar",
+              to: "/software-engineering/design-architecture/security",
             },
           ],
         },

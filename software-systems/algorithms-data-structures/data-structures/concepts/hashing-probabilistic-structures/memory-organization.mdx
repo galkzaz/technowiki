@@ -1,0 +1,657 @@
+
+## Memory Organization
+
+This section explains **how a hash table occupies memory** and why the choice of collision-handling strategy affects both memory usage and performance.
+
+The key idea is that a hash table is usually made from **two levels of storage**:
+
+```text
+Hash Table
+    │
+    ├── Array of bins
+    │      H[0]
+    │      H[1]
+    │      H[2]
+    │      ...
+    │      H[b-1]
+    │
+    └── Elements / nodes stored in those bins
+           │
+           ├── key
+           ├── value / data
+           └── next pointer   ← if using chaining
+```
+
+For **separate chaining**, memory comes from both the **array of bins** and the **linked-list nodes**.
+
+---
+
+### Linked-List Overhead
+
+With separate chaining, each bin can contain a linked list:
+
+```text
+H[0] → null
+
+H[1] → [key/value | next] → [key/value | next] → null
+
+H[2] → [key/value | next] → null
+
+H[3] → null
+```
+
+Every node needs some information besides the actual element.
+
+For example:
+
+```c
+struct Node {
+    int key;
+    int value;
+    struct Node *next;
+};
+```
+
+Conceptually, each node contains:
+
+```text
+┌─────────────────────────┐
+│ key                     │
+├─────────────────────────┤
+│ value                   │
+├─────────────────────────┤
+│ next pointer            │
+└─────────────────────────┘
+```
+
+The `next` pointer is **overhead** required by the linked-list structure.
+
+##### Why is this important?
+
+Suppose you have:
+
+```text
+n = 1,000,000 elements
+```
+
+If every element is stored in its own linked-list node, you need approximately:
+
+```text
+1,000,000 × node size
+```
+
+The node contains not only your data but also structural information such as the pointer to the next node.
+
+There can also be additional overhead depending on the programming language and implementation.
+
+For example, a managed language may have:
+
+```text
+Object header
++
+key/value fields
++
+next reference
++
+alignment/padding
+```
+
+So a linked-list-based hash table can consume considerably more memory than the raw data itself.
+
+##### Important distinction
+
+The linked-list overhead is **not the same thing as the hash-table array overhead**.
+
+```text
+Total memory
+    │
+    ├── Hash-table array
+    │
+    └── Linked-list nodes
+           ├── actual data
+           └── next pointers / node metadata
+```
+
+---
+
+### Node Storage
+
+With separate chaining, elements are usually stored in dynamically allocated nodes.
+
+For example:
+
+```text
+H
+│
+├── H[0] → null
+│
+├── H[1] → Node A → Node B → null
+│
+├── H[2] → Node C → null
+│
+└── H[3] → null
+```
+
+Each node might contain:
+
+```text
+Node
+┌──────────────┐
+│ key          │
+├──────────────┤
+│ value        │
+├──────────────┤
+│ next         │
+└──────────────┘
+```
+
+The nodes are commonly allocated separately from the array.
+
+Conceptually:
+
+```text
+Hash-table array
+        ↓
+   ┌─────────┐
+   │ pointer │ ──────────┐
+   ├─────────┤            │
+   │ pointer │ ──────┐    │
+   ├─────────┤       │    │
+   │ pointer │       │    │
+   └─────────┘       │    │
+                     ↓    ↓
+                  ┌─────┐ ┌─────┐
+                  │Node │ │Node │
+                  └─────┘ └─────┘
+```
+
+This has an important consequence: **nodes may be scattered throughout memory**.
+
+They are not necessarily adjacent.
+
+For example:
+
+```text
+Memory
+
+0x1000  Node A
+0x2000  Node C
+0x5000  Node B
+0x9000  Node D
+```
+
+The linked list might be:
+
+```text
+A → B → C → D
+```
+
+even though the nodes are physically far apart in memory.
+
+##### Why does that matter?
+
+Modern CPUs work very efficiently when data is located close together in memory because of **cache locality**.
+
+A linked list can have poor cache locality:
+
+```text
+Node A
+   ↓
+far away
+   ↓
+Node B
+   ↓
+far away
+   ↓
+Node C
+```
+
+So even though searching a short chain is theoretically fast, the actual hardware cost can be affected by memory accesses.
+
+---
+
+### 6.3 Array Storage
+
+The hash table itself is normally an array.
+
+If there are `b` bins:
+
+```text
+H[0]
+H[1]
+H[2]
+...
+H[b-1]
+```
+
+The array requires approximately:
+
+```text
+b × size_of_array_entry
+```
+
+For separate chaining, an array entry is usually a pointer/reference to the first node:
+
+```text
+H
+┌───────────┐
+│ H[0] ─────┼──→ null
+├───────────┤
+│ H[1] ─────┼──→ Node
+├───────────┤
+│ H[2] ─────┼──→ Node
+├───────────┤
+│ H[3] ─────┼──→ null
+├───────────┤
+│ ...       │
+└───────────┘
+```
+
+Therefore, if there are `b` bins and each array entry contains an 8-byte pointer/reference, the array alone requires approximately:
+
+```text
+8b bytes
+```
+
+ignoring other implementation details.
+
+For example:
+
+```text
+b = 1,000,000
+```
+
+would require roughly:
+
+```text
+1,000,000 × 8
+= 8 MB
+```
+
+for the references alone.
+
+The nodes are additional memory.
+
+---
+
+#### Array vs Nodes
+
+This gives us two major components:
+
+| Component     | Purpose                    |                    Memory |
+| ------------- | -------------------------- | ------------------------: |
+| Array of bins | Locates the correct bucket |                    `O(b)` |
+| Nodes         | Stores elements            |                    `O(n)` |
+| Node links    | Connect elements in chains | Included in node overhead |
+| Total         | Hash table                 |                  `O(b+n)` |
+
+So for separate chaining:
+
+$$
+\boxed{Memory = O(b+n)}
+$$
+
+where:
+
+* `n` = number of stored elements
+* `b` = number of bins
+
+---
+
+### 6.4 Memory vs Performance
+The memory and performance of a hash table depend on the number of keys, number of bins, hash function, collision strategy, and implementation details.
+
+This is one of the most important design trade-offs in hash tables.
+
+You can increase the number of bins to reduce collisions.
+
+Suppose:
+
+```text
+n = 1,000 elements
+```
+
+##### Small table
+
+```text
+b = 100
+```
+
+Load factor:
+
+$$
+\alpha = \frac{n}{b}
+       = \frac{1000}{100}
+       = 10
+$$
+
+On average, there are about 10 elements per bin.
+
+```text
+H[0] → Node → Node → Node → ... → Node
+H[1] → Node → Node → ...
+H[2] → Node → ...
+```
+
+Search may require examining several nodes.
+
+---
+
+##### Larger table
+
+Now use:
+
+```text
+b = 2,000
+```
+
+Then:
+
+$$
+\alpha = \frac{1000}{2000}
+       = 0.5
+$$
+
+There are only about 0.5 elements per bin on average.
+
+Conceptually:
+
+```text
+H[0] → Node
+
+H[1] → null
+
+H[2] → null
+
+H[3] → Node
+
+H[4] → null
+
+H[5] → Node
+```
+
+There are fewer collisions and shorter chains.
+
+But we have also allocated a much larger array.
+
+---
+
+#### The trade-off
+
+```text
+More bins
+    ↓
+More array memory
+    ↓
+Lower load factor
+    ↓
+Fewer collisions
+    ↓
+Shorter chains
+    ↓
+Faster expected search
+```
+
+Whereas:
+
+```text
+Fewer bins
+    ↓
+Less array memory
+    ↓
+Higher load factor
+    ↓
+More collisions
+    ↓
+Longer chains
+    ↓
+Slower expected search
+```
+
+So we are balancing:
+
+```text
+       MEMORY
+          ↕
+       PERFORMANCE
+```
+
+---
+
+#### Example
+
+Suppose:
+
+```text
+n = 1,000,000
+```
+
+1. Option A
+
+```text
+b = 100,000
+```
+
+Then:
+
+$$
+\alpha = \frac{1000000}{100000}=10
+$$
+
+Average chain length is around 10, assuming a reasonably uniform hash function.
+
+2. Option B
+
+```text
+b = 1,000,000
+```
+
+Then:
+
+$$
+\alpha = 1
+$$
+
+Average occupancy is around one element per bin.
+
+3. Option C
+
+```text
+b = 2,000,000
+```
+
+Then:
+
+$$
+\alpha = 0.5
+$$
+
+Chains become shorter, but the array is twice as large as in Option B.
+
+So increasing `b` indefinitely isn't necessarily useful:
+
+```text
+b ↑
+│
+├── memory usage ↑
+│
+└── collision probability ↓
+```
+
+Eventually, the performance improvement from adding more bins becomes relatively small while memory consumption continues to increase.
+
+---
+
+### Important: `O(n)` Memory Is Not the Whole Story
+
+It is tempting to say:
+
+> "A hash table uses O(n) memory."
+
+That's often correct asymptotically, but it hides an important practical detail.
+
+For separate chaining:
+
+$$
+M = O(n+b)
+$$
+
+And since:
+
+$$
+\alpha = \frac{n}{b}
+$$
+
+we can choose `b` based on the desired load factor.
+
+For example, if we want:
+
+$$
+\alpha \approx 1
+$$
+
+then:
+
+$$
+b \approx n
+$$
+
+and therefore:
+
+$$
+M = O(n+n)=O(n)
+$$
+
+But the **constant factors** matter significantly.
+
+A table with one million elements might have:
+
+```text
+1,000,000 elements
++
+1,000,000 array entries
++
+1,000,000 node allocations
++
+1,000,000 next pointers
++
+object/header/alignment overhead
+```
+
+The asymptotic complexity remains `O(n)`, but the actual memory consumption can be substantial.
+
+---
+
+### Separate Chaining vs Open Addressing
+
+This section becomes especially useful when comparing collision strategies.
+
+##### Separate chaining
+
+```text
+Array
+  ↓
+bucket → node → node → node
+```
+
+Memory:
+
+```text
+O(b + n)
+```
+
+because nodes are stored separately.
+
+##### Open addressing
+
+Elements are stored **directly inside the array**:
+
+```text
+H
+┌───────┐
+│ key   │
+├───────┤
+│ empty │
+├───────┤
+│ key   │
+├───────┤
+│ key   │
+├───────┤
+│ empty │
+└───────┘
+```
+
+There are no linked-list nodes or `next` pointers.
+
+This can reduce memory overhead and improve cache locality, but it requires a sufficiently large table and a probing strategy.
+
+So the trade-off becomes:
+
+| Property           | Separate Chaining      | Open Addressing     |
+| ------------------ | ---------------------- | ------------------- |
+| Array              | Required               | Required            |
+| Extra nodes        | Yes                    | No                  |
+| `next` pointers    | Yes                    | No                  |
+| Memory overhead    | Higher                 | Usually lower       |
+| Cache locality     | Often poorer           | Often better        |
+| Collision handling | Linked chains          | Probing             |
+| High load factor   | Can tolerate it better | Usually problematic |
+| Storage model      | Array + nodes          | Array only          |
+
+---
+
+### Big Picture
+
+The whole memory organization can be viewed like this:
+
+```text
+                    HASH TABLE
+                        │
+             ┌──────────┴──────────┐
+             │                     │
+        Array of bins          Stored elements
+             │                     │
+          O(b)                  O(n)
+             │                     │
+             │             ┌───────┴────────┐
+             │             │                │
+             │          actual data      node overhead
+             │                              │
+             │                       next pointer
+             │                       object metadata
+             │                       allocation overhead
+             │
+             └──────────────┬───────────────
+                            │
+                    Total: O(b + n)
+```
+
+And the central design relationship is:
+
+$$
+\alpha = \frac{n}{b}
+$$
+
+```text
+         b increases
+              ↓
+       load factor decreases
+              ↓
+        fewer collisions
+              ↓
+       shorter search paths
+              ↓
+       better expected performance
+
+              BUT
+
+         b increases
+              ↓
+       array memory increases
+```
+
+So **Memory Organization** belongs naturally in the **Hash Tables** chapter because it explains the implementation-level cost of choosing a table size and collision strategy.
+ 
+The key takeaway is:
+
+> **A hash table trades memory for faster access. More bins generally mean fewer collisions and faster expected searches, but they also require more memory. Separate chaining adds another memory cost because each stored element may require a separate node and link pointer.**

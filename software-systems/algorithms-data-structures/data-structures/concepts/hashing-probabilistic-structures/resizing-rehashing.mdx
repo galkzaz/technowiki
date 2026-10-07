@@ -1,0 +1,546 @@
+
+## Resizing / Rehashing
+Computing the load factor for a hash table describes the expected performance for
+searching and insertions. If the load factor is too high, the number of probes to
+locate an item becomes excessive, whether in a bucket’s linked list or a chain of bins
+in open addressing. 
+
+A hash table can increase the number of bins and reconstitute
+itself using a process known as “rehashing,” an infrequent operation that reduces the
+load factor, although it is a costly O(n) operation. The typical way to do this is to
+double the number of bins and add one (because hash tables usually contain an odd
+number of bins). Once more bins are available, all existing elements in the hash
+table are rehashed and inserted in the new structure. This expensive operation
+reduces the overall cost of future searches, but it must be run infrequently; other‐
+wise, you will not observe the amortized O(1) performance of the hash tables.
+A hash table should rehash its contents when it detects uneven distribution of ele‐
+ments. This can be done by setting a threshold value that will trigger a rehash when
+the load factor for the hash table exceeds that value. The default threshold load fac‐
+tor for the java.util.Hashtable class is 0.75; if the threshold is large enough, the
+hash table will never rehash.
+
+Suppose we have:
+
+```text
+capacity = 8
+```
+
+and the table becomes too full.
+
+We might create a larger table:
+
+```text
+8 → 16
+```
+
+Then every existing key is inserted into the new table again.
+
+This is called **rehashing**.
+
+Rehashing means:
+
+> Create a larger hash table and insert all existing elements into the new table using the hash function again.
+
+```text
+Old table
++---+---+---+---+---+---+---+---+
+|   | A |   | B | C |   | D |   |
++---+---+---+---+---+---+---+---+
+                |
+                | resize
+                ↓
+New table
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+|   |   | A |   |   | B |   | C |   |   | D |   |   |   |   |   |
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+```
+
+hen we **reinsert every element**:
+
+```text
+A → new hash position
+B → new hash position
+C → new hash position
+D → new hash position
+...
+```
+
+This is why it is called **re-hashing**.
+
+Notice that the entries usually **cannot simply be copied to the same indices**.
+
+Why? Because the hash function depends on the table size.
+
+For example:
+
+```text
+h(k) = k % 8
+```
+
+versus:
+
+```text
+h(k) = k % 16
+```
+
+can produce different positions.
+
+---
+
+### Amortized Complexity of Resizing
+
+Resizing itself can take:
+
+```text
+O(n)
+```
+
+because all existing entries may need to be rehashed.
+
+But resizing doesn't happen on every insertion.
+
+Therefore, over a large sequence of operations, insertion can still have:
+
+```text
+O(1) amortized
+```
+
+complexity.
+
+This is similar to dynamic arrays such as `ArrayList`/`vector`.
+
+Suppose the table currently contains:
+
+```text
+n = 1,000,000 elements
+```
+
+When rehashing occurs, we have to process all one million elements.
+
+Conceptually:
+
+```text
+for every element:
+    calculate new hash position
+    insert into new table
+```
+
+Therefore:
+
+$$
+\boxed{O(n)}
+$$
+
+This is expensive compared with the expected normal hash-table operation:
+
+$$
+\boxed{O(1)}
+$$
+
+So we don't want to rehash after every insertion.
+
+---
+
+Why is rehashing still worthwhile?
+
+This is the important idea behind **amortized analysis**.
+
+Imagine:
+
+```text
+insert → O(1)
+insert → O(1)
+insert → O(1)
+insert → O(1)
+...
+insert → O(n)    ← rehash
+insert → O(1)
+insert → O(1)
+insert → O(1)
+...
+```
+
+The rehash is expensive, but it happens **infrequently**.
+
+The cost of the rehash is spread across many ordinary insertions.
+
+This gives us an **amortized \(O(1)\)** insertion cost.
+
+The important distinction is:
+
+```text
+Individual rehash:
+    O(n)
+
+Normal hash-table operation:
+    expected O(1)
+
+Amortized insertion:
+    O(1)
+```
+
+So **\(O(n)\) rehashing does not mean every insertion becomes \(O(n)\)**.
+
+---
+
+Why do implementations often increase the table size significantly?
+
+The typical way to do this is to double the number of bins and add one.
+
+For example:
+
+```text
+Old size       New size
+   11     →       23
+   23     →       47
+   47     →       95
+```
+
+The idea is to make the new table substantially larger so that the load factor drops.
+
+For example:
+
+```text
+Before:
+
+n = 80
+b = 101
+
+α ≈ 0.79
+```
+
+After increasing the number of bins:
+
+```text
+n = 80
+b = 203
+
+α ≈ 0.39
+```
+
+We've gone from approximately:
+
+```text
+79% full
+```
+
+to:
+
+```text
+39% full
+```
+
+That gives the table much more room for future insertions.
+
+---
+
+### Capacity
+### Threshold
+A hash table normally doesn't wait until it is completely full.
+
+Instead, it defines a **threshold load factor**.
+
+For example:
+
+```text
+threshold = 0.75
+```
+
+Then:
+
+```text
+if load_factor > 0.75:
+    rehash()
+```
+
+Suppose:
+
+```text
+bins = 100
+```
+
+We can roughly store:
+
+```text
+100 × 0.75 = 75 elements
+```
+
+before triggering a resize/rehash.
+
+So:
+
+```text
+0.00 ─────────────── 0.75 ───────── 1.00
+                     ↑
+                rehash here
+```
+
+The exact trigger condition depends on the implementation.
+
+1. Too low a threshold
+
+   ```text
+   0.50
+   ```
+
+   You rehash frequently.
+
+   Advantages:
+
+   ```text
+   lower load factor
+   fewer collisions
+   fewer probes
+   ```
+
+   Disadvantage:
+
+   ```text
+   more frequent O(n) rehashing
+   more memory
+   ```
+
+2. Too high a threshold
+
+   ```text
+   0.90
+   ```
+
+   You rehash less frequently.
+
+   Advantages:
+
+   ```text
+   fewer rehash operations
+   less resizing overhead
+   ```
+
+   Disadvantages:
+
+   ```text
+   higher load factor
+   more collisions
+   more probes
+   slower operations
+   ```
+
+   So the threshold is a **trade-off**.
+
+---
+
+The default threshold load factor for the `java.util.Hashtable` class is `0.75`; 
+
+with a default threshold load factor of:
+
+```text
+0.75
+```
+
+Conceptually:
+
+```java
+if (loadFactor > 0.75) {
+    rehash();
+}
+```
+
+The purpose is to prevent the table from becoming too crowded.
+
+So the implementation is balancing two costs:
+
+if the threshold is large enough, the hash table will never rehash.
+
+Suppose:
+
+```text
+threshold = 10.0
+```
+
+But a normal hash table's load factor is:
+
+$$
+\alpha = \frac{n}{b}
+$$
+
+and it normally doesn't exceed roughly `1.0` for open addressing.
+
+Then:
+
+```text
+α > 10.0
+```
+
+will never happen.
+
+Therefore:
+
+```text
+rehash()
+```
+
+will never be triggered.
+
+The table avoids the expensive resizing operation—but at the cost of allowing the table to become extremely crowded.
+
+### Rehashing
+### Growth strategies
+
+### Advantages
+#### Rehashing reduces the load factor
+
+Consider:
+
+```text
+Before rehashing
+
+n = 750
+b = 1000
+
+α = 0.75
+```
+
+Suppose we increase the table to:
+
+```text
+b = 2001
+```
+
+Then:
+
+$$
+\alpha = \frac{750}{2001} \approx 0.375
+$$
+
+So:
+
+```text
+Before rehash:
+███████████████░░░░░   75%
+
+After rehash:
+███████░░░░░░░░░░░░░   37.5%
+```
+
+The table now has much more empty space.
+
+That means fewer collisions and shorter probe sequences/chains.
+
+---
+
+#### Rehashing improves future searches
+
+Imagine:
+
+```text
+Before rehashing:
+
+[A][B][C][D][E][F][G][ ][ ][ ]
+ └───────────────┘
+     long cluster
+```
+
+Searching for something near the end may require many probes.
+
+After rehashing:
+
+```text
+[A][ ][ ][B][ ][C][ ][ ][D][ ][ ][E]
+```
+
+The elements are redistributed.
+
+Now searches generally require fewer probes.
+
+So we're paying:
+
+```text
+             expensive
+                 ↓
+          ┌─────────────┐
+          │  REHASH O(n)│
+          └─────────────┘
+                 ↓
+        lower load factor
+                 ↓
+      fewer future probes
+                 ↓
+        faster operations
+```
+
+---
+
+
+### Summary
+
+You can think of the whole process as a cycle:
+
+```text
+        Start
+          │
+          ↓
+   Hash table created
+          │
+          ↓
+     Insert elements
+          │
+          ↓
+   Calculate load factor
+          │
+          ↓
+   ┌──────┴──────┐
+   │             │
+ below          above
+threshold      threshold
+   │             │
+   ↓             ↓
+continue       REHASH
+   │             │
+   │             ↓
+   │       create larger table
+   │             │
+   │             ↓
+   │       rehash all elements
+   │             │
+   │             ↓
+   └───────← lower load factor
+```
+
+---
+
+**The key relationship**
+
+The most important concept is:
+
+$$
+\boxed\{
+\text\{Load Factor}
+\rightarrow
+\text{Collisions}
+\rightarrow
+\text{Probes}
+\rightarrow
+\text{Performance}
+}
+$$
+
+And rehashing breaks that chain:
+
+$$
+\boxed\{
+\text\{High Load Factor}
+\rightarrow
+\text{Rehash}
+\rightarrow
+\text\{More Bins}
+\rightarrow
+\text\{Lower Load Factor}
+\rightarrow
+\text\{Fewer Probes}
+}
+$$
+
+Soe
+
+> **Rehashing is an occasional \(O(n)\) operation that increases the table's capacity and redistributes its elements, reducing the load factor so that future searches and insertions remain expected \(O(1)\).**
+
+This is also why **load factor, resizing, rehashing, and amortized analysis** should be studied together when learning hash tables.

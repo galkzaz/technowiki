@@ -1,0 +1,2045 @@
+---
+id: software-systems-algorithms-data-structures-algorithms-concepts-searching-hash-based-search-analysis
+title: Hash-Based Searching
+description: Hash-based searching is a search technique that uses a hash function to transform a search key into an array position in a hash table
+sidebar_position: 14
+---
+
+## Analysis
+
+### why Hash-Based Search is expected to be O(1)
+As long as the hash function distributes the elements in the collection fairly evenly,
+Hash-Based Search has excellent performance. The average time required to search
+for an element is constant, or O(1). The search consists of a single look-up in H
+followed by a linear search through a short list of collisions. 
+
+Suppose we have:
+
+```text
+n = 1,000 elements
+b = 1,000 bins
+```
+
+and the hash function distributes the elements reasonably evenly:
+
+```text
+H[0] → A
+H[1] → B → C
+H[2] → D
+H[3] → E
+H[4] → F → G
+...
+```
+
+The chains are short.
+
+Therefore, when searching for an element, we don't inspect all 1,000 elements.
+
+Instead:
+
+```text
+target
+  │
+  ▼
+compute hash
+  │
+  ▼
+one table lookup
+  │
+  ▼
+short collision chain
+  │
+  ▼
+found / not found
+```
+
+This gives **expected O(1)** search time.
+
+**Hash-Based Search gets its expected O(1) performance from two things working together:**
+
+1. **Hashing quickly identifies the relevant table location.**
+2. **Good collision handling keeps the remaining search small.**
+
+
+### The three components of Hash-Based Search
+The components to
+searching for an element in a hash table are:
+1. Computing the hash value
+2. Accessing the item in the table indexed by the hash value
+3. Finding the specified item in the presence of collisions
+
+All Hash-Based Search algorithms share the first two components; different behaviors stem from variations in collision handling.
+```text
+                 Hash-Based Search
+                        │
+                        ▼
+                 target key
+                        │
+                        ▼
+               1. Compute hash
+                        │
+                        ▼
+               table index h
+                        │
+                        ▼
+              2. Access H[h]
+                        │
+                        ▼
+                Is there a
+                  collision?
+                  /       \
+                No         Yes
+                │           │
+                │           ▼
+                │    3. Handle collision
+                │           │
+                │     ┌─────┴──────┐
+                │     │            │
+                │ chaining     open addressing
+                │     │            │
+                │ search list   probe table
+                │
+                └─────────┬─────────┘
+                          ▼
+                    found / absent
+```
+#### Component 1 — Computing the hash value
+
+Given:
+
+```text
+target = "computer"
+```
+
+we calculate:
+
+```text
+hash("computer")
+```
+
+For Java:
+
+```java
+int h = target.hashCode();
+```
+
+Then map it into the table:
+
+```java
+int index = Math.floorMod(h, tableSize);
+```
+
+Conceptually:
+
+```text
+target
+  │
+  ▼
+hash function
+  │
+  ▼
+hash code
+  │
+  ▼
+table index
+```
+
+The goal is:
+
+```text
+0 <= index < tableSize
+```
+
+---
+
+#### Component 2 — Accessing the table
+
+Once we have the index, we directly access:
+
+```java
+table[index]
+```
+
+For example:
+
+```text
+target = 25
+
+hash(25)
+   ↓
+   5
+   ↓
+table[5]
+```
+
+If the table is:
+
+```text
+H[0] → ...
+H[1] → ...
+H[2] → ...
+H[3] → ...
+H[4] → ...
+H[5] → 35 → 25 → 15
+H[6] → ...
+```
+
+we immediately jump to:
+
+```text
+H[5]
+```
+
+This is the part that makes hash-based search fundamentally different from linear search.
+
+**Linear search**
+
+```text
+A → B → C → D → E → F → ...
+```
+
+Potentially inspect many elements.
+
+**Hash search**
+
+```text
+target
+  ↓
+hash
+  ↓
+H[index]
+```
+
+Directly identify the relevant bin.
+
+#### Component 3 — Handling collisions
+
+The table entry may contain multiple elements.
+
+For example:
+
+```text
+H[5] → 35 → 25 → 15 → NULL
+```
+
+Why?
+
+Because:
+
+```text
+hash(35) = 5
+hash(25) = 5
+hash(15) = 5
+```
+
+These are **collisions**.
+
+So after reaching `H[5]`, we still have to search the linked list:
+
+```text
+35 == 25?  No
+25 == 25?  Yes
+```
+
+This is a linear search, but importantly, it is a linear search over **only the collision chain**, not the entire collection.
+
+---
+
+**Why can the whole thing still be O(1)?**
+
+This is the subtle point.
+
+Suppose:
+
+```text
+n = 1,000,000
+```
+
+but the hash function distributes those elements reasonably evenly across:
+
+```text
+b = 1,000,000 bins
+```
+
+Then the chains might look roughly like:
+
+```text
+H[0] → A
+H[1] → B → C
+H[2] → D
+H[3] → E
+...
+```
+
+Most chains are very short.
+
+Therefore:
+
+```text
+Hash computation       O(1)
+        +
+Table access            O(1)
+        +
+Short chain search     O(1) expected
+        =
+                        O(1) expected
+```
+
+The last part is not mathematically guaranteed for every individual search; it is an **expected/average-case property** under suitable hashing and table organization.
+
+---
+
+**What happens with a bad hash function?**
+
+Consider:
+
+```text
+hash(x) = 0
+```
+
+for every element.
+
+Then:
+
+```text
+H[0] → A → B → C → D → E → F → ... → N
+```
+
+Every element goes into the same bin.
+
+Now searching for an element requires:
+
+```text
+A
+ ↓
+B
+ ↓
+C
+ ↓
+...
+ ↓
+N
+```
+
+So:
+
+```text
+Search = O(n)
+```
+
+The hash table has effectively degraded into a linked list.
+
+Therefore:
+
+```text
+Good distribution
+      ↓
+short chains
+      ↓
+expected O(1)
+```
+
+while:
+
+```text
+Poor distribution
+      ↓
+long chains
+      ↓
+O(n) worst case
+```
+
+---
+
+**Applying this to your Java implementation**
+
+Your implementation:
+
+```java
+public boolean search(V value) {
+
+    int h = hash(value);
+
+    LinkedList<V> list = table[h];
+
+    if (list == null) {
+        return false;
+    }
+
+    return list.contains(value);
+}
+```
+
+maps almost perfectly onto the three components.
+
+1. Component 1
+
+```java
+int h = hash(value);
+```
+
+**Compute hash value**
+
+```text
+value → hash → h
+```
+
+2. Component 2
+
+```java
+LinkedList<V> list = table[h];
+```
+
+**Access table**
+
+```text
+h → table[h]
+```
+
+3. Component 3
+
+```java
+return list.contains(value);
+```
+
+**Handle collisions**
+
+```text
+table[h] → linked list → search list
+```
+
+So:
+
+```text
+search(value)
+     │
+     ├── 1. hash(value)
+     │
+     ├── 2. table[h]
+     │
+     └── 3. list.contains(value)
+```
+
+---
+
+### why Hash-Based Search can achieve amortized \(O(1)\) search time, by connecting the load factor \(\alpha\) to the length of the collision chains.
+{/* This paragraph is explaining **why Hash-Based Search can achieve amortized \(O(1)\) search time**, by connecting the **load factor \(\alpha\)** to the length of the collision chains. */}
+The three costs of Hash-Based Search
+
+Recall the three parts:
+
+```text
+target
+  │
+  ▼
+1. Compute hash value
+  │
+  ▼
+2. Access H[h]
+  │
+  ▼
+3. Search collision list
+  │
+  ▼
+found / not found
+```
+
+1. Computing the hash value
+
+The cost of computing the hash value must be bounded by a fixed, constant upper bound.
+
+Suppose we have strings:
+
+```text
+"cat"
+"computer"
+"data-structure"
+"abcdefghijklmnopqrstuvwxyz..."
+```
+
+Computing a string hash normally depends on its length.
+
+For example:
+
+```java
+int hashCode(String s) {
+    int result = 0;
+
+    for (int i = 0; i < s.length(); i++) {
+        result = result * 31 + s.charAt(i);
+    }
+
+    return result;
+}
+```
+
+If the string has \(m\) characters:
+
+$$
+T_{hash}=O(m)
+$$
+
+So technically, hashing a string is **not inherently \(O(1)\)** if arbitrary-length strings are allowed.
+
+Assumeing a **fixed collection of strings**.
+
+If the longest possible string in the collection takes \(T_k\) time to hash, then every other string takes at most \(T_k\):
+
+$$
+T_{hash} \leq T_k
+$$
+
+Therefore, relative to this fixed dataset:
+
+$$
+T_{hash}=O(1)
+$$
+So there are two ways to describe it:
+
+| Situation              |                           Hash computation |
+| ---------------------- | -----------------------------------------: |
+| Fixed-size integer key |                                   \(O(1)\) |
+| Bounded-length string  | \(O(1)\) under the bounded-size assumption |
+| String of length \(m\) |                                   \(O(m)\) |
+| Arbitrarily large key  |                   Not necessarily \(O(1)\) |
+
+This distinction is important when discussing hash-search complexity precisely.
+
+2. Accessing the hash table
+
+The second step is:
+
+```text
+hash(key)
+   ↓
+   h
+   ↓
+H[h]
+```
+
+For an array-based hash table:
+
+```text
+H[0]   H[1]   H[2]   H[3]   ...   H[b-1]
+```
+
+Accessing:
+
+```java
+H[h]
+```
+
+takes constant time:
+
+$$
+O(1)
+$$
+
+because the array directly calculates the memory location from the index.
+
+If the table is
+stored on secondary storage, there may be a variation that depends on the position
+of the element and the time required to position the device, but this has a constant
+upper bound.
+
+For example, suppose the hash table is stored on a disk:
+
+```text
+hash
+ ↓
+bin number
+ ↓
+disk location
+ ↓
+read bin
+```
+
+There can be additional positioning/access time, but if the storage system has a fixed upper bound for that operation, we can still treat this cost as bounded by a constant.
+
+For the normal RAM-based hash table, the simpler model is:
+
+$$
+T_{access}=O(1)
+$$
+
+3. collision handling
+
+Now we reach the important part. If we can show that the third part of the computation also has a constant upper bound, it will prove the overall time performance of Hash-Based Search is constant.
+
+Suppose:
+
+```text
+H[5] → 15 → 25 → 35 → 45
+```
+
+If we search for `35`, we have to inspect:
+
+```text
+15
+25
+35
+```
+
+So the search cost depends on the length of the linked list.
+
+If the chain contains \(k\) elements:
+
+$$
+T_{collision}=O(k)
+$$
+
+Therefore, the question becomes:
+
+> **Can we keep \(k\) bounded by a small constant?**
+
+This is where the **load factor** comes in.
+
+For example:
+
+```text
+n = 1,000 elements
+b = 1,000 bins
+```
+
+then:
+
+$$
+\alpha=\frac{1000}{1000}=1
+$$
+
+On average, there is one element per bin.
+
+Another example:
+
+```text
+n = 1,000
+b = 2,000
+```
+
+gives:
+
+$$
+\alpha=\frac{1000}{2000}=0.5
+$$
+
+On average, there are 0.5 elements per bin.
+
+Notice that **0.5 does not mean every bin contains half an element**. It is an average over all bins.
+
+You might have:
+
+```text
+H[0] → 25
+H[1] → empty
+H[2] → 18 → 42
+H[3] → empty
+H[4] → 91
+...
+```
+
+---
+
+**Why increasing `b` helps**
+
+Suppose we have:
+
+```text
+n = 213,557 elements
+```
+
+and progressively increase the number of bins.
+
+| Bins \(b\) | Load factor \(\alpha\) | Max chain(Max length of
+linked list) | Unique bins |
+| ---------: | ---------------------: | --------: | ----------: |
+|      4,095 |                  52.15 |        82 |           0 |
+|      8,191 |                  26.07 |        46 |           0 |
+|     16,383 |                  13.04 |        28 |           0 |
+|     32,767 |                   6.52 |        19 |         349 |
+|     65,535 |                   3.26 |        13 |       8,190 |
+|    131,071 |                   1.63 |        10 |      41,858 |
+|    262,143 |                  0.815 |         7 |      94,319 |
+|    524,287 |                   0.41 |         7 |     142,530 |
+|  1,048,575 |                   0.20 |         5 |     173,912 |
+
+Note how the maximum length of the element linked lists drops while the number
+of bins containing a unique element rapidly increases once b is sufficiently large. In
+the final row, 81% of the elements are hashed to a unique bin and the average number of elements in a bin becomes just a single digit. 
+
+For: $b=4095$
+
+the load factor is:
+
+$$
+\alpha=\frac{213557}{4095}\approx52.15
+$$
+
+That means:
+
+> On average, there are about 52 elements per bin.
+
+So the linked lists can become quite long.
+
+The maximum chain in this experiment is(observed result from the experiment, not something calculated directly from the load factor.): $82$
+
+A search may therefore have to inspect many elements.
+
+Now look at \(b=262143\)
+
+Here:
+
+$$
+\alpha=\frac{213557}{262143}\approx0.815
+$$
+
+The maximum chain is only:
+
+$$
+7
+$$
+
+And:
+
+```text
+unique bins = 94,319
+```
+
+A **unique bin** here means a bin containing exactly one element.
+
+So:
+
+```text
+H[10] → element
+H[11] → element
+H[12] → empty
+H[13] → element
+...
+```
+
+Many searches can therefore find their target after checking just one element.
+
+With:
+
+$$
+b=1,048,575
+$$
+
+the load factor becomes:
+
+$$
+\alpha=0.20
+$$
+
+and the maximum chain length is only:
+
+$$
+5
+$$
+
+There are:
+
+```text
+173,912 unique bins
+```
+
+This means the table has become very sparse.
+
+The tradeoff is:
+
+```text
+        More bins
+           ↓
+    ┌──────┴──────┐
+    ↓             ↓
+fewer collisions  more memory
+    ↓
+shorter chains
+    ↓
+faster searches
+```
+
+So hash-table design is not simply:
+
+> "Use as many bins as possible."
+
+You are trading **memory for shorter collision chains**.
+
+---
+
+There is a very clear relationship:
+
+```text
+more bins
+   ↓
+smaller α
+   ↓
+fewer collisions
+   ↓
+shorter chains
+   ↓
+less work during search
+```
+
+---
+
+**Why does this lead to \(O(1)\)?**
+
+This is the central argument. Regardless of the initial number
+of elements, you can choose a sufficiently large b value to ensure there will be a
+small, fixed number of elements (on average) in every bin. This means that searching for an element in a hash table is no longer dependent on the number of elements
+in the hash table, but rather is a fixed cost, producing amortized O(1) performance.
+
+Suppose we can choose `b` sufficiently large so that the collision list has only a small fixed number of elements.
+
+For example:
+
+```text
+H[0] → 1 element
+H[1] → 0 elements
+H[2] → 2 elements
+H[3] → 1 element
+H[4] → 3 elements
+...
+```
+
+Suppose the maximum relevant chain length is bounded by:
+
+$$
+k=5
+$$
+
+Then searching a bin requires at most approximately five comparisons.
+
+So:
+
+$$
+T_{collision}\leq 5
+$$
+
+Since 5 is a constant:
+
+$$
+T_{collision}=O(1)
+$$
+
+And the entire search becomes:
+
+$$
+T_{search}
+=
+T_{hash}
++
+T_{table-access}
++
+T_{collision}
+$$
+
+Under the bounded-key assumption:
+
+$$
+O(1)+O(1)+O(1)
+$$
+
+therefore:
+
+$$
+\boxed{O(1)}
+$$
+
+---
+
+**average vs maximum**
+
+The load factor is:
+
+$$
+\alpha=\frac{n}{b}
+$$
+
+It tells us the **average number of elements per bin**.
+
+It does **not** guarantee that every bin has at most \(\alpha\) elements.
+
+For example:
+
+```text
+α = 1
+```
+
+could still produce:
+
+```text
+H[0] → 1
+H[1] → 0
+H[2] → 0
+H[3] → 0
+H[4] → 5
+H[5] → 0
+...
+```
+
+The average could still be around 1 even though one bin contains five elements.
+
+Therefore:
+
+$$
+\alpha \text{ small}
+$$
+
+doesn't by itself mathematically guarantee:
+
+$$
+\text{"maximum chain length"}=O(1)
+$$
+
+You also need a **good hash function / sufficiently uniform distribution**.
+
+---
+
+**Expected \(O(1)\) vs worst-case \(O(n)\)**
+
+This distinction is extremely important.
+
+1. Good distribution
+
+```text
+H[0] → A
+H[1] → C → X
+H[2] → B
+H[3] → empty
+H[4] → D → Y
+```
+
+Chains remain short.
+
+Expected:
+
+$$
+\boxed{O(1)}
+$$
+
+2. Bad distribution
+
+Suppose everything hashes to bin 5:
+
+```text
+H[5] → A → B → C → D → E → ... → n
+```
+
+Now searching could require examining all \(n\) elements.
+
+Therefore:
+
+$$
+\boxed{O(n)}
+$$
+
+So the standard statement is:
+
+> **Hash-table search is expected/amortized \(O(1)\) under suitable hashing and load-factor assumptions, but its worst-case time is \(O(n)\).**
+
+---
+
+Conceptually:
+
+```text
+Number of elements
+        n
+        │
+        │
+        │       ─────────────
+        │      /
+        │     /
+        │    /
+        │   /
+        │  /
+        └────────────────────
+              bins
+```
+
+As we increase the number of bins appropriately, we can keep the collision work small.
+
+But there's an important theoretical qualification:
+
+**Simply making `b` larger does not automatically make hash search \(O(1)\).**
+
+If `b` grows but `n` grows much faster, the load factor can still become large.
+
+The usual condition is that the load factor is maintained at a bounded value:
+
+$$
+\alpha=\frac{n}{b}=O(1)
+$$
+
+---
+
+The entire argument can be summarized as:
+
+```text
+                Hash-Based Search
+                       │
+          ┌────────────┼────────────┐
+          ↓            ↓            ↓
+     Compute hash   Access H[h]   Resolve collision
+          │            │            │
+         O(1)         O(1)       O(chain length)
+                                     │
+                                     ↓
+                           Keep α = n/b bounded
+                                     │
+                                     ↓
+                             Short chains
+                                     │
+                                     ↓
+                                O(1) expected
+```
+
+For the separate-chaining implementation:
+
+```java
+public boolean search(V value) {
+    int h = hash(value);          // 1. O(1)*
+
+    LinkedList<V> list = table[h]; // 2. O(1)
+
+    if (list == null) {
+        return false;
+    }
+
+    return list.contains(value);   // 3. O(chain length)
+}
+```
+
+\(*\) assuming a bounded-size key.
+
+So the most important part is:
+A suitable load factor keeps collision chains short, and short collision chains make the collision-resolution part effectively constant on average.
+
+:::note
+
+The phrase **"constant time" does not mean the operation literally takes the same number of CPU cycles for every possible input**. It means that under the stated bounded-key and bounded-load-factor assumptions, the amount of work has a constant upper bound independent of \(n\).
+
+:::
+
+In summarize:
+
+> **Hash-Based Search achieves expected/amortized \(O(1)\) performance when hash computation is bounded, table access is \(O(1)\), and the load factor \(\alpha=n/b\) is kept bounded so that collision chains remain short. Its worst-case search time remains \(O(n)\) when many elements collide into the same bin.**
+
+### Design of the Hash Function
+Hash-Based Search raises two main concerns: 
+1. the design of the hash function and
+2. how to handle collisions. 
+
+A poorly chosen hash function can leave keys poorly distributed in the primary storage, with two consequences: (a) many bins in the hash
+table may be unused, wasting space, and (b) there will be collisions that force many
+keys into the same bin, which worsens search performance
+
+the **two central design problems in Hash-Based Search**:
+
+1. **How should we design the hash function?**
+2. **What should we do when collisions occur?**
+
+A hash table has this basic structure:
+
+```text
+Key
+ │
+ ▼
+Hash Function
+ │
+ ▼
+Hash Value / Index
+ │
+ ▼
+Hash Table
+```
+
+So two things can go wrong:
+
+```text
+                 Hash-Based Search
+                        │
+             ┌──────────┴──────────┐
+             │                     │
+       Hash Function          Collisions
+             │                     │
+      distribution            resolution
+```
+
+The **hash function** determines *where keys go*.
+
+**Collision handling** determines *what happens when multiple keys want the same location*.
+
+
+---
+
+** Concern #1 — Design of the Hash Function**
+
+A good hash function should distribute keys across the available bins as evenly as possible.
+
+Suppose we have:
+
+```text
+b = 10 bins
+```
+
+Ideally, the elements should be distributed somewhat like:
+
+```text
+Bin     Elements
+---     --------
+ 0      ██
+ 1      █
+ 2      ██
+ 3      █
+ 4      ██
+ 5      █
+ 6      ██
+ 7      █
+ 8      ██
+ 9      █
+```
+
+The exact distribution doesn't need to be perfectly equal, but we want to avoid large concentrations.
+
+---
+
+** Poor Hash Function**
+
+Consider a bad hash function:
+
+$$
+h(x) = 0
+$$
+
+for every key.
+
+Suppose we insert:
+
+```text
+42
+17
+89
+31
+56
+12
+73
+```
+
+Everything goes to bin `0`:
+
+```text
+H:
+
+0 → 42 → 17 → 89 → 31 → 56 → 12 → 73
+
+1 → empty
+2 → empty
+3 → empty
+4 → empty
+5 → empty
+6 → empty
+7 → empty
+8 → empty
+9 → empty
+```
+
+This is terrible.
+
+It creates both problems mentioned above
+
+---
+
+** Consequence A — Unused Bins**
+
+many bins in the hash table may be unused, wasting space
+
+In our example:
+
+```text
+b = 10
+n = 7
+```
+
+but:
+
+```text
+Bin 0 → 7 elements
+Bins 1–9 → empty
+```
+
+So only one of the ten bins is actually being used.
+
+```text
+0  ███████
+1
+2
+3
+4
+5
+6
+7
+8
+9
+```
+
+The table has allocated space for 10 bins, but the hash function isn't making effective use of that space.
+
+This is a **space-utilization problem**.
+
+---
+
+** Consequence B — Many Collisions**
+
+The second problem is even more important.
+
+All seven elements have the same hash value:
+
+```text
+hash(42) = 0
+hash(17) = 0
+hash(89) = 0
+hash(31) = 0
+hash(56) = 0
+hash(12) = 0
+hash(73) = 0
+```
+
+Therefore:
+
+```text
+42 ─┐
+17 ─┤
+89 ─┤
+31 ─┼──► bin 0
+56 ─┤
+12 ─┤
+73 ─┘
+```
+
+This produces a very long collision chain:
+
+```text
+H[0]
+ ↓
+42 → 17 → 89 → 31 → 56 → 12 → 73
+```
+
+---
+
+** Why Do Collisions Hurt Search Performance?**
+
+Suppose we want to find `73`.
+
+First:
+
+```text
+hash(73)
+   ↓
+   0
+```
+
+Then:
+
+```text
+H[0]
+ ↓
+42 → 17 → 89 → 31 → 56 → 12 → 73
+                                      ↑
+                                    found
+```
+
+We had to inspect all seven elements.
+
+The search inside the bin is therefore:
+
+$$
+O(n)
+$$
+
+instead of the desired expected:
+
+$$
+O(1)
+$$
+
+So a poorly distributed hash function can destroy the main performance advantage of hashing.
+
+---
+
+** Good vs Poor Distribution**
+
+1. Good hash function
+
+```text
+H:
+
+0 → 42
+1 → 31
+2 → 12
+3 → 73
+4 → empty
+5 → 56
+6 → empty
+7 → 17
+8 → empty
+9 → 89
+```
+
+The elements are spread across the table.
+
+2. Poor hash function
+
+```text
+H:
+
+0 → 42 → 17 → 89 → 31 → 56 → 12 → 73
+1 → empty
+2 → empty
+3 → empty
+4 → empty
+5 → empty
+6 → empty
+7 → empty
+8 → empty
+9 → empty
+```
+
+The elements are concentrated in one bin.
+
+---
+
+** The Load Factor Connection**
+
+This connects directly to the **load factor** :
+
+$$
+\alpha = \frac{n}{b}
+$$
+
+For example:
+
+```text
+n = 7
+b = 10
+```
+
+gives:
+
+$$
+\alpha = 0.7
+$$
+
+But the load factor alone doesn't tell us whether the distribution is good.
+
+Consider these two tables:
+
+1. Table A
+
+```text
+0 → 1
+1 → 1
+2 → 1
+3 → 1
+4 → 1
+5 → 1
+6 → 1
+```
+
+2. Table B
+
+```text
+0 → 7
+1 → 0
+2 → 0
+3 → 0
+4 → 0
+5 → 0
+6 → 0
+```
+
+Both have:
+
+```text
+n = 7
+b = 10
+α = 0.7
+```
+
+But Table B has severe clustering.
+
+So we need **both**:
+
+* an appropriate load factor
+* a good distribution from the hash function
+
+---
+
+** What Makes a Hash Function Good?**
+
+For hash-based searching, we generally want:
+
+** Deterministic**
+
+The same key should always produce the same hash value.
+
+```text
+hash(key) → same result
+```
+
+** Uniform distribution**
+
+Keys should be spread across the bins.
+
+```text
+Good:
+
+0 → ██
+1 → █
+2 → ██
+3 → █
+4 → ██
+...
+```
+
+rather than:
+
+```text
+Bad:
+
+0 → █████████████
+1
+2
+3
+...
+```
+
+** Efficient to calculate**
+
+Computing the hash should itself be fast.
+
+There's little benefit in having an extremely complicated hash function if calculating it is expensive.
+
+---
+
+** The Two Problems Are Related**
+
+hash-function quality affects collision frequency.
+
+```text
+Poor hash function
+       │
+       ▼
+Poor distribution
+       │
+       ├───────────────┐
+       ▼               ▼
+Unused bins       More collisions
+                       │
+                       ▼
+                Longer searches
+                       │
+                       ▼
+                  Worse performance
+```
+
+So the goal is:
+
+```text
+Good Hash Function
+       │
+       ▼
+Even Distribution
+       │
+       ├──► bins used effectively
+       │
+       └──► fewer collisions
+                  │
+                  ▼
+             short chains
+                  │
+                  ▼
+          fast expected search
+```
+
+---
+
+** Why Collision Handling Is Still Necessary**
+
+Even with an excellent hash function, **collisions cannot generally be eliminated** when the key space is larger than the table.
+
+For example, suppose:
+
+```text
+Possible keys = millions
+Hash table bins = 1000
+```
+
+Many different keys have to share the available bins.
+
+Therefore:
+
+> A good hash function **reduces** collisions; it does not necessarily eliminate them.
+
+We still need a collision-resolution strategy:
+
+```text
+Collision Handling
+│
+├── Separate Chaining
+│
+└── Open Addressing
+    ├── Linear Probing
+    ├── Quadratic Probing
+    └── Double Hashing
+```
+
+---
+
+The key idea
+
+```text
+              Hash-Based Search
+                      │
+             ┌────────┴────────┐
+             │                 │
+       Hash Function      Collision Handling
+             │                 │
+             ▼                 ▼
+     Where should the    What if multiple
+     key go?             keys go there?
+             │                 │
+             ▼                 ▼
+      Good distribution   Resolve collisions
+             │
+       ┌─────┴─────┐
+       ▼           ▼
+   Use bins      Shorter
+   effectively   searches
+```
+
+
+The hash function controls distribution; collision handling controls what happens when distribution isn't unique.
+
+
+### Table Size and Search Performance
+{/* This section is mainly about **choosing the size of the hash table and understanding its memory cost**. Given your earlier decision, I would keep only the search-related motivation here and move the detailed implementation/memory discussion to **Hash Tables**. */}
+Choosing the hashing function is just the first decision to make when implementing
+Hash-Based Search. Storage space poses another design issue. The primary storage,
+H, must be large enough to reduce the size of the linked lists storing the elements in
+each bin.
+
+
+**Hash Table Size and Storage**
+
+Once we decide to use hashing, how large should the hash table be?
+The hash function determines **where** an element goes, but the size of `H` determines **how many bins are available**.
+
+---
+
+** Why does the table size matter?**
+
+Suppose we have:
+
+```text
+n = 100,000 elements
+```
+
+and create a table with:
+
+```text
+b = 10 bins
+```
+
+Even with a good hash function, many elements will have to share each bin.
+
+Conceptually:
+
+```text
+H[0] → 10,000 elements
+H[1] → 10,000 elements
+H[2] → 10,000 elements
+...
+```
+
+The linked lists become very long.
+
+Searching one of those lists can therefore become expensive.
+
+Instead, suppose:
+
+```text
+b = 100,000 bins
+```
+
+Then the elements can be spread across many more locations:
+
+```text
+H[0] → 1 element
+H[1] → empty
+H[2] → 2 elements
+H[3] → 1 element
+...
+```
+
+The chains are much shorter.
+
+So:
+
+```text
+larger table
+     ↓
+more bins
+     ↓
+shorter chains
+     ↓
+fewer comparisons
+     ↓
+faster search
+```
+
+But there's an important trade-off:
+
+```text
+larger table
+     ↓
+more memory
+```
+
+Therefore, we don't simply make the table as large as possible.
+
+---
+
+** Why not use `b = n`?**
+
+
+For example:
+
+```text
+n = 213,557 words
+b = 213,557 bins
+```
+
+At first this sounds ideal.
+
+We might imagine:
+
+```text
+word 1 → bin 0
+word 2 → bin 1
+word 3 → bin 2
+...
+```
+
+with every word having its own bin.
+
+If we could construct a **perfect one-to-one mapping**:
+
+```text
+string → unique integer in [0, n)
+```
+
+then there would be no collisions.
+
+For example:
+
+```text
+"apple"  → 0
+"banana" → 1
+"cat"    → 2
+"dog"    → 3
+...
+```
+
+Then:
+
+```text
+search → hash → exactly one bin → one comparison
+```
+
+That would be excellent.
+
+---
+
+** Why is a one-to-one hash function difficult?**
+
+The problem is that the keys are arbitrary strings.
+
+Imagine the collection contains:
+
+```text
+213,557 English words
+```
+
+We would need a function that knows exactly which 213,557 strings occur and maps each one to a unique number:
+
+```text
+213,557 strings
+       ↓
+213,557 unique integers
+```
+
+That's possible in specialized situations, but designing such a function generally isn't simple.
+
+This is related to **perfect hashing**, which is a specialized topic.
+
+For ordinary hash tables, we instead accept that:
+
+```text
+collisions will happen
+```
+
+and try to keep them relatively infrequent.
+
+---
+
+** The practical approach**
+
+Create a table with enough bins so that there aren't too many elements in each bin, while also avoiding excessive empty space.
+
+So we're balancing two things:
+
+```text
+             Hash Table Size
+                    │
+          ┌─────────┴─────────┐
+          ▼                   ▼
+     too small            too large
+          │                   │
+          ▼                   ▼
+ long chains             wasted memory
+          │                   │
+          ▼                   ▼
+ slower search           unnecessary space
+```
+
+The desired situation is somewhere in between.
+
+---
+
+** Load factor gives us a useful way to think about this**
+
+The load factor is:
+
+```text
+α = n / b
+```
+
+where:
+
+* `n` = number of stored elements
+* `b` = number of bins
+
+For example:
+
+```text
+n = 100,000
+b = 200,000
+```
+
+gives:
+
+```text
+α = 100,000 / 200,000
+  = 0.5
+```
+
+So there are, on average, `0.5` elements per bin.
+
+Compare that with:
+
+```text
+n = 100,000
+b = 10,000
+```
+
+giving:
+
+```text
+α = 10
+```
+
+Now we have, on average, 10 elements per bin.
+
+That generally means longer chains and more comparisons.
+
+---
+
+if the hash function distributes keys evenly, we can get reasonable results by choosing an array size approximately as large as the collection.
+
+Suppose:
+
+```text
+n = 213,557
+b ≈ 213,557
+```
+
+Then:
+
+```text
+α ≈ 1
+```
+
+Under a reasonably uniform distribution, we'd expect the chains to remain fairly short.
+
+For example, conceptually:
+
+```text
+H[0] → word
+H[1] → empty
+H[2] → word → word
+H[3] → word
+H[4] → empty
+H[5] → word
+...
+```
+
+Not every bin will contain exactly one word, but the average occupancy is around one.
+
+---
+
+** Why choose a prime table size?**
+
+The size of `H` is typically chosen to be a prime number.
+
+Suppose the hash code is:
+
+```text
+hashCode(s)
+```
+
+and we need to convert it into a table index.
+
+A common operation is:
+
+```text
+h = hashCode(s) % b
+```
+
+where `b` is the number of bins.
+
+For example:
+
+```text
+hashCode("computer") = 123456
+b = 1009
+```
+
+then:
+
+```text
+123456 % 1009 = 497
+```
+
+so:
+
+```text
+H[497]
+```
+
+is the selected bin.
+
+Choosing a suitable table size can help avoid undesirable patterns in the resulting indices.
+
+---
+
+** Why not always use a power of two?**
+
+This is related to properties of the hash values and the modulo operation.
+
+If you choose:
+
+```text
+b = 1024
+```
+
+then:
+
+```text
+hash % 1024
+```
+
+depends heavily on the lower bits of the hash value.
+
+If the hash function has poor variation in those bits, the distribution can become poor.
+
+Using an appropriate prime table size can help reduce some of these undesirable patterns.
+
+The important point for **Hash-Based Searching**:
+
+> The table size should be selected so that the computed hash values are distributed effectively across the available bins.
+
+---
+
+A good choice
+in practice is $2^k − 1$, even though this value isn’t always prime
+
+For example, if:
+
+```text
+k = 10
+```
+
+then:
+
+```text
+2^10 - 1 = 1023
+```
+
+For:
+
+```text
+k = 16
+```
+
+we get:
+
+```text
+2^16 - 1 = 65,535
+```
+
+For:
+
+```text
+k = 18
+```
+
+we get:
+
+```text
+2^18 - 1 = 262,143
+```
+
+The important warning is that:
+
+> `2^k - 1` is **not necessarily prime**.
+
+For example:
+
+```text
+2^10 - 1 = 1023
+```
+
+and:
+
+```text
+1023 = 3 × 11 × 31
+```
+
+So this is a practical sizing heuristic, not a guarantee of primality.
+
+---
+
+### Memory
+
+With separate chaining, our table might look like:
+
+```text
+H
+│
+├── H[0] → node → node
+├── H[1] → node
+├── H[2] → empty
+├── H[3] → node → node → node
+├── ...
+└── H[b-1]
+```
+
+Each linked-list node contains information such as:
+
+```text
+┌─────────────────┐
+│ element         │
+│ next pointer    │
+└─────────────────┘
+```
+
+So the elements aren't simply sitting inside the array.
+
+The array stores references/pointers to linked-list structures, and the linked-list nodes store references to the actual objects.
+
+---
+
+** Why linked lists have overhead**
+
+Suppose we have:
+
+```text
+H[5] → Node → Node → Node
+```
+
+Each node needs at least:
+
+```text
+data
+next pointer
+```
+
+Depending on the implementation, there may be additional information.
+
+And the list itself may store:
+
+```text
+head pointer
+tail pointer
+size
+```
+
+For example:
+
+```text
+LinkedList
+┌───────────────┐
+│ first ────────┼──────► Node
+│ last ─────────┼──────────────► Node
+│ size          │
+└───────────────┘
+```
+
+The Java `LinkedList` class contains additional bookkeeping information because it is a general-purpose data structure.
+
+That means using a general-purpose linked-list implementation can consume considerably more memory than a specialized structure designed specifically for a hash table.
+
+
+There are therefore **two resources** we're balancing:
+
+1. Time
+
+We want:
+
+```text
+short chains
+     ↓
+few comparisons
+     ↓
+fast search
+```
+
+2. Space
+
+We don't want:
+
+```text
+huge table
+     +
+large linked-list overhead
+     ↓
+excessive memory usage
+```
+
+So the design problem becomes:
+
+```text
+                 Hash Table Design
+                        │
+             ┌──────────┴──────────┐
+             ▼                     ▼
+        Search Time            Memory
+             │                     │
+             ▼                     ▼
+       short chains          reasonable table
+             │                     │
+             └──────────┬──────────┘
+                        ▼
+                  good trade-off
+```

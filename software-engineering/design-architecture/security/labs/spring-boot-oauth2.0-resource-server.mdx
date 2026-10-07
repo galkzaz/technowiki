@@ -1,0 +1,1650 @@
+---
+id: software-engineering-design-architecture-security-labs-spring-boot-oauth2.0-resource-server
+title: Resource Server using Spring Boot
+sidebar_position: 4
+---
+
+Below is a concrete **Spring Boot 3.x + Spring Security OAuth 2.0 Resource Server** example for an online shop.
+
+We'll use:
+
+* **Authorization Server:** Keycloak
+* **Resource Server:** Spring Boot `shop-api`
+* **Client:** Web/mobile shop application
+* **Protected resources:** products and orders
+* **Scopes:** `products:read`, `orders:read`, `orders:write`
+* **Roles:** `CUSTOMER`, `MANAGER`
+* **Resource rule:** a customer can read/write **their own orders**, while a manager can access any order.
+
+The important part is that the Resource Server does **not** authenticate the user by talking to Keycloak on every request when using JWT access tokens. It validates the JWT locally using Keycloak's published signing keys.
+
+## Overall Architecture
+
+```text
+                            ┌──────────────────────┐
+                            │       Keycloak       │
+                            │     Authorization    │
+                            │        Server        │
+                            └──────────┬───────────┘
+                                       │
+                                 Access Token
+                                       │
+                                       ▼
+┌──────────────┐            ┌──────────────────────┐
+│ Shop Web App │            │     Spring Boot      │
+│              │───────────►│    Resource Server   │
+│              │  Bearer    │      shop-api        │
+└──────────────┘  Token     └──────────┬───────────┘
+                                       │
+                                       │
+                             ┌─────────┴──────────┐
+                             │                    │
+                             ▼                    ▼
+                      Product Service        Order Service
+                        /products                /orders
+```
+
+For simplicity, we'll make the Spring Boot application itself expose:
+
+```text
+GET  /api/products
+GET  /api/products/{id}
+
+GET  /api/orders
+GET  /api/orders/{id}
+
+POST /api/orders
+PUT  /api/orders/{id}
+```
+
+## The Request We Want to Protect
+
+Suppose Alice logs into the shop.
+
+The Authorization Server gives her:
+
+```text
+Access Token
+```
+
+containing claims approximately like:
+
+```json
+{
+  "iss": "http://localhost:8080/realms/shop",
+  "sub": "alice-id",
+  "aud": "shop-api",
+  "scope": "products:read orders:read orders:write",
+  "realm_access": {
+    "roles": [
+      "CUSTOMER"
+    ]
+  },
+  "exp": 1790845200
+}
+```
+
+She then requests:
+
+```http
+GET /api/orders/1001 HTTP/1.1
+Host: localhost:8081
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+```
+
+The Resource Server performs:
+
+```text
+HTTP Request
+     │
+     ▼
+Bearer Token Processing
+     │
+     ▼
+Token Validation
+     │
+     ├── signature
+     ├── expiration
+     └── token structure
+     │
+     ▼
+Issuer Validation
+     │
+     ▼
+Audience Validation
+     │
+     ▼
+Scope Validation
+     │
+     ▼
+Resource Authorization
+     │
+     ▼
+Controller
+     │
+     ▼
+Protected Resource
+```
+
+## Project Structure
+
+A small project could look like:
+
+```text
+shop-api/
+├── src/main/java/com/example/shop/
+│   ├── ShopApplication.java
+│   │
+│   ├── config/
+│   │   └── SecurityConfig.java
+│   │
+│   ├── security/
+│   │   └── JwtRoleConverter.java
+│   │
+│   ├── controller/
+│   │   ├── ProductController.java
+│   │   └── OrderController.java
+│   │
+│   ├── service/
+│   │   └── OrderService.java
+│   │
+│   └── model/
+│       └── Order.java
+│
+└── src/main/resources/
+    └── application.yml
+```
+
+## Dependencies
+
+For Gradle:
+
+```groovy
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.example'
+version = '1.0.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(24)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-jose'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+}
+```
+
+The important dependency is:
+
+```groovy
+implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+```
+
+This gives Spring Security the Resource Server functionality.
+
+## Spring Resource Server Configuration
+
+Create:
+
+```text
+src/main/resources/application.yml
+```
+
+```yaml
+server:
+  port: 8081
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8080/realms/shop
+```
+
+This one configuration is extremely important.
+
+```yaml
+issuer-uri: http://localhost:8080/realms/shop
+```
+
+tells Spring:
+
+> I trust tokens issued by this Authorization Server.
+
+Spring Security can use the issuer metadata to discover the Authorization Server's public keys and other information required for JWT validation.
+
+## Security Configuration
+
+```java
+package com.example.shop.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.web.SecurityFilterChain;
+
+@Configuration
+@EnableMethodSecurity
+public class SecurityConfig {
+
+    @Bean
+    SecurityFilterChain securityFilterChain(HttpSecurity http)
+            throws Exception {
+
+        http
+            .authorizeHttpRequests(auth -> auth
+
+                // Public endpoint
+                .requestMatchers("/api/products").hasAuthority(
+                        "SCOPE_products:read"
+                )
+
+                // Orders require authentication
+                .requestMatchers("/api/orders/**").authenticated()
+
+                // Everything else
+                .anyRequest().authenticated()
+            )
+
+            .oauth2ResourceServer(oauth2 ->
+                oauth2.jwt(jwt -> {})
+            );
+
+        return http.build();
+    }
+}
+```
+
+This tells Spring Security:
+- This application is an OAuth 2.0 Resource Server.
+- Accept Bearer tokens.
+- Validate JWT access tokens.
+- Require authentication for protected endpoints.
+
+## What Happens When a Request Arrives?
+
+Now let's follow:
+
+```http
+GET /api/orders/1001
+Authorization: Bearer eyJhbGciOi...
+```
+
+from beginning to end.
+
+### Step 1 — Bearer Token Processing
+
+Spring Security's Resource Server support contains a filter that looks for:
+
+```http
+Authorization: Bearer <token>
+```
+
+Conceptually:
+
+```text
+HTTP Request
+     │
+     ▼
+BearerTokenAuthenticationFilter
+     │
+     ▼
+Extract:
+    eyJhbGciOi...
+```
+
+You don't normally write this filter yourself.
+
+Spring Security provides it.
+
+Conceptually, it does something like:
+
+```java
+String authorization =
+        request.getHeader("Authorization");
+
+if (authorization != null &&
+    authorization.startsWith("Bearer ")) {
+
+    String token =
+        authorization.substring(7);
+
+    // Send token to authentication manager
+}
+```
+
+So:
+
+```http
+Authorization: Bearer abc123
+```
+
+becomes:
+
+```text
+abc123
+```
+
+and Spring passes the token to its authentication machinery.
+
+### Step 2 — Token Validation
+
+Spring Security now needs to determine:
+
+> Is this JWT a valid access token?
+
+For a JWT, the Resource Server validates the token's cryptographic signature.
+
+Suppose the JWT is:
+
+```text
+xxxxx.yyyyy.zzzzz
+```
+
+It contains:
+
+```text
+Header.Payload.Signature
+```
+
+Spring verifies the signature using the Authorization Server's public key.
+
+```text
+JWT
+ │
+ ├── Header
+ ├── Payload
+ └── Signature
+          │
+          ▼
+       Verify
+          │
+          ▼
+ Authorization Server public key
+```
+
+If the signature is invalid:
+
+```text
+Authentication fails
+        │
+        ▼
+401 Unauthorized
+```
+
+The request does not reach the controller.
+
+### Token Expiration
+
+Spring also checks temporal claims such as:
+
+```json
+{
+  "exp": 1790845200
+}
+```
+
+`exp` means: **expiration time**
+
+If:
+
+```text
+current time > exp
+```
+
+the token is expired. Therefore:
+
+```text
+Token
+ │
+ ├── Signature valid
+ │
+ └── exp expired
+        │
+        ▼
+       REJECT
+```
+
+The client receives:
+
+```http
+401 Unauthorized
+```
+
+### Step 3 — Issuer Validation
+
+Our configuration contains:
+
+```yaml
+issuer-uri: http://localhost:8080/realms/shop
+```
+
+Spring expects:
+
+```json
+{
+  "iss": "http://localhost:8080/realms/shop"
+}
+```
+
+Suppose the token contains:
+
+```json
+{
+  "iss": "http://evil.example.com"
+}
+```
+
+Spring rejects the token.
+
+The important distinction is:
+
+```text
+issuer-uri configuration
+        │
+        ▼
+Who do I trust?
+        │
+        ▼
+http://localhost:8080/realms/shop
+```
+
+The `iss` claim answers:
+
+```text
+Who issued this token?
+```
+
+Therefore:
+
+```text
+Configured trusted issuer:
+    http://localhost:8080/realms/shop
+
+Token:
+    iss = http://localhost:8080/realms/shop
+
+                 ↓
+
+             ACCEPT
+```
+
+But:
+
+```text
+Configured trusted issuer:
+    http://localhost:8080/realms/shop
+
+Token:
+    iss = http://another-server/realm
+
+                 ↓
+
+             REJECT
+```
+
+### Step 4 — Audience Validation
+
+Issuer validation alone is not enough.
+
+Suppose Keycloak issued tokens for several APIs:
+
+```text
+                Keycloak
+                   │
+        ┌──────────┼──────────┐
+        ▼          ▼          ▼
+   shop-api   payment-api  shipping-api
+```
+
+A token intended for:
+
+```text
+payment-api
+```
+
+should not automatically be accepted by:
+
+```text
+shop-api
+```
+
+We therefore want:
+
+```json
+{
+  "aud": "shop-api"
+}
+```
+
+Spring Security can validate the audience using a custom JWT validator.
+
+For example:
+
+```java
+package com.example.shop.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtDecoders;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
+
+import java.util.List;
+
+@Configuration
+public class JwtConfig {
+
+    @Bean
+    JwtDecoder jwtDecoder() {
+
+        JwtDecoder decoder =
+                JwtDecoders.fromIssuerLocation(
+                        "http://localhost:8080/realms/shop"
+                );
+
+        OAuth2TokenValidator<Jwt> issuerValidator =
+                JwtValidators.createDefaultWithIssuer(
+                        "http://localhost:8080/realms/shop"
+                );
+
+        OAuth2TokenValidator<Jwt> audienceValidator =
+                new JwtClaimValidator<List<String>>(
+                        "aud",
+                        audiences -> audiences != null &&
+                                audiences.contains("shop-api")
+                );
+
+        OAuth2TokenValidator<Jwt> validator =
+                new DelegatingOAuth2TokenValidator<>(
+                        issuerValidator,
+                        audienceValidator
+                );
+
+        decoder.setJwtValidator(validator);
+
+        return decoder;
+    }
+}
+```
+
+Now:
+
+```json
+{
+  "aud": [
+    "shop-api"
+  ]
+}
+```
+
+is accepted.
+
+But:
+
+```json
+{
+  "aud": [
+    "payment-api"
+  ]
+}
+```
+
+is rejected.
+
+### Step 5 — Scope Validation
+
+Suppose our API has:
+
+```text
+GET /api/products
+```
+
+and requires:
+
+```text
+products:read
+```
+
+The access token contains:
+
+```json
+{
+  "scope": "products:read orders:read"
+}
+```
+
+Spring Security converts scopes into authorities:
+
+```text
+scope:
+    products:read
+
+        ↓
+
+authority:
+    SCOPE_products:read
+```
+
+Therefore we can write:
+
+```java
+.requestMatchers("/api/products/**")
+    .hasAuthority("SCOPE_products:read")
+```
+
+For example:
+
+```java
+@Bean
+SecurityFilterChain securityFilterChain(HttpSecurity http)
+        throws Exception {
+
+    http
+        .authorizeHttpRequests(auth -> auth
+
+            .requestMatchers("/api/products/**")
+                .hasAuthority("SCOPE_products:read")
+
+            .requestMatchers("/api/orders/**")
+                .hasAuthority("SCOPE_orders:read")
+
+            .anyRequest()
+                .authenticated()
+        )
+
+        .oauth2ResourceServer(oauth2 ->
+            oauth2.jwt(jwt -> {})
+        );
+
+    return http.build();
+}
+```
+
+Now consider:
+
+```text
+Token scopes:
+
+products:read
+orders:read
+```
+
+Request:
+
+```http
+GET /api/products/10
+```
+
+Result:
+
+```text
+products:read
+      │
+      ▼
+Required authority:
+SCOPE_products:read
+      │
+      ▼
+       ✓
+      │
+      ▼
+Allow
+```
+
+But:
+
+```http
+POST /api/orders
+```
+
+might require:
+
+```text
+orders:write
+```
+
+If the token only contains:
+
+```text
+orders:read
+```
+
+then:
+
+```text
+Required:
+    orders:write
+
+Token:
+    orders:read
+
+        ↓
+
+    FORBIDDEN
+```
+
+The request is authenticated but not authorized. Therefore: **403 Forbidden**
+
+### Step 6 — Resource Authorization
+
+This is where things become more interesting.
+
+Suppose Alice has:
+
+```text
+scope = orders:read
+role = CUSTOMER
+sub = alice
+```
+
+She requests:
+
+```http
+GET /api/orders/1001
+```
+
+The scope tells us:
+
+```text
+Alice is allowed to read orders.
+```
+
+But it doesn't necessarily tell us:
+
+```text
+Alice can read order 1001.
+```
+
+We need a resource-level authorization rule.
+
+For example:
+
+```text
+Customer:
+    Can read own orders
+
+Manager:
+    Can read any order
+```
+
+So the Resource Server needs to check:
+
+```text
+order.customerId == token.sub
+```
+
+## Order Model
+
+```java
+package com.example.shop.model;
+
+public record Order(
+        Long id,
+        String customerId,
+        String product,
+        int quantity
+) {
+}
+```
+
+Example database record:
+
+```text
+id = 1001
+customerId = alice
+product = Laptop
+quantity = 1
+```
+
+## Order Service
+
+```java
+package com.example.shop.service;
+
+import com.example.shop.model.Order;
+import org.springframework.stereotype.Service;
+
+import java.util.Map;
+
+@Service
+public class OrderService {
+
+    private final Map<Long, Order> orders = Map.of(
+            1001L,
+            new Order(
+                    1001L,
+                    "alice",
+                    "Laptop",
+                    1
+            ),
+
+            1002L,
+            new Order(
+                    1002L,
+                    "bob",
+                    "Phone",
+                    2
+            )
+    );
+
+    public Order findById(Long id) {
+        return orders.get(id);
+    }
+}
+```
+
+## Order Controller
+
+```java
+package com.example.shop.controller;
+
+import com.example.shop.model.Order;
+import com.example.shop.service.OrderService;
+
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/orders")
+public class OrderController {
+
+    private final OrderService orderService;
+
+    public OrderController(OrderService orderService) {
+        this.orderService = orderService;
+    }
+
+    @GetMapping("/{id}")
+    public Order getOrder(
+            @PathVariable Long id,
+            Authentication authentication) {
+
+        Order order = orderService.findById(id);
+
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+
+        String userId = jwt.getSubject();
+
+        if (!order.customerId().equals(userId)) {
+            throw new RuntimeException(
+                    "You cannot access this order"
+            );
+        }
+
+        return order;
+    }
+}
+```
+
+Here:
+
+```java
+String userId = jwt.getSubject();
+```
+
+reads:
+
+```json
+{
+  "sub": "alice"
+}
+```
+
+So the Resource Server performs:
+
+```text
+Token:
+    sub = alice
+
+Order:
+    customerId = alice
+
+             ↓
+
+          MATCH
+
+             ↓
+
+           ALLOW
+```
+
+But if Alice requests Bob's order:
+
+```text
+Token:
+    sub = alice
+
+Order:
+    customerId = bob
+
+             ↓
+
+          NO MATCH
+
+             ↓
+
+           DENY
+```
+
+## Better Resource Authorization
+
+Instead of putting authorization logic directly in the controller, we can create a dedicated authorization service.
+
+```java
+package com.example.shop.security;
+
+import com.example.shop.model.Order;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.stereotype.Component;
+
+@Component
+public class OrderAuthorization {
+
+    public boolean canAccess(
+            Authentication authentication,
+            Order order) {
+
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+
+        String userId = jwt.getSubject();
+
+        boolean manager =
+                authentication.getAuthorities()
+                        .stream()
+                        .anyMatch(a ->
+                            a.getAuthority()
+                              .equals("ROLE_MANAGER")
+                        );
+
+        if (manager) {
+            return true;
+        }
+
+        return order.customerId().equals(userId);
+    }
+}
+```
+
+Then:
+
+```java
+@GetMapping("/{id}")
+public Order getOrder(
+        @PathVariable Long id,
+        Authentication authentication) {
+
+    Order order = orderService.findById(id);
+
+    if (!orderAuthorization.canAccess(
+            authentication,
+            order)) {
+
+        throw new ResponseStatusException(
+                HttpStatus.FORBIDDEN
+        );
+    }
+
+    return order;
+}
+```
+
+Now the responsibilities are nicely separated:
+
+```text
+Spring Security
+      │
+      ├── Token validation
+      ├── Issuer validation
+      ├── Audience validation
+      └── Scope validation
+               │
+               ▼
+        Application Security
+               │
+               └── Resource authorization
+                        │
+                        ▼
+                    Controller
+```
+
+## Roles from Keycloak
+
+Keycloak commonly puts roles somewhere like:
+
+```json
+{
+  "realm_access": {
+    "roles": [
+      "CUSTOMER"
+    ]
+  }
+}
+```
+
+Spring Security does not automatically treat arbitrary Keycloak role claims as `ROLE_*` authorities in every configuration.
+
+We can create a converter.
+
+```java
+package com.example.shop.security;
+
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
+public class JwtRoleConverter
+        implements Converter<Jwt, AbstractAuthenticationToken> {
+
+    @Override
+    public AbstractAuthenticationToken convert(Jwt jwt) {
+
+        Collection<SimpleGrantedAuthority> authorities =
+                new ArrayList<>();
+
+        // Scopes
+        String scope = jwt.getClaimAsString("scope");
+
+        if (scope != null) {
+
+            for (String s : scope.split(" ")) {
+
+                authorities.add(
+                        new SimpleGrantedAuthority(
+                                "SCOPE_" + s
+                        )
+                );
+            }
+        }
+
+        // Keycloak realm roles
+        Map<String, Object> realmAccess =
+                jwt.getClaim("realm_access");
+
+        if (realmAccess != null) {
+
+            Object roles =
+                    realmAccess.get("roles");
+
+            if (roles instanceof List<?> roleList) {
+
+                for (Object role : roleList) {
+
+                    authorities.add(
+                            new SimpleGrantedAuthority(
+                                    "ROLE_" + role
+                            )
+                    );
+                }
+            }
+        }
+
+        return new JwtAuthenticationToken(
+                jwt,
+                authorities
+        );
+    }
+}
+```
+
+Then configure it:
+
+```java
+@Bean
+SecurityFilterChain securityFilterChain(
+        HttpSecurity http)
+        throws Exception {
+
+    JwtRoleConverter converter =
+            new JwtRoleConverter();
+
+    http
+        .authorizeHttpRequests(auth -> auth
+
+            .requestMatchers("/api/products/**")
+                .hasAuthority("SCOPE_products:read")
+
+            .requestMatchers(HttpMethod.GET, "/api/orders/**")
+                .hasAuthority("SCOPE_orders:read")
+
+            .requestMatchers(HttpMethod.POST, "/api/orders/**")
+                .hasAuthority("SCOPE_orders:write")
+
+            .anyRequest()
+                .authenticated()
+        )
+
+        .oauth2ResourceServer(oauth2 ->
+            oauth2.jwt(jwt ->
+                jwt.jwtAuthenticationConverter(converter)
+            )
+        );
+
+    return http.build();
+}
+```
+
+Now:
+
+```text
+Keycloak:
+
+realm_access.roles:
+    CUSTOMER
+
+        ↓
+
+Spring Security:
+
+ROLE_CUSTOMER
+```
+
+## Combining Scope + Role + Resource Ownership
+
+Now we can build the complete authorization model.
+
+Suppose: `Customer` has:
+
+```text
+ROLE_CUSTOMER
+SCOPE_orders:read
+```
+
+and: `Manager`
+
+has:
+
+```text
+ROLE_MANAGER
+SCOPE_orders:read
+SCOPE_orders:write
+```
+
+The rules could be:
+
+| Operation                       | Customer | Manager |
+| ------------------------------- | -------- | ------- |
+| Read products                   | ✓        | ✓       |
+| Read own order                  | ✓        | ✓       |
+| Read another customer's order   | ✗        | ✓       |
+| Create order                    | ✓        | ✓       |
+| Update own order                | ✓        | ✓       |
+| Update another customer's order | ✗        | ✓       |
+| Delete order                    | ✗        | ✓       |
+
+Notice the different layers:
+
+```text
+Scope
+ │
+ └── "Can this type of operation be performed?"
+ 
+Role
+ │
+ └── "What type of user is this?"
+ 
+Resource ownership
+ │
+ └── "Does this particular resource belong to them?"
+```
+
+## Complete Request Flow
+
+Let's now follow a real request.
+
+Alice sends:
+
+```http
+GET /api/orders/1001 HTTP/1.1
+Host: shop.example.com
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+```
+
+### Stage 1 — Request arrives
+
+```text
+Client
+  │
+  │ GET /api/orders/1001
+  │ Authorization: Bearer ...
+  ▼
+Spring Security Filter Chain
+```
+
+### Stage 2 — Bearer token processing
+
+Spring finds:
+
+```http
+Authorization: Bearer eyJ...
+```
+
+and extracts:
+
+```text
+eyJ...
+```
+
+```text
+BearerTokenAuthenticationFilter
+              │
+              ▼
+         Access Token
+```
+
+### Stage 3 — Token validation
+
+Spring parses the JWT:
+
+```text
+Header.Payload.Signature
+```
+
+and verifies:
+
+```text
+✓ JWT structure
+✓ Signature
+✓ Expiration
+✓ Not-before, if present
+```
+
+If invalid:
+
+```text
+401 Unauthorized
+```
+
+### Stage 4 — Issuer validation
+
+Token:
+
+```json
+{
+  "iss": "http://localhost:8080/realms/shop"
+}
+```
+
+Configuration:
+
+```yaml
+issuer-uri: http://localhost:8080/realms/shop
+```
+
+Result:
+
+```text
+✓ Trusted issuer
+```
+
+### Stage 5 — Audience validation
+
+Token:
+
+```json
+{
+  "aud": ["shop-api"]
+}
+```
+
+Resource Server expects:
+
+```text
+shop-api
+```
+
+Result:
+
+```text
+✓ Correct audience
+```
+
+### Stage 6 — Scope validation
+
+Token:
+
+```json
+{
+  "scope": "products:read orders:read"
+}
+```
+
+Endpoint requires:
+
+```text
+orders:read
+```
+
+Result:
+
+```text
+✓ Scope is present
+```
+
+### Stage 7 — Authentication object
+
+Spring creates an authenticated principal:
+
+```text
+Authentication
+     │
+     ├── Principal
+     │      └── Jwt
+     │
+     ├── Authorities
+     │      ├── SCOPE_products:read
+     │      ├── SCOPE_orders:read
+     │      └── ROLE_CUSTOMER
+     │
+     └── Authenticated = true
+```
+
+The controller can access it through:
+
+```java
+Authentication authentication
+```
+
+## Stage 8 — Resource Authorization
+
+Now the application asks:
+
+```text
+Who is making the request?
+```
+
+JWT:
+
+```json
+{
+  "sub": "alice"
+}
+```
+
+Order:
+
+```json
+{
+  "id": 1001,
+  "customerId": "alice",
+  "product": "Laptop"
+}
+```
+
+Check:
+
+```text
+token.sub == order.customerId
+```
+
+Result:
+
+```text
+alice == alice
+
+    ✓
+```
+
+Resource authorization succeeds.
+
+## Stage 9 — Controller Executes
+
+The controller now returns:
+
+```java
+return order;
+```
+
+Spring serializes it:
+
+```json
+{
+  "id": 1001,
+  "customerId": "alice",
+  "product": "Laptop",
+  "quantity": 1
+}
+```
+
+The protected resource has been returned.
+
+## Complete Flow
+
+Putting everything together:
+
+```text
+                    CLIENT
+                      │
+                      │
+                      │ GET /api/orders/1001
+                      │ Authorization: Bearer JWT
+                      ▼
+          ┌─────────────────────────┐
+          │ Spring Security         │
+          │ Filter Chain            │
+          └────────────┬────────────┘
+                       │
+                       ▼
+          ┌─────────────────────────┐
+          │ Bearer Token Processing │
+          │                         │
+          │ Extract JWT             │
+          └────────────┬────────────┘
+                       │
+                       ▼
+          ┌─────────────────────────┐
+          │ Token Validation        │
+          │                         │
+          │ Signature               │
+          │ Expiration              │
+          │ Structure               │
+          └────────────┬────────────┘
+                       │
+                       ▼
+          ┌─────────────────────────┐
+          │ Issuer Validation       │
+          │                         │
+          │ iss == trusted issuer   │
+          └────────────┬────────────┘
+                       │
+                       ▼
+          ┌─────────────────────────┐
+          │ Audience Validation     │
+          │                         │
+          │ aud == shop-api         │
+          └────────────┬────────────┘
+                       │
+                       ▼
+          ┌─────────────────────────┐
+          │ Scope Validation        │
+          │                         │
+          │ orders:read             │
+          └────────────┬────────────┘
+                       │
+                       ▼
+          ┌─────────────────────────┐
+          │ Authentication Created  │
+          │                         │
+          │ sub = alice             │
+          │ role = CUSTOMER         │
+          └────────────┬────────────┘
+                       │
+                       ▼
+          ┌─────────────────────────┐
+          │ Resource Authorization  │
+          │                         │
+          │ Can Alice access        │
+          │ order 1001?             │
+          └────────────┬────────────┘
+                       │
+                       ▼
+                ┌─────────────┐
+                │  Controller  │
+                └──────┬──────┘
+                       │
+                       ▼
+                ┌─────────────┐
+                │ OrderService│
+                └──────┬──────┘
+                       │
+                       ▼
+                ┌─────────────┐
+                │ Order 1001  │
+                └──────┬──────┘
+                       │
+                       ▼
+              Protected Resource
+                       │
+                       ▼
+                     CLIENT
+```
+
+## Where Does Token Introspection Fit?
+
+Everything above used a **JWT/self-contained access token**.
+
+If instead Keycloak issues an **opaque/reference token**, the flow changes.
+
+Instead of:
+
+```text
+Client
+  │
+  │ opaque token
+  ▼
+Resource Server
+  │
+  │ locally validate JWT
+  ▼
+Authorization
+```
+
+we have:
+
+```text
+Client
+  │
+  │ opaque token
+  ▼
+Resource Server
+  │
+  │ introspection request
+  ▼
+Keycloak
+  │
+  │ active + claims
+  ▼
+Resource Server
+  │
+  ├── issuer
+  ├── audience
+  ├── expiration
+  ├── scopes
+  └── authorization
+  │
+  ▼
+Protected Resource
+```
+
+Spring configuration would use:
+
+```yaml
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        opaquetoken:
+          introspection-uri: http://localhost:8080/realms/shop/protocol/openid-connect/token/introspect
+          client-id: shop-api
+          client-secret: secret
+```
+
+Instead of:
+
+```yaml
+resourceserver:
+  jwt:
+    issuer-uri: ...
+```
+
+So:
+
+```text
+JWT Resource Server
+        │
+        └── Validate token locally
+
+Opaque Token Resource Server
+        │
+        └── Ask Authorization Server
+            through introspection
+```
+
+## Spring Security Mapping
+
+| OAuth Resource Server responsibility | Spring Security                                                           |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| **Bearer Token Processing**          | `BearerTokenAuthenticationFilter`                                         |
+| **Token Validation**                 | `JwtDecoder` / JWT validators                                             |
+| **Issuer Validation**                | `JwtValidators.createDefaultWithIssuer(...)`                              |
+| **Audience Validation**              | Custom `OAuth2TokenValidator<Jwt>`                                        |
+| **Scope Validation**                 | `hasAuthority("SCOPE_orders:read")`                                       |
+| **Token Introspection**              | `opaquetoken` + introspection endpoint                                    |
+| **Resource Authorization**           | `authorizeHttpRequests`, method security, application authorization logic |
+| **Protected Resource**               | `@RestController` / service layer                                         |
+
+The key conceptual separation is:
+
+```text
+                    Resource Server
+                           │
+        ┌──────────────────┴──────────────────┐
+        │                                     │
+        ▼                                     ▼
+  TOKEN SECURITY                         RESOURCE SECURITY
+        │                                     │
+        ├── Bearer processing                 ├── Scope
+        ├── Signature                         ├── Role
+        ├── Expiration                        ├── Ownership
+        ├── Issuer                            ├── Business rules
+        ├── Audience                          └── Resource authorization
+        └── Introspection
+```
+
+**the first group establishes that the access token can be trusted; the second group determines what the authenticated principal is actually allowed to do with the protected resource.**

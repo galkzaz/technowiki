@@ -1,0 +1,1733 @@
+
+
+
+## Separate Chaining
+│
+## Open Addressing
+#### Python
+This example implements an **open-addressing hash table** using **probing** rather than separate linked lists. The two important methods are `add()` and `delete()`.
+
+The key idea is that **all elements live directly inside the array `bins`**. When a collision occurs, the table probes another position.
+
+The class assumes the user
+will provide a hash function that produces a valid index in the `range [0, b)` and a
+probe function for open addressing; plausible alternatives are provided by default
+using Python’s built-in hash method. This implementation allows elements to be
+deleted and it stores a deleted list to ensure the open addressing chains do not
+break. The following implementation follows set semantics for a collection, and only
+allows for unique membership in the hash table.
+
+```python
+class Hashtable:
+    def __init__(self, b=11, hashFunction=None, probeFunction=None):
+        """
+        Initialize an open-addressing hash table.
+
+        Parameters:
+            b              : Number of bins.
+            hashFunction   : Function(value, size) -> initial index.
+            probeFunction  : Function(index, size, probe_number) -> next index.
+        """
+
+        self.b = b
+
+        # Stores the actual values.
+        self.bins = [None] * b
+
+        # True means the slot contains a deleted/tombstone entry.
+        self.deleted = [False] * b
+
+        # Use the supplied hash function or Python's built-in hash().
+        if hashFunction:
+            self.hashFunction = hashFunction
+        else:
+            self.hashFunction = lambda value, size: hash(value) % size
+
+        # Use the supplied probe function or linear probing.
+        #
+        # hk = current index
+        # size = table size
+        # i = probe number
+        #
+        # We move one position at a time.
+        if probeFunction:
+            self.probeFunction = probeFunction
+        else:
+            self.probeFunction = lambda hk, size, i: (hk + 1) % size
+
+    # ---------------------------------------------------------
+    # ADD
+    # ---------------------------------------------------------
+
+    def add(self, value):
+        """
+        Add value to the hash table.
+
+        Returns:
+            Positive number = number of probes used.
+            Negative value   = insertion failed.
+
+        Duplicate values are not inserted.
+        """
+
+        # Calculate the initial hash position.
+        hk = self.hashFunction(value, self.b)
+
+        # Probe counter.
+        ctr = 1
+
+        while ctr <= self.b:
+
+            # -------------------------------------------------
+            # Case 1:
+            # Empty slot OR deleted slot
+            # -------------------------------------------------
+
+            if self.bins[hk] is None or self.deleted[hk]:
+
+                self.bins[hk] = value
+
+                # The slot is now active again.
+                self.deleted[hk] = False
+
+                return ctr
+
+            # -------------------------------------------------
+            # Case 2:
+            # Value already exists
+            # -------------------------------------------------
+
+            if self.bins[hk] == value and not self.deleted[hk]:
+                return ctr
+
+            # -------------------------------------------------
+            # Case 3:
+            # Collision
+            # -------------------------------------------------
+
+            hk = self.probeFunction(hk, self.b, ctr)
+            ctr += 1
+
+        # No available position was found.
+        return -self.b
+
+    # ---------------------------------------------------------
+    # CONTAINS
+    # ---------------------------------------------------------
+
+    def contains(self, value):
+        """
+        Search for value.
+
+        Returns:
+            Positive number = number of probes if found.
+            Negative value   = value was not found.
+        """
+
+        hk = self.hashFunction(value, self.b)
+        ctr = 1
+
+        while ctr <= self.b:
+
+            # -------------------------------------------------
+            # An actually empty slot means the probing chain
+            # ends here.
+            # -------------------------------------------------
+
+            if self.bins[hk] is None:
+                return -ctr
+
+            # -------------------------------------------------
+            # Found the value.
+            # -------------------------------------------------
+
+            if self.bins[hk] == value and not self.deleted[hk]:
+                return ctr
+
+            # -------------------------------------------------
+            # Deleted slot or different value.
+            # Continue probing.
+            # -------------------------------------------------
+
+            hk = self.probeFunction(hk, self.b, ctr)
+            ctr += 1
+
+        return -self.b
+
+    # ---------------------------------------------------------
+    # DELETE
+    # ---------------------------------------------------------
+
+    def delete(self, value):
+        """
+        Delete value from the hash table.
+
+        The value is not physically removed.
+        Instead, the slot is marked as deleted.
+
+        Returns:
+            Positive number = number of probes used.
+            Negative value   = value was not found.
+        """
+
+        hk = self.hashFunction(value, self.b)
+        ctr = 1
+
+        while ctr <= self.b:
+
+            # -------------------------------------------------
+            # Empty slot means the value cannot be farther
+            # along this probing chain.
+            # -------------------------------------------------
+
+            if self.bins[hk] is None:
+                return -ctr
+
+            # -------------------------------------------------
+            # Found active value.
+            # -------------------------------------------------
+
+            if self.bins[hk] == value and not self.deleted[hk]:
+
+                # Mark the slot as a tombstone.
+                self.deleted[hk] = True
+
+                return ctr
+
+            # -------------------------------------------------
+            # Continue probing.
+            # -------------------------------------------------
+
+            hk = self.probeFunction(hk, self.b, ctr)
+            ctr += 1
+
+        return -self.b
+
+    # ---------------------------------------------------------
+    # DISPLAY
+    # ---------------------------------------------------------
+
+    def display(self):
+        """Display the contents of the hash table."""
+
+        print("\nIndex | Value       | State")
+        print("--------------------------------")
+
+        for i in range(self.b):
+
+            if self.bins[i] is None:
+                value = "None"
+                state = "EMPTY"
+
+            elif self.deleted[i]:
+                value = str(self.bins[i])
+                state = "DELETED"
+
+            else:
+                value = str(self.bins[i])
+                state = "ACTIVE"
+
+            print(f"{i:5} | {value:11} | {state}")
+
+    # ---------------------------------------------------------
+    # SIZE
+    # ---------------------------------------------------------
+
+    def size(self):
+        """Return the number of active elements."""
+
+        count = 0
+
+        for i in range(self.b):
+
+            if self.bins[i] is not None and not self.deleted[i]:
+                count += 1
+
+        return count
+
+    # ---------------------------------------------------------
+    # IS EMPTY
+    # ---------------------------------------------------------
+
+    def is_empty(self):
+        """Return True if the table contains no active elements."""
+
+        return self.size() == 0
+
+    # ---------------------------------------------------------
+    # IS FULL
+    # ---------------------------------------------------------
+
+    def is_full(self):
+        """
+        Return True if there are no physically empty slots.
+
+        Note:
+            A table can be physically full while still containing
+            deleted/tombstone slots that can be reused.
+        """
+
+        return all(value is not None for value in self.bins)
+
+
+# =============================================================
+# TESTING
+# =============================================================
+
+def test_basic_insertion():
+    print("\n" + "=" * 60)
+    print("TEST 1: BASIC INSERTION")
+    print("=" * 60)
+
+    table = Hashtable(11)
+
+    print("Adding 10...")
+    print("Probes:", table.add(10))
+
+    print("Adding 20...")
+    print("Probes:", table.add(20))
+
+    print("Adding 30...")
+    print("Probes:", table.add(30))
+
+    table.display()
+
+    print("\nActive elements:", table.size())
+
+
+def test_duplicates():
+    print("\n" + "=" * 60)
+    print("TEST 2: DUPLICATE INSERTION")
+    print("=" * 60)
+
+    table = Hashtable(11)
+
+    print("Adding 10...")
+    table.add(10)
+
+    print("Adding 10 again...")
+    probes = table.add(10)
+
+    print("Result:", probes)
+
+    table.display()
+
+    print("\nSize should be 1.")
+    print("Actual size:", table.size())
+
+
+def test_search():
+    print("\n" + "=" * 60)
+    print("TEST 3: SEARCH")
+    print("=" * 60)
+
+    table = Hashtable(11)
+
+    table.add(10)
+    table.add(20)
+    table.add(30)
+
+    table.display()
+
+    print("\nSearching for 20...")
+
+    result = table.contains(20)
+
+    if result > 0:
+        print(f"20 found after {result} probe(s).")
+    else:
+        print("20 not found.")
+
+    print("\nSearching for 99...")
+
+    result = table.contains(99)
+
+    if result > 0:
+        print(f"99 found after {result} probe(s).")
+    else:
+        print(f"99 not found. Return value = {result}")
+
+
+def test_collision():
+    print("\n" + "=" * 60)
+    print("TEST 4: COLLISION HANDLING")
+    print("=" * 60)
+
+    # Use a small table so collisions are easy to demonstrate.
+    table = Hashtable(7)
+
+    print("Table size = 7")
+
+    print("\nAdding 10...")
+    print("Probes:", table.add(10))
+
+    print("\nAdding 17...")
+    print("Probes:", table.add(17))
+
+    print("\nAdding 24...")
+    print("Probes:", table.add(24))
+
+    print("\nAll three values have:")
+    print("10 % 7 =", 10 % 7)
+    print("17 % 7 =", 17 % 7)
+    print("24 % 7 =", 24 % 7)
+
+    print("\nTherefore they collide at index 3.")
+
+    table.display()
+
+
+def test_delete():
+    print("\n" + "=" * 60)
+    print("TEST 5: DELETION")
+    print("=" * 60)
+
+    table = Hashtable(7)
+
+    table.add(10)
+    table.add(17)
+    table.add(24)
+
+    print("Before deletion:")
+    table.display()
+
+    print("\nDeleting 17...")
+
+    result = table.delete(17)
+
+    print("Delete result:", result)
+
+    print("\nAfter deletion:")
+    table.display()
+
+
+def test_delete_preserves_chain():
+    print("\n" + "=" * 60)
+    print("TEST 6: DELETION PRESERVES PROBING CHAIN")
+    print("=" * 60)
+
+    table = Hashtable(7)
+
+    # All three values hash to index 3.
+    table.add(10)
+    table.add(17)
+    table.add(24)
+
+    print("Initial table:")
+    table.display()
+
+    print("\nDeleting 17...")
+
+    table.delete(17)
+
+    print("\nTable after deleting 17:")
+    table.display()
+
+    print("\nSearching for 24...")
+
+    result = table.contains(24)
+
+    if result > 0:
+        print(
+            f"24 was found after {result} probe(s)."
+        )
+    else:
+        print("24 was not found!")
+
+    print("\nThis demonstrates why we need tombstones.")
+
+    print("""
+If deletion had changed bins[4] to None,
+the search for 24 could stop too early.
+
+Instead:
+
+    bins[4] = 17
+    deleted[4] = True
+
+The search knows that the slot was previously occupied
+and therefore continues probing.
+""")
+
+
+def test_reuse_deleted_slot():
+    print("\n" + "=" * 60)
+    print("TEST 7: REUSE DELETED SLOT")
+    print("=" * 60)
+
+    table = Hashtable(7)
+
+    table.add(10)
+    table.add(17)
+    table.add(24)
+
+    print("Initial table:")
+    table.display()
+
+    print("\nDeleting 17...")
+    table.delete(17)
+
+    print("\nAfter deletion:")
+    table.display()
+
+    print("\nAdding 31...")
+
+    # 31 % 7 = 3
+    # The original chain begins at index 3.
+    # The deleted slot can be reused.
+    result = table.add(31)
+
+    print("Insertion probes:", result)
+
+    print("\nFinal table:")
+    table.display()
+
+
+def test_not_found_after_deletion():
+    print("\n" + "=" * 60)
+    print("TEST 8: SEARCH AFTER DELETION")
+    print("=" * 60)
+
+    table = Hashtable(7)
+
+    table.add(10)
+    table.add(17)
+    table.add(24)
+
+    print("Deleting 17...")
+    table.delete(17)
+
+    print("\nSearching for 17...")
+
+    result = table.contains(17)
+
+    if result > 0:
+        print("17 is still present!")
+    else:
+        print("17 correctly reported as absent.")
+        print("Return value:", result)
+
+
+def test_custom_hash_function():
+    print("\n" + "=" * 60)
+    print("TEST 9: CUSTOM HASH FUNCTION")
+    print("=" * 60)
+
+    # Force every value to start at index 0.
+    def custom_hash(value, size):
+        return 0
+
+    table = Hashtable(
+        b=7,
+        hashFunction=custom_hash
+    )
+
+    print("Custom hash function always returns index 0.")
+
+    print("\nAdding 10...")
+    print("Probes:", table.add(10))
+
+    print("Adding 20...")
+    print("Probes:", table.add(20))
+
+    print("Adding 30...")
+    print("Probes:", table.add(30))
+
+    table.display()
+
+
+def test_custom_probe_function():
+    print("\n" + "=" * 60)
+    print("TEST 10: CUSTOM PROBE FUNCTION")
+    print("=" * 60)
+
+    def custom_hash(value, size):
+        return value % size
+
+    # Linear probing:
+    # 0 -> 1 -> 2 -> 3 -> ...
+    def linear_probe(hk, size, i):
+        return (hk + 1) % size
+
+    table = Hashtable(
+        b=7,
+        hashFunction=custom_hash,
+        probeFunction=linear_probe
+    )
+
+    table.add(10)
+    table.add(17)
+    table.add(24)
+
+    table.display()
+
+
+def test_full_table():
+    print("\n" + "=" * 60)
+    print("TEST 11: FULL TABLE")
+    print("=" * 60)
+
+    table = Hashtable(5)
+
+    print("Adding 1...")
+    print("Result:", table.add(1))
+
+    print("Adding 2...")
+    print("Result:", table.add(2))
+
+    print("Adding 3...")
+    print("Result:", table.add(3))
+
+    print("Adding 4...")
+    print("Result:", table.add(4))
+
+    print("Adding 5...")
+    print("Result:", table.add(5))
+
+    table.display()
+
+    print("\nTrying to add 6...")
+
+    result = table.add(6)
+
+    print("Result:", result)
+
+    if result < 0:
+        print("Insertion failed because the table is full.")
+
+
+# =============================================================
+# RUN ALL TESTS
+# =============================================================
+
+if __name__ == "__main__":
+
+    test_basic_insertion()
+
+    test_duplicates()
+
+    test_search()
+
+    test_collision()
+
+    test_delete()
+
+    test_delete_preserves_chain()
+
+    test_reuse_deleted_slot()
+
+    test_not_found_after_deletion()
+
+    test_custom_hash_function()
+
+    test_custom_probe_function()
+
+    test_full_table()
+
+    print("\n" + "=" * 60)
+    print("ALL TESTS COMPLETED")
+    print("=" * 60)
+```
+
+** Basic structure**
+
+The table contains three important pieces:
+
+```python
+self.b = b
+self.bins = [None] * b
+self.deleted = [False] * b
+```
+
+For example, if `b = 7`:
+
+```text
+index:    0    1    2    3    4    5    6
+bins:   None None None None None None None
+deleted: F    F    F    F    F    F    F
+```
+
+There are two arrays:
+
+- `bins`
+
+Stores the actual values.
+
+```text
+bins[3] = 42
+```
+
+means value `42` is currently stored at index `3`.
+
+- `deleted`
+
+Records whether a previously occupied location has been deleted.
+
+```text
+bins[3] = 42
+deleted[3] = False
+```
+
+means `42` is active.
+
+After deleting it:
+
+```text
+bins[3] = 42
+deleted[3] = True
+```
+
+Notice something important:
+
+> The value is **not physically removed** from `bins`.
+
+This is necessary to preserve the probing chain.
+
+---
+
+** Why do we need `deleted`?**
+
+This is the most important concept in this implementation.
+
+Suppose the table has size 7 and the hash function produces:
+
+```text
+hash(A) = 2
+hash(B) = 2
+hash(C) = 2
+```
+
+Assume the probe sequence is:
+
+```text
+2 → 3 → 4 → 5 → ...
+```
+
+After inserting:
+
+```text
+A → 2
+B → 3
+C → 4
+```
+
+the table is:
+
+```text
+index:   0    1    2    3    4    5    6
+        ---  ---   A    B    C   ---  ---
+```
+
+Now suppose we delete `B`.
+
+If we simply did:
+
+```python
+bins[3] = None
+```
+
+we would get:
+
+```text
+index:   0    1    2    3    4    5    6
+        ---  ---   A   None   C   ---  ---
+```
+
+Now search for `C`.
+
+It starts at:
+
+```text
+2
+```
+
+finds `A`, then probes:
+
+```text
+3
+```
+
+and sees `None`.
+
+The search might conclude:
+
+> "There is no C."
+
+But `C` is actually at index 4.
+
+Therefore, in open addressing:
+
+> **An empty slot means "the probing chain ends here."**
+
+But a deleted slot means:
+
+> **"Something used to be here, so keep probing."**
+
+That's why the implementation uses:
+
+```python
+self.deleted[hk] = True
+```
+
+instead of simply making the bin empty.
+
+---
+
+** Constructor**
+
+The constructor is:
+
+```python
+def __init__(self, b=1009, hashFunction=None, probeFunction=None):
+```
+
+It accepts:
+
+* `b` → number of bins
+* `hashFunction` → determines the initial position
+* `probeFunction` → determines where to look next
+
+---
+
+** Default hash function**
+
+```python
+self.hashFunction = lambda value, size: hash(value) % size
+```
+
+For example:
+
+```python
+hashFunction(42, 10)
+```
+
+might produce:
+
+```text
+2
+```
+
+because:
+
+```text
+hash(42) % 10 = 2
+```
+
+The `% size` guarantees:
+
+```text
+0 <= index < size
+```
+
+---
+
+** The probe function**
+
+The default probe function is:
+
+```python
+self.probeFunction = lambda hk, size, i: (hk + 37) % size
+```
+
+It moves from the current position by 37.
+
+For example, with:
+
+```text
+size = 100
+hk = 10
+```
+
+the next position is:
+
+```text
+(10 + 37) % 100
+= 47
+```
+
+Then:
+
+```text
+47 → 84 → 21 → 58 → ...
+```
+
+The important point is that the **hash function chooses the initial position**, while the **probe function chooses subsequent positions**.
+
+---
+
+** `add()` operation**
+
+The code shows how open addressing adds elements into empty
+bins or bins marked as deleted. It maintains a counter that ensures the worst-case
+performance is O(b). The caller can determine that add was successful if the func‐
+tion returns a positive number; if probeFunction is unable to locate an empty bin in
+b tries, then a negative number is returned.
+The method starts with:
+
+```python
+hk = self.hashFunction(value, self.b)
+ctr = 1
+```
+
+`hk` means **hash key/index**.
+
+Suppose:
+
+```text
+value = 50
+hash(value) % b = 4
+```
+
+Then:
+
+```text
+hk = 4
+ctr = 1
+```
+
+---
+
+** First condition in `add()`**
+
+The code checks:
+
+```python
+if self.bins[hk] is None or self.deleted[hk]:
+```
+
+This means:
+
+> Is this location either completely empty or previously deleted?
+
+If yes:
+
+```python
+self.bins[hk] = value
+self.deleted[hk] = False
+return ctr
+```
+
+So the value is inserted.
+
+For example:
+
+```text
+before:
+
+index:   0   1   2   3   4   5
+bins:   --- --- --- --- --- ---
+                         ↑
+                        hk=4
+```
+
+Insert:
+
+```text
+bins[4] = 50
+```
+
+Result:
+
+```text
+index:   0   1   2   3   4   5
+bins:   --- --- --- --- 50  ---
+```
+
+---
+
+** What if the value is already present?**
+
+The next condition is:
+
+```python
+if self.bins[hk] == value and not self.deleted[hk]:
+    return ctr
+```
+
+This implements **set semantics**.
+
+A set cannot contain duplicates.
+
+For example:
+
+```python
+table.add(50)
+table.add(50)
+```
+
+The second insertion does not create another `50`.
+
+The table remains:
+
+```text
+50
+```
+
+rather than:
+
+```text
+50
+50
+```
+
+The method simply returns the number of probes required to discover that the value already exists.
+
+---
+
+** What happens after a collision?**
+
+Suppose:
+
+```text
+hash(50) → 4
+hash(60) → 4
+```
+
+When inserting `60`, position 4 contains `50`.
+
+Therefore neither condition succeeds:
+
+```python
+self.bins[hk] is None
+```
+
+is false, and:
+
+```python
+self.deleted[hk]
+```
+
+is false.
+
+And:
+
+```python
+self.bins[hk] == value
+```
+
+is also false.
+
+So we probe another position:
+
+```python
+hk = self.probeFunction(hk, self.b, ctr)
+ctr += 1
+```
+
+For example:
+
+```text
+50 → index 4
+
+60:
+initial position = 4
+occupied
+      ↓
+probe
+      ↓
+index 41
+```
+
+Then we check index 41.
+
+---
+
+** The probe counter**
+
+The loop is:
+
+```python
+while ctr <= self.b:
+```
+
+This guarantees that the algorithm doesn't probe forever.
+
+At most `b` positions are investigated.
+
+Therefore:
+
+```text
+Worst-case add = O(b)
+```
+
+where `b` is the number of bins.
+
+Since normally:
+
+```text
+b ≈ n
+```
+
+where `n` is the number of stored elements/capacity scale, this is commonly described as potentially **O(n)** in the worst case.
+
+---
+
+** Why return the number of probes?**
+
+The method returns:
+
+```python
+return ctr
+```
+
+on success.
+
+For example:
+
+```text
+return 1
+```
+
+means:
+
+> The value was found/inserted at the initial hash position.
+
+While:
+
+```text
+return 2
+```
+
+means:
+
+> The initial position was occupied, so one additional probe was required.
+
+For example:
+
+```text
+add(10) → 1
+add(20) → 1
+add(30) → 3
+```
+
+The return value therefore provides useful information about the amount of probing.
+
+---
+
+** What does `-self.b` mean?**
+
+At the end:
+
+```python
+return -self.b
+```
+
+means:
+
+> We tried `b` positions but couldn't find a usable location.
+
+For example, with:
+
+```text
+b = 10
+```
+
+failure returns:
+
+```text
+-10
+```
+
+So the caller can distinguish:
+
+```text
+positive → success
+negative → failure
+```
+
+The comment describes this explicitly:
+
+```text
+positive number → success
+negative number → failure
+```
+
+---
+
+** The complete insertion algorithm**
+
+Conceptually:
+
+```text
+              hash(value)
+                   │
+                   ▼
+             initial index
+                   │
+                   ▼
+          ┌─────────────────┐
+          │ Is slot empty   │
+          │ or deleted?     │
+          └────────┬────────┘
+                   │
+              Yes  │  No
+                   │
+                   ▼
+                insert
+                   │
+                   ▼
+                return
+
+If occupied:
+       │
+       ▼
+Is it the same value?
+       │
+   Yes │ No
+       │
+       ▼
+    return
+          │
+          ▼
+       probe next
+          │
+          ▼
+       repeat
+```
+
+---
+
+** `delete()` operation**
+
+Now look at:
+
+```python
+def delete(self, value):
+```
+
+The delete code is
+nearly identical to the code to check whether the hash table contains a value; specifi‐
+cally, the contains method (not reproduced here) omits the code that marks
+self.deleted[hk] = True. Observe how this code uses the probeFunction to
+identify the next bin to investigate.
+
+It starts similarly:
+
+```python
+hk = self.hashFunction(value, self.b)
+ctr = 1
+```
+
+So deletion follows **exactly the same probing sequence** used when the value was inserted.
+
+That's essential.
+
+---
+
+** First condition during deletion**
+
+```python
+if self.bins[hk] is None:
+    return -ctr
+```
+
+This is different from the insertion logic.
+
+If we encounter a genuinely empty slot:
+
+```text
+bins[hk] is None
+```
+
+we know the value cannot appear later in this probe chain.
+
+Therefore the search can stop.
+
+For example:
+
+```text
+probe sequence:
+
+2 → 3 → 4 → 5
+
+table:
+
+2 = A
+3 = B
+4 = None
+5 = C
+```
+
+If searching for `D`, we stop at index 4.
+
+We **do not** continue to 5 because an actual `None` indicates the chain was never extended beyond that position.
+
+---
+
+** What happens if the value is found?**
+
+The code is:
+
+```python
+if self.bins[hk] == value and not self.deleted[hk]:
+    self.deleted[hk] = True
+    return ctr
+```
+
+Notice:
+
+```python
+self.bins[hk] = value
+```
+
+is **not changed**.
+
+Instead:
+
+```python
+self.deleted[hk] = True
+```
+
+marks the location as deleted.
+
+For example:
+
+```text
+Before:
+
+index:    0   1   2   3   4
+bins:    --- --- A   B   C
+deleted:  F   F   F   F   F
+```
+
+Delete `B`:
+
+```text
+index:    0   1   2   3   4
+bins:    --- --- A   B   C
+deleted:  F   F   F   T   F
+                       ↑
+                    deleted
+```
+
+The `B` remains physically in the array, but logically it is no longer a member.
+
+---
+
+** Why `contains()` needs `deleted`**
+
+Imagine:
+
+```text
+index:    0   1   2   3   4
+bins:    --- --- A   B   C
+deleted:  F   F   F   T   F
+```
+
+Searching for `C`:
+
+```text
+hash(C) → 2
+```
+
+Search:
+
+```text
+index 2 → A
+```
+
+not C.
+
+Probe:
+
+```text
+index 3 → B
+```
+
+but:
+
+```python
+deleted[3] == True
+```
+
+so B is treated as deleted.
+
+Continue:
+
+```text
+index 4 → C
+```
+
+Found.
+
+Without the deleted marker, the search could incorrectly stop at index 3.
+
+---
+
+** Deletion followed by insertion**
+
+The `deleted` mechanism also allows the space to be reused.
+
+Suppose:
+
+```text
+index:    0   1   2   3   4
+bins:    --- --- A   B   C
+deleted:  F   F   F   T   F
+```
+
+Now insert `D`, and suppose its probe sequence reaches index 3.
+
+The insertion condition:
+
+```python
+if self.bins[hk] is None or self.deleted[hk]:
+```
+
+recognizes:
+
+```text
+deleted[3] == True
+```
+
+and reuses the location:
+
+```text
+bins[3] = D
+deleted[3] = False
+```
+
+Result:
+
+```text
+index:    0   1   2   3   4
+bins:    --- --- A   D   C
+deleted:  F   F   F   F   F
+```
+
+---
+
+** Important distinction: `None` vs deleted**
+
+This implementation effectively has **three states** for a slot:
+
+| `bins[i]` | `deleted[i]` | Meaning                          |
+| --------- | -----------: | -------------------------------- |
+| `None`    |      `False` | Never occupied / genuinely empty |
+| value     |      `False` | Active element                   |
+| value     |       `True` | Deleted element / tombstone      |
+
+For example:
+
+```text
+None + False
+```
+
+means:
+
+```text
+EMPTY
+```
+
+while:
+
+```text
+42 + False
+```
+
+means:
+
+```text
+ACTIVE
+```
+
+and:
+
+```text
+42 + True
+```
+
+means:
+
+```text
+DELETED
+```
+
+This third state is called a **tombstone**.
+
+---
+
+** Why doesn't deletion set `bins[hk] = None`?**
+
+Because doing this:
+
+```python
+self.bins[hk] = None
+```
+
+would destroy information needed by future searches.
+
+Instead:
+
+```python
+self.deleted[hk] = True
+```
+
+preserves the probing chain.
+
+This is one of the defining implementation details of deletion in open addressing.
+
+---
+
+** `add()` and `delete()` side by side**
+
+The two algorithms are closely related:
+
+| `add()`                    | `delete()`                 |
+| -------------------------- | -------------------------- |
+| Compute hash               | Compute hash               |
+| Check current slot         | Check current slot         |
+| Empty/deleted → insert     | Empty → stop, not found    |
+| Same value → don't insert  | Same active value → delete |
+| Otherwise probe            | Otherwise probe            |
+| Repeat                     | Repeat                     |
+| Return positive on success | Return positive on success |
+| Return `-b` if exhausted   | Return `-b` if exhausted   |
+
+The crucial difference is:
+
+- `add()`
+
+A deleted slot is **available**:
+
+```python
+if self.bins[hk] is None or self.deleted[hk]:
+```
+
+- `delete()`
+
+A deleted slot must be **skipped**:
+
+```python
+if self.bins[hk] == value and not self.deleted[hk]:
+```
+
+---
+
+** Complete working example**
+
+The original example only provides the core methods. Here is a small runnable version with `contains()` and testing:
+
+```python
+class Hashtable:
+    def __init__(self, b=11, hashFunction=None, probeFunction=None):
+        """Initialize an open-addressing hash table."""
+
+        self.b = b
+
+        # Actual values
+        self.bins = [None] * b
+
+        # Tombstone markers
+        self.deleted = [False] * b
+
+        # Hash function
+        if hashFunction:
+            self.hashFunction = hashFunction
+        else:
+            self.hashFunction = lambda value, size: hash(value) % size
+
+        # Probe function
+        if probeFunction:
+            self.probeFunction = probeFunction
+        else:
+            self.probeFunction = lambda hk, size, i: (hk + 1) % size
+
+    def add(self, value):
+        """Insert value if it is not already present."""
+
+        hk = self.hashFunction(value, self.b)
+        ctr = 1
+
+        while ctr <= self.b:
+
+            # Empty or deleted slot
+            if self.bins[hk] is None or self.deleted[hk]:
+                self.bins[hk] = value
+                self.deleted[hk] = False
+                return ctr
+
+            # Already present
+            if self.bins[hk] == value and not self.deleted[hk]:
+                return ctr
+
+            # Collision: probe next position
+            hk = self.probeFunction(hk, self.b, ctr)
+            ctr += 1
+
+        # Table is full for this probe sequence
+        return -self.b
+
+    def contains(self, value):
+        """Return the number of probes if found, otherwise negative."""
+
+        hk = self.hashFunction(value, self.b)
+        ctr = 1
+
+        while ctr <= self.b:
+
+            # A genuinely empty slot ends the search.
+            if self.bins[hk] is None:
+                return -ctr
+
+            # Found active value
+            if self.bins[hk] == value and not self.deleted[hk]:
+                return ctr
+
+            # Continue probing
+            hk = self.probeFunction(hk, self.b, ctr)
+            ctr += 1
+
+        return -self.b
+
+    def delete(self, value):
+        """Delete value without breaking the probing chain."""
+
+        hk = self.hashFunction(value, self.b)
+        ctr = 1
+
+        while ctr <= self.b:
+
+            # Value cannot be farther along this chain.
+            if self.bins[hk] is None:
+                return -ctr
+
+            # Found active value
+            if self.bins[hk] == value and not self.deleted[hk]:
+                self.deleted[hk] = True
+                return ctr
+
+            # Continue probing
+            hk = self.probeFunction(hk, self.b, ctr)
+            ctr += 1
+
+        return -self.b
+
+    def display(self):
+        """Display the table."""
+
+        for i in range(self.b):
+            if self.bins[i] is None:
+                state = "EMPTY"
+            elif self.deleted[i]:
+                state = f"{self.bins[i]} (DELETED)"
+            else:
+                state = str(self.bins[i])
+
+            print(f"{i}: {state}")
+
+
+# -------------------------------------------------------
+# Testing
+# -------------------------------------------------------
+
+table = Hashtable(11)
+
+print("Add 10:", table.add(10))
+print("Add 21:", table.add(21))
+print("Add 32:", table.add(32))
+
+print("\nHash table:")
+table.display()
+
+print("\nContains 21:", table.contains(21))
+
+print("\nDelete 21:", table.delete(21))
+
+print("\nAfter deleting 21:")
+table.display()
+
+print("\nContains 32:", table.contains(32))
+
+print("\nAdd 43:", table.add(43))
+
+print("\nFinal table:")
+table.display()
+```
+
+The interesting part of the test is:
+
+```text
+10
+21
+32
+```
+
+If they collide, they form a probing chain.
+
+Then:
+
+```python
+table.delete(21)
+```
+
+doesn't break that chain.
+
+Later:
+
+```python
+table.contains(32)
+```
+
+can still find `32`.
+
+And a later insertion can reuse the deleted position.
+
+---
+
+** Complexity**
+
+Let:
+
+* `b` = number of bins
+* `n` = number of stored elements
+* `α = n / b` = **load factor**
+
+The worst case is:
+
+```text
+add       O(b)
+contains  O(b)
+delete    O(b)
+```
+
+because each operation may inspect all `b` positions.
+
+With a sufficiently low load factor and a good probing strategy, the expected number of probes can be much smaller.
+
+This is why open addressing is normally used with a table that has **additional empty capacity** rather than allowing it to become almost completely full.
+
+---
+
+** The key idea to remember**
+
+The entire implementation can be reduced to four rules:
+
+```text
+1. Hash → find the initial position.
+
+2. Collision → use the probe function to find another position.
+
+3. Empty slot → the search chain ends.
+
+4. Deleted slot → keep probing.
+```
+
+And for deletion:
+
+```text
+DO NOT:
+    bins[index] = None
+
+DO:
+    deleted[index] = True
+```
+
+because a **tombstone preserves the probing chain**.
+
+That `empty vs. deleted` distinction is the central idea behind implementing deletion correctly in an **open-addressing hash table**.
+
+### Linear Probing
+
+### Quadratic Probing
+### Double Hashing

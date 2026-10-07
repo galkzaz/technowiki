@@ -1,0 +1,2687 @@
+---
+id: software-engineering-design-architecture-security-api-security-oauth2-resource-server
+title: OAuth for Native Apps
+sidebar_position: 16
+---
+
+OAuth for **native apps** means OAuth used by applications installed on a device, such as:
+
+* Android apps
+* iOS/iPadOS apps
+* Desktop applications
+* Mobile applications
+
+Like browser-based apps, native apps can’t use a client secret, as that would require that the developer ship the secret in their binary distribution of the application. It has been proven to be relatively easy to decompile and extract the secret. As such, native apps must use an OAuth flow that does not require a preregistered client secret.
+
+The important difference from a traditional server-side web application is that a native app **cannot safely keep a client secret**. The app is distributed to users, and an attacker can inspect or modify it.
+
+The current industry best practice is to use the Authorization Flow along with the PKCE extension, omitting the client secret from the request, and to use an external user agent to complete the flow. 
+
+Therefore, native-app OAuth is designed around:
+
+1. **Authorization Code Flow**
+2. **External User-Agent**
+3. **Redirecting back to the native app**
+4. **PKCE**
+5. A secure redirect mechanism such as **claimed HTTPS URLs / App Links / Universal Links**
+
+## Native App OAuth Architecture
+
+A typical architecture looks like this:
+
+```text
+                    ┌─────────────────────┐
+                    │ Authorization       │
+                    │ Server              │
+                    │                     │
+                    │ /authorize          │
+                    │ /token              │
+                    └──────────┬──────────┘
+                               │
+                               │ Authorization Code
+                               │
+                               ▼
+┌──────────────┐       ┌──────────────────────┐
+│ Native App   │       │ External User-Agent  │
+│              │◄─────►│                      │
+│              │       │ System Browser       │
+│ PKCE         │       │                      │
+│ code_verifier│       └──────────────────────┘
+└──────┬───────┘
+       │
+       │ HTTPS / API
+       ▼
+┌──────────────────────┐
+│ Resource Server      │
+│                      │
+│ /api/orders          │
+│ /api/products        │
+└──────────────────────┘
+```
+
+The important point is that the **native app does not display the authorization page itself**.
+
+Instead:
+
+```text
+Native App
+    │
+    │ authorization request
+    ▼
+System Browser
+    │
+    │ user authenticates
+    │ user gives consent
+    ▼
+Authorization Server
+    │
+    │ redirect
+    ▼
+Native App
+```
+
+The browser is acting as the **External User-Agent**.
+
+### Why Native Apps Are Different
+
+Consider a web application:
+
+```text
+Browser
+   │
+   ▼
+Web Server
+   │
+   │ client_secret
+   ▼
+Authorization Server
+```
+
+The server can keep:
+
+```text
+client_id
+client_secret
+```
+
+secret because the user cannot inspect the server's filesystem or executable.
+
+A native application is different:
+
+```text
+User's Phone
+└── ShoppingApp
+```
+
+The application binary is installed on the user's device.
+
+An attacker can potentially:
+
+* reverse-engineer the application
+* inspect configuration
+* extract embedded secrets
+* modify the application
+* impersonate the application
+
+Therefore:
+
+> **A native application is a public OAuth client.**
+
+You should **not** treat a value embedded in the app as a confidential `client_secret`.
+
+This is one of the reasons **PKCE** is so important.
+
+## External User-Agent
+
+An external user agent is typically the device’s native browser, (with a separate security domain from the native app) so that the app cannot access the cookie storage or inspect or modify the page content inside the browser. Since the app can’t reach inside the browser being used in this case, this provides the opportunity for the device to keep users signed in while authorizing different applications, so that they don’t have to enter their credentials each time they authorize a new application.
+
+The **External User-Agent** is the user-agent that is outside the native application.
+
+In practice, this is normally the device's browser or browser-based system component.
+
+In recent years, both iOS and Android have been working to further improve the user experience of OAuth for native apps by providing a native user agent that can be launched from within the application, while still being isolated from the application launching it. The result is that the user no longer needs to leave the application in order to launch a native browser that shares the system cookies. This was first added as SFSafariViewController in iOS 9, and later evolved to SFAuthenticationSession in iOS 11, and ASWebAuthenticationSession in iOS 12.
+
+These recommendations for native apps are published as an RFC 8252, where these concepts are described in more explicit detail.
+
+For example:
+
+```text
+Android
+   │
+   └── Chrome / system browser
+       
+iOS
+   │
+   └── Safari / system browser
+```
+
+The native app launches the authorization request in the external user-agent:
+
+```text
+Native App
+    │
+    │ Open authorization URL
+    ▼
+External User-Agent
+    │
+    ▼
+Authorization Server
+```
+
+The user then performs authentication in that environment.
+
+For example:
+
+```text
+┌──────────────────────────────┐
+│       Authorization Server   │
+│                              │
+│ Sign in                      │
+│                              │
+│ Username: __________         │
+│ Password: __________         │
+│                              │
+│       [ Sign In ]            │
+└──────────────────────────────┘
+```
+
+The native application **doesn't receive the user's password**.
+
+That's an important security property.
+
+### Why Use an External User-Agent?
+It used to be common practice for native apps to embed the OAuth interface in a web view inside the app. This approach has multiple problems, including that the client app can potentially eavesdrop on the user entering their credentials when signing in, or even present a false authorization page. Mobile operating system security is typically implemented in a way where the embedded web view doesn’t share cookies with the system’s native browser, so users have a worse experience because they need to enter their credentials each time as well.
+
+Suppose a malicious application displays a fake OAuth login screen:
+
+```text
+FakeApp
+   │
+   ▼
+"Login with Google"
+
+Username: ______
+Password: ______
+```
+
+The fake application could steal the user's credentials.
+
+The more secure and trusted way to accomplish the authorization flow is by launching a system browser. However, up until the addition of the specialized device APIs, this had the drawback of the user being popped out of the app and launching their browser, then redirecting back to the app, which is also not an ideal user experience.
+
+Using the system browser provides a more trustworthy authentication environment:
+
+```text
+Native App
+     │
+     ▼
+System Browser
+     │
+     ▼
+Authorization Server
+```
+
+The authorization server can also maintain browser authentication state.
+
+For example, the user may already be logged in:
+
+```text
+Browser
+   │
+   └── existing authorization-server session
+```
+
+So the authorization server can recognize the user without requiring the native application to handle credentials.
+
+## System Browser
+Thankfully, the mobile platforms have been addressing the issue. There are now APIs available on iOS and Android for apps to launch a system browser but stay within the context of the application. The API does not not allow the client app to peek inside the browser, getting the security benefits of using an external browser and the user experience benefits of staying within the application the whole time.
+
+Native app developers are strongly encouraged to use these special-purpose APIs, but if they can’t for some reason, fall back to launching an external browser instead of an embedded web view.
+
+Authorization servers should enforce this behavior by attempting to detect whether the authorization URL was launched inside an embedded web view and reject the request if so. The particular techniques for detecting whether the page is being visited in an embedded web view vs the system browser will depend on the platform, but usually involve inspecting the user agent header.
+
+
+The **system browser** is the browser environment provided by the operating system.
+
+For example:
+
+```text
+Android
+   ↓
+System browser / browser app
+
+iOS
+   ↓
+Safari-based system authentication
+```
+
+The important idea is that the authorization request leaves the native application:
+
+```text
+┌───────────────┐
+│ Native App    │
+└───────┬───────┘
+        │
+        │ HTTPS authorization request
+        ▼
+┌───────────────────┐
+│ System Browser    │
+└─────────┬─────────┘
+          │
+          ▼
+┌───────────────────┐
+│ Authorization     │
+│ Server            │
+└───────────────────┘
+```
+
+After authorization, the browser must return the authorization result to the native app.
+
+
+That creates an important question:
+
+> **How does the browser know which native application should receive the redirect?**
+
+This is where redirect URI mechanisms become important.
+
+---
+
+**Returning to the Native App**
+
+After successful authorization, the authorization server sends the browser to the registered redirect URI:
+
+```http
+HTTP/1.1 302 Found
+Location: https://example.com/oauth/callback?code=abc123
+```
+
+For a web application, that's easy:
+
+```text
+https://example.com/oauth/callback
+        │
+        ▼
+Web server
+```
+
+For a native app, we need something that causes the operating system to launch the application.
+
+There are several mechanisms:
+
+```text
+Claimed HTTPS URI
+       │
+       ├── Android App Links
+       │
+       └── iOS Universal Links
+
+or
+
+Custom URL Scheme
+```
+## Redirect URIs
+In order to support a wide range of types of native apps, your server will need to support registering three types of redirect URLs, each to support a slightly different use case.
+
+### URL matching
+### Claimed HTTPS URIs
+
+Both iOS and Android allow apps to register URL patterns that indicate the app should be launched whenver a system browser visits a URL that matches the registered pattern. This is commonly used by apps to “deep link” into the native app, such as the Yelp app opening to the restaurant’s page when a Yelp URL is viewed in the browser.
+
+Normally, when you open:
+
+```text
+https://www.yelp.com/biz/some-restaurant
+```
+
+the system browser handles the URL.
+
+But iOS and Android can be configured so that a particular app says:
+
+> "URLs matching this HTTPS pattern belong to my app."
+
+For example:
+
+```text
+https://www.yelp.com/biz/*
+```
+
+could be associated with the Yelp app.
+
+Then:
+
+```text
+Browser
+   │
+   │ https://www.yelp.com/biz/restaurant-123
+   ▼
+Operating System
+   │
+   │ URL matches verified app association
+   ▼
+Yelp App
+```
+
+This is called **deep linking** because the link takes you directly into a particular location inside the application.
+
+**Why is this useful for OAuth?**
+
+This technique can also be used by apps to register URL a pattern that will launch the app when an authorization server redirects back to the app. If a platform provides this feature(not every platform necessarily gives you the same **verified HTTPS app association** capability.
+), this is the recommended choice for native apps, as this provides the most integrity that the app belongs to the URL it’s matching. This also provides a reasonable fallback in the case that the platform doesn’t support app-claimed URLs.
+
+Suppose your native shopping application is:
+
+```text
+ShoppingApp
+```
+
+and your authorization server is:
+
+```text
+https://auth.example.com
+```
+
+You register this redirect URI:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+The authorization server eventually redirects the browser to:
+
+```text
+https://shop.example.com/oauth/callback?code=ABC123
+```
+
+Normally, the browser would try to open:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+as a web page.
+
+But the operating system has been configured to associate that URL with:
+
+```text
+ShoppingApp
+```
+
+Therefore:
+
+```text
+Authorization Server
+        │
+        │ redirect
+        ▼
+https://shop.example.com/oauth/callback
+        │
+        │ verified URL association
+        ▼
+   ShoppingApp
+```
+
+This is the OAuth use of **HTTPS URL matching**.
+
+A **claimed HTTPS URI** uses a normal HTTPS URL that is associated with a particular native application.
+
+For example:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+This looks exactly like an ordinary web URL.
+
+But the operating system knows:
+
+```text
+https://shop.example.com/oauth/callback
+             │
+             ▼
+        Shopping App
+```
+
+The association is established through mechanisms provided by the operating system.
+
+This is preferable to simply saying:
+
+```text
+"Whenever you see this URL, open my app."
+```
+
+because another application could potentially attempt to claim the same URL.
+
+The operating system verifies the relationship between:
+
+```text
+Website
+    ↕
+Native application
+```
+there is a **verified relationship between the web domain and the native application**.
+
+**"App-claimed URLs"** means **HTTPS URLs that an app has been able to officially associate/claim as belonging to it**, so the operating system knows that the URL should open that particular app.
+
+"Claimed" doesn't mean the app simply declares:
+
+> "I own this URL."
+
+It means the **platform can verify the association** between the app and the HTTPS domain.
+
+That's why:
+
+* Android → **App Links**
+* iOS → **Universal Links**
+
+are examples of **app-claimed URLs**.
+
+---
+
+not every platform necessarily gives you the same **verified HTTPS app association** capability. If the platform supports a mechanism for an app to claim/associate an HTTPS URL, use that because it's preferred. If the platform doesn't provide such a mechanism, you can fall back to another redirect mechanism, such as a **custom URL scheme**.
+```text
+             Native OAuth Redirect
+                     │
+                     ▼
+          Can platform verify an
+          HTTPS ↔ app association?
+                /          \
+              Yes           No
+               │             │
+               ▼             ▼
+       Claimed HTTPS     Custom URL
+           URI             Scheme
+               │             │
+         App Links /       myapp://
+       Universal Links
+```
+
+#### Flow
+Suppose we have:
+
+```text
+Native app:
+ShoppingApp
+
+Authorization Server:
+https://auth.shop.example
+
+Redirect URI:
+https://shop.example/oauth/callback
+```
+
+1. **Step 1 — App creates PKCE values**
+
+        ```text
+        code_verifier
+        │
+        ▼
+        SHA-256
+        │
+        ▼
+        code_challenge
+        ```
+
+2. **Step 2 — App opens browser**
+
+        ```text
+        ShoppingApp
+        │
+        │ /authorize
+        │ code_challenge=...
+        ▼
+        System Browser
+        ```
+
+3. **Step 3 — User authenticates**
+
+        ```text
+        System Browser
+        │
+        ▼
+        Authorization Server
+        │
+        ├── Login
+        └── Consent
+        ```
+
+4. **Step 4 — Authorization server redirects**
+
+        ```text
+        https://shop.example.com/oauth/callback?code=ABC
+        ```
+
+5. **Step 5 — Operating system recognizes URL**
+
+        Because:
+
+        ```text
+        shop.example.com
+        ↕
+        ShoppingApp
+        ```
+
+        is a verified association:
+
+        ```text
+        Browser
+        │
+        ▼
+        Operating System
+        │
+        ▼
+        ShoppingApp
+        ```
+
+6. **Step 6 — App receives code**
+
+        ```text
+        ShoppingApp
+        │
+        ├── authorization_code = ABC
+        │
+        └── code_verifier = XYZ
+        ```
+
+7. **Step 7 — App exchanges code**
+
+        ```text
+        POST /token
+
+        code=ABC
+        code_verifier=XYZ
+        ```
+
+8. **Step 8 — Authorization server verifies PKCE**
+
+        ```text
+        SHA256(XYZ)
+        │
+        ▼
+        matches original code_challenge?
+        │
+        Yes
+        │
+        ▼
+        Access Token
+```
+
+
+#### Android App Links
+
+On Android, the mechanism is called **App Links**.
+
+Suppose your application uses:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+You configure Android so that:
+
+```text
+shop.example.com
+        │
+        │ associated with
+        ▼
+ShoppingApp
+```
+
+Android can verify the relationship using information published by the website and application.
+
+Conceptually:
+
+```text
+Authorization Server
+        │
+        │ redirect
+        ▼
+https://shop.example.com/oauth/callback
+        │
+        │ Android recognizes verified association
+        ▼
+ShoppingApp
+```
+
+So the user doesn't have to choose:
+
+```text
+Open with:
+
+Chrome
+ShoppingApp
+AnotherApp
+```
+
+The verified App Link can directly open the intended application.
+
+#### iOS Universal Links
+
+iOS provides a similar mechanism called **Universal Links**.
+
+For example:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+can be associated with:
+
+```text
+ShoppingApp
+```
+
+Conceptually:
+
+```text
+Authorization Server
+        │
+        ▼
+https://shop.example.com/oauth/callback
+        │
+        │ iOS verifies association
+        ▼
+ShoppingApp
+```
+
+So:
+
+```text
+Android → App Links
+iOS     → Universal Links
+```
+
+Both solve essentially the same architectural problem:
+
+> **Associate an HTTPS URL with a particular native application.**
+#### Claimed HTTPS vs HTTPS URL matching
+They are closely related, but they refer to **different levels of the idea**.
+
+* **HTTPS URL matching** = the **mechanism of matching a URL against a pattern** to decide whether an app should be opened.
+* **App-claimed URLs** = HTTPS URLs for which an app has established a **verified association/ownership relationship** with the domain.
+
+Think:
+
+```text
+HTTPS URL matching
+        │
+        │ "Does this URL match a pattern?"
+        ▼
+https://shop.example.com/oauth/callback
+        │
+        ▼
+App-claimed URL
+        │
+        │ "Is this URL officially associated
+        │  with ShoppingApp?"
+        ▼
+ShoppingApp
+```
+1. **HTTPS URL matching**
+
+        This is the more general concept.
+
+        An app can specify a URL pattern such as:
+
+        ```text
+        https://shop.example.com/*
+        ```
+
+        The operating system receives a URL:
+
+        ```text
+        https://shop.example.com/oauth/callback
+        ```
+
+        and checks whether it matches the registered pattern:
+
+        ```text
+        https://shop.example.com/*
+                        ↑
+                matches
+        ```
+        The operating system can use the URL pattern to decide:
+
+        > "This URL should launch this application."
+
+        This is **URL matching**.
+        Conceptually:
+
+        ```text
+        Browser
+        │
+        │ https://example.com/oauth/callback
+        ▼
+        Operating System
+        │
+        │ URL matches registered pattern
+        ▼
+        MyApp
+        ```
+
+        The focus is:
+
+        **URL → application routing.**
+
+        So **URL matching** answers:
+
+        > "Does this URL match the pattern registered by an app?"
+
+        It is primarily about **URL → app routing**.
+
+2. **App-claimed URLs**
+        Now consider a stronger mechanism.
+
+        The app doesn't merely register:
+
+        ```text
+        https://example.com/*
+        ```
+
+        It establishes a **verified association** with:
+
+        ```text
+        example.com
+        ```
+        An **app-claimed URL** adds an important security property.
+
+        It's not merely:
+
+        ```text
+        App says:
+
+        "I want https://shop.example.com/*"
+        ```
+
+        Instead, the platform verifies that the app is actually authorized to associate itself with that domain.
+
+        Conceptually:
+
+        ```text
+        shop.example.com
+        │
+        │ verified association
+        ▼
+        ShoppingApp
+        ```
+
+        Now when the OS sees:
+
+        ```text
+        https://shop.example.com/oauth/callback
+        ```
+
+        it knows:
+
+        ```text
+        This URL matches
+        +
+        The app is verified for this domain
+        =
+        Open ShoppingApp
+        ```
+        Now the OS knows:
+
+        > "MyApp is legitimately associated with example.com."
+
+        This is an **app-claimed URL**.
+
+        The focus is:
+
+        **URL/domain ↔ legitimate application association.**
+
+        So **app claiming** answers:
+
+        > "Is this app legitimately associated with this HTTPS domain?"
+
+---
+
+**Why the distinction matters for OAuth?**
+
+Consider two apps:
+
+```text
+ShoppingApp
+MaliciousApp
+```
+
+Both might try to register:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+Simple URL matching alone isn't enough to establish which app legitimately owns that URL.
+
+The security mechanism adds the association:
+
+```text
+shop.example.com
+       │
+       │ verified
+       ▼
+ShoppingApp
+```
+
+Therefore:
+
+```text
+https://shop.example.com/oauth/callback
+                  │
+                  ▼
+          ShoppingApp
+```
+
+rather than potentially:
+
+```text
+https://shop.example.com/oauth/callback
+                  │
+          ┌───────┴───────┐
+          ▼               ▼
+    ShoppingApp      MaliciousApp
+```
+
+This is why OAuth documentation emphasizes **app-claimed URLs**.
+
+---
+
+The key is that **"HTTPS URL matching" is not necessarily the same thing as "app-claimed URLs."**
+
+**The distinction**
+
+Think of them as two levels:
+
+```text
+HTTPS URL Matching
+        │
+        │ URL pattern causes an app to launch
+        ▼
+     Native App
+
+
+App-Claimed HTTPS URL
+        │
+        │ URL pattern + verified ownership
+        ▼
+     Native App
+```
+
+The important difference is **verification**.
+
+---
+
+**Android and iOS terminology**
+
+This distinction becomes clearer with the platform names:
+
+| Concept                           | Android                      | iOS                          |
+| --------------------------------- | ---------------------------- | ---------------------------- |
+| HTTPS URL matching                | URL intent matching          | Universal Link URL matching  |
+| Verified app ↔ domain association | **App Links**                | **Universal Links**          |
+| Result                            | HTTPS URL opens verified app | HTTPS URL opens verified app |
+
+So you can think of:
+
+```text
+HTTPS URL matching
+        ↓
+General routing mechanism
+
+App-claimed HTTPS URL
+        ↓
+Verified routing mechanism
+```
+
+---
+
+On Android, these ideas are historically related but have different security properties.
+
+You can have ordinary URL handling:
+
+```text
+https://example.com/...
+        │
+        ▼
+Intent filter
+        │
+        ▼
+MyApp
+```
+
+This is essentially:
+
+**"My app handles URLs matching this pattern."**
+
+But Android **App Links** add domain verification:
+
+```text
+https://example.com/...
+        │
+        ▼
+Verified domain association
+        │
+        ▼
+MyApp
+```
+
+That's much stronger.
+
+So:
+
+```text
+Ordinary HTTPS URL matching
+          ≠
+Verified Android App Link
+```
+
+The latter includes the former **plus domain verification**.
+
+
+---
+
+iOS Universal Links provide the verified association:
+
+```text
+example.com
+     │
+     │ verified
+     ▼
+MyApp
+```
+
+rather than simply saying:
+
+```text
+"MyApp can handle https://example.com/*"
+```
+
+So Universal Links are the **stronger, verified form** of HTTPS URL handling.
+
+---
+
+**HTTPS URL matching is the routing mechanism; app-claimed URLs are the stronger version where the platform verifies that the app is legitimately associated with the HTTPS domain.**
+
+The easiest way to remember it
+
+> **HTTPS URL matching is about "does the URL match?"**
+
+> **App-claimed URL is about "does this app legitimately own/associate with that URL?"**
+
+And for OAuth, **the second property is the security-critical one**.
+
+#### Claimed HTTPS URI vs App Links vs Universal Links
+
+These terms are related but aren't identical.
+
+| Concept           | Meaning                                                                       |
+| ----------------- | ----------------------------------------------------------------------------- |
+| Claimed HTTPS URI | General OAuth concept: an HTTPS redirect URI associated with a particular app |
+| App Links         | Android mechanism for claiming/associating HTTPS links with an app            |
+| Universal Links   | Apple mechanism for associating HTTPS links with an app                       |
+
+So you can think of the hierarchy as:
+
+```text
+Claimed HTTPS Redirect URI
+          │
+          ├──────── Android
+          │           │
+          │        App Links
+          │
+          └──────── iOS
+                      │
+                 Universal Links
+```
+
+#### Claimed HTTPS URLs vs PKCE
+It's important not to confuse **claimed HTTPS URLs** and **PKCE**.
+
+They solve different problems.
+
+1. Claimed HTTPS URL
+
+        Protects the **redirect/app association**:
+
+        ```text
+        HTTPS URL
+        │
+        ▼
+        Verified native app
+        ```
+
+        It helps prevent another application from pretending to own the HTTPS redirect.
+
+2. PKCE
+
+        Protects the **authorization code**:
+
+        ```text
+        Authorization Code
+        +
+        code_verifier
+        │
+        ▼
+        Access Token
+        ```
+
+        If an attacker somehow obtains the authorization code, they still need the `code_verifier`.
+
+Therefore native OAuth should ideally have **both**:
+
+```text
+┌───────────────────────────────┐
+│        Native OAuth           │
+│                               │
+│  Claimed HTTPS Redirect       │
+│             +                 │
+│            PKCE               │
+└───────────────────────────────┘
+```
+
+### Custom URL Schemes
+
+Another way for a native application to receive the OAuth redirect is a **custom URL scheme**.
+
+Some platforms allow apps to register a custom URL scheme which will launch the app whenever a URL with that scheme is opened in a browser or another app. Supporting redirect URLs with a custom URL scheme allows clients to launch an external browser to complete the authorization flow, and then be redirected back to the application after the authorization is complete. However this method is less secure than the HTTPS URL matching method, as there is no global registry of custom URL schemes to avoid conflicts between developers.
+
+Instead of:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+the application might register:
+
+```text
+myshop://oauth/callback
+```
+
+#### Flow
+Apps that use a custom URL scheme will start the authorization request as normal, described in Authorization Request, but will provide a redirect URL that has their custom URL scheme. The authorization server should still verify that this URL was previously registered as an allowed redirect URL, and can treat it like any other redirect URL registered by web apps.
+
+When the authorization server redirects the native app to the URL with the custom scheme, the operating system will launch the app and make the whole redirect URL accessible to the original app. The app can extract the authorization code just like a regular OAuth 2.0 client would.
+
+the application might register:
+
+```text
+myshop://oauth/callback
+```
+
+Then the OAuth flow looks like:
+
+```text
+Authorization Server
+        │
+        │ redirect_uri
+        ▼
+myshop://oauth/callback?code=abc123
+        │
+        ▼
+Operating System
+        │
+        ▼
+ShoppingApp
+```
+
+The native application registers the scheme:
+
+```text
+myshop://
+```
+
+and the operating system knows:
+
+```text
+myshop://
+      ↓
+ShoppingApp
+```
+
+#### Problem with Custom URL Schemes
+
+Custom schemes have an important weakness.
+
+Another application may attempt to register the same scheme:
+
+```text
+myshop://
+```
+
+Then you could have:
+
+```text
+                     ┌── ShoppingApp
+myshop://oauth ──────┤
+                     └── MaliciousApp
+```
+
+The operating system has to determine which application receives the URL.
+
+This creates an **app impersonation / interception** risk.
+
+For example:
+
+```text
+Authorization Server
+       │
+       │ code=ABC
+       ▼
+myshop://oauth/callback?code=ABC
+       │
+       ▼
+MaliciousApp
+       │
+       └── steals authorization code
+```
+App developers should choose a URL scheme that is likely to be globally unique, and one which they can assert control over. Since operating systems typically do not have a registry of whether a particular app has claimed a URL scheme, it is theoretically possible for two apps to independently choose the same scheme, such as `myapp://`. If you want to help prevent collisions by app developers using custom schemes, you should recommend (or even enforce) that they use a scheme that is the reverse domain name pattern of a domain they control. At the very least, you can require that the redirect URL contains at least one . so as not to conflict with other system schemes such as mailto or ftp.
+
+For example, if an app has a corresponding website called `photoprintr.example.org`, the reverse domain name that can be used as their URL scheme would be org.example.photoprintr. The redirect URL that the developer would register would then begin with `org.example.photoprintr://`. By enforcing this, you can help encourage developers to choose explicit URL schemes that won’t conflict with other installed applications.
+
+
+PKCE is particularly important here because even if an attacker intercepts the authorization code, they should not be able to exchange it for tokens without the original application's `code_verifier`.
+
+#### Claimed HTTPS vs Custom URL Scheme
+
+**App-claimed URL = "this HTTPS URL is verified as belonging to this particular app."**
+
+**Custom URL scheme = "this app registered this custom scheme."**
+
+The former provides stronger assurance about the **website ↔ app relationship**, which is why OAuth for native apps prefers it when available.
+
+|                              | Claimed HTTPS                       | Custom Scheme          |
+| ---------------------------- | ----------------------------------- | ---------------------- |
+| Example                      | `https://shop.example.com/callback` | `myshop://callback`    |
+| Looks like web URL           | Yes                                 | No                     |
+| App association              | Verified                            | OS scheme registration |
+| Android                      | App Links                           | Custom scheme          |
+| iOS                          | Universal Links                     | Custom scheme          |
+| App impersonation resistance | Stronger                            | Weaker                 |
+| Preferred when available     | **Yes**                             | Usually fallback       |
+
+So, conceptually:
+
+```text
+Preferred
+
+HTTPS
+  ↓
+Verified association
+  ↓
+Native App
+```
+
+rather than:
+
+```text
+Custom scheme
+  ↓
+OS chooses application
+```
+
+### Loopback URLs
+
+**Loopback URLs** are another redirect technique designed mainly for **native applications running on desktop operating systems**, especially command-line applications and desktop GUI applications.
+
+The key idea is:
+
+> Instead of registering a custom URL scheme or an HTTPS URL, the application temporarily starts a local HTTP server and uses `localhost` as its OAuth redirect URI.
+
+For example:
+
+```text
+http://127.0.0.1:49152/redirect
+```
+
+The browser performs the OAuth authorization normally, but at the end it sends the authorization response to a server running **inside the native application itself**.
+
+#### The basic architecture
+
+Suppose we have a desktop application called `Shopping CLI`.
+
+The flow looks like this:
+
+```text
+┌──────────────────────┐
+│   Native Application │
+│                      │
+│  Local HTTP Server   │
+│  127.0.0.1:49152     │
+└──────────┬───────────┘
+           │
+           │ 1. Start local server
+           │
+           │
+           │ 2. Open browser
+           ▼
+┌──────────────────────┐
+│    System Browser    │
+└──────────┬───────────┘
+           │
+           │ 3. Authorization request
+           ▼
+┌──────────────────────┐
+│ Authorization Server │
+│      Keycloak        │
+└──────────┬───────────┘
+           │
+           │ 4. User authenticates
+           │    + gives consent
+           │
+           │ 5. Redirect
+           ▼
+     http://127.0.0.1:49152/redirect
+           │
+           ▼
+┌──────────────────────┐
+│   Native Application │
+│                      │
+│ receives ?code=...   │
+└──────────────────────┘
+```
+
+The important part is that the redirect request never needs to travel across the network.
+
+The key mental model is:
+
+> **A loopback redirect turns the native application into a temporary local web server, allowing the system browser to return the OAuth authorization response directly to the application through `127.0.0.1`/`localhost`.**
+
+#### Why is it called a "loopback" URL?
+
+A **loopback address** refers to an address that points back to the same machine.
+
+The most familiar one is:
+
+```text
+127.0.0.1
+```
+
+For IPv6, the loopback address is:
+
+```text
+::1
+```
+
+And you can also use:
+
+```text
+localhost
+```
+
+So these represent the local machine:
+
+```text
+http://127.0.0.1:49152/redirect
+http://[::1]:49152/redirect
+http://localhost:49152/redirect
+```
+
+The important distinction is:
+
+```text
+127.0.0.1
+    │
+    └── the user's own computer
+```
+
+It does **not** mean:
+
+```text
+Internet
+   ↓
+Remote server
+```
+
+Instead:
+
+```text
+Browser
+   │
+   │ HTTP
+   ▼
+127.0.0.1:49152
+   │
+   ▼
+Native application
+```
+
+#### Why does the application use a random port?
+
+The application doesn't normally want to permanently occupy one well-known port.
+
+Instead, it can ask the operating system for an available port.
+
+For example: `49152`, Today it might get: `49152`, Another time: `53421`, Another application might get: `49153`, So the OAuth redirect might be:
+
+```text
+http://127.0.0.1:49152/redirect
+```
+
+The port is therefore **dynamic**.
+
+Conceptually:
+
+```text
+Native app
+    │
+    ├── start HTTP server
+    │
+    └── OS assigns available port
+                  │
+                  ▼
+             port 49152
+```
+
+The application then constructs the redirect URI using that port:
+
+```text
+http://127.0.0.1:49152/redirect
+```
+
+and includes it in the authorization request.
+
+#### Complete OAuth flow
+
+Let's walk through the complete flow.
+
+Assume:
+
+```text
+Application:
+    Shopping CLI
+
+Authorization Server:
+    Keycloak
+
+Client ID:
+    shopping-cli
+
+Redirect URI:
+    http://127.0.0.1:49152/redirect
+```
+
+The application first generates its PKCE values:
+
+```text
+code_verifier
+      │
+      ▼
+SHA-256
+      │
+      ▼
+code_challenge
+```
+
+It also generates: `state`
+
+Then it starts the local HTTP server: `127.0.0.1:49152`
+
+1. Step 1 — Start local server
+
+The application starts:
+
+```text
+HTTP Server
+    ↓
+127.0.0.1:49152
+```
+
+and waits for an HTTP request.
+
+For example:
+
+```text
+GET /redirect?code=...&state=...
+```
+
+2. Step 2 — Open the browser
+
+The native application launches the user's system browser.
+
+It sends the browser to something like:
+
+```text
+https://auth.example.com/authorize
+    ?client_id=shopping-cli
+    &response_type=code
+    &redirect_uri=http://127.0.0.1:49152/redirect
+    &scope=openid%20profile
+    &state=ABC123
+    &code_challenge=XYZ789
+    &code_challenge_method=S256
+```
+
+Notice the redirect URI:
+
+```text
+http://127.0.0.1:49152/redirect
+```
+
+3. User authenticates
+
+The browser communicates with the authorization server:
+
+```text
+Browser
+   │
+   │ Authorization request
+   ▼
+Authorization Server
+   │
+   │ Login
+   ▼
+User
+```
+
+The user enters their credentials and gives consent if required.
+
+The authorization server then generates an authorization code:
+
+```text
+authorization code
+        ↓
+       ABC...
+```
+
+4. Authorization server redirects to localhost
+
+Now comes the important part.
+
+The authorization server tells the browser:
+
+```text
+HTTP 302 Found
+
+Location:
+http://127.0.0.1:49152/redirect
+    ?code=AUTH_CODE
+    &state=ABC123
+```
+
+The browser follows that redirect.
+
+But notice what happens:
+
+```text
+Browser
+   │
+   │ HTTP request
+   ▼
+127.0.0.1:49152
+   │
+   ▼
+Native application's HTTP server
+```
+
+The request doesn't go to the authorization server.
+
+It goes to the **local HTTP server created by the native application**.
+
+5. The application receives the authorization code
+
+The local server receives:
+
+```http
+GET /redirect?code=AUTH_CODE&state=ABC123 HTTP/1.1
+Host: 127.0.0.1:49152
+```
+
+The application extracts:
+
+```text
+code = AUTH_CODE
+state = ABC123
+```
+
+Then it verifies:
+
+```text
+received state
+      =
+original state
+```
+
+If they don't match:
+
+```text
+❌ reject response
+```
+
+If they match:
+
+```text
+✓ continue
+```
+
+6. The application exchanges the code
+
+The native application then contacts the authorization server directly.
+
+```http
+POST /token
+```
+
+with:
+
+```text
+grant_type=authorization_code
+client_id=shopping-cli
+code=AUTH_CODE
+redirect_uri=http://127.0.0.1:49152/redirect
+code_verifier=ORIGINAL_VERIFIER
+```
+
+The authorization server verifies:
+
+```text
+authorization code
+        +
+client_id
+        +
+redirect_uri
+        +
+code_verifier
+```
+
+The PKCE relationship is:
+
+```text
+Original verifier
+       │
+       │ SHA-256
+       ▼
+Code challenge
+       │
+       │
+       ▼
+Authorization request
+```
+
+Later:
+
+```text
+Original verifier
+       │
+       ▼
+Token request
+       │
+       ▼
+Authorization Server
+       │
+       └── verifies it matches challenge
+```
+
+If everything is valid:
+
+```text
+Access Token
+Refresh Token
+ID Token (if OIDC)
+```
+
+are returned.
+
+**Why is HTTP acceptable here?**
+
+This is one of the unusual aspects of loopback redirects.
+
+Normally we strongly prefer:
+
+```text
+https://
+```
+
+rather than:
+
+```text
+http://
+```
+
+But the loopback case is different.
+
+Consider:
+
+```text
+Browser
+   │
+   │ HTTP
+   ▼
+127.0.0.1
+   │
+   ▼
+Same machine
+```
+
+The request is addressed to the local machine.
+
+It isn't being sent over the Internet to a remote server.
+
+Therefore:
+
+```text
+http://127.0.0.1:49152/redirect
+```
+
+can be acceptable for this particular OAuth redirect use case.
+
+**This does not mean HTTP is generally safe for OAuth redirects.**
+
+The exception is specifically the loopback interface.
+
+**Why use a random port?**
+
+There is an important security property here.
+
+Suppose an application always used:
+
+```text
+http://127.0.0.1:8080/redirect
+```
+
+Another local application could potentially try to interfere with that port.
+
+Instead, the OAuth application can ask the OS for an available port:
+
+```text
+OS
+ │
+ ├── Application A → 49152
+ │
+ ├── Application B → 49153
+ │
+ └── Application C → 49154
+```
+
+The OAuth application then binds:
+
+```text
+127.0.0.1:49152
+```
+
+and uses that exact port in its redirect URI.
+
+This creates a temporary communication channel between:
+
+```text
+Browser
+     ↓
+127.0.0.1:49152
+     ↓
+Correct application
+```
+
+#### The authorization server's role
+
+The authorization server needs to support loopback redirect URIs.
+
+The important idea is that the server should permit the application to use:
+
+```text
+http://127.0.0.1:<dynamic-port>/
+```
+
+and IPv6:
+
+```text
+http://[::1]:<dynamic-port>/
+```
+
+and commonly:
+
+```text
+http://localhost:<dynamic-port>/
+```
+
+The server should also allow an arbitrary path.
+
+For example:
+
+```text
+http://127.0.0.1:49152/redirect
+http://127.0.0.1:49153/oauth/callback
+http://127.0.0.1:53221/callback
+```
+
+The key point is that the **port is intentionally dynamic**.
+
+#### Why this is particularly useful for CLI applications
+
+Consider a CLI application:
+
+```bash
+$ shopping login
+```
+
+The CLI doesn't have its own graphical UI.
+
+It can do:
+
+```text
+CLI
+ │
+ ├── start localhost HTTP server
+ │
+ ├── generate PKCE
+ │
+ ├── open browser
+ │
+ ▼
+Browser
+```
+
+The user performs authentication in the normal browser.
+
+After authentication:
+
+```text
+Authorization Server
+        │
+        │ redirect
+        ▼
+127.0.0.1:49152
+        │
+        ▼
+CLI application
+```
+
+The CLI receives the authorization code without requiring the user to manually copy and paste a code.
+
+That's what the text means by **"seamless redirects."**
+
+#### Desktop GUI application example
+
+The same mechanism works for desktop applications.
+
+For example:
+
+```text
+┌─────────────────────────┐
+│ Desktop Shopping App    │
+│                         │
+│ [ Login with Keycloak ] │
+└────────────┬────────────┘
+             │
+             ▼
+        System Browser
+             │
+             ▼
+       Keycloak Login
+             │
+             ▼
+ http://127.0.0.1:49152/
+             │
+             ▼
+┌─────────────────────────┐
+│ Desktop Shopping App    │
+│                         │
+│ ✓ Login successful      │
+└─────────────────────────┘
+```
+
+The browser handles the interactive authentication, while the desktop application handles the OAuth protocol.
+
+#### Loopback URLs and PKCE
+It's tempting to think that loopback eliminates the need for PKCE because the application owns the local server.
+
+It doesn't.
+
+The authorization code should still be protected using **PKCE**.
+
+The complete security model is:
+
+```text
+                 state
+                  │
+                  ▼
+Browser ─────── OAuth ─────── Authorization Server
+   │                              │
+   │                              │
+   │ redirect                     │
+   ▼                              │
+127.0.0.1:49152                   │
+   │                              │
+   ▼                              │
+Native App ───── code + verifier ─┘
+```
+
+`state` protects the authorization response against request/response correlation attacks.
+
+`PKCE` binds the authorization code to the application instance that initiated the authorization request.
+
+So even with loopback:
+
+```text
+Authorization Code Flow
+        +
+       state
+        +
+       PKCE
+```
+
+is the appropriate design for a native application.
+
+#### Loopback URLs vs Custom URL Scheme
+
+1. Custom URL scheme
+
+```text
+shoppingapp://oauth/callback
+```
+
+Flow:
+
+```text
+Browser
+   │
+   │ redirect
+   ▼
+Android OS
+   │
+   ├── ShoppingApp
+   └── potentially another app
+```
+
+The OS must determine which application handles the custom scheme.
+
+2. Loopback
+
+```text
+http://127.0.0.1:49152/redirect
+```
+
+Flow:
+
+```text
+Browser
+   │
+   │ redirect
+   ▼
+127.0.0.1:49152
+   │
+   ▼
+Application's local HTTP server
+```
+
+The application has actually opened the port and is listening there.
+
+3. HTTPS App Links
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+Flow:
+
+```text
+Browser
+   │
+   │ redirect
+   ▼
+HTTPS URL
+   │
+   ▼
+Android/iOS URL association
+   │
+   ▼
+Verified application
+```
+
+This provides a stronger association between the domain and the application.
+
+#### The three native-app redirect mechanisms
+
+You can therefore think of the native-app redirect mechanisms as:
+
+| Technique         | Example                                   | Typical platform | Domain verification |
+| ----------------- | ----------------------------------------- | ---------------- | ------------------- |
+| Custom URL scheme | `shoppingapp://oauth/callback`            | Mobile/desktop   | ❌                   |
+| Loopback          | `http://127.0.0.1:49152/redirect`         | Desktop/CLI      | Not applicable      |
+| Claimed HTTPS URL | `https://shop.example.com/oauth/callback` | Mobile           | ✅                   |
+
+And the architectural picture becomes:
+
+```text
+OAuth for Native Apps
+│
+├── External User-Agent
+│   └── System Browser
+│
+├── Redirect URIs
+│   │
+│   ├── Custom URL Schemes
+│   │   └── shoppingapp://oauth/callback
+│   │
+│   ├── Loopback URLs
+│   │   └── http://127.0.0.1:<random-port>/redirect
+│   │
+│   └── HTTPS URLs
+│       └── App-Claimed URLs
+│           ├── Android App Links
+│           └── iOS Universal Links
+│
+└── PKCE
+```
+
+### Authorization Rerver Registration
+As with server-side apps, all native-app redirect techniques must also register their redirect URL(s) with the authorization server.The authorization server must know which redirect URIs a client is allowed to use, and it must reject redirect URIs that don't match the registered configuration. This means the authorization server will need to allow registered redirect URLs that match all the patterns described above, in addition to traditional HTTPS URLs for server-side apps.
+
+When the authorization request is initiated at the authorization server, the server will validate all the request parameters, including the redirect URL given. The authorization should reject unrecognized URLs in the request, to help avoid an authorization code interception attack.
+
+** What if the redirect URI is not registered?**
+Suppose the legitimate application normally sends:
+
+```text
+http://127.0.0.1:49152/callback
+```
+
+But an attacker sends:
+
+```text
+http://attacker.example/callback
+```
+
+using the same client ID:
+
+```text
+client_id=shopping-cli
+```
+
+The authorization server must reject it:
+
+```text
+❌ Invalid redirect_uri
+```
+
+It must **not** redirect the authorization code to:
+
+```text
+http://attacker.example/callback
+```
+
+This is the fundamental security property.
+
+---
+
+**Authorization Code Interception Attack**
+
+Let's see why redirect URI validation matters.
+
+Imagine the legitimate application starts:
+
+```text
+Shopping CLI
+     │
+     │ authorization request
+     ▼
+Authorization Server
+```
+
+The authorization server produces:
+
+```text
+AUTHORIZATION_CODE
+```
+
+If an attacker can cause the server to redirect that code somewhere they control:
+
+```text
+Authorization Server
+       │
+       │ code
+       ▼
+Attacker
+```
+
+the attacker may try to exchange the code for tokens.
+
+That's why the authorization server must enforce:
+
+```text
+client_id
+      +
+registered redirect URI
+      +
+authorization request
+```
+Imagine an attacker modifies the authorization request:
+
+```text
+client_id=shopping-cli
+redirect_uri=https://evil.example/callback
+```
+
+If the authorization server simply trusted the supplied URI:
+
+```text
+Authorization Server
+        │
+        │ authorization code
+        ▼
+https://evil.example/callback
+        │
+        ▼
+     Attacker
+```
+
+The authorization code could be exposed to the attacker.
+
+Instead:
+
+```text
+Authorization Server
+        │
+        │
+        ▼
+Check redirect_uri
+        │
+        ├── registered? ── YES → continue
+        │
+        └── registered? ── NO  → reject
+```
+
+---
+
+**Registration happens before authorization**
+
+It's useful to separate these two concepts:
+
+```text
+             Registration
+                  │
+                  ▼
+        Authorization Server
+                  │
+                  │ stores
+                  ▼
+       Allowed redirect rules
+                  │
+                  │
+                  ▼
+             Later...
+                  │
+                  │
+          Authorization
+                  │
+                  ▼
+       redirect_uri=...
+                  │
+                  ▼
+          Validate against
+             registration
+```
+
+So:
+- Registration: Defines what is allowed.
+- Authorization request: Chooses one of the allowed redirect URIs.
+- Authorization server: Validates that choice.
+
+---
+
+**Registration + PKCE are different security mechanisms**
+
+This is another important distinction.
+
+We now have two separate protections:
+
+1. Redirect URI validation
+
+        Answers:
+
+        > **Where is the authorization server allowed to send the authorization response?**
+
+        ```text
+        Is this redirect URI legitimate?
+```
+
+2. PKCE
+
+        Answers:
+
+        > **Who is allowed to redeem the authorization code?**
+
+        ```text
+        Does this application possess
+        the correct code_verifier?
+        ```
+
+Together:
+
+```text
+                OAuth Security
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+          ▼                     ▼
+ Redirect URI                PKCE
+ validation
+          │                     │
+          ▼                     ▼
+Where can the code       Who can redeem
+be sent?                 the code?
+```
+
+And `state` provides another protection:
+
+```text
+state
+  │
+  ▼
+Does this response belong
+to the authorization request
+I initiated?
+```
+
+So your native application flow becomes:
+
+```text
+Registration
+     │
+     ▼
+Redirect URI validation
+     │
+     ▼
+Authorization
+     │
+     ▼
+Redirect
+     │
+     ▼
+state validation
+     │
+     ▼
+PKCE verification
+     │
+     ▼
+Token issuance
+```
+
+
+### complete example
+
+Let's put everything together.
+
+1. Step 1 — Register the client
+
+```text
+Client ID:
+shopping-cli
+
+Client type:
+Public
+```
+
+1. Step 2 — Register its redirect mechanism
+
+```text
+Redirect:
+Loopback
+
+Allowed form:
+http://127.0.0.1:<port>/callback
+```
+
+1. Step 3 — Application starts
+
+```text
+Node.js CLI
+     │
+     ▼
+OS assigns port 49152
+```
+
+1. Step 4 — Application constructs actual URI
+
+```text
+http://127.0.0.1:49152/callback
+```
+
+1. Step 5 — Authorization request
+
+```http
+GET /authorize?
+    client_id=shopping-cli
+    &response_type=code
+    &redirect_uri=http://127.0.0.1:49152/callback
+    &state=ABC
+    &code_challenge=XYZ
+    &code_challenge_method=S256
+```
+
+1. Step 6 — Authorization Server validates
+
+```text
+client_id
+    ↓
+shopping-cli
+    ↓
+Client exists?
+    ↓
+YES
+    ↓
+redirect_uri
+    ↓
+127.0.0.1:49152/callback
+    ↓
+Allowed for this client?
+    ↓
+YES
+    ↓
+Continue
+```
+
+1. Step 7 — User authenticates
+
+```text
+User → Keycloak
+```
+
+1. Step 8 — Authorization Server redirects
+
+```text
+http://127.0.0.1:49152/callback
+    ?code=ABC123
+    &state=ABC
+```
+
+1. Step 9 — CLI receives code
+
+```text
+Node.js CLI
+     │
+     ├── code
+     └── state
+```
+
+1. Step 10 — CLI validates `state`
+
+```text
+returned state
+      =
+original state
+      │
+      ▼
+     ✓
+```
+
+1. Step 11 — CLI exchanges code + PKCE verifier
+
+```text
+POST /token
+
+code=ABC123
+code_verifier=...
+redirect_uri=http://127.0.0.1:49152/callback
+```
+
+1. Step 12 — Token endpoint validates everything
+
+```text
+Authorization Code
+       +
+Client
+       +
+Redirect URI
+       +
+PKCE verifier
+       │
+       ▼
+Access Token
+```
+
+## PKCE
+
+The problem is:
+
+```text
+ Authorization Code
+        │
+        ▼
+     Browser
+        │
+        ▼
+     Redirect
+```
+
+The authorization code travels through a redirect mechanism.
+
+Suppose another application intercepts it:
+
+```text
+Authorization Server
+        │
+        │ code=ABC
+        ▼
+Malicious App
+        │
+        └── has ABC
+```
+
+How can we prevent the malicious application from exchanging:
+
+```text
+code=ABC
+```
+
+for an access token? PKCE solves this.
+
+### PKCE Flow
+
+The native app first generates a random secret: **code_verifier**. For example:
+
+```text
+code_verifier = dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+```
+
+The application then derives: **code_challenge**, from the verifier:
+
+```text
+code_challenge =
+BASE64URL(
+    SHA256(code_verifier)
+)
+```
+
+The app sends the challenge to the authorization server.
+
+```text
+Native App
+    │
+    │ code_challenge
+    ▼
+Authorization Server
+```
+
+The authorization server stores the challenge alongside the authorization request.
+
+### Authorization Request with PKCE
+
+The authorization request might look conceptually like:
+
+```http
+GET /authorize?
+    response_type=code
+    &client_id=mobile-shop
+    &redirect_uri=https://shop.example.com/oauth/callback
+    &scope=openid%20orders.read
+    &state=xyz
+    &code_challenge=abc123...
+    &code_challenge_method=S256
+```
+
+Important parameters:
+
+```text
+client_id
+redirect_uri
+scope
+state
+code_challenge
+code_challenge_method
+```
+
+### User Authentication
+
+The browser displays the authorization server's login/consent UI:
+
+```text
+System Browser
+       │
+       ▼
+Authorization Server
+       │
+       ├── authenticate user
+       │
+       └── request consent
+```
+
+For example:
+
+```text
+Shopping App wants:
+
+✓ Read your orders
+
+        [Allow]
+```
+
+The user approves.
+
+### Authorization Code Returned
+
+The authorization server redirects back:
+
+```text
+https://shop.example.com/oauth/callback
+    ?code=AUTH_CODE
+    &state=xyz
+```
+
+The operating system launches the native application.
+
+```text
+Browser
+   │
+   │ code=AUTH_CODE
+   ▼
+Native App
+```
+
+At this point, the application has:
+
+```text
+authorization_code
+code_verifier
+```
+
+The attacker may have obtained:
+
+```text
+authorization_code
+```
+
+but does not have:
+
+```text
+code_verifier
+```
+
+### Token Request
+
+The native application sends the code and verifier to the token endpoint:
+
+```http
+POST /token
+
+grant_type=authorization_code
+&client_id=mobile-shop
+&code=AUTH_CODE
+&redirect_uri=https://shop.example.com/oauth/callback
+&code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+```
+
+The authorization server calculates:
+
+```text
+SHA256(code_verifier)
+```
+
+and compares it with the original:
+
+```text
+code_challenge
+```
+
+Conceptually:
+
+```text
+                Original request
+                       │
+                 code_challenge
+                       │
+                       ▼
+               Authorization Server
+
+
+Token request
+     │
+     │ code_verifier
+     ▼
+SHA256(code_verifier)
+     │
+     ▼
+Compare
+     │
+     ├── Match → issue tokens
+     │
+     └── No match → reject
+```
+
+### What Happens to an Attacker?
+
+Suppose an attacker intercepts:
+
+```text
+AUTH_CODE
+```
+
+They try:
+
+```http
+POST /token
+
+code=AUTH_CODE
+```
+
+But they don't know:
+
+```text
+code_verifier
+```
+
+Therefore:
+
+```text
+SHA256(attacker's verifier)
+       ≠
+original code_challenge
+```
+
+The authorization server rejects the request.
+
+So:
+
+```text
+Authorization Code
+       +
+Code Verifier
+       ↓
+Access Token
+```
+
+Both are required.
+
+## Complete Native OAuth Flow
+
+Putting everything together:
+
+```text
+┌─────────────────┐
+│   Native App    │
+└────────┬────────┘
+         │
+         │ 1. Generate code_verifier
+         │
+         │ 2. Generate code_challenge
+         │
+         │ 3. Open authorization URL
+         ▼
+┌────────────────────────┐
+│    System Browser      │
+│ External User-Agent    │
+└───────────┬────────────┘
+            │
+            │ 4. Authorization request
+            ▼
+┌────────────────────────┐
+│ Authorization Server   │
+│                        │
+│ Login                  │
+│ Consent                │
+└───────────┬────────────┘
+            │
+            │ 5. Authorization code
+            ▼
+┌────────────────────────┐
+│ System Browser         │
+└───────────┬────────────┘
+            │
+            │ 6. Redirect URI
+            ▼
+┌────────────────────────┐
+│ Native App             │
+│                        │
+│ receives code          │
+└───────────┬────────────┘
+            │
+            │ 7. code + code_verifier
+            ▼
+┌────────────────────────┐
+│ Authorization Server   │
+│ /token                 │
+└───────────┬────────────┘
+            │
+            │ 8. access token
+            ▼
+┌────────────────────────┐
+│ Native App             │
+└───────────┬────────────┘
+            │
+            │ 9. Bearer access token
+            ▼
+┌────────────────────────┐
+│ Resource Server        │
+│ /api/orders            │
+└───────────┬────────────┘
+            │
+            │ 10. Protected resource
+            ▼
+       Native App
+```
+
+## Summary
+
+The key distinction to remember is:
+
+**External User-Agent** answers **"where does authentication happen?"**
+
+**Redirect URI mechanisms** answer **"how does the authorization response get back to my app?"**
+
+**PKCE** answers **"what prevents an intercepted authorization code from being exchanged by another app?"**
+
+Together:
+
+```text
+System Browser
+     │
+     │ Authentication
+     ▼
+Authorization Server
+     │
+     │ Authorization Code
+     ▼
+Redirect URI
+     │
+     ├── App Links
+     ├── Universal Links
+     └── Custom URL Scheme
+     │
+     ▼
+Native App
+     │
+     │ code + code_verifier
+     ▼
+Token Endpoint
+     │
+     ▼
+Access Token
+```
+
+This is why **PKCE isn't a replacement for secure redirect URIs**: they solve different parts of the native-app security problem.

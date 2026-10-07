@@ -1,0 +1,2109 @@
+---
+id: software-systems-algorithms-data-structures-algorithms-concepts-searching-hash-based-search-benchmarking
+title: Benchmarking
+description: Hash-based searching is a search technique that uses a hash function to transform a search key into an array position in a hash table
+sidebar_position: 14
+---
+
+## load factor / chain lengths(structure of the hash table)
+Suppose we have:
+
+```text
+n = 213,557 elements
+```
+
+and progressively increase the number of bins.
+
+**What exactly is being benchmarked?**
+
+The experiment uses the same collection:
+
+$$
+213,557\text{ words}
+$$
+
+The hash table is built using those words.
+
+| Bins \(b\) | Load factor \(\alpha\) | Max chain(Max length of linked list) | Unique bins |
+| ---------: | ---------------------: | -----------------------------------: | ----------: |
+|      4,095 |                  52.15 |        82                            |           0 |
+|      8,191 |                  26.07 |        46                            |           0 |
+|     16,383 |                  13.04 |        28                            |           0 |
+|     32,767 |                   6.52 |        19                            |         349 |
+|     65,535 |                   3.26 |        13                            |       8,190 |
+|    131,071 |                   1.63 |        10                            |      41,858 |
+|    262,143 |                  0.815 |         7                            |      94,319 |
+|    524,287 |                   0.41 |         7                            |     142,530 |
+|  1,048,575 |                   0.20 |         5                            |     173,912 |
+                        
+Note how the maximum length of the element linked lists drops while the number
+of bins containing a unique element rapidly increases once b is sufficiently large. In
+the final row, 81% of the elements are hashed to a unique bin and the average number of elements in a bin becomes just a single digit. 
+
+For: $b=4095$
+
+the load factor is:
+
+$$
+\alpha=\frac{213557}{4095}\approx52.15
+$$
+
+That means:
+
+> On average, there are about 52 elements per bin.
+
+So the linked lists can become quite long.
+
+The maximum chain in this experiment is(observed result from the experiment, not something calculated directly from the load factor.): $82$
+
+A search may therefore have to inspect many elements.
+
+Now look at \(b=262143\)
+
+Here:
+
+$$
+\alpha=\frac{213557}{262143}\approx0.815
+$$
+
+The maximum chain is only:
+
+$$
+7
+$$
+
+And:
+
+```text
+unique bins = 94,319
+```
+
+A **unique bin** here means a bin containing exactly one element.
+
+So:
+
+```text
+H[10] → element
+H[11] → element
+H[12] → empty
+H[13] → element
+...
+```
+
+Many searches can therefore find their target after checking just one element.
+
+With:
+
+$$
+b=1,048,575
+$$
+
+the load factor becomes:
+
+$$
+\alpha=0.20
+$$
+
+and the maximum chain length is only:
+
+$$
+5
+$$
+
+There are:
+
+```text
+173,912 unique bins
+```
+
+This means the table has become very sparse.
+
+The tradeoff is:
+
+```text
+        More bins
+           ↓
+    ┌──────┴──────┐
+    ↓             ↓
+fewer collisions  more memory
+    ↓
+shorter chains
+    ↓
+faster searches
+```
+
+So hash-table design is not simply:
+
+> "Use as many bins as possible."
+
+You are trading **memory for shorter collision chains**.
+
+---
+
+There is a very clear relationship:
+
+```text
+more bins
+   ↓
+smaller α
+   ↓
+fewer collisions
+   ↓
+shorter chains
+   ↓
+less work during search
+```
+
+---
+
+## custom hash table vs Java's `java.util.Hashtable`?
+This benchmark is testing a very specific question:
+
+> **How does hash-table size affect search performance, and how does a simple custom hash table compare with Java's `java.util.Hashtable`?**
+
+The key idea is that the experiment changes **only the number of bins \(b\)** while searching the same 213,557 words.
+
+The code is:
+
+```java
+public boolean search(V v) {
+    int h = hashMethod.hash(v);
+
+    LinkedList<V> list = (LinkedList<V>) listTable[h];
+
+    if (list == null) {
+        return false;
+    }
+
+    return list.contains(v);
+}
+```
+
+The search has three steps:
+
+```text
+target word
+     │
+     ▼
+hash(v)
+     │
+     ▼
+bin index h
+     │
+     ▼
+listTable[h]
+     │
+     ├── null → false
+     │
+     └── linked list
+              │
+              ▼
+        list.contains(v)
+              │
+          found / not found
+```
+
+The hash function is:
+
+```java
+int hash(V v) {
+    int h = v.hashCode();
+
+    if (h < 0) {
+        h = 0 - h;
+    }
+
+    return h % tableSize;
+}
+```
+
+So:
+
+$$
+h = |v.hashCode()| \bmod b
+$$
+
+where \(b\) is the number of bins.
+
+---
+
+**What exactly is being benchmarked?**
+
+The experiment uses the same collection:
+
+$$
+213,557\text{ words}
+$$
+
+The hash table is built using those words.
+
+Then the program performs **213,557 searches**.
+
+But there are two different search scenarios.
+
+1. **`p = 1.0`: searching for words that exist**
+
+    For `p = 1.0`, every search target is one of the original words.
+
+    For example:
+
+    ```text
+    Hash table contains:
+
+    apple
+    computer
+    algorithm
+    database
+    network
+    ...
+    ```
+
+    The searches are:
+
+    ```text
+    apple      → found
+    computer   → found
+    algorithm  → found
+    database   → found
+    network    → found
+    ...
+    ```
+
+    Therefore:
+
+    $$
+    p=1.0
+    $$
+
+    means:
+
+    > **100% of the searches are successful.**
+
+    The program has to find the target inside its collision list.
+
+    For example:
+
+    ```text id="f3g7fj"
+    H[42]
+    ↓
+    "apple" → "apply" → "apples" → "application"
+                        ↑
+                        target
+    ```
+
+    `list.contains()` may have to examine several elements before finding the target.
+
+2. **`p = 0.0`: searching for words that don't exist**
+
+    This is more interesting.
+
+    The book takes every word and changes its last character to `*`.
+
+    For example:
+
+    ```text
+    original       search target
+
+    computer   →   compute*
+    database   →   databas*
+    algorithm  →   algorith*
+    network    →   networ*
+    ```
+
+    The modified word is not in the table.
+
+    Therefore:
+
+    $$
+    p=0.0
+    $$
+
+    means:
+
+    > **0% of the searches are successful.**
+
+    Every search eventually returns:
+
+    ```java
+    false
+    ```
+
+---
+
+**Why replace the last character?**
+
+This is a clever benchmarking detail.
+
+Suppose the successful search is:
+
+```text
+computer
+```
+
+and the unsuccessful search were:
+
+```text
+x
+```
+
+Then hashing `x` would be much cheaper than hashing `computer`.
+
+That would make the comparison unfair.
+
+Instead, they use:
+
+```text
+computer
+compute*
+```
+
+Both have the same length.
+
+Therefore, approximately:
+
+```text
+hash("computer")
+       ↓
+same amount of character processing
+       ↓
+hash("compute*")
+```
+
+So the cost of computing the hash is kept approximately the same.
+
+The benchmark can then focus more clearly on **collision-list searching**.
+
+---
+
+**Why are unsuccessful searches sometimes slower?**
+
+Look at the first row:
+
+```text
+b = 4,095
+
+Our table:
+p=1.0 → 200.53 ms
+p=0.0 → 373.24 ms
+```
+
+Why is:
+
+$$
+373.24 > 200.53
+$$
+
+?
+
+Because of what `LinkedList.contains()` has to do.
+
+Suppose:
+
+```text id="6k6l6p"
+H[100]
+   ↓
+A → B → C → D → E
+```
+
+If we search for `C`:
+
+```text
+search C
+
+A  ✗
+B  ✗
+C  ✓
+```
+
+We stop as soon as we find it.
+
+But if we search for something that isn't there:
+
+```text
+search X
+
+A  ✗
+B  ✗
+C  ✗
+D  ✗
+E  ✗
+     ↓
+   false
+```
+
+We must examine the **entire chain**.
+
+Therefore:
+
+1. Successful search
+
+    Average:
+
+    $$
+    \text{"roughly half of the chain"}
+    $$
+
+2. Unsuccessful search
+
+    Usually:
+
+    $$
+    \text{"entire chain"}
+    $$
+
+This explains why the `p=0.0` column can be slower.
+
+---
+
+### the effect of increasing `b`
+
+This is the most important part of the experiment.
+
+The custom hash table results are:
+
+|     \(b\) | Load factor | Existing `p=1.0` | Missing `p=0.0` |
+| --------: | ----------: | ---------------: | --------------: |
+|     4,095 |       52.15 |        200.53 ms |       373.24 ms |
+|     8,191 |       26.07 |           140.47 |          234.68 |
+|    16,383 |       13.04 |           109.61 |          160.48 |
+|    32,767 |        6.52 |            91.56 |          112.89 |
+|    65,535 |        3.26 |            80.96 |           84.38 |
+|   131,071 |        1.63 |            75.47 |           60.17 |
+|   262,143 |       0.815 |            74.09 |           43.18 |
+|   524,287 |        0.41 |            75.00 |           33.05 |
+| 1,048,575 |        0.20 |            76.68 |           29.02 |
+
+Notice something interesting.
+
+As \(b\) increases:
+
+```text
+b ↑
+↓
+α = n/b ↓
+↓
+collision chains ↓
+↓
+search time generally ↓
+```
+
+---
+
+**Why does `p=0.0` improve so dramatically?**
+
+Look at:
+
+```text
+b = 4,095
+p=0.0 → 373.24 ms
+```
+
+versus:
+
+```text
+b = 1,048,575
+p=0.0 → 29.02 ms
+```
+
+That's a huge difference. Why?
+
+At:
+
+$$
+b=4095
+$$
+
+the load factor is:
+
+$$
+\alpha=52.15
+$$
+
+So there are approximately 52 elements per bin on average.
+
+An unsuccessful search may therefore have to inspect a long chain.
+
+At:
+
+$$
+b=1,048,575
+$$
+
+the load factor is:
+
+$$
+\alpha=0.20
+$$
+
+and the maximum chain is only 5.
+
+So an unsuccessful search can finish after examining only a few elements.
+
+---
+
+**Why doesn't `p=1.0` keep getting faster?**
+
+This is one of the most interesting parts of the table.
+
+Look at:
+
+```text
+b          p=1.0
+
+4,095      200.53
+8,191      140.47
+16,383     109.61
+32,767      91.56
+65,535      80.96
+131,071     75.47
+262,143     74.09
+524,287     75.00
+1,048,575   76.68
+```
+
+Initially:
+
+```text
+more bins → much faster
+```
+
+But eventually:
+
+```text
+more bins → almost no improvement
+```
+
+and even:
+
+```text
+1,048,575 → 76.68 ms
+```
+
+is slightly slower than:
+
+```text
+262,143 → 74.09 ms
+```
+
+Why? Because once collision lists are already very short, reducing them further doesn't save much.
+
+There are other costs:
+
+```text
+hash computation
++ array access
++ linked-list access
++ object/reference operations
++ CPU/cache effects
++ benchmark overhead
+```
+
+Once collision handling becomes cheap, these other costs dominate.
+
+So we get a practical plateau:
+
+```text id="j7u5r8"
+Search time
+   │
+   │\
+   │ \
+   │  \
+   │   \___________
+   │
+   └──────────────────→ number of bins
+       collision cost
+       becomes small
+```
+
+This is actually a useful demonstration of an engineering principle:
+
+> **Making one component faster eventually stops helping when another component becomes the bottleneck.**
+
+---
+
+### compare with `java.util.Hashtable`
+
+The right half of the table is:
+
+|     \(b\) | JDK `Hashtable` p=1.0 | JDK `Hashtable` p=0.0 |
+| --------: | --------------------: | --------------------: |
+|     4,095 |                 82.11 |                 38.37 |
+|     8,191 |                 71.45 |                 28.44 |
+|    16,383 |                 70.64 |                 28.66 |
+|    32,767 |                 71.15 |                 28.33 |
+|    65,535 |                 70.36 |                 28.33 |
+|   131,071 |                 71.24 |                 28.28 |
+|   262,143 |                 70.06 |                 28.43 |
+|   524,287 |                 69.33 |                 28.26 |
+| 1,048,575 |                 72.24 |                 27.37 |
+
+he performance of the existing java.util.Hashtable class outperforms our
+example code, but the savings are reduced as the size of the hash table grows. The
+reason is that java.util.Hashtable contains optimized list classes that efficiently
+manage the element chains. In addition, java.util.Hashtable automatically
+“rehashes” the entire hash table when the load factor is too high. The implementation increases the cost of
+building the hash table, but improves search performance. If we prevent the
+“rehash” capability, search performance in java.util.Hashtable is nearly the same
+as our implementation.
+
+The JDK implementation is much less sensitive to `b`. Why?
+
+1. **JDK Hashtable has optimized implementation**
+
+The implementation uses:
+
+```java
+LinkedList<V>
+```
+
+for each bin.
+
+So you have something like:
+
+```text id="q9m3ac"
+table
+ │
+ ├── bin 0 → LinkedList
+ ├── bin 1 → null
+ ├── bin 2 → LinkedList
+ ├── bin 3 → LinkedList
+ └── ...
+```
+
+The JDK implementation is optimized internally.
+
+Therefore, operations on its buckets have less overhead than the simple demonstration implementation.
+
+So the benchmark isn't saying:
+
+> "Hash tables are slow."
+
+It is showing:
+
+> **A simple educational implementation has more overhead than a highly optimized library implementation.**
+
+2. **Rehashing is another important difference**
+
+A hash table doesn't necessarily keep the same size forever.
+
+Suppose:
+
+```text id="q4p5px"
+initial:
+
+b = 16
+n = 10
+
+α = 10/16 = 0.625
+```
+
+Then you insert many more elements:
+
+```text
+n = 30
+```
+
+Now:
+
+$$
+\alpha=\frac{30}{16}=1.875
+$$
+
+The collision chains can become long.
+
+A dynamic hash table can respond by increasing its size:
+
+```text id="0cru5p"
+small table
+     ↓
+load factor gets high
+     ↓
+resize
+     ↓
+new larger table
+     ↓
+rehash every element
+     ↓
+shorter chains
+```
+
+This is **rehashing**. Why does rehashing improve searching?
+
+Remember:
+
+$$
+index = hash(key) \bmod b
+$$
+
+If `b` changes, the index can change.
+
+For example:
+
+```text
+hashCode = 12345
+```
+
+with:
+
+```text
+b = 100
+```
+
+gives:
+
+$$
+12345\bmod100=45
+$$
+
+But after resizing:
+
+```text
+b = 200
+```
+
+we get:
+
+$$
+12345\bmod200=145
+$$
+
+So you cannot simply copy the old bins.
+
+You must calculate the new positions:
+
+```text id="h2xwqk"
+old table
+   │
+   ├── element A
+   ├── element B
+   └── element C
+          ↓
+       rehash
+          ↓
+new table
+   │
+   ├── element A
+   ├── element B
+   └── element C
+```
+
+This costs time during table construction/update.
+
+But afterward:
+
+```text
+shorter chains
+     ↓
+faster searches
+```
+
+So there is a tradeoff:
+
+$$
+\text{"more work during resizing/building"}
+$$
+
+in exchange for:
+
+$$
+\text{"better search performance"}
+$$
+
+---
+
+**Why disabling rehash makes Hashtable similar?**
+
+This is a very useful experimental observation.
+
+Normally:
+
+```text id="m42w3s"
+Hashtable
+   ↓
+load factor becomes high
+   ↓
+rehash
+   ↓
+larger table
+   ↓
+shorter chains
+   ↓
+faster search
+```
+
+If you prevent that:
+
+```text id="qj3z4m"
+Hashtable
+   ↓
+no rehash
+   ↓
+same collision situation
+   ↓
+performance becomes similar
+       to the simple implementation
+```
+
+That tells us something important:
+
+> The performance advantage isn't magic. A significant part of it comes from the optimized implementation and maintaining a suitable load factor.
+
+---
+
+### What exactly is this benchmark proving?
+
+The experiment supports several observations.
+
+1. **Observation 1 — Load factor matters**
+
+    ```text
+    α high
+    ↓
+    long chains
+    ↓
+    more comparisons
+    ↓
+    slower search
+    ```
+
+    and:
+
+    ```text
+    α low
+    ↓
+    short chains
+    ↓
+    fewer comparisons
+    ↓
+    faster search
+    ```
+2. **Observation 2 — Unsuccessful searches can be more expensive**
+
+    With separate chaining:
+
+    ```text
+    successful:
+
+    A → B → C → TARGET
+                ↑
+            stop
+
+
+    unsuccessful:
+
+    A → B → C → D → E → NULL
+                            ↑
+                        stop
+    ```
+
+    The unsuccessful search has to examine the entire chain.
+
+3. **Observation 3 — Eventually increasing the table provides diminishing returns**
+
+    Once chains are already very short:
+
+    ```text
+    b = 262,143 → max chain 7
+    b = 524,287 → max chain 7
+    b = 1,048,575 → max chain 5
+    ```
+
+    There isn't much more collision work to eliminate.
+
+4.  **Observation 4 — Library implementations can outperform simple educational implementations**
+
+    The JDK has optimized data structures and resizing strategies.
+
+    Therefore:
+
+    ```text
+    simple implementation
+            <
+    optimized library implementation
+    ```
+
+    in this benchmark.
+
+    But that's a statement about **these implementations and this workload**, not a general statement that every JDK collection is always faster than every custom implementation.
+
+---
+
+**How this connects to the previous benchmark**
+
+This is the most important connection between the two tables.
+
+1.  previous benchmark
+
+    measures the **structure of the hash table**:
+
+    ```text
+    b
+    α
+    minimum chain
+    maximum chain
+    unique bins
+    ```
+2.  this benchmark 
+
+    measures the **actual search performance**:
+
+    ```text
+    search time
+    ```
+
+So you can connect them:
+
+```text id="y5p2zt"
+previous benchmark
+    │
+    │  tells us
+    ▼
+load factor / chain lengths
+    │
+    ▼
+collision cost
+    │
+    ▼
+this benchmark 
+    │
+    │  measures
+    ▼
+actual search time
+```
+
+For example:
+
+```text
+b = 4,095
+
+α = 52.15
+max chain = 82
+       ↓
+many collision comparisons
+       ↓
+search time:
+p=1.0 → 200.53 ms
+p=0.0 → 373.24 ms
+```
+
+Compare:
+
+```text
+b = 1,048,575
+
+α = 0.20
+max chain = 5
+       ↓
+very few collision comparisons
+       ↓
+search time:
+p=1.0 → 76.68 ms
+p=0.0 → 29.02 ms
+```
+
+That's exactly what the benchmark is trying to demonstrate.
+
+---
+
+**The main idea to remember**
+
+Don't memorize the actual milliseconds.
+
+The important relationship is:
+
+$$
+b\uparrow
+\Rightarrow
+\alpha\downarrow
+\Rightarrow
+\text{"shorter collision chains"}
+\Rightarrow
+\text{"less search work"}
+$$
+
+provided that the hash function distributes the keys reasonably well.
+
+And therefore:
+
+$$
+\text{"Hash-table search is expected" }O(1)
+$$
+
+when the table maintains a suitably bounded load factor and has a good hash distribution.
+
+The **actual numbers in Table above are benchmark results**, while the **relationship between load factor, collisions, and expected search performance is the general DSA principle**.
+
+### What does rehashing cost while building the hash table?
+
+The important idea is the trade-off:
+
+$$
+\text\{more work during construction} \longrightarrow \text\{faster searches later}
+$$
+
+
+:::info
+
+**What is rehashing?**
+
+Suppose the hash table starts with:
+
+```text
+b = 4,095
+```
+
+and we keep inserting the 213,557 words.
+
+Initially:
+
+```text
+table
+  ↓
+few elements
+  ↓
+low load factor
+```
+
+As more words are inserted:
+
+```text
+n ↑
+↓
+α = n/b ↑
+↓
+collision chains become longer
+```
+
+When the load factor becomes too high, `java.util.Hashtable` increases the table size.
+
+Then it must redistribute the existing elements:
+
+```text
+old table
+    │
+    │ resize
+    ▼
+new larger table
+    │
+    │ rehash every element
+    ▼
+new positions
+```
+
+That redistribution is the **rehash** operation.
+
+:::
+
+**Why must it rehash?**
+
+This is extremely important.
+
+Suppose:
+
+$$
+hash(key)=12345
+$$
+
+and the old table has:
+
+$$
+b=100
+$$
+
+Then:
+
+$$
+12345\bmod100=45
+$$
+
+So:
+
+```text
+key → bin 45
+```
+
+Now suppose we resize:
+
+$$
+b=200
+$$
+
+Then:
+
+$$
+12345\bmod200=145
+$$
+
+The same key now belongs in:
+
+```text
+bin 145
+```
+
+not bin 45.
+
+Therefore, after resizing:
+
+```text
+old table
+H[45] → key
+       ↓
+resize
+       ↓
+new table
+H[145] → key
+```
+
+You can't simply copy the old array.
+
+You have to **rehash the elements**.
+
+---
+
+We constructed the hash tables from the word list described
+earlier; after running 100 trials, the best- and worst-performing timings were discarded and the table contains the average of the remaining 98 trials. 
+
+.
+Table shows the number of times rehash is invoked when building the
+java.util.Hashtable hash table and the total time (in milliseconds) required to
+
+The table measures **construction time**.
+
+For example:
+
+```text
+Our hash table
+JDK Hashtable α = 0.75
+JDK Hashtable α = 4.0
+JDK Hashtable α = n/b, no rehash
+```
+
+It also records:
+
+```text
+#Rehash
+```
+
+for the JDK implementations.
+
+---
+
+** Understanding the three JDK configurations**
+
+1. A. JDK Hashtable, α = 0.75
+
+    This keeps the load factor relatively low.
+
+    When:
+
+    $$
+    \alpha > 0.75
+    $$
+
+    the table is resized and rehashed.
+
+    Therefore:
+
+    ```text
+    low load factor
+        ↓
+    more resizing
+        ↓
+    more rehash operations
+        ↓
+    higher construction cost
+        ↓
+    shorter chains
+        ↓
+    faster searches
+    ```
+
+2. JDK Hashtable, α = 4.0
+
+    This allows a much higher load factor.
+
+    It tolerates:
+
+    $$
+    \alpha \leq 4.0
+    $$
+
+    before resizing.
+
+    Therefore:
+
+    ```text
+    higher allowed α
+        ↓
+    less resizing
+        ↓
+    fewer rehash operations
+        ↓
+    lower construction cost
+        ↓
+    longer chains
+        ↓
+    potentially slower searches
+    ```
+
+    So this configuration spends less time building the table but accepts more collisions.
+
+3. JDK Hashtable, α = n/b, no rehash
+
+    This is essentially:
+
+    > **Don't resize the table at all.**
+
+    The table size `b` is predetermined.
+
+    Therefore:
+
+    ```text
+    insert all 213,557 words
+        ↓
+    never resize
+        ↓
+    never rehash
+    ```
+
+    Consequently:
+
+    ```text
+    #Rehash = 0
+    ```
+
+---
+
+For:
+
+$$
+b=4095
+$$
+
+the results are:
+
+| Implementation | Build time | Rehashes |
+| -------------- | ---------: | -------: |
+| Our hash table |  403.61 ms |        — |
+| JDK, α=0.75    |   42.44 ms |        7 |
+| JDK, α=4.0     |   35.30 ms |        4 |
+| JDK, no rehash |  104.41 ms |        0 |
+
+At first this might look strange.
+
+You might think:
+
+> "If rehashing costs extra work, why is the JDK with 7 rehashes faster than the no-rehash version?"
+
+Because there is another important factor:
+
+**the JDK implementation itself is much more optimized than the simple educational implementation.**
+
+So:
+
+```text
+Our implementation
+    ↓
+simple LinkedList-based structure
+    ↓
+403.61 ms
+```
+
+versus:
+
+```text
+JDK implementation
+    ↓
+optimized implementation
+    ↓
+42.44 ms
+```
+
+The benchmark isn't isolating only rehashing.
+
+---
+
+** Look at α = 0.75**
+
+For \(b=4095\):
+
+```text
+JDK α=.75
+
+Build = 42.44 ms
+Rehash = 7
+```
+
+For \(b=32,767\):
+
+```text
+Build = 41.28 ms
+Rehash = 4
+```
+
+For \(b=262,143\):
+
+```text
+Build = 36.06 ms
+Rehash = 1
+```
+
+For:
+
+$$
+b=524,287
+$$
+
+there is no need to rehash:
+
+```text
+Build = 21.37 ms
+Rehash = 0
+```
+
+So generally:
+
+```text
+larger initial table
+       ↓
+lower initial load factor
+       ↓
+fewer rehashes
+       ↓
+less construction overhead
+```
+
+---
+
+**What does α = 4.0 do?**
+
+Now compare:
+
+```text
+b = 4095
+
+α = 0.75 → 7 rehashes → 42.44 ms
+α = 4.0  → 4 rehashes → 35.30 ms
+```
+
+The `α=4.0` configuration permits the table to become more crowded before resizing.
+
+Therefore:
+
+$$
+4\text{-threshold} > 0.75\text{-threshold}
+$$
+
+so fewer rehashes are necessary.
+
+That's why:
+
+$$
+35.30 < 42.44
+$$
+
+in this row.
+
+---
+
+**Why does rehashing make construction more expensive?**
+
+Imagine we already have 100,000 elements.
+
+Then the table becomes too crowded.
+
+We resize it.
+
+Now we have to process those 100,000 elements again:
+
+```text
+100,000 existing elements
+          ↓
+       rehash
+          ↓
+100,000 new hash/index calculations
+          ↓
+100,000 elements placed into new table
+```
+
+Then we continue inserting the remaining elements.
+
+So rehashing introduces additional work.
+
+Conceptually:
+
+$$
+T_{build}
+=
+T_{insertions}
++
+T_{rehashing}
+$$
+
+More rehashes generally mean more construction work.
+
+---
+
+**But why would we want that extra work?**
+
+Because it improves the **search phase**.
+
+Suppose we don't resize:
+
+```text
+n = 213,557
+b = 4,095
+
+α = 52.15
+```
+
+That's extremely crowded.
+
+The previous table showed:
+
+```text
+maximum chain = 82
+```
+
+So searching may require traversing long lists.
+
+But if we resize:
+
+```text
+b ↑
+↓
+α ↓
+↓
+chains ↓
+↓
+search becomes faster
+```
+
+Therefore:
+
+```text
+           Build time
+               ↑
+               │
+          rehashing
+               │
+               │
+               ▼
+        better search time
+```
+
+This is a classic **time-for-time trade-off**.
+
+---
+
+**The engineering trade-off**
+
+Think about an application where you build a hash table once and search it millions of times.
+
+For example:
+
+```text
+Build table
+    ↓
+1 second extra construction
+    ↓
+10,000,000 searches
+```
+
+Spending additional time during construction might be worthwhile if it makes every subsequent search faster.
+
+But if you build the table and immediately discard it:
+
+```text
+build
+ ↓
+one search
+ ↓
+discard
+```
+
+then aggressive rehashing may not be as valuable.
+
+This is why the book says:
+
+> The JDK performs extra computation while constructing the hash table to improve search performance.
+
+---
+
+**Why are the last two rows interesting?**
+
+Look at: \(b=524,287\)
+
+```text
+α = n/b ≈ 0.41
+```
+
+Results:
+
+| JDK configuration | Build time |
+| ----------------- | ---------: |
+| α=0.75            |   21.37 ms |
+| α=4.0             |   22.51 ms |
+| No rehash         |   22.37 ms |
+
+All are very close.
+
+And:
+
+```text
+#Rehash = 0
+```
+
+for the first two configurable versions.
+
+Why? Because the table is already large enough. The load factor never reaches the thresholds:
+
+$$
+0.41 < 0.75
+$$
+
+and:
+
+$$
+0.41 < 4.0
+$$
+
+So no rehashing is needed.
+
+---
+
+Same thing for \(b=1,048,575\)
+
+Here:
+
+$$
+\alpha=\frac{213557}{1048575}\approx0.20
+$$
+
+Again:
+
+$$
+0.20 < 0.75
+$$
+
+so:
+
+```text
+α=.75 → no rehash
+α=4.0 → no rehash
+no rehash → no rehash
+```
+
+The build times are therefore relatively similar:
+
+```text
+25.46 ms
+26.91 ms
+27.12 ms
+```
+
+This is exactly what the book means when it says:
+
+> "the last two rows ... do not rehash themselves"
+
+---
+
+**Why the custom implementation is so much slower**
+
+Look at \(b=4095\):
+
+```text
+Our hash table       403.61 ms
+JDK α=.75              42.44 ms
+JDK α=4.0              35.30 ms
+```
+
+The custom implementation is dramatically slower.
+
+But you should **not conclude that the hash-table algorithm itself is inefficient**.
+
+The custom implementation is intentionally simple and educational.
+
+It uses things like:
+
+```java
+LinkedList<V>
+```
+
+for every collision chain and doesn't automatically resize.
+
+The JDK implementation has years of optimization behind it.
+
+So this benchmark is comparing:
+
+```text
+simple educational implementation
+             VS
+optimized library implementation
+```
+
+not:
+
+```text
+hashing algorithm
+             VS
+different hashing algorithm
+```
+
+---
+
+**The deeper DSA lesson**
+
+This benchmark demonstrates an important concept in algorithm engineering:
+
+> **Asymptotic complexity doesn't tell the whole performance story.**
+
+Both implementations are based on hash-table lookup with expected:
+
+$$
+O(1)
+$$
+
+search.
+
+But their actual running times can differ substantially because of:
+
+* data structures used internally,
+* memory layout,
+* resizing strategy,
+* collision handling,
+* implementation overhead,
+* cache behavior,
+* object allocation,
+* library optimizations.
+
+So:
+
+$$
+O(1)\neq\text{"same actual running time"}
+$$
+
+Two \(O(1)\) implementations can have very different constant factors.
+
+---
+
+### The complete picture
+
+You now have three related experiments:
+
+```text
+                  Hash Table
+                      │
+          ┌───────────┴───────────┐
+          │                       │
+      Build phase             Search phase
+          │                       │
+          ▼                       ▼
+      Table 5-7                Table 5-6
+          │                       │
+          ▼                       ▼
+     Rehash cost            Search performance
+          │                       │
+          ▼                       ▼
+    larger table            lower load factor
+          │                       │
+          └───────────┬───────────┘
+                      ▼
+              shorter chains
+                      │
+                      ▼
+                faster search
+```
+
+**The trade-off is:**
+
+$$
+\text{"Build cost"}
+\quad\longleftrightarrow\quad
+\text{"Search cost"}
+$$
+
+Rehashing spends more time **now** to potentially save time on **future searches**.
+
+That's one of the fundamental ideas behind dynamic hash tables.
+
+
+
+## performance of open addressing
+{/* This paragraph is explaining an important performance trade-off in open addressing: you save memory by storing everything inside the hash table, but the table may require more probes to find an element. */}
+Let’s review the performance of open addressing by considering how many probes it
+takes to locate an element in the hash table.
+
+Given a fixed word list, how can we search for a word efficiently?
+
+lets starts with a fixed dictionary:
+
+```text
+Number of words = 213,557
+
+Next Figure shows the results for both
+successful and unsuccessful searches, using the same list of 213,557 words as before.
+As the number of bins increases—from 224,234 (or 95.2% full) to 639,757 (or 33.4%
+full)
+
+$$
+\alpha = \frac{213557}{224234} \approx 0.952 = 95.2% full
+$$
+
+$$
+\alpha = \frac{213557}{639757} \approx 0.334 = 33.4% full
+$$
+The difference is huge:
+
+```text
+95.2% full                         33.4% full
+
+███████████████████░              ██████░░░░░░░░░░░░
+
+very little empty space            lots of empty space
+many collisions                    fewer collisions
+more probes                         fewer probes
+```
+
+you can see how the number of probes decreases dramatically. The top half of
+this figure shows the average (and worst) number of probes for a successful search
+![Performance of open addressing](/docs/assets/software-systems/data-structures-and-algorithms/algorithms/concepts/searching/hash-based-search/performance-of-open-addressing.png)
+
+while the bottom presents the same information for unsuccessful searches. 
+
+The important relationship is:
+
+```text
+Higher load factor
+        ↓
+Less empty space
+        ↓
+More collisions / longer probe sequences
+        ↓
+More probes
+        ↓
+Slower searches
+```
+
+Conversely:
+
+```text
+Lower load factor
+        ↓
+More empty space
+        ↓
+Fewer collisions
+        ↓
+Shorter probe sequences
+        ↓
+Fewer probes
+        ↓
+Faster searches
+```
+
+---
+
+Successful vs. unsuccessful searches
+
+The figure separates two different situations.
+
+**Successful search**
+
+We are looking for an element that **exists** in the table.
+
+For example:
+
+```text
+[ ] [A] [B] [ ] [C] [ ] [ ]
+     ↑
+     hash(A)
+```
+
+Suppose `A` is found immediately:
+
+```text
+probe 1 → A found
+```
+
+Only **1 probe**.
+
+But suppose `C` originally hashed to index `1`:
+
+```text
+hash(C) = 1
+```
+
+and linear probing placed it at index `4`:
+
+```text
+index:  0   1   2   3   4
+       [ ] [A] [B] [ ] [C]
+                           ↑
+                      C found
+```
+
+Searching for `C` requires:
+
+```text
+probe 1 → A
+probe 2 → B
+probe 3 → empty
+probe 4 → C
+```
+
+So the search requires several probes.
+
+The figure therefore reports:
+
+* **average successful probes**
+* **worst-case successful probes**
+
+**Unsuccessful search**
+
+An unsuccessful search is different.
+
+We are looking for an element that **does not exist**.
+
+For example:
+
+```text
+hash(X) = 1
+```
+
+and the table contains:
+
+```text
+index:  0   1   2   3   4   5
+       [ ] [A] [B] [C] [D] [ ]
+```
+
+With linear probing:
+
+```text
+probe 1 → A
+probe 2 → B
+probe 3 → C
+probe 4 → D
+probe 5 → empty
+```
+
+Only when we encounter an appropriate empty position can we conclude:
+
+```text
+X does not exist
+```
+
+So unsuccessful searches can require **many probes**.
+
+This is why unsuccessful searches are particularly sensitive to a high load factor.
+
+---
+
+Why does 95.2% occupancy hurt so much?
+
+Consider the extreme case:
+
+```text
+95.2% full
+```
+
+There are very few empty slots available.
+
+Imagine:
+
+```text
+[A][B][C][D][E][F][G][H][I][ ]
+```
+
+If an element hashes to the beginning of this cluster, we may have to inspect almost the entire sequence before finding what we want—or an empty slot.
+
+Compare that with:
+
+```text
+[A][ ][ ][B][ ][C][ ][ ][D][ ]
+```
+
+There are many opportunities to stop searching.
+
+So **open addressing becomes increasingly expensive as the table approaches full capacity**.
+
+---
+
+**overall storage**
+
+With separate chaining, a hash table might contain:
+
+```text
+table
+  ↓
+[ ] → node → node
+[ ] → node
+[ ] → node → node → node
+[ ]
+```
+
+Each collision may require another node.
+
+That means we need storage for:
+
+```text
+hash table
++
+linked-list nodes
++
+pointers/references
+```
+
+Open addressing instead stores the elements **directly inside the table**:
+
+```text
+[A][ ][B][C][ ][D][ ][E]
+```
+
+There are no linked-list nodes required.
+
+Therefore:
+
+> **Open addressing can use less memory than separate chaining.**
+
+But there is a trade-off.
+
+| Open Addressing                   | Consequence                   |
+| --------------------------------- | ----------------------------- |
+| Elements stored directly in table | Lower storage overhead        |
+| No separate collision chains      | Less memory                   |
+| Requires empty slots              | Cannot become completely full |
+| High load factor                  | More probes                   |
+| Collisions create probe sequences | Searches can become slower    |
+| Linear probing                    | Can create clustering         |
+| Worst-case search                 | Can require many probes       |
+
+So:
+
+```text
+                 OPEN ADDRESSING
+                       │
+             ┌─────────┴─────────┐
+             ↓                   ↓
+        Memory efficient      Probe sensitive
+             │                   │
+             ↓                   ↓
+      fewer auxiliary        high load factor
+        structures                 ↓
+                              more probes
+                                   ↓
+                              slower search
+```
+
+---
+
+**Clustering** happens when consecutive occupied positions form a long block.
+
+For example:
+
+```text
+[ ][A][B][C][D][E][ ][ ][F][ ]
+    └─────────┘
+       cluster
+```
+
+Suppose another element hashes to index `2`.
+
+It cannot go there because:
+
+```text
+index 2 → B
+```
+
+so linear probing checks:
+
+```text
+2 → 3 → 4 → 5 → ...
+```
+
+The new element may therefore extend the existing cluster:
+
+```text
+[ ][A][B][C][D][E][X][ ][F][ ]
+    └───────────────┘
+         bigger cluster
+```
+
+Now another element that hashes anywhere inside this region has to traverse a long sequence.
+
+This creates a **feedback effect**:
+
+```text
+collision
+   ↓
+linear probing
+   ↓
+longer occupied run
+   ↓
+clustering
+   ↓
+future collisions encounter the cluster
+   ↓
+even more probes
+```
+
+linear probing is particularly affected
+
+Linear probing uses:
+
+$$
+h(k), h(k)+1, h(k)+2, h(k)+3,\ldots
+$$
+
+So once a consecutive block develops, many keys are forced through that same block.
+
+For example:
+
+```text
+                 cluster
+                   ↓
+index:   0  1  2  3  4  5  6  7  8
+        [ ][A][B][C][D][E][ ][ ][ ]
+
+                   ↑
+             new collision
+```
+
+A key hashing to:
+
+```text
+1
+```
+
+may need to check:
+
+```text
+1 → 2 → 3 → 4 → 5 → 6
+```
+
+That is **6 probes** just to find an empty position.
+
+This phenomenon is called **primary clustering**.
+
+---
+
+Open addressing saves memory because elements are stored directly in the hash table, but that memory efficiency comes at the cost of probe performance. As the table becomes fuller, searches require more probes, and linear probing makes the problem worse because of primary clustering.
+
+The three things to remember
+
+```text
+1. Lower load factor
+       → fewer probes
+
+2. Higher load factor
+       → more probes
+
+3. Linear probing
+       → primary clustering
+       → longer probe sequences
+       → more probes
+```
+
+This is the key performance trade-off you should carry forward when studying **open addressing**.
+
+In brief, open addressing reduces the overall storage used but requires noticeably more probes in the worst case. A second implication is that linear probing leads to more probes due to clustering

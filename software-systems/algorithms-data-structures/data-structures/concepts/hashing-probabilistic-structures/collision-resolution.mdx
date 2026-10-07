@@ -1,0 +1,2251 @@
+
+## Collision Resolution(Handling)
+There is a problem with Hash Tables: sometimes the hash function returns the same memory position for two different inputs.
+That’s called a hash collision. When it happens, both items have
+to be stored at the same memory address (for instance, by using a
+Linked List that starts at the given address). Hash collisions are an
+extra overhead of CPU and memory, so we try to avoid it.
+
+It can happen that multiple elements in C have the same hash value; this is known as a collision and the hash table needs a strategy to deal with these situations. 
+
+The biggest issue with hash tables is that **two different keys can produce the same index**.
+
+For example:
+
+```text
+h(key) = key % 10
+```
+
+Then:
+
+```text
+h(25) = 5
+h(35) = 5
+```
+
+Both keys want to use:
+
+```text
+table[5]
+```
+
+This is called a **collision**.
+
+```text
+25 ─────┐
+        ├──→ hash() → 5
+35 ─────┘
+```
+
+A hash table therefore needs a **collision resolution strategy**.
+
+The two major approaches are:
+
+```text
+Hash Table
+│
+├── Separate Chaining
+│
+└── Open Addressing
+    ├── Linear Probing
+    ├── Quadratic Probing
+    └── Double Hashing
+```
+
+---
+
+
+This is a **collision**.
+
+**Why do collisions happen?**
+
+Imagine we have:
+
+```text
+1,000,000 possible keys
+```
+
+but only:
+
+```text
+1,000 bins
+```
+
+We are mapping a huge set of possible values into a much smaller set of locations.
+
+Therefore, different keys can inevitably map to the same location.
+
+Conceptually:
+
+```text
+Large key space
+─────────────────────────
+42   52   72   102   1002 ...
+          │
+          ▼
+     hash function
+          │
+          ▼
+Small table
+─────────────────
+0  1  2  3 ... 999
+       ↑
+       └── many keys may map here
+```
+
+This is why **collision handling** is an essential part of hash-table design.
+
+--- 
+
+A hash table therefore needs a collision-resolution strategy.
+
+The two major approaches are:
+
+```text
+Collision Handling
+│
+├── Separate Chaining
+│
+└── Open Addressing
+    ├── Linear Probing
+    ├── Quadratic Probing
+    └── Double Hashing
+```
+
+---
+
+### Separate Chaining
+With **separate chaining**, each table slot contains a collection of entries.
+
+Usually this is a linked list, although implementations may use other structures.
+
+the most common traditional solution: "store a linked list at each hash index", This is called **separate chaining**.
+
+With **separate chaining**, each table position contains a collection of entries, commonly a linked list.
+
+Instead of each hash-table position containing a single element:
+
+```text
+H[2] → 42
+```
+
+each position contains a linked list:
+
+```text
+H[2] → 42 → 52 → 72 → NULL
+```
+
+For example:
+
+```text
+h(k) = k % 10
+```
+
+The keys:
+
+```text
+23
+43
+73
+```
+
+all map to:
+
+```text
+3
+```
+
+Instead of replacing one another, they form a chain:
+
+```text
+table[3]
+
+   ┌────┐     ┌────┐     ┌────┐
+   │ 23 │ ──► │ 43 │ ──► │ 73 │ ──► NULL
+   └────┘     └────┘     └────┘
+```
+
+The entire table might look like:
+
+```text
+0 → NULL
+1 → NULL
+2 → 52 → NULL
+3 → 23 → 43 → 73 → NULL
+4 → NULL
+5 → 15 → NULL
+6 → NULL
+7 → 27 → 87 → NULL
+8 → NULL
+9 → NULL
+```
+Each index represents a **bucket/bin**, and the linked list stores all elements that hashed to that index.
+
+---
+
+**Why do some lists contain only one element?**
+
+even though many of these linked lists may contain only one element, That's because a good hash function tries to distribute elements evenly.
+
+For example:
+
+```text
+H[1] → 31
+H[2] → 42 → 52 → 72
+H[3] → 73
+H[4] → 14
+H[5] → 15 → 65
+```
+
+Most buckets might contain:
+
+```text
+0 or 1 element
+```
+
+while a few contain:
+
+```text
+2 or 3 elements
+```
+
+That's desirable.
+
+---
+
+**Searching a chain**
+
+Suppose:
+
+```text
+H[2] → 42 → 52 → 72
+```
+
+and we search for:
+
+```text
+52
+```
+
+First calculate:
+
+```text
+hash(52)
+   ↓
+   2
+```
+
+Then:
+
+```text
+H[2]
+ ↓
+42 → 52 → 72
+     ↑
+    found
+```
+
+The search inside the linked list is **linear**.
+
+So if the chain contains `k` elements:
+
+$$
+O(k)
+$$
+
+But if the hash function distributes the elements well, `k` should be small.
+
+Therefore, the expected search remains approximately:
+
+$$
+\boxed{O(1)}
+$$
+
+---
+
+#### Advantages
+
+* Simple collision handling
+* Table can contain more elements than the number of buckets
+* Deletion is relatively straightforward
+
+#### Disadvantage
+
+If too many elements are placed in one chain:
+
+```text
+table[3] → A → B → C → D → E → F → ...
+```
+
+search can approach:
+
+```text
+O(n)
+```
+
+---
+
+### Open Addressing
+Open addressing is a collision-handling technique where **all elements are stored directly inside the hash table array**.
+
+Unlike separate chaining, a bin cannot contain a linked list.
+
+With **open addressing**, all entries are stored directly inside the hash table array.
+
+There are no external linked lists.
+
+If the initial position is occupied, the algorithm searches for another position according to a **probe sequence**.
+
+For example:
+
+```text
+h(key) = key % 10
+```
+
+Insert:
+
+```text
+25
+```
+
+gives:
+
+```text
+25 % 10 = 5
+```
+
+So:
+
+```text
+table[5] = 25
+```
+
+Now insert:
+
+```text
+35
+```
+
+We get:
+
+```text
+35 % 10 = 5
+```
+
+But slot 5 is occupied.
+
+We therefore probe for another slot.
+
+The algorithm tries another position:
+
+```text
+3 → 4 → 5 → 6 → ...
+```
+
+depending on the probing strategy.
+
+#### Basic Concept
+
+The basic idea is:
+
+> **If the desired hash-table position is occupied, search for another position according to a probing strategy.**
+
+Suppose:
+
+```text
+b = 10
+```
+
+and we want to insert:
+
+```text
+25
+```
+
+Assume:
+
+```text
+hash(25) = 5
+```
+
+Initially:
+
+```text
+Index:  0   1   2   3   4   5   6   7   8   9
+       [ ] [ ] [ ] [ ] [ ] [ ] [ ] [ ] [ ] [ ]
+                               ↑
+                              25
+```
+
+If position 5 is empty:
+
+```text
+H[5] = 25
+```
+
+Done.
+
+But suppose:
+
+```text
+H[5] = 15
+```
+
+Then we have a collision:
+
+```text
+hash(25) = 5
+
+H[5] already contains 15
+        ↓
+     collision
+```
+
+Open addressing says:
+
+> Don't create a chain. Find another empty slot.
+
+For example:
+
+```text
+H[5] occupied
+   ↓
+H[6] empty
+   ↓
+H[6] = 25
+```
+
+Result:
+
+```text
+Index:  0   1   2   3   4   5   6   7   8   9
+       [ ] [ ] [ ] [ ] [ ] [15] [25] [ ] [ ] [ ]
+```
+
+So the important difference is:
+
+```text
+Separate Chaining:
+
+H[5] → 15 → 25
+
+
+Open Addressing:
+
+H[5] = 15
+H[6] = 25
+```
+
+**What does "probe" mean?**
+
+**Probing** means checking other positions in the hash table according to a predefined rule.
+
+For example, the simplest rule is:
+
+> Check the next position.
+
+So if the desired position is:
+
+$$
+h=2
+$$
+
+we check:
+
+```text
+H[2]
+H[3]
+H[4]
+H[5]
+...
+```
+
+until we find an empty position.
+
+This particular strategy is called **linear probing**.
+
+```text
+h
+↓
+H[2] → occupied
+        ↓
+H[3] → occupied
+        ↓
+H[4] → empty
+        ↓
+insert here
+```
+
+**Why is this called "open addressing"?**
+
+Because the element is not required to stay at its original hash position.
+
+The hash function gives us the **initial address**:
+
+$$
+h_0=hash(e)
+$$
+
+If that position is occupied, we look for another address:
+
+$$
+h_1,h_2,h_3,\ldots
+$$
+
+until we find an available position.
+
+So:
+
+```text
+hash(e)
+   ↓
+initial address
+   ↓
+collision?
+   │
+   ├── no → store here
+   │
+   └── yes
+        ↓
+      probe
+        ↓
+      another address
+        ↓
+      probe again if necessary
+```
+
+---
+
+open addressing is not one single algorithm. There are several probing strategies.
+
+**The main open-addressing techniques are**:
+
+```text
+Open Addressing
+│
+├── Linear Probing
+├── Quadratic Probing
+└── Double Hashing
+```
+
+#### Insertion
+
+Insertion follows a sequence of steps.
+
+Suppose the table has:
+
+```text
+b = 10
+```
+
+and we want to insert:
+
+```text
+25
+```
+
+with:
+
+```text
+hash(25) = 5
+```
+
+1. Step 1 — Compute the initial position
+
+```text
+h = hash(25)
+  = 5
+```
+
+2. Step 2 — Check the position
+
+```text
+H[5]
+```
+
+If empty:
+
+```text
+H[5] = 25
+```
+
+Insertion is complete.
+
+If occupied:
+
+```text
+H[5] = 15
+```
+
+we have a collision.
+
+3. Step 3 — Probe another position
+
+The exact position depends on the probing strategy.
+
+With linear probing:
+
+```text
+5 → 6 → 7 → 8 → ...
+```
+
+Suppose:
+
+```text
+H[5] = 15
+H[6] = 35
+H[7] = empty
+```
+
+Then:
+
+```text
+hash(25) = 5
+
+H[5] → occupied
+H[6] → occupied
+H[7] → empty
+```
+
+Therefore:
+
+```text
+H[7] = 25
+```
+
+**Complete process**
+
+```text
+             insert(25)
+                  |
+                  ↓
+             hash(25)
+                  |
+                  ↓
+                 5
+                  |
+                  ↓
+              H[5]?
+             /     \
+         empty    occupied
+           |          |
+           ↓          ↓
+       insert 25    probe
+                       |
+                       ↓
+                    H[6]?
+                   /     \
+               empty    occupied
+                 |          |
+                 ↓          ↓
+             insert 25    probe again
+```
+
+So insertion is essentially:
+
+```text
+calculate hash
+      ↓
+check slot
+      ↓
+occupied?
+   /       \
+ no         yes
+ |           |
+insert      probe
+             ↓
+          repeat
+```
+
+#### Probe Sequence
+
+The **probe sequence** is the sequence of table positions examined when a collision occurs.
+
+This is a very important concept.
+
+Suppose:
+
+```text
+hash(K) = 3
+```
+
+A probing strategy might examine:
+
+```text
+3 → 4 → 5 → 6 → 7 → 8 → ...
+```
+
+Those positions form the probe sequence.
+
+Different open-addressing techniques use different probe sequences.
+
+#### Full Table and Insertion Failure
+In all cases, if no empty bin is found after b probe attempts, the insert request must fail.
+
+This is an important limitation of **open addressing**.
+
+In open addressing, the hash table has `b` bins (slots), and **each bin can contain at most one element**.
+
+Suppose:
+
+```text
+b = 7
+
+Index:  0   1   2   3   4   5   6
+       [ ] [A] [ ] [B] [C] [ ] [D]
+```
+
+Now we want to insert `X`, and its initial hash position is:
+
+```text
+hash(X) = 3
+```
+
+If bin `3` is occupied, we probe other bins according to the probing strategy.
+
+For example, with **linear probing**:
+
+```text
+h₀ = 3
+h₁ = 4
+h₂ = 5
+h₃ = 6
+h₄ = 0
+h₅ = 1
+h₆ = 2
+```
+
+The probe sequence visits every bin exactly once.
+
+If all seven bins are occupied:
+
+```text
+Index:  0   1   2   3   4   5   6
+       [A] [B] [C] [D] [E] [F] [G]
+```
+
+then there is nowhere to put `X`.
+
+Therefore:
+
+```text
+insert(X)
+   ↓
+hash(X) = 3
+   ↓
+probe 3 → occupied
+   ↓
+probe 4 → occupied
+   ↓
+probe 5 → occupied
+   ↓
+probe 6 → occupied
+   ↓
+probe 0 → occupied
+   ↓
+probe 1 → occupied
+   ↓
+probe 2 → occupied
+   ↓
+all b = 7 bins checked
+   ↓
+INSERT FAILS
+```
+
+**Why can't we keep probing?**
+
+Because there are only `b` positions in the table.
+
+After examining all `b` positions, one of two things is true:
+
+```text
+An empty bin was found
+        ↓
+     INSERT
+
+OR
+
+All b bins are occupied
+        ↓
+   INSERT FAILS
+```
+
+Continuing to probe would simply revisit bins that have already been checked.
+
+his is one of the fundamental differences between **open addressing** and **separate chaining**:
+
+|                                  | Separate Chaining | Open Addressing    |
+| -------------------------------- | ----------------- | ------------------ |
+| Elements per bin                 | Multiple          | One                |
+| Collision handling               | Linked list/chain | Probe another slot |
+| Can `n > b`?                     | Yes               | No                 |
+| What happens when table is full? | Chains grow       | Insertion fails    |
+| Extra node storage               | Yes               | No                 |
+
+For example, with:
+
+```text
+n = 10 elements
+b = 5 bins
+```
+
+separate chaining can store them:
+
+```text
+H[0] → A → F
+H[1] → B → G
+H[2] → C → H
+H[3] → D → I
+H[4] → E → J
+```
+
+But open addressing **cannot** store 10 elements in 5 bins:
+
+```text
+n > b
+10 > 5
+
+→ impossible
+```
+
+This is why open addressing requires:
+
+$$
+\alpha = \frac{n}{b} \leq 1
+$$
+
+and, in practice, the table is normally resized **before** it becomes completely full.
+
+The key idea to remember is:
+
+> **Open addressing searches for another empty slot within the table. If all `b` slots have been examined and none is empty, the insertion cannot succeed.**
+
+##### Load Factor
+
+For open addressing:
+
+$$
+\alpha = \frac{n}{b}
+$$
+
+where:
+
+* `n` = number of stored elements
+* `b` = number of slots
+
+For example:
+
+```text
+n = 7
+b = 10
+
+α = 7/10 = 0.7
+```
+
+The table is 70% occupied.
+
+If:
+
+```text
+n = 10
+b = 10
+```
+
+then:
+
+$$
+\alpha = 1
+$$
+
+The table is completely full.
+
+You cannot insert another element.
+
+Therefore, open-addressing implementations normally resize the table before it becomes full.
+
+```text
+α becomes too high
+       ↓
+resize table
+       ↓
+create larger array
+       ↓
+rehash elements
+       ↓
+continue inserting
+```
+
+This connects directly to your earlier **Resizing and Rehashing** topic.
+
+#### Linear Probing
+
+##### Basic Concept
+The simplest open-addressing technique is **linear probing**.
+
+Repeatedly search other bins $h_i(k) = (h(k) + c*i) \bmod b$ where `c` is an integer offset and `i` is the number of successive probes into `H`; often, `c = 1`. Clusters of elements may appear in `H` using this strategy.
+
+With **linear probing**, we check consecutive positions.
+
+The probe formula is:
+
+$$
+h_i(k) = (h(k) + i) \bmod m
+$$
+
+where:
+
+* `h(k)` = original hash value
+* `i` = probe number
+* `m` = table size
+
+For example:
+
+```text
+h(k) = 3
+```
+
+and position `3` is occupied.
+
+We try:
+
+```text
+i = 0 → 3
+i = 1 → 4
+i = 2 → 5
+i = 3 → 6
+```
+
+So:
+
+```text
+3 → 4 → 5 → 6 → ...
+```
+
+Example:
+
+```text
+Index:
+ 0   1   2   3   4   5   6
+             ↓
+            [23]
+                 ↓
+                [43]
+                     ↓
+                    [73]
+```
+
+The probing sequence is:
+
+```text
+h(k)
+h(k) + 1
+h(k) + 2
+h(k) + 3
+...
+```
+
+usually modulo the table size.
+
+For example:
+
+```text
+table size = 10
+
+h(25) = 5
+```
+
+Insert:
+
+```text
+table[5] = 25
+```
+
+Then:
+
+```text
+h(35) = 5
+```
+
+but:
+
+```text
+table[5] = 25
+```
+
+So try:
+
+```text
+table[6]
+```
+
+Therefore:
+
+```text
+table[5] = 25
+table[6] = 35
+```
+
+Another key:
+
+```text
+45
+```
+
+produces:
+
+```text
+45 % 10 = 5
+```
+
+Positions:
+
+```text
+5 → occupied
+6 → occupied
+7 → free
+```
+
+So:
+
+```text
+table[7] = 45
+```
+
+The table becomes:
+
+```text
+0   empty
+1   empty
+2   empty
+3   empty
+4   empty
+5   25
+6   35
+7   45
+8   empty
+9   empty
+```
+
+---
+
+Many modern explanations define basic linear probing specifically as:
+
+$$
+h_i=(h+i)\bmod b
+$$
+
+which means:
+
+$$
+c=1
+$$
+
+The book is using the more general fixed-step form:
+
+$$
+h_i=(h_k+i\cdot c)\bmod b
+$$
+
+and calls it linear probing because the probe position changes **linearly with `i`**.
+
+So you can think of:
+
+```text
+c = 1  →  1, 2, 3, 4, 5, ...
+c = 2  →  1, 3, 5, 7, 9, ...
+c = 3  →  1, 4, 7, 10, 2, ...
+```
+
+The figure is specifically demonstrating:
+
+$$
+b=11,\quad h_k=1,\quad c=3
+$$
+
+giving:
+
+$$
+1\rightarrow4\rightarrow7\rightarrow10
+$$
+
+and therefore `e` is inserted into **H[10]**.
+
+##### Example1
+
+Suppose we have 10 bins:
+
+```text
+Index:  0  1  2  3  4  5  6  7  8  9
+        -------------------------------
+Table:  _  _  _  _  _  _  _  _  _  _
+```
+
+Suppose:
+
+```text
+hash(25) = 5
+hash(35) = 5
+hash(45) = 5
+```
+
+1. **Insert 25**
+
+   ```text
+   hash(25) = 5
+   ```
+
+   `H[5]` is empty:
+
+   ```text
+   0  1  2  3  4  5  6  7  8  9
+                     ↓
+                     25
+   ```
+
+2. **Insert 35**
+
+   ```text
+   hash(35) = 5
+   ```
+
+   But:
+
+   ```text
+   H[5] = 25
+   ```
+
+   Collision.
+
+   With linear probing:
+
+   ```text
+   H[5] → occupied
+   H[6] → empty
+   ```
+
+   So:
+
+   ```text
+   H[6] = 35
+   ```
+
+3. Insert 45
+
+   Again:
+
+   ```text
+   hash(45) = 5
+   ```
+
+   Check:
+
+   ```text
+   H[5] → 25       occupied
+   H[6] → 35       occupied
+   H[7] → empty
+   ```
+
+   So:
+
+   ```text
+   H[7] = 45
+```
+
+The final table:
+
+```text
+Index:  0  1  2  3  4  5   6   7  8  9
+        --------------------------------
+Table:  _  _  _  _  _  25  35  45  _  _
+```
+
+Notice something important:
+
+**25, 35, and 45 all have the same original hash position, but they occupy different table positions.**
+
+##### Example 2
+This example is illustrating **open addressing with linear probing where the probe step is `c = 3`**. The important point is that here “linear probing” is not necessarily moving to the immediately next bin; it moves by a fixed step size `c`.
+
+the figure shows a sample hash table with b = 11 bins using linear probing with
+c = 3. The load factor for the hash table is α = 0.45 because it contains five elements.
+This figure shows the behavior when attempting to add element e, which hashes to
+hk = 1. The bin H[1] is already occupied (by the value 3) so it proceeds to probe
+other potential bins. After i = 3 iterations it finds an empty bin and inserts e into
+H[10].
+
+```text
+     hk
+     ↓
+[ ] [3] [ ] [ ] [1] [2] [ ] [5] [ ] [7] [ ] [ ]
+     0   1   2   3   4   5   6   7   8   9  10
+     |___________|___________|_______________|
+
+```
+The element `e` wants to go to:
+
+```text
+H[1]
+```
+
+But:
+
+```text
+H[1] = 3
+```
+
+so we have a collision.
+
+```text
+hash(e) = 1
+             ↓
+        H[1] = 3
+             ↓
+          occupied
+             ↓
+          PROBE
+```
+
+Now we need to find another position.
+
+The probing strategy uses a constant step:
+
+$$
+c=3
+$$
+
+So instead of checking:
+
+```text
+1 → 2 → 3 → 4 → ...
+```
+
+we check:
+
+```text
+1 → 4 → 7 → 10 → ...
+```
+
+That's exactly what the arrows in the figure show.
+
+The general probing formula is:
+
+$$
+h_i=(h_k+i\cdot c)\bmod b
+$$
+
+where:
+
+* \(h_k\) = original hash position
+* \(i\) = probe number
+* \(c\) = probe step
+* \(b\) = number of bins
+
+For this example:
+
+$$
+h_k=1,\qquad c=3,\qquad b=11
+$$
+
+Therefore:
+
+$$
+h_i=(1+3i)\bmod11
+$$
+Follow the probes
+
+1. Probe 0
+
+Initially:
+
+$$
+h_0=(1+3(0))\bmod11
+$$
+
+$$
+h_0=1
+$$
+
+So:
+
+```text
+i = 0
+    ↓
+H[1] = 3
+```
+
+Occupied.
+
+---
+
+2. Probe 1
+
+Now:
+
+$$
+h_1=(1+3(1))\bmod11
+$$
+
+$$
+h_1=4
+$$
+
+So:
+
+```text
+i = 1
+    ↓
+H[4] = 1
+```
+
+Occupied.
+
+---
+
+3. Probe 2
+
+Next:
+
+$$
+h_2=(1+3(2))\bmod11
+$$
+
+$$
+h_2=7
+$$
+
+So:
+
+```text
+i = 2
+    ↓
+H[7] = 5
+```
+
+Occupied.
+
+---
+
+4. Probe 3
+
+Next:
+
+$$
+h_3=(1+3(3))\bmod11
+$$
+
+$$
+h_3=10
+$$
+
+So:
+
+```text
+i = 3
+    ↓
+H[10] = empty
+```
+
+We found an empty bin!
+
+Therefore:
+
+```text
+H[10] = e
+```
+
+---
+
+**The entire process**
+
+The figure can be read as:
+
+```text
+                     c = 3
+                       ↓
+H[1] → H[4] → H[7] → H[10]
+ ↓       ↓       ↓       ↓
+ 3       1       5      empty
+                         ↑
+                         e
+```
+
+So the element travels:
+
+```text
+1 → 4 → 7 → 10
+```
+
+and is finally inserted at:
+
+```text
+H[10]
+```
+
+---
+
+**Why do we use modulo `b`?**
+
+Because eventually we may reach the end of the array.
+
+For example, starting at `8` with `c=3` and `b=11`:
+
+$$
+8\rightarrow11\rightarrow14\rightarrow17...
+$$
+
+But indices 11, 14, 17 don't exist.
+
+The modulo operation wraps them around:
+
+$$
+8\bmod11=8
+$$
+
+$$
+(8+3)\bmod11=0
+$$
+
+$$
+(8+6)\bmod11=3
+$$
+
+So:
+
+```text
+8 → 0 → 3 → 6 → 9 → 1 → ...
+```
+
+This is how the probe sequence stays inside the table.
+
+---
+
+**Why must `c` be chosen carefully?**
+
+This is an important detail.
+
+We have:
+
+$$
+b=11
+$$
+
+and:
+
+$$
+c=3
+$$
+
+Because `11` and `3` are relatively prime:
+
+$$
+\gcd(11,3)=1
+$$
+
+the probe sequence can eventually visit **all 11 positions**.
+
+For example, starting at 1:
+
+```text
+1 → 4 → 7 → 10 → 2 → 5 → 8 → 0 → 3 → 6 → 9
+```
+
+Every table position is reachable.
+
+But suppose:
+
+$$
+b=12,\qquad c=4
+$$
+
+Then:
+
+```text
+1 → 5 → 9 → 1 → 5 → 9 → ...
+```
+
+It cycles through only three positions.
+
+That's bad because the table might have empty positions elsewhere, but the probing algorithm can never reach them.
+
+So for this style of probing, we generally want:
+
+$$
+\gcd(c,b)=1
+$$
+
+---
+
+**Connecting this to insertion failure**
+
+In insertion
+
+> If no empty bin is found after `b` probe attempts, insertion fails.
+
+Why `b`? Because there are only `b` bins. With:
+
+$$
+b=11
+$$
+
+the probe sequence can examine at most 11 positions.
+
+In this example:
+
+```text
+1 → 4 → 7 → 10 → 2 → 5 → 8 → 0 → 3 → 6 → 9
+```
+
+After those positions, we've checked the entire table.
+
+If every one is occupied:
+
+```text
+no empty bin
+     ↓
+insertion fails
+```
+
+---
+
+##### Advantage
+
+Very simple and often cache-friendly because nearby memory locations are accessed.
+
+**Why does open addressing reduce memory overhead?**
+
+This is one of the main advantages.
+
+1. **Separate chaining**
+
+   You need:
+
+   ```text
+   array of bin references
+   +
+   linked-list nodes
+   +
+   next pointers
+   ```
+
+   Conceptually:
+
+   ```text
+   H[5] ──→ Node
+            │
+            ├── value
+            └── next
+                  │
+                  ▼
+               Node
+   ```
+
+   There is additional memory for the linked-list nodes and pointers.
+
+2. **Open addressing**
+
+   Everything is stored directly in the array:
+
+   ```text
+   H[0] = ...
+   H[1] = ...
+   H[2] = ...
+   H[3] = ...
+   ```
+
+   There are no linked-list nodes.
+
+   So:
+
+   ```text
+   Separate chaining
+
+   table
+   +
+   linked-list nodes
+   +
+   next pointers
+
+
+   Open addressing
+
+   table only
+   ```
+
+   This can significantly reduce memory overhead.
+
+
+**The two collision strategies**
+
+You can now see the fundamental difference:
+
+```text
+                Collision
+                    │
+             ┌──────┴──────┐
+             ↓             ↓
+        Chaining       Open Addressing
+             │             │
+             ↓             ↓
+      linked list       probe table
+             │             │
+      multiple items    one item/bin
+        per bin
+```
+
+- Separate chaining
+
+   ```text
+   H[h] → A → B → C
+   ```
+
+- Open addressing
+
+   ```text
+   H[h]   = A
+   H[h+1] = B
+   H[h+2] = C
+   ```
+
+---
+##### Disadvantage
+But there is a trade-off
+
+Open addressing saves memory, but it introduces another issue:
+
+> **The table itself must have enough empty positions for probing to work efficiently.**
+
+Imagine:
+
+```text
+H:
+[A][B][C][D][E][F][G][H][_][_]
+```
+
+The table is nearly full.
+
+Suppose a new element hashes to position 2:
+
+```text
+H[2] → C
+H[3] → D
+H[4] → E
+H[5] → F
+...
+H[8] → _
+```
+
+The insertion may have to examine many positions.
+
+So as the table becomes full:
+
+$$
+\alpha=\frac{n}{b}
+$$
+
+gets closer to 1, and probing becomes increasingly expensive.
+
+This is different from separate chaining, With separate chaining, you can theoretically have:
+
+$$
+\alpha>1
+$$
+
+For example:
+
+$$
+n=1000,\quad b=100
+$$
+
+gives:
+
+$$
+\alpha=10
+$$
+
+because multiple elements can occupy each bin's linked list.
+
+With open addressing, you cannot have:
+
+$$
+n>b
+$$
+
+because each bin can hold only one element.
+
+Therefore:
+
+$$
+\alpha\leq1
+$$
+
+and in practice you usually want:
+
+$$
+\alpha\<1
+$$
+
+by a comfortable margin.
+
+---
+
+Linear probing can suffer from **primary clustering**.
+
+For example:
+
+```text
+[ ][ ][X][X][X][X][ ][ ][ ]
+       └─────────┘
+          cluster
+```
+
+Once a cluster forms, new elements are likely to extend it.
+
+---
+
+##### Clustering
+
+Linear probing has a significant problem called **primary clustering**.
+
+Suppose we have:
+
+```text
+5 → 25
+6 → 35
+7 → 45
+8 → 55
+9 → 65
+```
+
+A group of occupied slots has formed:
+
+```text
+[25][35][45][55][65]
+```
+
+New keys that hash anywhere into this region may have to search through the entire cluster.
+
+This increases the search time.
+
+---
+
+#### Quadratic Probing
+Quadratic probing uses increasingly larger jumps.
+
+Repeatedly search other bins $h_i(k) = (h(k) + c1*i + c2*i^2) \bmod b$ where `c1` and `c2` are constants. This approach tends to break up clusters of elements. Useful values in
+practice are 4c1 = c2 = 1/2$.
+
+A common formula is:
+
+$$
+h_i(k) = (h(k) + i^2) \bmod m
+$$
+
+The probe sequence might be:
+
+```text
+h(k) = 3
+```
+
+Then:
+
+```text
+i = 0 → 3 + 0² = 3
+i = 1 → 3 + 1² = 4
+i = 2 → 3 + 2² = 7
+i = 3 → 3 + 3² = 12
+```
+
+With table size `10`:
+
+```text
+3  → 3 % 10  = 3
+4  → 4 % 10  = 4
+7  → 7 % 10  = 7
+12 → 12 % 10 = 2
+...
+```
+
+Instead of:
+
+```text
+3 → 4 → 5 → 6 → 7
+```
+
+we get something more spread out:
+
+```text
+3 → 4 → 7 → 2 → ...
+```
+
+This helps reduce **primary clustering**.
+
+However, quadratic probing can still suffer from **secondary clustering**, where keys with the same initial hash value follow the same probe sequence.
+
+---
+
+Instead of checking:
+
+```text
+h(k) + 1
+h(k) + 2
+h(k) + 3
+```
+
+quadratic probing checks positions based on squares:
+
+```text
+h(k)
+h(k) + 1²
+h(k) + 2²
+h(k) + 3²
+...
+```
+
+For example:
+
+```text
+h(k) = 5
+```
+
+the sequence could be:
+
+```text
+5
+6
+9
+14
+...
+```
+
+with indices taken modulo the table size.
+
+This reduces the clustering problem compared with linear probing.
+
+
+#### Double Hashing
+Like linear probing except that `c` is not a constant but is determined by a second hash function; this extra computation is intended to reduce the likelihood
+of clustering.
+
+Instead of using one hash function, we use two:
+
+
+```text
+h1(k)
+h2(k)
+```
+
+The probe sequence becomes something like:
+
+```text
+h(k, i) = (h1(k) + i × h2(k)) % m
+```
+
+where:
+
+```text
+i = 0, 1, 2, 3, ...
+```
+
+This generally gives a better distribution than linear probing.
+
+**Double hashing** uses two hash functions.
+
+A common formula is:
+
+$$
+h_i(k) = (h_1(k) + i \cdot h_2(k)) \bmod m
+$$
+
+For example:
+
+```text
+h₁(k) = k % 10
+h₂(k) = 7 - (k % 7)
+```
+
+Suppose:
+
+```text
+k = 23
+```
+
+Then:
+
+```text
+h₁(23) = 3
+
+h₂(23) = 7 - 2
+       = 5
+```
+
+The probe sequence becomes:
+
+```text
+i = 0 → 3
+i = 1 → 8
+i = 2 → 13 % 10 = 3
+...
+```
+
+The choice of table size and second hash function is important so that the probe sequence can visit enough table positions.
+
+Double hashing generally provides better distribution of probes than simple linear or quadratic probing.
+
+#### Searching
+
+Searching in open addressing is slightly different from searching in separate chaining.
+
+The critical rule is:
+
+> **Search must follow the same probe sequence that insertion used.**
+
+Suppose we inserted:
+
+```text
+25
+```
+
+with:
+
+```text
+hash(25) = 5
+```
+
+and linear probing.
+
+At insertion time:
+
+```text
+H[5] = 15
+H[6] = 35
+H[7] = 25
+```
+
+So:
+
+```text
+Index:  0   1   2   3   4   5    6    7    8   9
+       [ ] [ ] [ ] [ ] [ ] [15] [35] [25] [ ] [ ]
+```
+
+Now search for `25`.
+
+1. Step 1
+
+Calculate:
+
+```text
+hash(25) = 5
+```
+
+Check:
+
+```text
+H[5] = 15
+```
+
+Not 25.
+
+Continue probing.
+
+2. Step 2
+
+```text
+H[6] = 35
+```
+
+Not 25.
+
+Continue.
+
+3. Step 3
+
+```text
+H[7] = 25
+```
+
+Found.
+
+```text
+5 → 6 → 7
+          ↑
+        found
+```
+
+---
+
+**What if the element doesn't exist?**
+
+Suppose we search for:
+
+```text
+40
+```
+
+and:
+
+```text
+hash(40) = 5
+```
+
+The search follows:
+
+```text
+H[5] = 15   → no
+H[6] = 35   → no
+H[7] = 25   → no
+H[8] = empty
+```
+
+At this point, we can conclude:
+
+```text
+40 does not exist
+```
+
+Why?
+
+Because if `40` had been inserted, the insertion process would have stopped at the first available slot.
+
+Since `H[8]` is empty, `40` could not have been placed beyond it in this probe sequence.
+
+This gives us an important optimization:
+
+```text
+occupied → keep probing
+
+empty → target cannot be further along this probe sequence
+```
+
+**But there is an important exception: deletion.**
+
+That's why deletion requires special handling.
+
+#### Deletion
+
+Deletion is one of the trickiest parts of open addressing.
+
+Suppose we have:
+
+```text
+Index:  0   1   2   3   4
+       [ ] [A] [B] [C] [ ]
+```
+
+Suppose:
+
+```text
+hash(A) = 1
+hash(B) = 1
+hash(C) = 1
+```
+
+Using linear probing:
+
+```text
+A → H[1]
+B → H[2]
+C → H[3]
+```
+
+So:
+
+```text
+H[1] = A
+H[2] = B
+H[3] = C
+```
+
+Now suppose we delete `B`.
+
+The tempting solution is:
+
+```text
+H[2] = empty
+```
+
+giving:
+
+```text
+H[1] = A
+H[2] = empty
+H[3] = C
+```
+
+But now search for `C`.
+
+```text
+hash(C) = 1
+
+check H[1] → A
+check H[2] → EMPTY
+```
+
+A normal search would conclude:
+
+```text
+C does not exist
+```
+
+But that's wrong!
+
+`C` is actually at `H[3]`.
+
+---
+
+**Why did this happen?**
+
+The empty slot broke the probe sequence:
+
+```text
+A → B → C
+    ↑
+  deleted
+
+A → EMPTY → C
+```
+
+The search sees the empty slot and assumes:
+
+> "If C existed, it would have been inserted here or before here."
+
+But `C` was pushed farther because `H[2]` was occupied **when C was inserted**.
+
+---
+
+**Tombstones**
+
+The standard solution is to use a special marker called a **tombstone**.
+
+To support deletions with open addressing you would need to
+mark a bin as deleted and adjust the search function accordingly.
+
+Instead of:
+
+```text
+H[2] = EMPTY
+```
+
+we use:
+
+```text
+H[2] = DELETED
+```
+
+Now:
+
+```text
+Index:  0   1   2       3
+       [ ] [A] [DEL]   [C]
+```
+
+When searching:
+
+```text
+EMPTY
+```
+
+means:
+
+> Stop. The element cannot be farther along this probe sequence.
+
+But:
+
+```text
+DELETED
+```
+
+means:
+
+> Keep searching.
+
+So:
+
+```text
+search(C)
+
+H[1] → A      → continue
+H[2] → DEL    → continue
+H[3] → C      → FOUND
+```
+
+This preserves the probe sequence.
+
+#### Summary
+Complete Picture
+
+These six topics fit together as one process:
+
+```text
+                 OPEN ADDRESSING
+                       |
+                       ↓
+              5.3.1 Basic Concept
+                       |
+             collision occurs
+                       |
+                       ↓
+                 5.3.2 Insertion
+                       |
+                       ↓
+               5.3.3 Probe Sequence
+                  /          \
+             empty           occupied
+               |                 |
+               ↓                 ↓
+            insert             probe again
+                                  |
+                                  ↓
+                       5.3.4 Full Table?
+                            /          \
+                          no            yes
+                          |              |
+                          ↓              ↓
+                       continue      insertion fails
+                          |
+                          ↓
+                  5.3.5 Searching
+                          |
+                    follow same
+                   probe sequence
+                          |
+                          ↓
+                  5.3.6 Deletion
+                          |
+                     use tombstone
+                     when necessary
+```
+The key ideas
+
+| Topic              | Main idea                                                        |
+| ------------------ | ---------------------------------------------------------------- |
+| **Basic Concept**  | Store every element directly in the table                        |
+| **Insertion**      | If the desired slot is occupied, probe for another slot          |
+| **Probe Sequence** | Defines which slots are examined                                 |
+| **Full Table**     | After `b` probes with no empty slot, insertion fails             |
+| **Searching**      | Follow the same probe sequence used during insertion             |
+| **Deletion**       | Don't simply create an empty slot; use a tombstone or reorganize |
+
+The most important relationship is:
+
+```text
+             Hash
+              ↓
+        Initial position
+              ↓
+          Collision?
+          /       \
+        No         Yes
+        |           |
+      store       Probe
+                    ↓
+             Probe sequence
+                    ↓
+              Empty slot?
+              /       \
+            Yes        No
+             |          |
+           store      probe again
+```
+
+And **deletion is special because an ordinary empty slot has meaning to the search algorithm**. That's the reason tombstones exist.

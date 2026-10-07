@@ -1,0 +1,2030 @@
+---
+id: software-engineering-design-architecture-security-labs-native-app-url-matching-android
+title: Android HTTPS URL Matching
+sidebar_position: 5
+---
+
+{/* Lab: Android HTTPS URL Matching + App Links + Keycloak OAuth + Ionic */}
+
+This lab builds a complete native-app OAuth flow using:
+
+* **Ionic + Angular**
+* **Capacitor**
+* **Android**
+* **Keycloak**
+* **Authorization Code Flow**
+* **PKCE (`S256`)**
+* **HTTPS redirect URI**
+* **Android URL matching**
+* **Android App Links / verified domain association**
+
+The final redirect will be:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+and Android will route that URL back into the Ionic application.
+
+Android App Links use the normal Android intent-filter mechanism plus `android:autoVerify="true"` and a Digital Asset Links file at `/.well-known/assetlinks.json`. ([Android Developers][1])
+
+---
+
+## 1. What We Are Building
+
+Our sample application is an online-shop mobile application:
+
+```text
+             ┌──────────────────────┐
+             │       Keycloak       │
+             │ Authorization Server │
+             └──────────┬───────────┘
+                        │
+                        │ OAuth 2.0
+                        │ Authorization Code
+                        │ + PKCE
+                        ▼
+                ┌───────────────┐
+                │ System Browser│
+                └───────┬───────┘
+                        │
+                        │ HTTPS redirect
+                        ▼
+       https://shop.example.com/oauth/callback
+                        │
+                        │ Android URL matching
+                        ▼
+              ┌──────────────────┐
+              │ Ionic Android App│
+              │                  │
+              │ ShoppingApp      │
+              └────────┬─────────┘
+                       │
+                       │ code + code_verifier
+                       ▼
+                  Keycloak
+                       │
+                       │ access token
+                       ▼
+                 Protected API
+```
+
+We'll deliberately build this in stages.
+
+
+## 2. Lab Architecture
+
+We'll use these logical components:
+
+| Component              | Example                                   |
+| ---------------------- | ----------------------------------------- |
+| Native app             | `ShoppingApp`                             |
+| Framework              | Ionic Angular                             |
+| Native runtime         | Capacitor                                 |
+| Android application ID | `com.example.shopping`                    |
+| Authorization Server   | Keycloak                                  |
+| Realm                  | `shop`                                    |
+| OAuth client           | `shopping-mobile`                         |
+| Redirect URI           | `https://shop.example.com/oauth/callback` |
+| URL host               | `shop.example.com`                        |
+| OAuth flow             | Authorization Code                        |
+| PKCE                   | S256                                      |
+| App Link               | Android verified HTTPS URL                |
+
+Capacitor provides the native Android runtime for an Ionic application, and the current setup uses `@capacitor/android` followed by `npx cap add android`. ([Capacitor][2])
+
+---
+
+## 3. Prerequisites
+
+Install:
+
+```bash
+node --version
+npm --version
+java --version
+adb version
+docker --version
+```
+
+You also need:
+
+* Android Studio
+* Android SDK
+* an Android emulator or physical device
+* Docker
+* Ionic CLI
+
+Install Ionic CLI:
+
+```bash
+npm install -g @ionic/cli
+```
+
+The current Ionic CLI supports creating Angular projects with:
+
+```bash
+ionic start
+```
+
+and Capacitor can then add Android as the native platform. ([Ionic Framework][3])
+
+---
+
+## 4. Create the Ionic Application
+
+Create the project:
+
+```bash
+ionic start shopping-mobile blank --type=angular --capacitor
+```
+
+Enter the directory:
+
+```bash
+cd shopping-mobile
+```
+
+Check the application:
+
+```bash
+ionic serve
+```
+
+You should see the Ionic application in your browser.
+
+---
+
+## 5. Add Android
+
+Install the Android platform:
+
+```bash
+npm install @capacitor/android
+```
+
+Then:
+
+```bash
+npx cap add android
+```
+
+Build and synchronize:
+
+```bash
+ionic build
+npx cap sync android
+```
+
+Open Android Studio:
+
+```bash
+npx cap open android
+```
+
+These are the standard Capacitor steps for adding Android and synchronizing the web application into the native project. ([Capacitor][2])
+
+---
+
+## 6. First Experiment — Plain HTTPS URL Matching
+
+Before involving Keycloak, let's understand the Android mechanism.
+
+We will create:
+
+```text
+https://shop.example.com/products/42
+```
+
+and configure Android to recognize:
+
+```text
+https://shop.example.com/*
+```
+
+---
+
+### 6.1 Android Manifest
+
+Open:
+
+```text
+android/app/src/main/AndroidManifest.xml
+```
+
+Find the `MainActivity`.
+
+Add:
+
+```xml
+<activity
+    android:name=".MainActivity"
+    android:exported="true"
+    android:launchMode="singleTask">
+
+    <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+
+        <data
+            android:scheme="https"
+            android:host="shop.example.com"
+            android:pathPrefix="/products" />
+    </intent-filter>
+
+</activity>
+```
+
+At this point:
+
+```text
+https://shop.example.com/products/42
+```
+
+matches:
+
+```text
+scheme = https
+host   = shop.example.com
+path   = /products/42
+```
+
+The conceptual matching is:
+
+```text
+https://shop.example.com/products/42
+│       │                 │
+│       │                 └── path matches
+│       └──────────────────── host matches
+└──────────────────────────── scheme matches
+```
+
+This is **URL matching**.
+
+We haven't established a verified association yet.
+
+---
+
+## 7. Handle the URL in Ionic
+
+Capacitor exposes the Android deep-link URL to the JavaScript application through the `appUrlOpen` event. It also provides `getLaunchUrl()` for a URL that launched the application. ([Capacitor][4])
+
+Open:
+
+```text
+src/app/app.component.ts
+```
+
+Add:
+
+```typescript
+import { Component, OnInit } from '@angular/core';
+import { App } from '@capacitor/app';
+
+@Component({
+  selector: 'app-root',
+  templateUrl: 'app.component.html',
+})
+export class AppComponent implements OnInit {
+
+  deepLinkUrl = '';
+
+  async ngOnInit() {
+    App.addListener('appUrlOpen', (event) => {
+      console.log('Received URL:', event.url);
+
+      this.deepLinkUrl = event.url;
+
+      this.handleDeepLink(event.url);
+    });
+
+    const launch = await App.getLaunchUrl();
+
+    if (launch?.url) {
+      console.log('Application launched with:', launch.url);
+
+      this.deepLinkUrl = launch.url;
+
+      this.handleDeepLink(launch.url);
+    }
+  }
+
+  private handleDeepLink(url: string) {
+    const parsed = new URL(url);
+
+    console.log('Scheme:', parsed.protocol);
+    console.log('Host:', parsed.host);
+    console.log('Path:', parsed.pathname);
+
+    if (parsed.pathname.startsWith('/products/')) {
+      const productId =
+        parsed.pathname.substring('/products/'.length);
+
+      console.log('Product ID:', productId);
+    }
+  }
+}
+```
+
+---
+
+## 8. Display the URL
+
+For the lab, modify:
+
+```text
+src/app/app.component.html
+```
+
+to something simple:
+
+```html
+<ion-app>
+
+  <ion-header>
+    <ion-toolbar>
+      <ion-title>
+        Shopping App
+      </ion-title>
+    </ion-toolbar>
+  </ion-header>
+
+  <ion-content class="ion-padding">
+
+    <h1>Android URL Matching Lab</h1>
+
+    <p>
+      Received URL:
+    </p>
+
+    <pre>{{ deepLinkUrl }}</pre>
+
+  </ion-content>
+
+</ion-app>
+```
+
+---
+
+## 9. Build the Application
+
+```bash
+ionic build
+npx cap sync android
+```
+
+Run:
+
+```bash
+npx cap run android
+```
+
+or run it directly from Android Studio.
+
+---
+
+## 10. Test URL Matching with ADB
+
+Find your device:
+
+```bash
+adb devices
+```
+
+Then execute:
+
+```bash
+adb shell am start \
+  -a android.intent.action.VIEW \
+  -d "https://shop.example.com/products/42"
+```
+
+The important part is:
+
+```text
+https://shop.example.com/products/42
+```
+
+Android sees:
+
+```text
+scheme = https
+host = shop.example.com
+path = /products/42
+```
+
+and finds our intent filter.
+
+Your Ionic application should receive something similar to:
+
+```text
+https://shop.example.com/products/42
+```
+
+---
+
+## 11. What Have We Proven?
+
+At this point:
+
+```text
+ADB
+ │
+ │ HTTPS URL
+ ▼
+Android
+ │
+ │ intent-filter matches
+ ▼
+ShoppingApp
+ │
+ ▼
+Capacitor
+ │
+ ▼
+appUrlOpen
+ │
+ ▼
+Angular
+```
+
+We have demonstrated:
+
+> **HTTPS URL matching**
+
+But we have **not yet demonstrated App Links verification**.
+
+That's the next step.
+
+---
+
+## 12. Create a Real HTTPS Domain
+
+For the App Links portion, you need a domain that Android can reach over HTTPS.
+
+Use a domain such as:
+
+```text
+shop.example.com
+```
+
+for a real domain you control.
+
+For local development, you can expose a local HTTP server through an HTTPS tunnel such as Cloudflare Tunnel/ngrok.
+
+The important requirement is:
+
+```text
+https://YOUR_DOMAIN/.well-known/assetlinks.json
+```
+
+must be publicly reachable over HTTPS.
+
+Android retrieves the Digital Asset Links file from exactly this location during verification. ([Android Developers][5])
+
+For the remainder of this lab I'll use:
+
+```text
+shop.example.com
+```
+
+Replace it with your actual domain.
+
+---
+
+## 13. Create the Website
+
+Create a directory:
+
+```text
+website/
+├── index.html
+└── .well-known/
+    └── assetlinks.json
+```
+
+Create:
+
+```text
+website/index.html
+```
+
+with:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Shopping App</title>
+</head>
+<body>
+
+<h1>Shopping App Website</h1>
+
+<p>
+    This website is associated with the Shopping Android application.
+</p>
+
+</body>
+</html>
+```
+
+---
+
+## 14. Find the Android Signing Certificate
+
+This is extremely important.
+
+Android needs the SHA-256 fingerprint of the certificate used to sign the application.
+
+For a debug build you can usually obtain it from:
+
+```bash
+./gradlew signingReport
+```
+
+from:
+
+```text
+android/
+```
+
+For example:
+
+```bash
+cd android
+./gradlew signingReport
+```
+
+You'll see something similar to:
+
+```text
+Variant: debug
+
+Store: ~/.android/debug.keystore
+
+Alias: AndroidDebugKey
+
+SHA256:
+AB:CD:12:34:56:78:...
+```
+
+Copy the SHA-256 fingerprint.
+
+For production applications using Google Play App Signing, you need the certificate fingerprint used by Google Play to sign the installed app, not necessarily your local upload key. Android's documentation specifically calls out this distinction. ([Android Developers][6])
+
+---
+
+## 15. Create `assetlinks.json`
+
+Create:
+
+```text
+website/.well-known/assetlinks.json
+```
+
+Put:
+
+```json
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.example.shopping",
+      "sha256_cert_fingerprints": [
+        "YOUR:SHA256:CERTIFICATE:FINGERPRINT"
+      ]
+    }
+  }
+]
+```
+
+Replace:
+
+```text
+com.example.shopping
+```
+
+with your actual Android application ID.
+
+And replace:
+
+```text
+YOUR:SHA256:CERTIFICATE:FINGERPRINT
+```
+
+with your certificate fingerprint.
+
+---
+
+## 16. Understand `assetlinks.json`
+
+This file is the critical piece.
+
+It says:
+
+```text
+shop.example.com
+
+    "I authorize"
+
+        ↓
+
+Android application:
+com.example.shopping
+
+signed by:
+
+SHA-256 fingerprint:
+AB:CD:...
+```
+
+So we now have two declarations.
+
+1. **Application**
+
+```xml
+<data
+    android:scheme="https"
+    android:host="shop.example.com" />
+```
+
+and:
+
+```xml
+android:autoVerify="true"
+```
+
+2. **Website**
+
+```json
+{
+  "package_name": "com.example.shopping",
+  "sha256_cert_fingerprints": [...]
+}
+```
+
+The two sides establish:
+
+```text
+                  HTTPS
+                    │
+                    ▼
+             shop.example.com
+                    │
+             assetlinks.json
+                    │
+                    ▼
+          com.example.shopping
+                    │
+              certificate
+                    │
+                    ▼
+             ShoppingApp
+```
+
+This is the **verified association**.
+
+---
+
+## 17. Publish the File
+
+The following URL must work:
+
+```text
+https://shop.example.com/.well-known/assetlinks.json
+```
+
+Test it:
+
+```bash
+curl https://shop.example.com/.well-known/assetlinks.json
+```
+
+You should receive:
+
+```json
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.example.shopping",
+      "sha256_cert_fingerprints": [
+        "AB:CD:..."
+      ]
+    }
+  }
+]
+```
+
+Important:
+
+```text
+HTTPS
+no redirect
+valid JSON
+correct fingerprint
+correct package name
+```
+
+Android's troubleshooting documentation specifically warns that redirects on the association URL can cause verification to fail. ([Android Developers][7])
+
+---
+
+## 18. Enable `autoVerify`
+
+Now change your intent filter:
+
+```xml
+<intent-filter android:autoVerify="true">
+
+    <action android:name="android.intent.action.VIEW" />
+
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+
+    <data
+        android:scheme="https"
+        android:host="shop.example.com"
+        android:pathPrefix="/products" />
+
+</intent-filter>
+```
+
+The important difference is:
+
+```xml
+android:autoVerify="true"
+```
+
+Android sees this and knows:
+
+> I should verify this application's relationship with `shop.example.com`.
+
+Android checks the website's:
+
+```text
+/.well-known/assetlinks.json
+```
+
+and verifies the certificate fingerprint. ([Android Developers][5])
+
+---
+
+## 19. Rebuild and Reinstall
+
+Because verification happens around application installation/update, remove the old application:
+
+```bash
+adb uninstall com.example.shopping
+```
+
+Then:
+
+```bash
+ionic build
+npx cap sync android
+npx cap run android
+```
+
+Android now performs domain verification.
+
+---
+
+## 20. Test the Verified App Link
+
+Run:
+
+```bash
+adb shell am start \
+  -a android.intent.action.VIEW \
+  -c android.intent.category.BROWSABLE \
+  -d "https://shop.example.com/products/42"
+```
+
+If verification succeeded:
+
+```text
+HTTPS URL
+    │
+    ▼
+Android
+    │
+    │ URL matches
+    │
+    │ domain verified
+    ▼
+ShoppingApp
+```
+
+There should be no app-selection dialog for the verified App Link.
+
+That's the important difference between ordinary URL matching and a verified App Link. Android describes App Links as verified web links that can open the corresponding app directly rather than requiring disambiguation. ([Android Developers][1])
+
+---
+
+## 21. Verify Android's State
+
+You can inspect the domain verification state with ADB.
+
+For example:
+
+```bash
+adb shell pm get-app-links com.example.shopping
+```
+
+Depending on the Android version, you'll see information about:
+
+```text
+shop.example.com
+```
+
+and whether it is verified.
+
+On Android 12+, you can also trigger verification manually:
+
+```bash
+adb shell pm verify-app-links --re-verify com.example.shopping
+```
+
+Android provides these mechanisms specifically for testing App Link verification. ([Android Developers][5])
+
+---
+
+## 22. Now Add Keycloak
+
+Now that we understand the Android redirect mechanism, let's turn it into a real OAuth redirect.
+
+We'll use:
+
+```text
+Keycloak
+```
+
+as the authorization server.
+
+Keycloak exposes the OIDC authorization endpoint:
+
+```text
+/realms/{realm}/protocol/openid-connect/auth
+```
+
+and token endpoint:
+
+```text
+/realms/{realm}/protocol/openid-connect/token
+```
+
+and publishes these through OIDC discovery. ([Keycloak][8])
+
+---
+
+## 23. Start Keycloak
+
+For the lab:
+
+```bash
+docker run \
+  --name keycloak \
+  -p 127.0.0.1:8080:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+  -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+  quay.io/keycloak/keycloak:26.8.0 \
+  start-dev
+```
+
+Keycloak's current Docker documentation uses the `26.8.0` container image and `start-dev` for development. ([Keycloak][9])
+
+Open:
+
+```text
+http://localhost:8080
+```
+
+Login:
+
+```text
+username: admin
+password: admin
+```
+
+---
+
+## 24. Create the Realm
+
+Create:
+
+```text
+shop
+```
+
+So our issuer becomes:
+
+```text
+http://localhost:8080/realms/shop
+```
+
+Discovery:
+
+```text
+http://localhost:8080/realms/shop/.well-known/openid-configuration
+```
+
+---
+
+## 25. Create a Test User
+
+Create:
+
+```text
+Username:
+alice
+```
+
+Set a password:
+
+```text
+Password:
+alice123
+```
+
+Disable:
+
+```text
+Temporary
+```
+
+for the password.
+
+---
+
+## 26. Create the OAuth Client
+
+Create a client:
+
+```text
+Client ID:
+shopping-mobile
+```
+
+Client type:
+
+```text
+OpenID Connect
+```
+
+The application is a **public client**. Why? Because this is a native application.
+
+We do **not** put:
+
+```text
+client_secret
+```
+
+inside the Ionic application.
+
+---
+
+## 27. Configure Redirect URI
+
+Configure the redirect URI:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+This is critical.
+
+It must match exactly.
+
+Our complete configuration is:
+
+```text
+Client ID:
+shopping-mobile
+
+Redirect URI:
+https://shop.example.com/oauth/callback
+
+Client authentication:
+OFF
+
+PKCE:
+S256
+```
+
+Keycloak supports requiring PKCE with the `S256` method in the client's settings. ([Keycloak][10])
+
+---
+
+## 28. Configure Web Origins
+
+For this particular lab, if the token exchange is performed from the Ionic WebView using `fetch`, configure the appropriate Web Origin for your app environment.
+
+For example, during development:
+
+```text
+http://localhost
+```
+
+You may need to adjust this depending on your Capacitor/WebView setup.
+
+However, for a production-quality native OAuth implementation, I recommend eventually moving the token exchange to a native HTTP layer rather than treating the Ionic WebView as an ordinary browser SPA.
+
+For this lab, we'll keep the code easy to understand.
+
+---
+
+## 29. The OAuth Redirect
+
+Our authorization URL will eventually look like:
+
+```text
+http://localhost:8080/realms/shop/protocol/openid-connect/auth
+    ?client_id=shopping-mobile
+    &response_type=code
+    &redirect_uri=https%3A%2F%2Fshop.example.com%2Foauth%2Fcallback
+    &scope=openid
+    &state=...
+    &code_challenge=...
+    &code_challenge_method=S256
+```
+
+The important thing is:
+
+```text
+redirect_uri=https://shop.example.com/oauth/callback
+```
+
+The browser doesn't redirect to:
+
+```text
+myapp://callback
+```
+
+It redirects to a normal HTTPS URL.
+
+Android then recognizes that URL as belonging to our application.
+
+---
+
+## 30. Implement PKCE
+
+Create:
+
+```text
+src/app/oauth.service.ts
+```
+
+```typescript
+import { Injectable } from '@angular/core';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class OAuthService {
+
+  private readonly clientId = 'shopping-mobile';
+
+  private readonly authorizationEndpoint =
+    'http://localhost:8080/realms/shop/protocol/openid-connect/auth';
+
+  private readonly tokenEndpoint =
+    'http://localhost:8080/realms/shop/protocol/openid-connect/token';
+
+  private readonly redirectUri =
+    'https://shop.example.com/oauth/callback';
+
+  async createLoginUrl(): Promise<string> {
+
+    const codeVerifier = this.generateCodeVerifier();
+
+    const codeChallenge =
+      await this.generateCodeChallenge(codeVerifier);
+
+    localStorage.setItem(
+      'oauth_code_verifier',
+      codeVerifier
+    );
+
+    const state = this.generateRandomString(32);
+
+    localStorage.setItem(
+      'oauth_state',
+      state
+    );
+
+    const params = new URLSearchParams({
+      client_id: this.clientId,
+      response_type: 'code',
+      redirect_uri: this.redirectUri,
+      scope: 'openid profile',
+      state,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256'
+    });
+
+    return `${this.authorizationEndpoint}?${params}`;
+  }
+
+  private generateCodeVerifier(): string {
+
+    const bytes = new Uint8Array(32);
+
+    crypto.getRandomValues(bytes);
+
+    return this.base64UrlEncode(bytes);
+  }
+
+  private async generateCodeChallenge(
+    verifier: string
+  ): Promise<string> {
+
+    const data =
+      new TextEncoder().encode(verifier);
+
+    const digest =
+      await crypto.subtle.digest('SHA-256', data);
+
+    return this.base64UrlEncode(
+      new Uint8Array(digest)
+    );
+  }
+
+  private generateRandomString(length: number): string {
+
+    const bytes = new Uint8Array(length);
+
+    crypto.getRandomValues(bytes);
+
+    return this.base64UrlEncode(bytes);
+  }
+
+  private base64UrlEncode(bytes: Uint8Array): string {
+
+    let binary = '';
+
+    bytes.forEach(
+      byte => binary += String.fromCharCode(byte)
+    );
+
+    return btoa(binary)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+  }
+}
+```
+
+The critical relationship is:
+
+```text
+code_verifier
+       │
+       │ SHA-256
+       ▼
+code_challenge
+```
+
+Keycloak receives:
+
+```text
+code_challenge
+```
+
+during authorization.
+
+Later the application sends:
+
+```text
+code_verifier
+```
+
+to the token endpoint.
+
+---
+
+## 31. Open the System Browser
+
+Install Capacitor Browser:
+
+```bash
+npm install @capacitor/browser
+```
+
+Then:
+
+```bash
+npx cap sync android
+```
+
+Modify your `AppComponent`.
+
+```typescript
+import { Component, OnInit } from '@angular/core';
+import { App } from '@capacitor/app';
+import { Browser } from '@capacitor/browser';
+import { OAuthService } from './oauth.service';
+
+@Component({
+  selector: 'app-root',
+  templateUrl: 'app.component.html',
+})
+export class AppComponent implements OnInit {
+
+  receivedUrl = '';
+
+  constructor(
+    private oauth: OAuthService
+  ) {}
+
+  async ngOnInit() {
+
+    App.addListener('appUrlOpen', async event => {
+
+      console.log(
+        'OAuth redirect received:',
+        event.url
+      );
+
+      this.receivedUrl = event.url;
+
+      await this.handleOAuthRedirect(
+        event.url
+      );
+    });
+
+    const launch =
+      await App.getLaunchUrl();
+
+    if (launch?.url) {
+
+      await this.handleOAuthRedirect(
+        launch.url
+      );
+    }
+  }
+
+  async login() {
+
+    const url =
+      await this.oauth.createLoginUrl();
+
+    await Browser.open({
+      url
+    });
+  }
+
+  private async handleOAuthRedirect(
+    url: string
+  ) {
+
+    const parsed =
+      new URL(url);
+
+    if (
+      parsed.origin !==
+      'https://shop.example.com'
+    ) {
+      return;
+    }
+
+    if (
+      parsed.pathname !==
+      '/oauth/callback'
+    ) {
+      return;
+    }
+
+    const code =
+      parsed.searchParams.get('code');
+
+    const state =
+      parsed.searchParams.get('state');
+
+    console.log('Authorization code:', code);
+    console.log('State:', state);
+
+    if (!code) {
+      console.error(
+        'No authorization code'
+      );
+      return;
+    }
+
+    await Browser.close();
+
+    // Token exchange comes next.
+  }
+}
+```
+
+---
+
+## 32. Add a Login Button
+
+Change:
+
+```text
+src/app/app.component.html
+```
+
+to:
+
+```html
+<ion-app>
+
+  <ion-header>
+    <ion-toolbar>
+      <ion-title>
+        Shopping App
+      </ion-title>
+    </ion-toolbar>
+  </ion-header>
+
+  <ion-content class="ion-padding">
+
+    <h1>Shopping App</h1>
+
+    <ion-button
+      expand="block"
+      (click)="login()">
+
+      Login with Keycloak
+
+    </ion-button>
+
+    <h2>Received Redirect</h2>
+
+    <pre>{{ receivedUrl }}</pre>
+
+  </ion-content>
+
+</ion-app>
+```
+
+Now:
+
+```text
+ShoppingApp
+     │
+     │ Login
+     ▼
+System Browser
+     │
+     ▼
+Keycloak
+```
+
+---
+
+## 33. What Happens During Login?
+
+The complete sequence is now:
+
+```text
+1. User taps Login
+          │
+          ▼
+2. Ionic app generates
+   code_verifier
+          │
+          ▼
+3. Ionic app derives
+   code_challenge
+          │
+          ▼
+4. Browser opens Keycloak
+          │
+          ▼
+5. User logs in
+          │
+          ▼
+6. Keycloak issues
+   authorization code
+          │
+          ▼
+7. Keycloak redirects browser
+          │
+          ▼
+https://shop.example.com/oauth/callback?code=ABC
+          │
+          ▼
+8. Android URL matching
+          │
+          ▼
+9. Verified App Link
+          │
+          ▼
+10. ShoppingApp
+```
+
+This is exactly the native OAuth architecture we discussed earlier.
+
+---
+
+## 34. Token Exchange
+
+Now complete the final part.
+
+Add to `OAuthService`:
+
+```typescript
+async exchangeCode(
+  code: string
+): Promise<any> {
+
+  const codeVerifier =
+    localStorage.getItem(
+      'oauth_code_verifier'
+    );
+
+  if (!codeVerifier) {
+    throw new Error(
+      'Missing PKCE code verifier'
+    );
+  }
+
+  const body =
+    new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: this.clientId,
+      code,
+      redirect_uri: this.redirectUri,
+      code_verifier: codeVerifier
+    });
+
+  const response =
+    await fetch(
+      this.tokenEndpoint,
+      {
+        method: 'POST',
+
+        headers: {
+          'Content-Type':
+            'application/x-www-form-urlencoded'
+        },
+
+        body
+      }
+    );
+
+  if (!response.ok) {
+
+    const error =
+      await response.text();
+
+    throw new Error(error);
+  }
+
+  const tokens =
+    await response.json();
+
+  localStorage.setItem(
+    'access_token',
+    tokens.access_token
+  );
+
+  if (tokens.refresh_token) {
+
+    localStorage.setItem(
+      'refresh_token',
+      tokens.refresh_token
+    );
+  }
+
+  return tokens;
+}
+```
+
+Then modify the redirect handler:
+
+```typescript
+private async handleOAuthRedirect(
+  url: string
+) {
+
+  const parsed =
+    new URL(url);
+
+  if (
+    parsed.origin !==
+    'https://shop.example.com'
+  ) {
+    return;
+  }
+
+  if (
+    parsed.pathname !==
+    '/oauth/callback'
+  ) {
+    return;
+  }
+
+  const error =
+    parsed.searchParams.get('error');
+
+  if (error) {
+
+    console.error(
+      'OAuth error:',
+      error
+    );
+
+    return;
+  }
+
+  const code =
+    parsed.searchParams.get('code');
+
+  const returnedState =
+    parsed.searchParams.get('state');
+
+  const expectedState =
+    localStorage.getItem(
+      'oauth_state'
+    );
+
+  if (
+    !returnedState ||
+    returnedState !== expectedState
+  ) {
+
+    throw new Error(
+      'Invalid OAuth state'
+    );
+  }
+
+  if (!code) {
+
+    throw new Error(
+      'Missing authorization code'
+    );
+  }
+
+  await Browser.close();
+
+  const tokens =
+    await this.oauth.exchangeCode(code);
+
+  console.log(
+    'Access token:',
+    tokens.access_token
+  );
+}
+```
+
+---
+
+## 35. Important: State vs PKCE
+
+Notice that we're using both:
+
+```text
+state
+```
+
+and:
+
+```text
+PKCE
+```
+
+They have different jobs.
+
+#### `state`
+
+Protects the authorization request/response relationship:
+
+```text
+Login request
+     │
+     │ state=XYZ
+     ▼
+Keycloak
+     │
+     ▼
+redirect
+     │
+     │ state=XYZ
+     ▼
+App
+```
+
+The application verifies:
+
+```text
+returned state == original state
+```
+
+#### PKCE
+
+Protects the authorization code exchange:
+
+```text
+authorization_code
+       +
+code_verifier
+       │
+       ▼
+access token
+```
+
+So:
+
+```text
+state → protects request correlation
+PKCE  → protects authorization code
+```
+
+---
+
+## 36. Final Architecture
+
+At this point our lab contains all the concepts from your OAuth Native Apps section:
+
+```text
+                     Native App
+                  ShoppingApp
+                       │
+                       │
+              ┌────────┴────────┐
+              │                 │
+             PKCE             state
+              │                 │
+              └────────┬────────┘
+                       │
+                       ▼
+                System Browser
+                       │
+                       ▼
+                ┌─────────────┐
+                │  Keycloak   │
+                │             │
+                │ /authorize  │
+                └──────┬──────┘
+                       │
+                       │ authorization code
+                       ▼
+          https://shop.example.com
+                /oauth/callback
+                       │
+                       ▼
+                  Android OS
+                       │
+              URL matching
+                       │
+                       ▼
+                App Link
+                       │
+              verified association
+                       │
+                       ▼
+                ShoppingApp
+                       │
+                       │ code
+                       │ +
+                       │ code_verifier
+                       ▼
+                Keycloak /token
+                       │
+                       ▼
+                  Access Token
+```
+
+---
+
+## 37. The Two Android Layers You Were Asking About
+
+This lab makes the distinction between the two concepts much easier to see.
+
+### Layer 1 — HTTPS URL matching
+
+Android manifest:
+
+```xml
+<data
+    android:scheme="https"
+    android:host="shop.example.com"
+    android:pathPrefix="/oauth" />
+```
+
+means:
+
+```text
+Does this URL match my pattern?
+```
+
+For:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+the answer is:
+
+```text
+YES
+```
+
+---
+
+### Layer 2 — App-claimed / verified URL
+
+Add:
+
+```xml
+android:autoVerify="true"
+```
+
+and publish:
+
+```text
+https://shop.example.com/.well-known/assetlinks.json
+```
+
+containing:
+
+```json
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.example.shopping",
+      "sha256_cert_fingerprints": [
+        "YOUR:FINGERPRINT"
+      ]
+    }
+  }
+]
+```
+
+Now Android can establish:
+
+```text
+shop.example.com
+       │
+       │ verified
+       ▼
+ShoppingApp
+```
+
+That's what makes it an **Android App Link**.
+
+---
+
+## 38. Final Test
+
+You should be able to perform this test independently of OAuth:
+
+```bash
+adb shell am start \
+  -a android.intent.action.VIEW \
+  -c android.intent.category.BROWSABLE \
+  -d "https://shop.example.com/products/42"
+```
+
+Expected:
+
+```text
+Android
+   │
+   │ HTTPS URL
+   ▼
+URL matching
+   │
+   │ matches host/path
+   ▼
+App Link verification
+   │
+   │ verified
+   ▼
+ShoppingApp
+```
+
+Then perform the real OAuth test:
+
+```text
+ShoppingApp
+    │
+    │ Login
+    ▼
+Keycloak
+    │
+    │ authenticate
+    ▼
+Keycloak
+    │
+    │ redirect_uri
+    ▼
+https://shop.example.com/oauth/callback
+    │
+    ▼
+Android App Link
+    │
+    ▼
+ShoppingApp
+    │
+    │ code + code_verifier
+    ▼
+Keycloak /token
+    │
+    ▼
+Access Token
+```
+
+---
+
+## 39. Troubleshooting Checklist
+
+If the browser doesn't return to the app, check these **in this order**.
+
+#### A. URL matching
+
+Check:
+
+```xml
+android:scheme="https"
+android:host="shop.example.com"
+android:pathPrefix="/oauth"
+```
+
+against:
+
+```text
+https://shop.example.com/oauth/callback
+```
+
+They must actually match.
+
+---
+
+#### B. `assetlinks.json`
+
+Check:
+
+```bash
+curl -i \
+  https://shop.example.com/.well-known/assetlinks.json
+```
+
+It must be directly accessible over HTTPS and return valid JSON. Android's troubleshooting guide specifically calls out invalid JSON, redirects, and incorrect fingerprints as common causes. ([Android Developers][7])
+
+---
+
+#### C. Package name
+
+Your app:
+
+```text
+com.example.shopping
+```
+
+must equal:
+
+```json
+"package_name": "com.example.shopping"
+```
+
+---
+
+#### D. Certificate
+
+Your actual installed APK's certificate must match:
+
+```json
+"sha256_cert_fingerprints": [
+    "..."
+]
+```
+
+A common mistake is using a release fingerprint in `assetlinks.json` while testing an APK signed with the debug certificate. ([Android Developers][7])
+
+---
+
+#### E. `autoVerify`
+
+Make sure:
+
+```xml
+<intent-filter android:autoVerify="true">
+```
+
+is present.
+
+---
+
+#### F. Reinstall
+
+After changing verification configuration:
+
+```bash
+adb uninstall com.example.shopping
+```
+
+then reinstall.
+
+---
+
+#### G. Force verification
+
+On Android 12+:
+
+```bash
+adb shell pm verify-app-links --re-verify com.example.shopping
+```
+
+---
+
+## 40. What This Lab Teaches
+
+The important conceptual progression is:
+
+```text
+                 Deep Linking
+                      │
+                      ▼
+          HTTPS URL Matching
+                      │
+                      ▼
+             App Links
+                      │
+                      ▼
+       Verified Domain Association
+                      │
+                      ▼
+            OAuth Redirect URI
+                      │
+                      ▼
+        Authorization Code + PKCE
+```
+
+So **don't think of App Links as a completely different redirect mechanism from HTTPS URL matching**.
+
+Rather:
+
+```text
+HTTPS URL matching
+       │
+       ├── basic URL → app routing
+       │
+       └── App Links
+              │
+              └── URL matching
+                  +
+                  verified domain ↔ app association
+```
+
+And in our OAuth lab:
+
+```text
+Keycloak
+   │
+   │ redirect_uri =
+   │ https://shop.example.com/oauth/callback
+   ▼
+Android
+   │
+   ├── Does URL match?
+   │       YES
+   │
+   ├── Is domain verified?
+   │       YES
+   │
+   ▼
+ShoppingApp
+   │
+   ├── authorization code
+   ├── state
+   └── code_verifier
+          │
+          ▼
+      Keycloak
+          │
+          ▼
+     Access Token
+```
+
+That is the complete relationship between **HTTPS URL matching → App Links → OAuth native-app redirect → PKCE**.
+
+[1]: https://developer.android.com/training/app-links/about?utm_source=chatgpt.com "About App Links  |  App architecture  |  Android Developers"
+[2]: https://next.capacitorjs.com/docs/next/android?utm_source=chatgpt.com "Capacitor Android Documentation | Capacitor Documentation"
+[3]: https://ionicframework.com/docs/cli/commands/start?utm_source=chatgpt.com "ionic start | Ionic Framework"
+[4]: https://next.capacitorjs.com/docs/next/android/configuration?utm_source=chatgpt.com "Configuring Android | Capacitor Documentation"
+[5]: https://developer.android.com/training/app-links/verify-applinks?authuser=383&utm_source=chatgpt.com "Verify App Links  |  App architecture  |  Android Developers"
+[6]: https://developer.android.com/training/app-links/configure-assetlinks?authuser=7&utm_source=chatgpt.com "Configure website associations and dynamic rules  |  App architecture  |  Android Developers"
+[7]: https://developer.android.com/training/app-links/troubleshoot?utm_source=chatgpt.com "Troubleshoot App Links  |  App architecture  |  Android Developers"
+[8]: https://www.keycloak.org/securing-apps/oidc-layers?utm_source=chatgpt.com "Securing applications and services with OpenID Connect - Keycloak"
+[9]: https://www.keycloak.org/getting-started/getting-started-docker?utm_source=chatgpt.com "Docker - Keycloak"
+[10]: https://www.keycloak.org/docs/26.8.0/server_admin/?utm_source=chatgpt.com "Server Administration Guide"

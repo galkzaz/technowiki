@@ -1,0 +1,3490 @@
+
+A **Bloom filter** is a probabilistic data structure used to answer one specific question very efficiently:
+
+> **“Is this element possibly in the set?”**
+
+It is especially useful when the collection is very large and we want to avoid expensive lookups.
+
+The key idea is:
+
+* **Definitely not present** → Bloom filter can tell us.
+* **Possibly present** → Bloom filter cannot guarantee that it is actually present.
+
+This is possible because Bloom filters trade **accuracy for memory efficiency**: they use very little space, but they can produce **false positives**.
+
+
+## Input/Output
+A Bloom Filter processes values much like Hash-Based Search, but instead of storing the actual values, it stores information about those values in a **bit array**.
+
+The algorithm
+starts with a bit array of m bits, all set to zero. There are k hash functions that
+compute (potentially different) bit positions within this bit array when values are
+inserted.
+
+The basic structure is:
+
+```text id="y8k0n3"
+                Values from C
+                     |
+                     v
+             +----------------+
+             |  k Hash        |
+             |  Functions     |
+             +----------------+
+                     |
+                     v
+             +----------------+
+             |   Bit Array B  |
+             |                |
+             | 0 1 0 1 1 0... |
+             +----------------+
+                     |
+                     v
+                  Search
+                     |
+              +------+------+
+              |             |
+            false          true
+              |             |
+              v             v
+        Definitely       Possibly
+          absent         present
+```
+
+The Bloom Filter returns false when it can demonstrate that a target element t has not yet been inserted into the bit array, and by extension does not exist in the collection C. The algorithm may return true as a false positive if the target element t was not inserted into the bit array.
+
+## Context
+{/* This paragraph explains when a Bloom Filter is useful and why we would use one in front of an expensive search operation. */}
+A Bloom Filter demonstrates efficient memory usage but it is only useful when false
+positives can be tolerated. 
+
+Use a Bloom Filter to reduce the number of expensive
+searches by filtering out those that are guaranteed to fail.
+
+Use a Bloom Filter as a cheap preliminary test to avoid expensive searches that are guaranteed to fail—for example, use a Bloom
+Filter to confirm whether to conduct an expensive search over disk-based storage.
+
+Searching memory is generally much cheaper than accessing storage.
+
+Suppose we have a huge database stored on disk:
+
+```text
+Disk
+┌───────────────────────────────┐
+│ millions/billions of records  │
+│                               │
+│ record                        │
+│ record                        │
+│ record                        │
+│ ...                           │
+└───────────────────────────────┘
+```
+
+A request for an item that doesn't exist might require expensive disk I/O.
+
+Without a Bloom Filter:
+
+```text
+Request
+   |
+   v
+Disk
+   |
+   v
+Search
+   |
+   v
+Not found
+```
+
+We wasted the disk access.
+
+Bloom Filter avoids unnecessary disk searches
+
+Instead, put a Bloom Filter in front of the storage:
+
+```text
+Request
+   |
+   v
+Bloom Filter
+   |
+   +------------ false ------------+
+   |                               |
+   v                               v
+Definitely absent              Don't access
+                                disk
+   |
+   |
+   +------------ true ------------+
+                                   |
+                                   v
+                              Search disk
+                                   |
+                              +----+----+
+                              |         |
+                           Found     Not found
+                                      |
+                                False positive
+```
+
+Now imagine that 90% of requested keys don't exist.
+
+The Bloom Filter can eliminate many of those requests **before they reach the disk**.
+
+**Example**
+
+Suppose a database contains:
+
+```text
+C = {
+    101,
+    205,
+    312,
+    450,
+    678
+}
+```
+
+We create a Bloom Filter representing these values.
+
+Now we receive:
+
+```text
+Search(999)
+```
+
+The Bloom Filter checks the hash positions of `999`.
+
+Suppose one required bit is `0`.
+
+Therefore:
+
+```text
+Bloom Filter
+     |
+     v
+999 → false
+```
+
+We immediately know:
+
+```text
+999 ∉ C
+```
+
+So:
+
+```text
+No disk search
+```
+
+---
+
+Now suppose:
+
+```text
+Search(312)
+```
+
+The Bloom Filter finds all required bits set:
+
+```text
+312 → true
+```
+
+But `true` means:
+
+```text
+possibly present
+```
+
+Therefore:
+
+```text
+Bloom Filter
+     |
+     v
+312 → possibly present
+     |
+     v
+Search disk/database
+     |
+     v
+312 found
+```
+
+---
+
+**False Positive is Acceptable in this scenario**
+
+This is what the paragraph means by:
+
+> **"only useful when false positives can be tolerated."**
+
+Suppose:
+
+```text
+Search(777)
+```
+
+and:
+
+```text
+Bloom Filter → true
+```
+
+even though:
+
+```text
+777 ∉ C
+```
+
+We perform the expensive disk search anyway:
+
+```text
+Bloom Filter
+     |
+     v
+true
+     |
+     v
+Disk search
+     |
+     v
+777 not found
+```
+
+The Bloom Filter made us perform an unnecessary search.
+
+That's a **false positive**, but nothing incorrect happened to the final result.
+
+The only cost is:
+
+```text
+unnecessary expensive search
+```
+
+That's why Bloom Filters are useful for **reducing** expensive searches rather than replacing them.
+
+---
+
+## Membership Testing
+
+The primary purpose of a Bloom filter is **membership testing**.
+
+A Bloom Filter can prove that an element is absent, but it cannot prove that an element is present.
+
+Suppose we have a set of usernames:
+
+```text
+alice
+bob
+charlie
+david
+```
+
+We want to ask:
+
+```text
+Is "alice" in the set?
+```
+
+A traditional data structure such as a hash table stores the actual elements:
+
+```text
+Hash Table
++---------+
+| alice   |
+| bob     |
+| charlie |
+| david   |
++---------+
+```
+
+A Bloom filter does **not** store the actual elements. Instead, it stores information derived from their hash values.
+
+For example:
+
+```text
+Bloom Filter
+
+Bit Array
+0 1 0 1 1 0 0 1 0 1 0 0
+```
+
+When we query `"alice"`, the Bloom filter checks several positions.
+
+It may conclude:
+
+```text
+alice → POSSIBLY PRESENT
+```
+
+or:
+
+```text
+alice → DEFINITELY NOT PRESENT
+```
+
+Notice the important distinction:
+
+| Result        | Meaning                                       |
+| ------------- | --------------------------------------------- |
+| `NOT PRESENT` | Guaranteed that the element is not in the set |
+| `PRESENT`     | Element **may** be in the set                 |
+
+So a Bloom filter is an excellent **filter before an expensive lookup**.
+
+For example:
+
+```text
+                Bloom Filter
+                     |
+              +------+------+
+              |             |
+          Definitely      Possibly
+           absent         present
+              |             |
+           Reject       Check database
+```
+
+## Bit Array
+
+The fundamental component of a Bloom filter is a **bit array**.
+
+A bit can contain only: `0` or: `1`
+
+For example, a Bloom filter might contain 10 bits:
+
+```text
+Index:     0 1 2 3 4 5 6 7 8 9
+           ---------------------
+Bits:      0 0 1 0 1 0 0 1 0 0
+```
+
+Initially, every bit is `0`:
+
+```text
+0 0 0 0 0 0 0 0 0 0
+```
+
+When we insert an element, hash functions determine which positions should become `1`.
+
+For example, suppose:
+
+```text
+hash1("alice") = 2
+hash2("alice") = 5
+hash3("alice") = 8
+```
+
+We set those bits:
+
+```text
+Index:     0 1 2 3 4 5 6 7 8 9
+           ---------------------
+Bits:      0 0 1 0 0 1 0 0 1 0
+```
+
+The Bloom filter does **not** store:
+
+```text
+alice
+```
+
+It only stores:
+
+```text
+bits 2, 5, and 8 are set
+```
+
+This is why Bloom filters can be extremely space-efficient.
+
+## Hash Functions
+
+A Bloom filter normally uses **multiple independent hash functions**.
+
+Suppose we have three:
+
+```text
+h₁(x)
+h₂(x)
+h₃(x)
+```
+
+and a bit array of size:
+
+```text
+m = 10
+```
+
+For:
+
+```text
+x = "alice"
+```
+
+we might get:
+
+```text
+h₁("alice") = 2
+h₂("alice") = 5
+h₃("alice") = 8
+```
+
+Therefore:
+
+```text
+bit[2] = 1
+bit[5] = 1
+bit[8] = 1
+```
+
+The resulting array becomes:
+
+```text
+0 0 1 0 0 1 0 0 1 0
+```
+
+Now insert `"bob"`:
+
+```text
+h₁("bob") = 1
+h₂("bob") = 5
+h₃("bob") = 7
+```
+
+Set:
+
+```text
+bit[1] = 1
+bit[5] = 1
+bit[7] = 1
+```
+
+Now:
+
+```text
+Index:      0 1 2 3 4 5 6 7 8 9
+           ---------------------
+alice Bits: 0 0 1 0 0 1 0 0 1 0
+bob Bits:   0 1 1 0 0 1 0 1 1 0
+```
+
+Notice that `bit[5]` was already `1`. That's perfectly fine.
+
+Bloom filters only perform:
+
+```text
+bit[i] = 1
+```
+
+They never need to know **which element caused the bit to become `1`**.
+
+### Choosing the Number of Hash Functions
+
+The number of hash functions is an important design decision.
+
+Let:
+
+```text
+m = number of bits
+n = number of inserted elements
+k = number of hash functions
+```
+
+If `k` is too small:
+
+```text
+fewer hash functions
+       ↓
+fewer bits set per element
+       ↓
+more efficient insertion
+       ↓
+but higher false-positive probability
+```
+
+If `k` is too large:
+
+```text
+more hash functions
+       ↓
+more bits set per element
+       ↓
+bit array becomes saturated faster
+       ↓
+false-positive probability increases
+```
+
+So there is an optimal value. For a standard Bloom filter, the optimal number of hash functions is approximately:
+
+$$
+k = \frac{m}{n}\ln 2
+$$
+
+where:
+
+* `m` = number of bits
+* `n` = number of expected elements
+
+For example:
+
+```text
+m = 1000 bits
+n = 100 elements
+```
+
+Then:
+
+$$
+k = \frac{1000}{100}\ln 2
+$$
+
+$$
+k = 10(0.693)
+$$
+
+$$
+k \approx 7
+$$
+
+So approximately **7 hash functions** would minimize the false-positive probability for that configuration.
+
+The corresponding approximate false-positive probability is:
+
+$$
+p \approx
+\left(1-e^{-kn/m}\right)^k
+$$
+
+This shows that Bloom-filter performance depends heavily on choosing appropriate:
+
+```text
+m
+n
+k
+```
+
+## False Positives
+
+A **false positive** occurs when the Bloom filter says: **possibly present**, but the element is actually absent.
+
+For example, suppose our filter contains:
+
+```text
+alice
+bob
+charlie
+```
+
+Now we search for:
+
+```text
+david
+```
+
+Suppose:
+
+```text
+h₁(david) = 1
+h₂(david) = 5
+h₃(david) = 8
+```
+
+If all three bits happen to be `1`:
+
+```text
+bit[1] = 1
+bit[5] = 1
+bit[8] = 1
+```
+
+the Bloom filter says:
+
+```text
+david → POSSIBLY PRESENT
+```
+
+But perhaps `david` was never inserted. That's a: **False positive**
+
+The Bloom filter cannot distinguish whether those bits were set by `"david"` or by other elements.
+
+In next Figure, two values, u and v, have been inserted into the bit array, B. The table
+at the top of the figure shows the bit positions computed by k = 3 hash functions. As
+you can see, the Bloom Filter can quickly demonstrate that a third value w has not
+been inserted into B, because one of its k computed bit values is zero (bit 6 in this
+case). However for value x, it returns a false positive since that value was not inser‐
+ted, yet all k of its computed bit values are one.
+False positives **can happen**. But a correctly implemented standard Bloom filter does not produce false negatives.
+```text
+    h1  h2   h3
+ +-------------+
+ u|1  | 3  | 8 |   
+ +-------------+
+ v|2  | 4  | 8 | 
+ +-------------+
+ w|1  | 2  | 6 | 
+ +-------------+
+ x| 1 |  2 | 3 | 
+ +-------------+   
+
+Index:  | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |10 |
+        -------------------------------------------
+Bits:   | 0 | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 
+
+```
+### Reason for False Negatives
+Because different elements can set the same bits.
+
+For example:
+
+```text
+alice → bits 1, 4, 7
+bob   → bits 2, 4, 6
+charlie → bits 1, 5, 7
+```
+
+Now:
+
+```text
+bit 1 = 1
+bit 4 = 1
+bit 7 = 1
+```
+
+A completely different element, `david`, might happen to hash to:
+
+```text
+1, 4, 7
+```
+
+The Bloom filter sees:
+
+```text
+1
+1
+1
+```
+
+and therefore cannot tell that those bits were set by other elements.
+
+This is the fundamental trade-off:
+
+$$
+\text\{Bloom Filter saves space and provides fast testing}
+\rightarrow
+\text\{but allows false positives}
+$$
+
+### False-positive probability
+The only reason to use a Bloom Filter is that it has a predicable false positive rate $p_k$,
+$$
+p_k \approx
+\left(1-\left(1-\frac{1}{m}\right)^{kn}\right)^k
+$$
+
+where:
+
+| Symbol | Meaning                            |
+| ------ | ---------------------------------- |
+| `m`    | Number of bits in the Bloom Filter |
+| `n`    | Number of inserted values          |
+| `k`    | Number of hash functions           |
+| `pₖ`   | False-positive probability         |
+
+There are `k × n` bit-setting operations. Why? If:
+
+```text
+n = 100 values
+k = 3 hash functions
+```
+
+then:
+
+```text
+100 × 3 = 300
+```
+
+bit positions are selected during insertion, although some selections may hit the same bit.
+
+The more bits that become `1`, the greater the chance that a new value finds all of its required bits already set.
+
+**Why does `n` affect false positives?**
+
+Suppose:
+
+```text
+m = 1,000 bits
+k = 3
+```
+
+With:
+
+```text
+n = 10
+```
+
+only a relatively small number of bits are likely to be set.
+
+```text
+100000100000001000...
+```
+
+A random search is likely to encounter a `0`.
+
+Therefore:
+
+```text
+false-positive probability → low
+```
+
+But after inserting:
+
+```text
+n = 900
+```
+
+many more bits are `1`:
+
+```text
+111111011111111111...
+```
+
+A random search is more likely to find all its required bits already set.
+
+Therefore:
+
+```text
+false-positive probability → high
+```
+
+This is why you need to estimate `n` before choosing `m` and `k`.
+
+---
+
+**empirical experiment**
+
+We empirically
+computed the false positive rate as follows:
+1. Randomly remove 2,135 words from the list of 213,557 words (1% of the full list) and insert the remaining 211,422 words into a Bloom Filter,The missing 2,135 words are useful for testing(we know these words were **not inserted** So we can search for them).
+
+For example:
+
+```text
+Bloom Filter contains:
+211,422 words
+
+Known missing:
+2,135 words
+```
+
+Then:
+
+```text
+search("missing-word")
+```
+
+If the Bloom Filter returns:
+
+```text
+True
+```
+
+that's a **false positive**, because we know the word was never inserted.
+
+2. Count the false positives when searching for the missing 2,135 words.
+3. Count the false positives when searching for 2,135 random strings (of between 2 and 10 lowercase letters). To see how the Bloom Filter behaves on values that aren't from the original word list.
+
+So we had two test groups:
+
+| Test group               | Number | Known to be inserted? |
+| ------------------------ | -----: | --------------------- |
+| Removed dictionary words |  2,135 | No                    |
+| Random strings           |  2,135 | No                    |
+
+For each group:
+
+```text
+false positives =
+number of searches returning True
+```
+
+We ran trials for m(bit-array sizes) with values of 100,000 to 2,000,000 (steps of 10,000). We used
+k = 3 hash functions. This allows them to observe how changing `m` affects the false-positive rate. The results are found in 
+
+If you know in advance that you want your false positive rate to be smaller than
+some small value(What if I need the false-positive rate to be below a particular value?), you need to set k and m after estimating the number of elements
+n to insert.
+
+For example:
+
+```text
+Required false-positive rate < 10%
+```
+
+You need to choose:
+
+```text
+m
+k
+```
+
+based on an estimate of:
+
+```text
+n = number of elements you expect to insert
+```
+
+So the design process is:
+
+```text
+        Estimate n
+            |
+            v
+   Choose desired false-positive rate
+            |
+            v
+       Determine m
+            |
+            v
+       Determine k
+            |
+            v
+       Create filter
+```
+The literature suggests trying to ensure $1-\left(1-\frac{1}{m}\right)^{kn}$ is close to 1/2.
+
+This expression represents approximately the **fraction of bits that are set to `1`**.
+
+Why is `1/2` important?
+
+If about half the bits are `1`:
+
+```text
+1010010110100101...
+```
+
+the filter has a useful balance.
+
+If almost everything is `0`:
+
+```text
+0000001000000100...
+```
+
+the filter isn't using its capacity effectively.
+
+If almost everything is `1`:
+
+```text
+1111111111111111...
+```
+
+the filter will generate many false positives.
+
+The choice of `k` and `m` aims to keep the filter in a useful range.
+
+For example, to ensure a false positive rate of smaller than 10% for the word list, be
+sure to set m to at least 1,120,000 or a total of 131,250 bytes.
+$$
+0.10 = \left(1-e^{-3(213557)/m}\right)^3
+$$
+$$
+m\approx1,027,000\text{ bits}
+$$
+## False Negatives
+This is the most important property of a standard Bloom filter.
+
+A **false negative** would mean:
+
+```text
+Element exists
+       ↓
+Bloom filter says "absent"
+```
+
+A standard Bloom filter does **not** produce false negatives. Why? When an element is inserted, all of its hash positions are set to `1`.
+
+Suppose:
+
+```text
+alice ∈ C
+```
+
+```text
+alice
+ ↓
+h₁ → 2
+h₂ → 5
+h₃ → 8
+```
+
+When we insert `alice`, we set all of its hash positions:
+```text
+bit[2] = 1
+bit[5] = 1
+bit[8] = 1
+```
+
+Later, when searching for `alice`, those positions are still `1`:
+
+```text
+bit[2] == 1
+bit[5] == 1
+bit[8] == 1
+```
+herefore:
+
+```text
+alice
+  ↓
+1, 4, 7
+  ↓
+B[1] = 1
+B[4] = 1
+B[7] = 1
+  ↓
+possibly present
+```
+Therefore, the filter will never incorrectly say:
+
+```text
+alice → definitely absent
+```
+
+as long as the Bloom filter is used correctly.
+
+So:
+
+```text
+False Positive → POSSIBLE
+False Negative → NOT possible
+```
+
+This gives us a very useful guarantee: If a Bloom filter says an element is absent, you can safely reject it.
+
+## Search Procedure
+
+The search operation is essentially the reverse of insertion.
+
+Suppose we have:
+
+```text
+m = 10
+k = 3
+```
+
+where:
+
+* `m` = number of bits
+* `k` = number of hash functions
+
+Our filter:
+
+```text
+Index:     0 1 2 3 4 5 6 7 8 9
+           ---------------------
+Bits:      0 1 1 0 0 1 0 1 1 0
+```
+
+We search for:
+
+```text
+alice
+```
+
+Calculate the same hash functions:
+
+```text
+h₁(alice) = 2
+h₂(alice) = 5
+h₃(alice) = 8
+```
+
+Check:
+
+```text
+bit[2] = 1
+bit[5] = 1
+bit[8] = 1
+```
+
+All bits are `1`.
+
+Therefore:
+
+```text
+alice → POSSIBLY PRESENT
+```
+
+Now search for:
+
+```text
+david
+```
+
+Suppose:
+
+```text
+h₁(david) = 3
+h₂(david) = 5
+h₃(david) = 8
+```
+
+Check:
+
+```text
+bit[3] = 0
+bit[5] = 1
+bit[8] = 1
+```
+
+One bit is `0`.
+
+Therefore:
+
+```text
+david → DEFINITELY ABSENT
+```
+
+#### Search algorithm
+
+Conceptually:
+
+```text
+function contains(x):
+
+    for each hash function h:
+        index = h(x)
+
+        if bit[index] == 0:
+            return false
+
+    return true
+```
+
+The returned `true` means: **possibly present**, not: **definitely present**
+
+
+## Pseudocode
+Here is the **complete Bloom Filter pseudocode**, including creation, insertion, and membership testing. I’ll use the corrected `AND (&)` operation for checking bits.
+
+
+### Basic Pseudocode
+This pseudocode describes a **Bloom Filter implemented as a bit array**, using **bitwise operations** to set and test individual bits.
+```text
+BloomFilter
+
+    create(m)
+        bits ← bit array of m bits
+        initialize all bits to 0
+        return bits
+    end
+
+
+    add(bits, value)
+
+        foreach hashFunction hf
+
+            position ← hf(value)
+
+            setbit ← 1 << position
+
+            bits ← bits | setbit
+
+        end
+
+    end
+
+
+    search(bits, value)
+
+        foreach hashFunction hf
+
+            position ← hf(value)
+
+            checkbit ← 1 << position
+
+            if (bits & checkbit) = 0 then
+                return false
+            end
+
+        end
+
+        return true
+
+    end
+
+end
+```
+This pseudocode describes a **Bloom Filter implemented as a bit array**, using **bitwise operations** to set and test individual bits.
+
+There are three operations:
+
+1. `create(m)` — create the bit array
+2. `add(bits, value)` — insert a value
+3. `search(bits, value)` — test whether a value may be present
+
+There is also a small notation issue in the `search` pseudocode: the condition
+
+```text
+if checkbit | bits = 0
+```
+
+would not correctly test whether a bit is set. It should normally be:
+
+```text
+if checkbit & bits = 0
+```
+
+where `&` is **bitwise AND**. I'll explain the intended algorithm below.
+
+---
+
+** `create(m)`**
+
+```text
+create(m)
+    return bit array of m bits
+end
+```
+
+This creates a Bloom filter containing `m` bits.
+
+For example:
+
+```text
+create(8)
+```
+
+creates:
+
+```text
+Index:  7 6 5 4 3 2 1 0
+        -----------------
+Bits:   0 0 0 0 0 0 0 0
+```
+
+All bits initially contain `0`.
+
+We can think of it as:
+
+```text
+B = 00000000
+```
+
+The Bloom filter starts empty.
+
+---
+
+** Understanding `1 << position`**
+
+Before understanding `add`, we need to understand this expression:
+
+```text
+1 << hf(value)
+```
+
+`<<` is the **left-shift operator**.
+
+For example:
+
+```text
+1 << 0
+```
+
+gives:
+
+```text
+00000001
+```
+
+While:
+
+```text
+1 << 1
+```
+
+gives:
+
+```text
+00000010
+```
+
+And:
+
+```text
+1 << 2
+```
+
+gives:
+
+```text
+00000100
+```
+
+And:
+
+```text
+1 << 3
+```
+
+gives:
+
+```text
+00001000
+```
+
+So:
+
+| Expression | Binary     | Decimal |
+| ---------- | ---------- | ------: |
+| `1 << 0`   | `00000001` |       1 |
+| `1 << 1`   | `00000010` |       2 |
+| `1 << 2`   | `00000100` |       4 |
+| `1 << 3`   | `00001000` |       8 |
+| `1 << 4`   | `00010000` |      16 |
+
+The result is a number with **exactly one bit set to `1`**.
+
+We can call this a **bit mask**.
+
+---
+
+** What does `hf(value)` mean?**
+
+`hf` represents a **hash function**.
+
+The pseudocode says:
+
+```text
+foreach hashFunction hf
+```
+
+because a Bloom filter uses multiple hash functions.
+
+For example:
+
+```text
+hf1("alice") = 2
+hf2("alice") = 5
+hf3("alice") = 7
+```
+
+These numbers represent the bit positions that should be set.
+
+So:
+
+```text
+alice
+  |
+  +---- hf1 → 2
+  |
+  +---- hf2 → 5
+  |
+  +---- hf3 → 7
+```
+
+---
+
+** `add(bits, value)`**
+
+The insertion operation is:
+
+```text
+add(bits,value)
+
+foreach hashFunction hf
+    setbit = 1 << hf(value)
+    bits |= setbit
+end
+```
+
+Let's break this down.
+
+Suppose our Bloom filter has 8 bits:
+
+```text
+bits = 00000000
+```
+
+We want to add:
+
+```text
+alice
+```
+
+Suppose we have three hash functions:
+
+```text
+hf1(alice) = 1
+hf2(alice) = 4
+hf3(alice) = 6
+```
+
+---
+
+**First hash function**
+
+```text
+hf1(alice) = 1
+```
+
+Calculate:
+
+```text
+setbit = 1 << 1
+```
+
+Therefore:
+
+```text
+setbit = 00000010
+```
+
+Now:
+
+```text
+bits |= setbit
+```
+
+Bitwise OR:
+
+```text
+  00000000
+| 00000010
+-----------
+  00000010
+```
+
+So:
+
+```text
+bits = 00000010
+```
+
+Bit `1` has been set.
+
+---
+
+** Second hash function**
+
+Now:
+
+```text
+hf2(alice) = 4
+```
+
+Calculate:
+
+```text
+setbit = 1 << 4
+```
+
+Therefore:
+
+```text
+setbit = 00010000
+```
+
+Now:
+
+```text
+  00000010
+| 00010000
+-----------
+  00010010
+```
+
+So:
+
+```text
+bits = 00010010
+```
+
+Bits `1` and `4` are now set.
+
+---
+
+** Third hash function**
+
+Suppose:
+
+```text
+hf3(alice) = 6
+```
+
+Then:
+
+```text
+setbit = 1 << 6
+```
+
+gives:
+
+```text
+01000000
+```
+
+Now:
+
+```text
+  00010010
+| 01000000
+-----------
+  01010010
+```
+
+The final Bloom filter is:
+
+```text
+bits = 01010010
+```
+
+Bits:
+
+```text
+Index:  7 6 5 4 3 2 1 0
+        -----------------
+Bits:   0 1 0 1 0 0 1 0
+          ↑   ↑     ↑
+          6   4     1
+```
+
+So inserting `alice` means:
+
+> Set all the bits corresponding to the hash functions of `alice`.
+
+---
+
+** Why use `|=`?**
+
+This is important.
+
+```text
+bits |= setbit
+```
+
+is shorthand for:
+
+```text
+bits = bits | setbit
+```
+
+`|` is **bitwise OR**.
+
+The OR operation has these rules:
+
+| A   | B   | A OR B |
+| --- | --- | ------ |
+| 0   | 0   | 0      |
+| 0   | 1   | 1      |
+| 1   | 0   | 1      |
+| 1   | 1   | 1      |
+
+The important property is:
+
+```text
+0 | 1 = 1
+1 | 1 = 1
+```
+
+So OR is perfect for a Bloom filter because we want to say:
+
+> **Turn this bit on, but don't turn any existing bits off.**
+
+For example:
+
+```text
+bits:
+10100100
+
+setbit:
+00001000
+
+OR:
+10101100
+```
+
+Only the desired bit is turned on.
+
+---
+
+** What if the bit is already `1`?**
+
+This happens frequently.
+
+Suppose:
+
+```text
+bits = 01010010
+```
+
+and another hash function produces position `4`:
+
+```text
+setbit = 00010000
+```
+
+Then:
+
+```text
+  01010010
+| 00010000
+-----------
+  01010010
+```
+
+Nothing changes.
+
+That's completely fine.
+
+It means another element has already set that bit.
+
+This is one reason Bloom filters cannot determine exactly **which element** caused a bit to be `1`.
+
+---
+
+** `search(bits,value)`**
+
+Now we have:
+
+```text
+search(bits,value)
+
+foreach hashFunction hf
+    checkbit = 1 << hf(value)
+
+    if checkbit & bits = 0 then
+        return false
+
+return true
+end
+```
+
+The idea is:
+
+> Calculate the same bit positions and check whether **all of them are set**.
+
+---
+
+** Searching for `alice`**
+
+Our current filter is:
+
+```text
+bits = 01010010
+```
+
+We previously inserted `alice` using:
+
+```text
+hf1(alice) = 1
+hf2(alice) = 4
+hf3(alice) = 6
+```
+
+1. First hash
+
+```text
+checkbit = 1 << 1
+```
+
+gives:
+
+```text
+checkbit = 00000010
+```
+
+Now:
+
+```text
+bits:
+01010010
+
+checkbit:
+00000010
+```
+
+Perform:
+
+```text
+checkbit & bits
+```
+
+```text
+  00000010
+& 01010010
+-----------
+  00000010
+```
+
+The result is not zero.
+
+Therefore bit `1` is set.
+
+---
+
+1. Second hash
+
+```text
+checkbit = 1 << 4
+```
+
+```text
+00010000
+```
+
+Check:
+
+```text
+  00010000
+& 01010010
+-----------
+  00010000
+```
+
+Not zero.
+
+Therefore bit `4` is set.
+
+---
+
+3. Third hash
+
+```text
+checkbit = 1 << 6
+```
+
+```text
+01000000
+```
+
+Check:
+
+```text
+  01000000
+& 01010010
+-----------
+  01000000
+```
+
+Not zero.
+
+Therefore bit `6` is set.
+
+All three bits are set:
+
+```text
+bit 1 = 1
+bit 4 = 1
+bit 6 = 1
+```
+
+Therefore:
+
+```text
+search(bits, "alice")
+        ↓
+      true
+```
+
+But remember:
+
+> `true` means **possibly present**, not definitely present.
+
+---
+
+** Why `&` instead of `|` during search?**
+
+This is the subtle but very important part.
+
+The pseudocode you provided says:
+
+```text
+if checkbit | bits = 0
+```
+
+That is almost certainly a typo or formatting error.
+
+The correct operation should be:
+
+```text
+if checkbit & bits = 0
+```
+
+**Why?**
+
+We want to ask:
+
+> "Is this particular bit set in `bits`?"
+
+Bitwise AND is exactly what allows us to test that.
+
+Suppose:
+
+```text
+bits     = 01010010
+checkbit = 00001000
+```
+
+The bit we're checking is `3`.
+
+AND:
+
+```text
+  00001000
+& 01010010
+-----------
+  00000000
+```
+
+The result is zero.
+
+Therefore:
+
+```text
+bit 3 = 0
+```
+
+So we immediately know:
+
+```text
+value definitely does not exist
+```
+
+---
+
+** Why does one zero mean "definitely absent"?**
+
+Suppose we search for `david`.
+
+Imagine:
+
+```text
+hf1(david) = 1
+hf2(david) = 3
+hf3(david) = 6
+```
+
+Our Bloom filter is:
+
+```text
+Index:  7 6 5 4 3 2 1 0
+        -----------------
+Bits:   0 1 0 1 0 0 1 0
+```
+
+Check the positions:
+
+```text
+1 → 1
+3 → 0
+6 → 1
+```
+
+We found:
+
+```text
+bit 3 = 0
+```
+
+Therefore:
+
+```text
+david → definitely absent
+```
+
+Why?
+
+Because if `david` had been inserted, its hash function would have set bit `3` to `1`.
+
+Since it is still `0`, `david` could not have been inserted.
+
+---
+
+** The complete search logic**
+
+The search operation can therefore be understood as:
+
+```text
+search(value):
+
+    for every hash function:
+
+        calculate the bit position
+
+        if that bit is 0:
+            return false
+
+    return true
+```
+
+In mathematical form:
+
+```text
+                  Search value
+                       |
+                       v
+             Calculate hash positions
+                       |
+             +---------+---------+
+             |         |         |
+             v         v         v
+            bit       bit       bit
+             |         |         |
+             +---------+---------+
+                       |
+                Are all bits 1?
+                  /          \
+                No            Yes
+                |              |
+                v              v
+          Definitely       Possibly
+            absent         present
+```
+
+---
+
+** Complete example**
+
+Let's put everything together.
+
+Suppose:
+
+```text
+m = 8 bits
+```
+
+Initially:
+
+```text
+00000000
+```
+
+We insert:
+
+```text
+alice
+```
+
+with:
+
+```text
+hf1 = 1
+hf2 = 4
+hf3 = 6
+```
+
+After insertion:
+
+```text
+01010010
+```
+
+Now insert:
+
+```text
+bob
+```
+
+Suppose:
+
+```text
+hf1(bob) = 0
+hf2(bob) = 4
+hf3(bob) = 5
+```
+
+Set:
+
+```text
+bit 0
+bit 4
+bit 5
+```
+
+Current filter:
+
+```text
+Before:
+
+01010010
+
+bob's bits:
+
+00110001
+```
+
+OR:
+
+```text
+  01010010
+| 00110001
+-----------
+  01110011
+```
+
+Now:
+
+```text
+bits = 01110011
+```
+
+---
+
+** Search for `alice`**
+
+Hash positions:
+
+```text
+1, 4, 6
+```
+
+Check:
+
+```text
+bit 1 → 1
+bit 4 → 1
+bit 6 → 1
+```
+
+Therefore:
+
+```text
+alice → possibly present
+```
+
+---
+
+** Search for a value that was never inserted**
+
+Suppose:
+
+```text
+charlie
+```
+
+hashes to:
+
+```text
+2, 3, 7
+```
+
+Our filter:
+
+```text
+Index:  7 6 5 4 3 2 1 0
+        -----------------
+Bits:   0 1 1 1 0 0 1 1
+```
+
+Check:
+
+```text
+bit 2 → 0
+```
+
+Immediately:
+
+```text
+charlie → definitely absent
+```
+
+We don't even need to check the remaining hashes.
+
+This is why the search can terminate early.
+
+---
+
+** The two possible paths**
+
+This is the most important mental model for the pseudocode:
+
+```text
+search(bits, value)
+        |
+        v
+ calculate hash position
+        |
+        v
+    check bit
+        |
+        +-------- bit = 0 --------+
+        |                         |
+        |                         v
+        |                  return false
+        |
+        +-------- bit = 1
+                  |
+                  v
+           check next hash
+                  |
+                  v
+             ...
+                  |
+                  v
+        all bits were 1
+                  |
+                  v
+            return true
+```
+
+And remember:
+
+```text
+false → definitely absent
+true  → possibly present
+```
+
+---
+
+** Why the algorithm is `O(k)`**
+
+If the Bloom filter uses `k` hash functions:
+
+1. Insertion
+
+For each hash function:
+
+```text
+calculate hash
+create bit mask
+OR it into bit array
+```
+
+Therefore:
+
+$$
+T_\{\text{add}} = O(k)
+$$
+
+2. Search
+
+For each hash function:
+
+```text
+calculate hash
+create bit mask
+AND with bit array
+```
+
+Therefore:
+
+$$
+T_\{\text{search}} = O(k)
+$$
+
+If `k` is a fixed constant:
+
+$$
+\boxed{O(1)}
+$$
+
+This is the "constant performance" mentioned in the paragraph you provided.
+
+### More explicit version
+
+```text
+create(m)
+
+    bits ← array containing m zeros
+
+    return bits
+
+end
+
+
+add(bits, value)
+
+    foreach hashFunction hf
+
+        position ← hf(value)
+
+        setbit ← 1 << position
+
+        bits ← bits OR setbit
+
+    end
+
+end
+
+
+search(bits, value)
+
+    foreach hashFunction hf
+
+        position ← hf(value)
+
+        checkbit ← 1 << position
+
+        result ← bits AND checkbit
+
+        if result = 0 then
+            return false
+        end
+
+    end
+
+    return true
+
+end
+```
+
+**Meaning of the operations**
+
+```text
+position = hf(value)
+```
+
+Find which bit this hash function identifies.
+
+```text
+setbit = 1 << position
+```
+
+Create a mask containing `1` at that position.
+
+```text
+bits = bits | setbit
+```
+
+Set that bit to `1`.
+
+```text
+bits & checkbit
+```
+
+Check whether that bit is already `1`.
+
+Therefore:
+
+```text
+                 Bloom Filter Search
+                         |
+                         v
+                 Calculate hashes
+                         |
+              +----------+----------+
+              |          |          |
+              v          v          v
+             bit        bit        bit
+              |          |          |
+           is 0?       is 0?      is 0?
+              |          |          |
+              +----------+----------+
+                         |
+              +----------+----------+
+              |                     |
+           Any bit 0            All bits 1
+              |                     |
+              v                     v
+      return false             return true
+      definitely absent        possibly present
+```
+
+So the two return values have different meanings:
+
+```text
+false → definitely not in the set
+true  → possibly in the set
+```
+
+That distinction is the defining property of a standard **Bloom Filter**.
+
+## Variations
+#### Counting Bloom Filter
+A variation called a **Counting Bloom Filter** replaces each bit with a counter:
+
+```text
+0 1 2 0 3 1 0 ...
+```
+
+This allows insertions and deletions.
+
+## Analysis
+### Time complexity
+the algorithm only
+requires a fixed number of `k` probes, so each insertion and search can be processed
+in $O(k)$ time, which is considered constant. 
+
+When adding a value, we execute all `k` hash functions.
+
+For example:
+
+```text
+k = 3
+```
+
+Then:
+
+```text
+add(value)
+    |
+    +-- hash1 → bit
+    |
+    +-- hash2 → bit
+    |
+    +-- hash3 → bit
+```
+
+That's three operations.
+
+So:
+
+```text
+Insertion = O(k)
+Search    = O(k)
+```
+
+If `k` is fixed, for example:
+
+```text
+k = 3
+```
+
+then:
+
+```text
+O(k) = O(3) = O(1)
+```
+
+Therefore, we normally say:
+
+```text
+Bloom Filter insertion = O(1)
+Bloom Filter search    = O(1)
+```
+
+assuming `k` is a fixed constant.
+### Space Efficiency
+The total storage required for a Bloom Filter is fixed to be m bits, and this won’t increase regardless of the number of values stored
+
+One of the biggest advantages of Bloom filters is their extremely small memory requirement.
+
+Suppose we need to remember whether:
+
+```text
+1 billion URLs
+```
+
+have already been seen.
+
+A normal hash set would have to store the URLs themselves, plus hash-table metadata.
+
+A Bloom filter can instead store only bits.
+
+For example:
+
+```text
+Actual elements
+       ↓
+┌──────────────────────────────┐
+│ URL 1                        │
+│ URL 2                        │
+│ URL 3                        │
+│ ...                          │
+│ URL 1,000,000,000            │
+└──────────────────────────────┘
+```
+
+versus:
+
+```text
+Bloom Filter
+
+010101001101010011010...
+```
+
+The Bloom filter does not need to store:
+
+```text
+URL
+string
+object
+record
+pointer
+```
+
+It only stores:
+
+```text
+bits
+```
+
+If we create:
+
+```text
+m = 1,000,000 bits
+```
+
+the Bloom Filter always uses approximately:
+
+```text
+1,000,000 bits
+```
+
+regardless of whether we insert:
+
+```text
+100 values
+```
+
+or:
+
+```text
+1,000,000 values
+```
+
+The approximate number of bits needed depends on the desired false-positive rate.
+
+A useful formula is:
+
+$$
+m \approx -\frac\{n\ln p}\{(\ln 2)^2}
+$$
+
+where:
+
+* `n` = number of elements
+* `p` = desired false-positive probability
+* `m` = number of bits
+
+For example, if:
+
+```text
+n = 1,000,000
+p = 0.01
+```
+
+we can calculate approximately:
+
+$$
+m \approx 9.6\text\{ million bits}
+$$
+
+which is roughly:
+
+$$
+1.2\text{ MB}
+$$
+
+That is dramatically smaller than storing one million full strings.
+
+#### Why does storage remain fixed?
+
+Suppose:
+
+```text
+m = 16 bits
+```
+
+Initially:
+
+```text
+0000000000000000
+```
+
+Insert `"alice"`:
+
+```text
+0001000010000100
+```
+
+Insert `"bob"`:
+
+```text
+0101000010100100
+```
+
+Insert more values:
+
+```text
+1101011011101101
+```
+
+The number of bits is still:
+
+```text
+16
+```
+
+We don't add another array when more values are inserted.
+
+Instead, more values cause more bits to become `1`.
+
+Eventually, many bits may be `1`:
+
+```text
+1111111111111111
+```
+
+At this point, the filter becomes ineffective because almost every search will return `true`.
+
+### Hash functions Design
+It is challenging to design effective hash functions to truly distribute the computed bits for
+the values to be inserted into the bit array.
+
+Suppose we have a 16-bit filter:
+
+```text
+0000000000000000
+```
+
+A good set of hash functions should distribute values across the array:
+
+```text
+1010010010101001
+```
+
+A poor hash function might concentrate values in a small region:
+
+```text
+1111000000000000
+```
+
+The second situation creates more collisions and therefore more false positives.
+
+So the quality of the hash functions affects the Bloom Filter's effectiveness.
+
+### Size of Bit Array
+{/* Why can `m` need to be large? */}
+While the size of the bit array is constant,
+it may need to be quite large to reduce the false positive rate.
+
+This is one of the most important trade-offs.
+
+Suppose:
+
+```text
+n = 1,000,000 values
+```
+
+If we use:
+
+```text
+m = 100,000 bits
+```
+
+we have far fewer bits than values.
+
+Many values will map onto the same bits:
+
+```text
+Values
+ A ──┐
+ B ──┼──> bit 10
+ C ──┘
+ D ────> bit 20
+ E ────> bit 10
+```
+
+The filter quickly becomes saturated.
+
+Instead, increasing:
+
+```text
+m
+```
+
+gives the values more space:
+
+```text
+m = 100,000
+       ↓
+m = 1,000,000
+       ↓
+m = 2,000,000
+```
+
+More bits generally means a **lower false-positive rate**, for the same `n` and suitable `k`.
+
+## Limitations
+
+Bloom filters are powerful, but they have important limitations.
+
+###  False positives
+with a Bloom Filter, checking
+whether an element is in B might return a false positive even though the element
+does not exist in C. The Bloom Filter can accurately determine when an element
+has not been added to B, so it never returns a false negative.
+
+The biggest limitation is: **possibly present**, does not mean: **definitely present**
+
+Therefore, Bloom filters cannot replace an exact data structure when exact membership is required.
+
+Here is the major trade-off.
+
+Suppose:
+
+```text
+C = {alice, bob, charlie}
+```
+
+We ask:
+
+```text
+Is david in C?
+```
+
+Suppose the hash functions for `david` produce:
+
+```text
+h₁(david) = 1
+h₂(david) = 4
+h₃(david) = 7
+```
+
+and the Bloom filter contains:
+
+```text
+B:
+
+Index:  0 1 2 3 4 5 6 7 8 9
+        ---------------------
+Bits:   0 1 1 0 1 0 1 1 0 0
+          ↑     ↑       ↑
+          1     4       7
+```
+
+All three bits are `1`.
+
+The Bloom filter therefore says:
+
+```text
+david → possibly present
+```
+
+But we know:
+
+```text
+david ∉ C
+```
+
+So this is a: **False positive**
+
+---
+
+The only reason to use a Bloom Filter is that it has a predictable false positive rate.
+
+The idea is that we deliberately accept false positives in exchange for:
+
+* very small memory usage
+* fast insertion
+* fast membership testing
+* no false negatives
+
+The result is:
+
+```text
+             Bloom Filter
+                  |
+         +--------+--------+
+         |                 |
+       False              True
+         |                 |
+         v                 v
+   Definitely absent   Possibly present
+                           |
+                           v
+                     Exact search
+```
+
+This makes Bloom Filters especially useful as a **pre-filter**.
+
+---
+
+### Standard Bloom filters cannot delete elements
+
+Suppose:
+
+```text
+alice
+```
+
+sets:
+
+```text
+bit[2] = 1
+bit[5] = 1
+bit[8] = 1
+```
+
+Now we want to delete `"alice"`.
+
+We cannot simply do:
+
+```text
+bit[2] = 0
+bit[5] = 0
+bit[8] = 0
+```
+
+because another element may also depend on those bits.
+
+For example:
+
+```text
+alice → 2, 5, 8
+bob   → 1, 5, 7
+```
+
+If we delete `alice` and clear `bit[5]`, we would accidentally affect `bob`. the filter could incorrectly say that `"bob"` is absent. Therefore, the standard Bloom filter does not support deletion.
+
+A variation called a **Counting Bloom Filter** replaces each bit with a counter:
+
+```text
+0 1 2 0 3 1 0 ...
+```
+
+This allows insertions and deletions.
+
+---
+
+###  It cannot retrieve elements
+
+A Bloom filter does not store the original elements.
+
+You cannot ask:
+
+```text
+"Give me all elements in the Bloom filter."
+```
+
+It cannot do that. It only answers membership questions.
+
+---
+
+###  It cannot tell which element caused a bit
+
+Suppose:
+
+```text
+bit[10] = 1
+```
+
+The Bloom filter does not know whether that bit was set because of:
+
+```text
+alice
+bob
+charlie
+```
+
+or multiple elements.
+
+It only knows:
+
+```text
+bit[10] is set
+```
+
+---
+
+###  Performance depends on configuration
+
+A poorly configured Bloom filter can become saturated.
+
+For example:
+
+```text
+0 1 1 1 1 1 1 1 1 1
+```
+
+If almost every bit is `1`, then almost every query will appear to be present.
+
+That produces a very high false-positive rate.
+
+Therefore, you need to choose an appropriate:
+
+```text
+bit-array size (m)
+number of elements (n)
+number of hash functions (k)
+```
+
+## Comparison 
+
+| Algorithm     |                Typical search |
+| ------------- | ----------------------------: |
+| Linear Search |                        `O(n)` |
+| Binary Search |                    `O(log n)` |
+| Hash Table    |               Expected `O(1)` |
+| Bloom Filter  | `O(k)` → `O(1)` for fixed `k` |
+
+But Bloom Filter has a major difference:
+
+> It doesn't actually find the element.
+
+It only answers:
+
+```text
+Definitely absent
+```
+
+or:
+
+```text
+Possibly present
+```
+
+That's why it's better thought of as a **filter** rather than a complete searching data structure.
+
+### Bloom Filter vs Hash Table
+The key difference is that a hash table tries to **store the actual values**, while a Bloom filter stores only a **compact probabilistic representation** of those values.
+
+##### Hash-Based Search
+Hash-Based Search stores the full set of values from a collection C in a hash table
+H, whether in linked lists or using open addressing.
+
+Suppose our collection is:
+
+```text
+C = {alice, bob, charlie, david}
+```
+
+A hash-based search stores these actual values in a hash table:
+
+```text
+Collection C
+     |
+     v
+Hash Function
+     |
+     v
+Hash Table H
+
+0 ──
+1 ── bob
+2 ──
+3 ── alice
+4 ── david
+5 ──
+6 ── charlie
+```
+
+The hash table can use either:
+
+* **Separate chaining** — each bin contains a linked list or another collection.
+* **Open addressing** — collisions are resolved by probing other positions.
+
+The important point is:
+
+> **The hash table stores the actual elements.**
+
+Therefore, when searching for `alice`, the algorithm can find the candidate position and compare the actual stored value.
+
+**What happens as more elements are added?**
+
+In both cases(linked lists or open addressing), as more elements
+are added to the hash table, the time to locate an element increases unless you also
+increase the amount of storage (in this case, the number of bins).
+
+Suppose we start with:
+
+```text
+H = 10 bins
+C = 5 elements
+```
+
+The table might look like:
+
+```text
+0
+1 → alice
+2
+3 → bob
+4
+5 → charlie
+6
+7 → david
+8
+9 → eve
+```
+
+Searching is usually very fast.
+
+But suppose we keep adding elements:
+
+```text
+C = 100 elements
+```
+
+while keeping:
+
+```text
+H = 10 bins
+```
+
+Now many elements must share the same bins.
+
+For separate chaining:
+
+```text
+3 → alice → david → john → mary → peter → ...
+```
+
+A search may need to compare several elements.
+
+For open addressing, the table becomes increasingly crowded:
+
+```text
+[ X ][ X ][ X ][ X ][ X ][ X ][ X ][ X ][ X ][ X ]
+```
+
+which means more probing may be required.
+
+So:
+
+$$
+\text\{more elements} \rightarrow \text\{more collisions} \rightarrow
+\text\{more work}
+$$
+How can a Hash Table maintain good performance?
+
+One solution is to increase the number of bins.
+
+For example:
+
+```text
+100 elements
+       ↓
+increase table size
+       ↓
+more bins
+       ↓
+fewer collisions
+       ↓
+fewer comparisons
+```
+
+For example:
+
+```text
+Before:
+
+10 bins
+100 elements
+
+After:
+
+200 bins
+100 elements
+```
+
+The second table has more empty space, but searches can remain efficient.
+
+This illustrates the fundamental **space-time trade-off**:
+
+```text
+More memory
+     ↓
+More bins
+     ↓
+Fewer collisions
+     ↓
+Faster search
+```
+we only seek a reasonable trade-off in the amount of space required to reduce the number of comparisons
+when looking for an element in the collection(We spend additional memory to reduce the amount of work required to find an element).
+
+#### Bloom Filter
+Bloom Filter takes a different approach, A Bloom Filter provides an alternative bit array structure B that ensures constant
+performance when adding elements from C into B or checking whether an element
+has not been added to B; amazingly, this behavior is independent of the number of
+items already added to B.
+
+A Bloom filter doesn't store the actual values.
+
+Instead, it uses a **bit array**.
+
+Suppose:
+
+```text
+C = {alice, bob, charlie, david}
+```
+
+Instead of storing:
+
+```text
+alice
+bob
+charlie
+david
+```
+
+we might have:
+
+```text
+B:
+
+Index:  0 1 2 3 4 5 6 7 8 9
+        ---------------------
+Bits:   0 1 1 0 1 0 1 1 0 0
+```
+
+The elements are represented indirectly by the bits set by their hash functions.
+
+For example:
+
+```text
+alice
+  |
+  +---- hash₁ → 1
+  +---- hash₂ → 4
+  +---- hash₃ → 7
+```
+
+So:
+
+```text
+B[1] = 1
+B[4] = 1
+B[7] = 1
+```
+
+The Bloom filter doesn't need to store `"alice"` itself.
+
+**Why is the Bloom Filter so space efficient?**
+
+Imagine:
+
+```text
+C = 1,000,000 elements
+```
+
+A hash table must store information about those million elements:
+
+```text
+Hash Table
++----------------+
+| element        |
+| element        |
+| element        |
+| ...            |
+| element        |
++----------------+
+```
+
+A Bloom filter might instead use something like:
+
+```text
+Bloom Filter
+
+011010101101001001011010...
+```
+
+Only bits are stored.
+
+Therefore:
+
+```text
+Hash Table
+    ↓
+stores values
+
+Bloom Filter
+    ↓
+stores bits
+```
+
+This can make a Bloom filter dramatically smaller.
+
+
+**Why does the Bloom Filter have constant-time checking?**
+
+Suppose we have:
+
+```text
+10 elements
+```
+
+and then:
+
+```text
+1,000,000 elements
+```
+
+The Bloom filter still performs a fixed number of operations if its number of hash functions is fixed.
+
+For example, with three hash functions:
+
+```text
+h₁(x)
+h₂(x)
+h₃(x)
+```
+
+checking an element always involves approximately:
+
+```text
+1. Calculate h₁
+2. Calculate h₂
+3. Calculate h₃
+4. Check three bits
+```
+
+It doesn't search through:
+
+```text
+10 elements
+```
+
+or:
+
+```text
+1,000,000 elements
+```
+
+It directly accesses the required bit positions.
+
+Conceptually:
+
+```text
+                     Search x
+                         |
+              +----------+----------+
+              |          |          |
+             h₁         h₂         h₃
+              |          |          |
+              v          v          v
+            B[i₁]      B[i₂]      B[i₃]
+              |          |          |
+              +----------+----------+
+                         |
+                  Are they all 1?
+```
+
+The number of bit checks is determined by `k`, the number of hash functions—not directly by the number of elements already inserted.
+
+Therefore:
+
+$$
+T_\{\text\{Bloom search}} = O(k)
+$$
+
+If `k` is treated as a fixed constant:
+
+$$
+\boxed{T = O(1)}
+$$
+**Adding an element is also constant-time**
+
+The same idea applies when inserting.
+
+Suppose:
+
+```text
+x = alice
+```
+
+and we have:
+
+```text
+k = 3 hash functions
+```
+
+Calculate:
+
+```text
+h₁(alice)
+h₂(alice)
+h₃(alice)
+```
+
+Then set three bits:
+
+```text
+B[h₁(alice)] = 1
+B[h₂(alice)] = 1
+B[h₃(alice)] = 1
+```
+
+So:
+
+$$
+T_\{\text{insert}} = O(k)
+$$
+
+and with fixed `k`:
+
+$$
+T_\{\text{insert}} = O(1)
+$$
+
+The important observation is that this doesn't require searching through all previously inserted elements.
+
+So:
+**Hash-Based Search**
+
+```text
+Collection C
+     |
+     v
+Hash Table H
+     |
+     v
+Stores actual values
+```
+
+As the collection grows:
+
+```text
+more elements
+     ↓
+more collisions
+     ↓
+potentially more comparisons
+```
+
+We can compensate by:
+
+```text
+more bins
+     ↓
+more memory
+     ↓
+fewer collisions
+```
+
+**Bloom Filter**
+
+```text
+Collection C
+     |
+     v
+Bloom Filter B
+     |
+     v
+Stores only bits
+```
+
+For each element:
+
+```text
+element
+   ↓
+multiple hash functions
+   ↓
+set several bits
+```
+
+For searching:
+
+```text
+element
+   ↓
+multiple hash functions
+   ↓
+check several bits
+```
+
+Therefore, assuming a fixed number of hash functions:
+
+$$
+O(1)\text\{ insertion}
+$$
+
+and
+
+$$
+O(1)\text\{ membership testing}
+$$
+
+But the result is probabilistic:
+
+```text
+Bloom says "absent"
+        ↓
+100% definitely absent
+
+Bloom says "present"
+        ↓
+only possibly present
+        ↓
+may be false positive
+```
+#### Final comparison
+A hash table tells you whether an element is present by storing the elements themselves; a Bloom filter uses a small bit array to tell you that an element is definitely absent or possibly present, trading exactness for space efficiency.
+
+| Feature              | Hash-Based Search                | Bloom Filter                     |
+| -------------------- | -------------------------------- | -------------------------------- |
+| Stores actual values | Yes                              | No                               |
+| Main structure       | Hash table                       | Bit array                        |
+| Hash functions       | Usually one/main hash            | Multiple                         |
+| Search               | Exact                            | Probabilistic                    |
+| Insert               | Expected `O(1)`                  | `O(k)` → `O(1)` for fixed `k`    |
+| Membership test      | Expected `O(1)`                  | `O(k)` → `O(1)` for fixed `k`    |
+| False positive       | No                               | **Possible**                     |
+| False negative       | No                               | **No**                           |
+| Can retrieve value?  | Yes                              | No                               |
+| Can normally delete? | Yes                              | No                               |
+| Space                | Stores elements + table overhead | Very compact                     |
+| Main advantage       | Exact lookup                     | Cheaply rule out absent elements |
+| Main trade-off       | More storage                     | False positives 
+
+| Property               | Bloom Filter                  | Hash Table           |
+| ---------------------- | ----------------------------- | -------------------- |
+| Stores actual elements | ❌ No                          | ✅ Yes                |
+| Membership testing     | ✅                             | ✅                    |
+| False positives        | ✅ Possible                    | ❌ Normally no        |
+| False negatives        | ❌ No                          | ❌ No                 |
+| Memory usage           | Very low                      | Higher               |
+| Exact membership       | ❌ No                          | ✅ Yes                |
+| Retrieve element       | ❌ No                          | ✅ Yes                |
+| Standard deletion      | ❌ No                          | ✅ Yes                |
+| Main operation         | Probabilistic membership test | Exact lookup         |
+| Best use               | Quickly reject absent items   | Exact storage/search |
+
+### Bloom Filters and Hash-Based Search
+Why Bloom Filters are useful with Hash-Based Search?
+
+A particularly useful pattern is to **combine them**.
+
+Suppose a database contains millions of records.
+
+Instead of immediately performing an expensive exact lookup:
+
+```text
+Request
+   |
+   v
+Database
+   |
+   v
+Expensive lookup
+```
+
+we can do:
+
+```text
+Request
+   |
+   v
+Bloom Filter
+   |
+   +---- Definitely absent
+   |          |
+   |          v
+   |        STOP
+   |
+   +---- Possibly present
+              |
+              v
+        Exact Hash Search
+              |
+              v
+           Database
+```
+
+This works because the Bloom filter is excellent at answering:
+
+> **“Can I safely rule this element out?”**
+
+It is not sufficient for answering:
+
+> **“Can I prove this element exists?”**
+
+That distinction is the central concept behind Bloom Filters.
+
+## Applications
+
+Bloom filters are particularly useful when a **negative answer can save an expensive operation**.
+
+###  Databases
+
+Suppose a database contains millions of records.
+
+Before performing an expensive lookup:
+
+```text
+Application
+    |
+    v
+Bloom Filter
+    |
+    +---- definitely absent ---> stop
+    |
+    +---- possibly present ----> Database lookup
+```
+
+If most requested items don't exist, the Bloom filter can eliminate many unnecessary database queries.
+
+###  Web Caches
+
+A cache might use a Bloom filter to determine whether an object could exist in a cache.
+
+```text
+Request
+   |
+   v
+Bloom Filter
+   |
+   +---- absent ---> don't check cache
+   |
+   +---- possible -> check cache
+```
+
+###  Distributed Systems
+
+Bloom filters can reduce unnecessary network requests. Imagine a distributed system where different nodes hold different data.
+
+Instead of asking another node: **Do you have object X?**
+
+the local system can first check a Bloom filter.
+
+```text
+Local Bloom Filter
+        |
+        +---- absent
+        |       ↓
+        |     Don't send request
+        |
+        +---- possible
+                ↓
+           Ask remote node
+```
+
+###  Web Crawlers
+
+A crawler needs to determine whether a URL has already been visited.
+
+Instead of storing and searching a huge set for every URL:
+
+```text
+URL
+ ↓
+Bloom Filter
+ ↓
+possibly visited?
+```
+
+This can significantly reduce memory consumption.
+
+A crawler can then perform an exact lookup when the Bloom filter returns a positive result if false positives are unacceptable.
+
+###  Databases / Storage Engines
+
+Bloom filters are commonly useful in storage systems to avoid reading files or data blocks that cannot contain a requested key.
+
+For example:
+
+```text
+Search key
+    |
+    v
+Bloom Filter
+    |
+    +---- definitely not here
+    |          ↓
+    |       skip block
+    |
+    +---- possibly here
+               ↓
+          read block
+```
+
+This is particularly valuable when disk or SSD I/O is much more expensive than checking a few bits in memory.
+
+## Summary
+
+The easiest way to remember a Bloom filter is:
+
+```text
+                    BLOOM FILTER
+                         |
+                         v
+                  ┌──────────────┐
+                  │  Bit Array   │
+                  │              │
+                  │ 0 1 1 0 1 0 │
+                  │ 1 0 0 1 1 0 │
+                  └──────────────┘
+                         ^
+                         |
+                Multiple Hashes
+                         ^
+                         |
+                    Element
+```
+
+**Insertion**
+
+```text
+element
+   |
+   +---- h₁ ----> bit[i₁] = 1
+   |
+   +---- h₂ ----> bit[i₂] = 1
+   |
+   +---- h₃ ----> bit[i₃] = 1
+```
+
+**Search**
+
+```text
+element
+   |
+   +---- h₁ ----> bit[i₁]
+   |
+   +---- h₂ ----> bit[i₂]
+   |
+   +---- h₃ ----> bit[i₃]
+                   |
+             ┌─────┴─────┐
+             |           |
+           Any 0       All 1
+             |           |
+             v           v
+       Definitely     Possibly
+          absent       present
+```
+
+The central rule is:
+
+> **One zero bit means definitely absent; all one bits mean possibly present.**
+
+---
+
+
+**The most important idea**
+
+A Bloom filter is often **not the final data structure**.
+
+Instead, it acts as a **cheap preliminary filter**:
+
+```text
+                    Request
+                       |
+                       v
+                ┌─────────────┐
+                │Bloom Filter │
+                └──────┬──────┘
+                       |
+             ┌─────────┴─────────┐
+             |                   |
+          "Absent"          "Possibly present"
+             |                   |
+             v                   v
+          Reject             Exact lookup
+                              in database
+                                  |
+                           ┌──────┴──────┐
+                           |             |
+                         Found        Not found
+                           |             |
+                         Result      False positive
+```
+So the Bloom Filter is not trying to replace an exact data structure. Its purpose is to **cheaply eliminate searches that are guaranteed to fail**, while accepting that some searches will pass through even though the value isn't actually present.
+
+The fundamental trade-off is:
+
+$$
+\text\{very low memory + very fast testing
+\quad\Longleftrightarrow\quad
+\text\{possible false positives}}
+$$
+
+That trade-off is what makes Bloom Filters useful in **databases, caches, storage engines, distributed systems, and large-scale data processing**.

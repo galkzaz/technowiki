@@ -1,0 +1,1492 @@
+---
+id: software-engineering-design-architecture-security-labs-oauth-scopes-and-roles
+title: OAuth scopes and Roles
+sidebar_position: 3
+---
+
+A good practical setup is an **online shop** where Keycloak is the Authorization Server and a Spring Boot API is the Resource Server.
+
+The important thing is to see how **roles and OAuth scopes cooperate without being the same thing**.
+
+```text
+                         Keycloak
+                  Authorization Server
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+          Roles assigned       Client scopes
+              │                     │
+      ┌───────┼────────┐      ┌─────┼──────────────┐
+      │       │        │      │     │              │
+   MANAGER  EDITOR  REVIEWER  orders.read    orders.update
+      │       │        │            │              │
+      └───────┴────────┘            │
+              │                     │
+              └───────┬─────────────┘
+                      │
+                 Access Token
+                      │
+                      ▼
+             Spring Boot API
+              Resource Server
+                      │
+              ┌───────┴────────┐
+              │                │
+        Check authentication   Check authorization
+              │                │
+              ▼                ▼
+        Is token valid?    Required scope/role?
+```
+
+The distinction we'll use is:
+
+* **Role** → *What kind of user/client is this?*
+* **Scope** → *What operation is this access token allowed to perform?*
+
+---
+
+##  Online Shop Example
+
+Suppose our shop exposes:
+
+```text
+GET    /api/orders
+GET    /api/orders/{id}
+POST   /api/orders
+PUT    /api/orders/{id}
+DELETE /api/orders/{id}
+```
+
+We define OAuth scopes:
+
+```text
+orders.read
+orders.create
+orders.update
+orders.delete
+```
+
+And Keycloak roles:
+
+```text
+MANAGER
+CUSTOMER
+EDITOR
+REVIEWER
+```
+
+We can conceptually organize them like this:
+
+| Role       | Typical capabilities           |
+| ---------- | ------------------------------ |
+| `CUSTOMER` | Read own orders, create orders |
+| `REVIEWER` | Read orders/review information |
+| `EDITOR`   | Read/update orders             |
+| `MANAGER`  | Broad order-management access  |
+
+Notice that **roles and scopes are different concepts**.
+
+For example:
+
+```text
+Role:
+EDITOR
+```
+
+doesn't itself mean:
+
+```text
+orders.update
+```
+
+We configure Keycloak so that an `EDITOR` can receive/use the appropriate scopes.
+
+---
+
+##  Keycloak as Authorization Server
+
+Our Keycloak server might be:
+
+```text
+https://auth.shop.example.com
+```
+
+We create a realm:
+
+```text
+shop
+```
+
+Inside it:
+
+```text
+Realm: shop
+
+Clients:
+    shop-api
+    shop-web
+
+Roles:
+    MANAGER
+    CUSTOMER
+    EDITOR
+    REVIEWER
+
+Client Scopes:
+    orders.read
+    orders.create
+    orders.update
+    orders.delete
+```
+
+The important relationship is:
+
+```text
+                         Keycloak
+                            │
+             ┌──────────────┴──────────────┐
+             │                             │
+           Roles                       Scopes
+             │                             │
+     ┌───────┼────────┐          ┌─────────┼─────────┐
+     │       │        │          │         │         │
+ MANAGER  EDITOR  REVIEWER  orders.read  orders.update ...
+     │       │        │
+     └───────┴────────┘
+             │
+             ▼
+       User's identity
+```
+
+---
+
+##  Define the Scopes
+
+Let's keep the scopes simple.
+
+1. `orders.read`
+
+Means:
+
+> The access token can be used to read orders.
+
+2. `orders.create`
+
+Means:
+
+> The access token can be used to create orders.
+
+3. `orders.update`
+
+Means:
+
+> The access token can be used to modify orders.
+
+4. `orders.delete`
+
+Means:
+
+> The access token can be used to delete orders.
+
+So:
+
+```text
+orders.read
+orders.create
+orders.update
+orders.delete
+```
+
+are **permissions**, not user categories.
+
+---
+
+##  Define the Roles
+
+Now define the user categories.
+
+```text
+MANAGER
+CUSTOMER
+EDITOR
+REVIEWER
+```
+
+For example:
+
+```text
+CUSTOMER
+    ↓
+orders.read
+orders.create
+
+REVIEWER
+    ↓
+orders.read
+
+EDITOR
+    ↓
+orders.read
+orders.update
+
+MANAGER
+    ↓
+orders.read
+orders.create
+orders.update
+orders.delete
+```
+
+This is a **policy you configure in your application/authorization system**. OAuth does not automatically create these relationships.
+
+Conceptually:
+
+```text
+CUSTOMER ──────────> orders.read
+      │
+      └─────────────> orders.create
+
+
+REVIEWER ──────────> orders.read
+
+
+EDITOR ────────────> orders.read
+      │
+      └────────────> orders.update
+
+
+MANAGER ───────────> orders.read
+      │
+      ├────────────> orders.create
+      ├────────────> orders.update
+      └────────────> orders.delete
+```
+
+This is where roles become useful.
+
+---
+
+##  A User in Keycloak
+
+Suppose we create:
+
+```text
+User:
+    alice
+```
+
+and assign:
+
+```text
+Role:
+    EDITOR
+```
+
+When Alice authenticates through Keycloak, the resulting access token can contain information such as:
+
+```json
+{
+  "sub": "123456",
+  "preferred_username": "alice",
+  "realm_access": {
+    "roles": [
+      "EDITOR"
+    ]
+  },
+  "scope": "openid profile orders.read orders.update"
+}
+```
+
+The exact JWT structure depends on Keycloak configuration and whether roles/scopes are realm/client roles and how protocol mappers are configured.
+
+Conceptually, however:
+
+```text
+Access Token
+│
+├── Identity
+│     └── alice
+│
+├── Roles
+│     └── EDITOR
+│
+└── Scopes
+      ├── orders.read
+      └── orders.update
+```
+
+This is the important connection.
+
+---
+
+##  Spring Boot Resource Server
+
+Our Spring Boot application is **not** responsible for issuing the token.
+
+Keycloak issues the token.
+
+Spring Boot validates and consumes it.
+
+```text
+                    Keycloak
+               Authorization Server
+                       │
+                       │ Access Token
+                       ▼
+              ┌─────────────────┐
+              │   Spring Boot   │
+              │   Shop API      │
+              │ Resource Server │
+              └─────────────────┘
+                       │
+                       ▼
+                  Order Service
+```
+
+---
+
+##  Spring Boot Configuration
+
+The Spring Boot application needs to know where Keycloak's issuer is.
+
+For example:
+
+```yaml
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://auth.shop.example.com/realms/shop
+```
+
+Spring Security can use the issuer metadata to discover the authorization server's configuration and validate JWT access tokens.
+
+You don't need to implement JWT signature verification yourself.
+
+---
+
+##  Protecting an Endpoint with a Scope
+
+Suppose:
+
+```http
+GET /api/orders
+```
+
+requires:
+
+```text
+orders.read
+```
+
+In Spring Security:
+
+```java
+@Bean
+SecurityFilterChain securityFilterChain(HttpSecurity http)
+        throws Exception {
+
+    http
+        .authorizeHttpRequests(auth -> auth
+
+            .requestMatchers(HttpMethod.GET, "/api/orders/**")
+                .hasAuthority("SCOPE_orders.read")
+
+            .requestMatchers(HttpMethod.PUT, "/api/orders/**")
+                .hasAuthority("SCOPE_orders.update")
+
+            .requestMatchers(HttpMethod.POST, "/api/orders/**")
+                .hasAuthority("SCOPE_orders.create")
+
+            .requestMatchers(HttpMethod.DELETE, "/api/orders/**")
+                .hasAuthority("SCOPE_orders.delete")
+
+            .anyRequest().authenticated()
+        )
+        .oauth2ResourceServer(oauth ->
+            oauth.jwt()
+        );
+
+    return http.build();
+}
+```
+
+The interesting part is:
+
+```java
+.hasAuthority("SCOPE_orders.read")
+```
+
+Spring Security maps an OAuth scope such as:
+
+```text
+orders.read
+```
+
+to an authority:
+
+```text
+SCOPE_orders.read
+```
+
+So:
+
+```text
+JWT
+ │
+ │ scope = orders.read
+ ▼
+Spring Security
+ │
+ │ creates authority
+ ▼
+SCOPE_orders.read
+ │
+ ▼
+GET /api/orders
+ │
+ ▼
+ALLOW
+```
+
+---
+
+##  What Happens with Alice?
+
+Alice has:
+
+```text
+Role:
+    EDITOR
+```
+
+and receives:
+
+```text
+Scopes:
+    orders.read
+    orders.update
+```
+
+Her token conceptually contains:
+
+```json
+{
+  "preferred_username": "alice",
+  "roles": ["EDITOR"],
+  "scope": "orders.read orders.update"
+}
+```
+
+Now Alice sends:
+
+```http
+GET /api/orders
+Authorization: Bearer eyJ...
+```
+
+Spring Security checks:
+
+```text
+Required:
+    SCOPE_orders.read
+
+Token:
+    orders.read
+    orders.update
+```
+
+Therefore:
+
+```text
+SCOPE_orders.read
+       ✓
+```
+
+The request is allowed.
+
+---
+
+##  Alice Updates an Order
+
+Alice sends:
+
+```http
+PUT /api/orders/123
+Authorization: Bearer eyJ...
+```
+
+Spring Security requires:
+
+```text
+SCOPE_orders.update
+```
+
+Her token has:
+
+```text
+orders.update
+```
+
+Therefore:
+
+```text
+ALLOW
+```
+
+---
+
+##  Alice Tries to Delete an Order
+
+Suppose Alice's token contains:
+
+```text
+orders.read
+orders.update
+```
+
+but does **not** contain:
+
+```text
+orders.delete
+```
+
+She sends:
+
+```http
+DELETE /api/orders/123
+```
+
+Spring Security checks:
+
+```text
+Required:
+    SCOPE_orders.delete
+
+Token:
+    orders.read
+    orders.update
+```
+
+Result:
+
+```text
+orders.delete
+      ✗
+```
+
+The request is rejected.
+
+This demonstrates the core purpose of scopes:
+
+> **The API operation is authorized according to the permissions contained in the access token.**
+
+---
+
+##  Where Does the Role Come In?
+
+Now we have an interesting question:
+
+> If scopes are enough to protect `/orders`, why do we need roles?
+
+Roles are useful when your business logic needs to know **who the user is in the application's organizational model**.
+
+For example:
+
+```text
+MANAGER
+EDITOR
+REVIEWER
+CUSTOMER
+```
+
+Suppose we have:
+
+```http
+GET /api/admin/reports
+```
+
+Only managers should access it.
+
+That is naturally expressed as a role:
+
+```java
+.requestMatchers("/api/admin/**")
+    .hasRole("MANAGER")
+```
+
+Conceptually:
+
+```text
+Access Token
+│
+├── Role: MANAGER
+│
+└── Scopes:
+      orders.read
+      orders.update
+      orders.delete
+```
+
+Spring checks:
+
+```text
+MANAGER?
+   │
+   ├── yes → continue
+   └── no  → reject
+```
+
+---
+
+##  Scope + Role Together
+
+This is where the model becomes particularly useful.
+
+Suppose:
+
+```http
+PUT /api/orders/{id}
+```
+
+requires:
+
+```text
+orders.update
+```
+
+But there's also a business rule:
+
+> Only users with the `EDITOR` or `MANAGER` role can update orders.
+
+You can express that at the application authorization layer.
+
+Conceptually:
+
+```text
+PUT /api/orders/123
+          │
+          ▼
+      Token valid?
+          │
+          ▼
+    orders.update?
+          │
+          ▼
+   EDITOR or MANAGER?
+          │
+          ▼
+       Update
+```
+
+So you can think of the two dimensions as:
+
+```text
+                 Authorization
+                      │
+          ┌───────────┴───────────┐
+          │                       │
+       Scope                    Role
+          │                       │
+   What operation?          What kind of user?
+          │                       │
+   orders.update               EDITOR
+   orders.read                MANAGER
+   orders.delete              REVIEWER
+                               CUSTOMER
+```
+
+---
+
+##  A Practical Authorization Matrix
+
+For our shop:
+
+| Endpoint              | Scope           | Allowed roles                       |
+| --------------------- | --------------- | ----------------------------------- |
+| `GET /orders`         | `orders.read`   | CUSTOMER, REVIEWER, EDITOR, MANAGER |
+| `GET /orders/{id}`    | `orders.read`   | CUSTOMER, REVIEWER, EDITOR, MANAGER |
+| `POST /orders`        | `orders.create` | CUSTOMER, MANAGER                   |
+| `PUT /orders/{id}`    | `orders.update` | EDITOR, MANAGER                     |
+| `DELETE /orders/{id}` | `orders.delete` | MANAGER                             |
+| `GET /admin/reports`  | —               | MANAGER                             |
+
+This table is **your application's authorization policy**.
+
+OAuth provides the framework for delegated scopes and tokens; Keycloak provides the identity/authorization infrastructure; Spring Security enforces the policy in the API.
+
+---
+
+##  Checking Roles in Spring
+
+There is one additional Keycloak/Spring detail.
+
+Keycloak may put roles into the JWT under something like:
+
+```json
+{
+  "realm_access": {
+    "roles": [
+      "EDITOR"
+    ]
+  }
+}
+```
+
+Spring Security does not necessarily map those Keycloak roles to Spring authorities exactly as you want automatically.
+
+A common approach is to configure a JWT authority converter.
+
+Conceptually:
+
+```java
+JwtAuthenticationConverter converter =
+        new JwtAuthenticationConverter();
+
+converter.setJwtGrantedAuthoritiesConverter(
+    new KeycloakJwtAuthoritiesConverter()
+);
+```
+
+The converter transforms Keycloak's role representation into Spring Security authorities.
+
+Then you can use:
+
+```java
+.hasRole("MANAGER")
+```
+
+or:
+
+```java
+.hasAuthority("ROLE_MANAGER")
+```
+
+depending on your converter configuration.
+
+The important point is:
+
+```text
+Keycloak JWT
+     │
+     ▼
+JWT Authority Converter
+     │
+     ├── roles → ROLE_MANAGER
+     │
+     └── scopes → SCOPE_orders.read
+     │
+     ▼
+Spring Security
+```
+
+---
+
+##  A Combined Spring Security Example
+
+A simplified configuration could therefore look like:
+
+```java
+@Bean
+SecurityFilterChain securityFilterChain(HttpSecurity http)
+        throws Exception {
+
+    http
+        .authorizeHttpRequests(auth -> auth
+
+            // Scope-based authorization
+            .requestMatchers(HttpMethod.GET, "/api/orders/**")
+                .hasAuthority("SCOPE_orders.read")
+
+            .requestMatchers(HttpMethod.POST, "/api/orders")
+                .hasAuthority("SCOPE_orders.create")
+
+            .requestMatchers(HttpMethod.PUT, "/api/orders/**")
+                .hasAuthority("SCOPE_orders.update")
+
+            .requestMatchers(HttpMethod.DELETE, "/api/orders/**")
+                .hasAuthority("SCOPE_orders.delete")
+
+            // Role-based authorization
+            .requestMatchers("/api/admin/**")
+                .hasRole("MANAGER")
+
+            .anyRequest()
+                .authenticated()
+        )
+
+        .oauth2ResourceServer(oauth ->
+            oauth.jwt()
+        );
+
+    return http.build();
+}
+```
+
+This is enough to illustrate the architecture without building the whole application.
+
+---
+
+## Resource-Level Authorization
+
+There is a subtle issue with this simple configuration.
+
+Suppose:
+
+```text
+CUSTOMER
+```
+
+has:
+
+```text
+orders.read
+```
+
+The endpoint:
+
+```http
+GET /api/orders/123
+```
+
+might technically allow them to access **any** order if the only check is:
+
+```java
+.hasAuthority("SCOPE_orders.read")
+```
+
+But your business requirement may be:
+
+> A customer can only read their own orders.
+
+That's **not purely a scope problem**.
+
+You need resource-level authorization:
+
+```text
+CUSTOMER
+   │
+   └── orders.read
+          │
+          ▼
+     GET /orders/123
+          │
+          ▼
+ Is order 123 owned by this customer?
+          │
+      ┌───┴───┐
+     yes      no
+      │        │
+    ALLOW    DENY
+```
+
+Whereas a manager might be allowed to read any order:
+
+```text
+MANAGER
+   │
+   └── orders.read
+          │
+          ▼
+      Any order
+```
+
+This illustrates why **scopes aren't a complete authorization model**.
+
+---
+
+The key idea is that **`orders.read` alone is not enough** to enforce “a customer can only read their own orders.”
+
+You need **two levels of authorization**:
+
+1. **Scope authorization** → Does the token have `orders.read`?
+2. **Resource ownership authorization** → Does the requested order belong to the authenticated customer?
+
+For your Spring Boot + Keycloak example:
+
+```text
+GET /api/orders/123
+        │
+        ▼
+Is access token valid?
+        │
+        ▼
+Does token have orders.read?
+        │
+        ▼
+Who is the authenticated user?
+        │
+        ▼
+Does order 123 belong to that user?
+        │
+    ┌───┴────┐
+   YES       NO
+    │         │
+  ALLOW      DENY
+```
+
+###  Put the customer's identity in the token
+
+Suppose Keycloak authenticates:
+
+```text
+alice@example.com
+```
+
+The access token has a unique `sub` claim:
+
+```json
+{
+  "sub": "8a7b9c...",
+  "preferred_username": "alice",
+  "scope": "openid orders.read orders.create",
+  "roles": ["CUSTOMER"]
+}
+```
+
+The important claim is:
+
+```text
+sub = 8a7b9c...
+```
+
+You should use the stable `sub` identifier rather than relying on the username or email address.
+
+---
+
+###  Store the owner of the order
+
+Your `Order` entity needs an owner/customer identifier.
+
+For example:
+
+```java
+public class Order {
+
+    private Long id;
+
+    private String customerId;
+
+    private BigDecimal total;
+
+    // ...
+}
+```
+
+Example database:
+
+| order_id | customer_id |  total |
+| -------: | ----------- | -----: |
+|      101 | `8a7b9c...` | 120.00 |
+|      102 | `8a7b9c...` |  75.00 |
+|      103 | `44cd21...` | 200.00 |
+
+Alice:
+
+```text
+sub = 8a7b9c...
+```
+
+owns:
+
+```text
+Order 101
+Order 102
+```
+
+but not:
+
+```text
+Order 103
+```
+
+---
+
+###  Get the authenticated user's ID
+
+Spring Security gives your controller/service access to the authenticated JWT.
+
+For example:
+
+```java
+@GetMapping("/api/orders/{id}")
+public Order getOrder(
+        @PathVariable Long id,
+        @AuthenticationPrincipal Jwt jwt) {
+
+    String customerId = jwt.getSubject();
+
+    return orderService.getOrder(id, customerId);
+}
+```
+
+Here:
+
+```java
+jwt.getSubject()
+```
+
+returns:
+
+```text
+8a7b9c...
+```
+
+which came from:
+
+```text
+Keycloak
+    ↓
+JWT sub
+    ↓
+Spring Security
+    ↓
+jwt.getSubject()
+```
+
+---
+
+###  Check ownership in the service/repository
+
+The important part is **don't do this**:
+
+```java
+Order order = repository.findById(id);
+return order;
+```
+
+because a customer could request:
+
+```http
+GET /api/orders/103
+```
+
+and potentially retrieve somebody else's order.
+
+Instead, make the database query include the owner:
+
+```java
+public Order getOrder(Long orderId, String customerId) {
+
+    return repository
+        .findByIdAndCustomerId(orderId, customerId)
+        .orElseThrow(() -> new OrderNotFoundException());
+}
+```
+
+Repository:
+
+```java
+public interface OrderRepository
+        extends JpaRepository<Order, Long> {
+
+    Optional<Order> findByIdAndCustomerId(
+        Long id,
+        String customerId
+    );
+}
+```
+
+Now the database effectively performs:
+
+```sql
+SELECT *
+FROM orders
+WHERE id = ?
+  AND customer_id = ?;
+```
+
+For Alice:
+
+```text
+id = 103
+customerId = 8a7b9c...
+```
+
+The query finds nothing because order `103` belongs to someone else.
+
+---
+
+###  Combine This With the Scope
+
+Your Spring Security configuration still protects the endpoint with:
+
+```java
+.requestMatchers(HttpMethod.GET, "/api/orders/**")
+    .hasAuthority("SCOPE_orders.read")
+```
+
+So you now have:
+
+```text
+                 GET /api/orders/103
+                         │
+                         ▼
+                 Valid JWT?
+                         │
+                         ▼
+                orders.read?
+                         │
+                         ▼
+                 Extract sub
+                         │
+                         ▼
+               customerId = sub
+                         │
+                         ▼
+       findByIdAndCustomerId(103, customerId)
+                         │
+                   ┌─────┴─────┐
+                  found       not found
+                    │             │
+                  ALLOW         DENY
+```
+
+This is the important distinction:
+
+```text
+orders.read
+     │
+     └── "Can this token read orders?"
+
+customerId
+     │
+     └── "Which customer's orders can it read?"
+```
+
+---
+
+###  What About Managers?
+
+Now your earlier role model becomes useful.
+
+Suppose:
+
+```text
+CUSTOMER
+```
+
+should only see their own orders, while:
+
+```text
+MANAGER
+```
+
+can see all orders.
+
+You could implement:
+
+```java
+public Order getOrder(
+        Long orderId,
+        Jwt jwt) {
+
+    String customerId = jwt.getSubject();
+
+    boolean manager =
+        jwt.getClaimAsStringList("roles")
+           .contains("MANAGER");
+
+    if (manager) {
+        return repository.findById(orderId)
+            .orElseThrow(OrderNotFoundException::new);
+    }
+
+    return repository
+        .findByIdAndCustomerId(orderId, customerId)
+        .orElseThrow(OrderNotFoundException::new);
+}
+```
+
+Conceptually:
+
+```text
+                       GET /orders/123
+                              │
+                              ▼
+                       orders.read?
+                              │
+                    ┌─────────┴─────────┐
+                   NO                   YES
+                   │                     │
+                 DENY              What is role?
+                                         │
+                              ┌──────────┴──────────┐
+                              │                     │
+                          CUSTOMER               MANAGER
+                              │                     │
+                              ▼                     ▼
+                       Own order only          Any order
+```
+
+You could similarly give `EDITOR` a different resource-access policy depending on your business requirements.
+
+---
+
+###  Even Better: Don't Let the Client Choose `customerId`
+
+This is extremely important.
+
+Avoid an API like:
+
+```http
+GET /api/orders?customerId=8a7b9c...
+```
+
+and trusting that value for a customer.
+
+A malicious client could simply change:
+
+```text
+customerId=alice
+```
+
+to:
+
+```text
+customerId=bob
+```
+
+Instead:
+
+```text
+JWT
+ │
+ └── sub = 8a7b9c...
+          │
+          ▼
+Spring Boot
+          │
+          ▼
+customerId = jwt.getSubject()
+          │
+          ▼
+Database query
+```
+
+The customer's identity comes from the **validated access token**, not from user-controlled request parameters.
+
+---
+
+###  List Orders Has the Same Rule
+
+The same principle applies to:
+
+```http
+GET /api/orders
+```
+
+Don't do:
+
+```java
+repository.findAll();
+```
+
+for a customer.
+
+Instead:
+
+```java
+@GetMapping("/api/orders")
+public List<Order> getOrders(
+        @AuthenticationPrincipal Jwt jwt) {
+
+    String customerId = jwt.getSubject();
+
+    return orderRepository
+        .findAllByCustomerId(customerId);
+}
+```
+
+Repository:
+
+```java
+List<Order> findAllByCustomerId(String customerId);
+```
+
+Database query conceptually:
+
+```sql
+SELECT *
+FROM orders
+WHERE customer_id = ?;
+```
+
+So Alice gets:
+
+```text
+101
+102
+```
+
+while Bob gets:
+
+```text
+103
+104
+```
+
+---
+
+###  The Three Authorization Layers
+
+For your OAuth documentation, this is a useful way to explain the complete model:
+
+```text
+                Access Request
+                     │
+                     ▼
+          ┌─────────────────────┐
+          │  Authentication     │
+          │                     │
+          │ Is JWT valid?       │
+          └──────────┬──────────┘
+                     │
+                     ▼
+          ┌─────────────────────┐
+          │ Scope Authorization │
+          │                     │
+          │ orders.read?        │
+          └──────────┬──────────┘
+                     │
+                     ▼
+          ┌─────────────────────┐
+          │ Role Authorization  │
+          │                     │
+          │ CUSTOMER/MANAGER?   │
+          └──────────┬──────────┘
+                     │
+                     ▼
+          ┌─────────────────────┐
+          │ Resource Ownership  │
+          │                     │
+          │ Does this order     │
+          │ belong to user?     │
+          └──────────┬──────────┘
+                     │
+                     ▼
+                   ALLOW
+```
+
+Not every endpoint needs all four checks, but they solve different problems.
+
+
+```text
+Authentication
+    → Is Alice's Keycloak token valid?
+
+Scope
+    → Does Alice have orders.read?
+
+Role
+    → Is Alice a CUSTOMER, EDITOR, or MANAGER?
+
+Ownership
+    → Does order 123 belong to Alice?
+```
+
+And this is the crucial concept:
+
+> **OAuth scopes provide the permission to perform an operation; they don't inherently identify which individual resources the permission applies to.**
+
+For “customer can only read their own orders,” the **`sub` claim + order ownership check** provides that resource-level restriction.
+
+##  The Complete Picture
+
+For your Spring Boot online shop, you can think of the architecture like this:
+
+```text
+                         ┌─────────────────────┐
+                         │       Keycloak      │
+                         │     Authorization   │
+                         │       Server        │
+                         └──────────┬──────────┘
+                                    │
+                    ┌───────────────┴──────────────┐
+                    │                              │
+                  Roles                          Scopes
+                    │                              │
+        ┌───────────┼────────────┐      ┌──────────┼──────────┐
+        │           │            │      │          │          │
+    MANAGER      EDITOR      CUSTOMER  read      update     delete
+        │           │            │      │          │          │
+        └───────────┴────────────┴──────┴──────────┴──────────┘
+                                    │
+                                    ▼
+                              Access Token
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │ Spring Boot Shop    │
+                         │ Resource Server     │
+                         └──────────┬──────────┘
+                                    │
+                             Spring Security
+                                    │
+                  ┌─────────────────┴──────────────────┐
+                  │                                    │
+             Scope checks                         Role checks
+                  │                                    │
+        SCOPE_orders.read                       ROLE_MANAGER
+        SCOPE_orders.update                     ROLE_EDITOR
+        SCOPE_orders.delete                     ...
+                  │                                    │
+                  └─────────────────┬──────────────────┘
+                                    ▼
+                              Order Service
+                                    │
+                                    ▼
+                                Database
+```
+
+### The mental model I recommend
+
+For your OAuth documentation, keep this distinction very clear:
+
+```text
+ROLE
+ │
+ └── "Who/what type of principal is this?"
+       MANAGER
+       EDITOR
+       REVIEWER
+       CUSTOMER
+
+
+SCOPE
+ │
+ └── "What delegated API capability does this token have?"
+       orders.read
+       orders.create
+       orders.update
+       orders.delete
+```
+
+Then:
+
+```text
+Keycloak
+    │
+    │ authenticates user
+    │ determines/grants authorization
+    ▼
+Access Token
+    │
+    ├── identity
+    ├── roles
+    └── scopes
+    │
+    ▼
+Spring Boot Resource Server
+    │
+    ├── validate token
+    ├── check scopes
+    ├── check roles
+    └── check resource ownership/business rules
+    │
+    ▼
+Online Shop API
+```
+
+**Scopes answer “what API access is being delegated?” while roles answer “what role does this principal have?”** Your Spring Boot application can use both, but they should remain conceptually separate.

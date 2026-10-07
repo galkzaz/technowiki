@@ -34,7 +34,7 @@ Programming for typical calculations required from half an hour to a whole day.
 ENIAC was a general-purpose machine, limited primarily by a small amount of
 storage and tedious programming.
 
-##  EDVAC (Electronic Discrete Variable Automatic Computer)
+## EDVAC (Electronic Discrete Variable Automatic Computer)
 In 1944, John von Neumann was attracted to the ENIAC project. The group
 wanted to improve the way programs were entered and discussed storing
 programs as numbers; von Neumann helped crystallize the ideas and wrote a
@@ -56,7 +56,7 @@ EDVAC also had a control unit that could fetch instructions from memory,
 decode them, and execute them. This allowed it to perform complex
 calculations much faster than previous machines. 
 
-##  EDSAC II (Electronic Delay Storage Automatic Calculator II)
+## EDSAC II (Electronic Delay Storage Automatic Calculator II)
 EDSAC II was the second stored-program computer to be built and used in the UK.
 It was designed by Maurice Wilkes and his team at the University of Cambridge.
 EDSAC II was a general-purpose computer, capable of running a wide range of
@@ -73,7 +73,7 @@ decode them, and execute them. This allowed it to perform complex
 calculations much faster than previous machines. 
 
 
-##  EDSAC (Electronic Delay Storage Automatic Calculator)
+## EDSAC (Electronic Delay Storage Automatic Calculator)
 EDSAC was the first stored-program computer to be built and used in the UK.
 It was designed by Maurice Wilkes and his team at the University of Cambridge.
 EDSAC was a general-purpose computer, capable of running a wide range of
@@ -93,7 +93,7 @@ calculations much faster than previous machines.
 ## IAS machine
 a paper by Goldstine discusses most of the architectural concepts seen in modern computers. This paper led to the IAS machine built by Julian Bigelow. It had a total of 1024 40-bit words and was roughly 10 times faster than ENIAC. 
 
-##  Mark-I
+## Mark-I
 Howard Aiken was building an electro-mechanical computer called the Mark-I at Harvard (a name that Manchester later
 adopted for its machine). He followed the Mark-I with a relay machine, the Mark-II,
 and a pair of vacuum tube machines, the Mark-III and Mark-IV. In contrast to earlier
@@ -128,7 +128,7 @@ first microprocessor in 1971—the Intel 4004.
 In 1963 came the announcement of the first supercomputer. Seymour Cray led the design of the Control Data Corporation CDC 6600. This machine included many ideas that are beginning to be found
 in the latest microprocessor
 
-##  Cray-1 
+## Cray-1 
 In 1976,  Seymour Cray announced the Cray-1. This machine was
 simultaneously the fastest in the world, the most expensive, and the computer with
 the best cost/performance for scientific programs.

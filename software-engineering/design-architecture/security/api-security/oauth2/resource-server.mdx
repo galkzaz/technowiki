@@ -1,0 +1,913 @@
+---
+id: software-engineering-design-architecture-security-api-security-oauth2-resource-server
+title: Resource Server
+sidebar_position: 1
+---
+
+
+In OAuth 2.0, the **Resource Server** is the server that hosts the **protected resources** that a client wants to access on behalf of a user.
+
+The **Resource Server** is the OAuth 2.0 term for your API server. The resource server handles authenticated requests after the application has obtained an access token.
+
+For example:
+
+```text
+┌──────────────┐
+│    Client    │
+│  Web / Mobile│
+└──────┬───────┘
+       │
+       │ Access Token
+       ▼
+┌────────────────────┐
+│  Resource Server   │
+│                    │
+│ GET /api/orders    │
+│ GET /api/profile   │
+└─────────┬──────────┘
+          │
+          ▼
+   Protected Resources
+```
+
+The **Authorization Server** issues the access token, while the **Resource Server** receives that token and decides whether the request is allowed to access a particular resource.
+
+Large scale deployments may have more than one resource server. Google’s services, for example, have dozens of resource servers, such as the Google Cloud platform, Google Maps, Google Drive, Youtube, Google+, and many others. Each of these resource servers are distinctly separate, but they all share the same authorization server.
+![Some of Google’s APIs](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/google-apis.png)
+Smaller deployments typically have only one resource server, and is often built as part of the same code base or same deployment as the authorization server.
+## Responsibilities
+
+The Resource Server's main responsibility is to **protect resources and enforce access control based on the access token**.
+
+A typical request looks like:
+
+```http
+GET /api/orders/123 HTTP/1.1
+Host: api.example.com
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+```
+
+The Resource Server generally performs these steps:
+
+```text
+Receive HTTP request
+       │
+       ▼
+Extract access token
+       │
+       ▼
+Validate token
+       │
+       ├── Invalid ──────► 401 Unauthorized
+       │
+       ▼
+Validate audience
+       │
+       ├── Wrong audience ► 401 Unauthorized
+       │
+       ▼
+Validate issuer
+       │
+       ├── Wrong issuer ─► 401 Unauthorized
+       │
+       ▼
+Validate required scopes
+       │
+       ├── Insufficient ─► 403 Forbidden
+       │
+       ▼
+Authorize resource access
+       │
+       ├── Not allowed ──► 403 Forbidden
+       │
+       ▼
+Return protected resource
+```
+
+Its responsibilities commonly include:
+
+* accepting protected-resource requests
+* extracting access tokens
+* validating access tokens
+* checking token expiration
+* checking the token issuer
+* checking the intended audience
+* checking scopes
+* optionally performing token introspection
+* enforcing resource-level authorization
+* returning appropriate HTTP errors
+* protecting against malformed or replayed tokens where applicable
+
+The Resource Server **does not normally issue access tokens**. That is the responsibility of the Authorization Server.
+
+## Bearer Token Processing
+
+OAuth 2.0 commonly uses **bearer access tokens**.
+
+A bearer token means:
+
+> Whoever possesses the token can present it to the Resource Server.
+
+The client normally sends the token using the HTTP `Authorization` header:
+
+```http
+Authorization: Bearer ACCESS_TOKEN
+```
+
+For example:
+
+```http
+GET /api/profile HTTP/1.1
+Host: api.example.com
+Authorization: Bearer abc123xyz
+```
+
+The Resource Server must therefore:
+
+1. locate the `Authorization` header
+2. verify that it uses the `Bearer` scheme
+3. extract the token
+4. validate the token
+5. determine whether the token authorizes the requested operation
+
+Conceptually:
+
+```text
+Authorization: Bearer abc123
+                    │
+                    ▼
+              Extract token
+                    │
+                    ▼
+              Validate token
+                    │
+                    ▼
+             Extract claims
+                    │
+                    ▼
+             Authorize request
+```
+
+#### Missing token
+
+If the endpoint requires authentication and no token is supplied:
+
+```http
+GET /api/profile HTTP/1.1
+Host: api.example.com
+```
+
+the Resource Server will generally respond:
+
+```http
+HTTP/1.1 401 Unauthorized
+```
+
+#### Invalid token
+
+For example:
+
+```http
+Authorization: Bearer invalid-token
+```
+
+should also result in an authentication failure.
+
+**Important security property**
+
+Because bearer tokens are credentials, they must be protected in transit.
+
+Normally:
+
+```text
+Client
+  │
+  │ HTTPS
+  │ Authorization: Bearer ...
+  ▼
+Resource Server
+```
+
+rather than sending them over unencrypted HTTP.
+
+## Token Validation
+
+The resource server will be getting requests from applications with an HTTP Authorization header containing an access token. The resource server needs to be able to verify the access token to determine whether to process the request, and find the associated user account, etc.
+
+After extracting the access token, the Resource Server needs to determine whether the token is **valid**.
+
+Exactly how this works depends on the type of access token.
+
+There are two common approaches:
+
+#### Self-contained token
+
+A JWT contains the information required for validation.
+
+If you’re using self-encoded access tokens, then verifying the tokens can be done entirely in the resource server without interacting with a database or external servers.
+
+```text
+JWT
+ │
+ ├── Header
+ ├── Payload
+ │    ├── iss
+ │    ├── aud
+ │    ├── exp
+ │    ├── scope
+ │    └── ...
+ └── Signature
+```
+
+The Resource Server verifies the JWT's cryptographic signature and validates relevant claims.
+
+For example:
+
+```text
+JWT
+ │
+ ▼
+Verify signature
+ │
+ ▼
+Check expiration
+ │
+ ▼
+Check issuer
+ │
+ ▼
+Check audience
+ │
+ ▼
+Check scopes
+ │
+ ▼
+Authorize request
+```
+
+#### Reference token
+
+Instead of containing all authorization information, the access token can be an opaque identifier:
+
+```text
+Access Token
+     │
+     ▼
+  abc123xyz
+```
+
+The Resource Server can ask the Authorization Server whether the token is valid through **token introspection**.
+
+```text
+Resource Server
+      │
+      │ introspection request
+      ▼
+Authorization Server
+      │
+      │ active: true
+      │ scope: orders.read
+      │ aud: orders-api
+      ▼
+Resource Server
+```
+
+Token validation normally includes things such as:
+
+* signature
+* expiration
+* not-before time, when applicable
+* issuer
+* audience
+* token type/use where applicable
+* scopes or permissions
+* other application-specific constraints
+
+#### Expired Tokens
+
+If your service uses short-lived access tokens with long-lived refresh tokens, then you’ll need to make sure to return the proper error response when an application makes a request with an expired token.
+
+Return an HTTP 401 response with a WWW-Authenticate header as described below. If your API typically returns JSON responses, then you can also return a JSON body with the same error information.
+```
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer error="invalid_token"
+                  error_description="The access token expired"
+Content-type: application/json
+ 
+{
+  "error": "invalid_token",
+  "error_description": "The access token expired"
+}
+```
+This will indicate to clients that their existing access token expired and that they should try to get a new one using their refresh token.
+## Scope Validation
+
+A valid token does **not automatically mean that the client can perform every operation**.
+
+The Resource Server should check whether the token contains the required **scope**.
+
+The resource server needs to know the list of scopes that are associated with the access token. The server is responsible for denying the request if the scopes in the access token do not include the required scope to perform the designated action.
+
+The OAuth 2.0 spec does not define any scopes itself, nor is there a central registry of scopes. The list of scopes is up to the service to decide for itself. 
+
+Suppose an API has:
+
+```text
+GET /api/orders
+```
+
+and requires:
+
+```text
+orders.read
+```
+
+The access token might contain:
+
+```json
+{
+  "sub": "user-123",
+  "scope": "orders.read orders.write"
+}
+```
+
+The Resource Server checks:
+
+```text
+Required scope:
+    orders.read
+
+Token scopes:
+    orders.read
+    orders.write
+
+Result:
+    ALLOWED
+```
+
+Now suppose the token contains:
+
+```json
+{
+  "sub": "user-123",
+  "scope": "orders.read"
+}
+```
+
+and the client attempts:
+
+```http
+POST /api/orders
+```
+
+where the API requires:
+
+```text
+orders.write
+```
+
+Then:
+
+```text
+Required:
+    orders.write
+
+Token:
+    orders.read
+
+Result:
+    DENIED
+```
+
+Usually the authentication is valid, but the authorization is insufficient:
+
+```http
+HTTP/1.1 403 Forbidden
+```
+
+This distinction is important:
+
+```text
+Authentication
+     │
+     └── "Is this token valid?"
+                  │
+                  ▼
+             YES
+                  │
+                  ▼
+Authorization
+     │
+     └── "Can this token perform this operation?"
+                  │
+                  ▼
+              NO → 403
+```
+
+Scopes therefore provide a coarse-grained authorization mechanism.
+
+## Audience Validation
+
+The **audience (`aud`) claim** identifies the resource server(s) for which the access token is intended.
+
+For example:
+
+```json
+{
+  "iss": "https://auth.example.com",
+  "aud": "orders-api",
+  "scope": "orders.read"
+}
+```
+
+Suppose the request is being sent to:
+
+```text
+https://orders.example.com
+```
+
+and that Resource Server identifies itself as:
+
+```text
+orders-api
+```
+
+Then:
+
+```text
+Token audience:
+    orders-api
+
+Resource Server:
+    orders-api
+
+Result:
+    valid audience
+```
+
+But imagine a token intended for:
+
+```text
+payments-api
+```
+
+being presented to:
+
+```text
+orders-api
+```
+
+The token might otherwise be perfectly valid:
+
+```text
+Signature: valid
+Issuer: valid
+Expiration: valid
+Scope: orders.read
+```
+
+but:
+
+```text
+Audience:
+    payments-api
+
+Expected:
+    orders-api
+```
+
+Therefore the Resource Server should reject it.
+
+#### Why audience validation matters
+
+Without audience validation, a valid token issued for one API could potentially be presented to another API.
+
+Conceptually:
+
+```text
+                  Authorization Server
+                         │
+            ┌────────────┴────────────┐
+            │                         │
+            ▼                         ▼
+      payments-api               orders-api
+```
+
+A token intended for:
+
+```text
+payments-api
+```
+
+should not automatically be accepted by:
+
+```text
+orders-api
+```
+
+Audience validation establishes that boundary.
+
+## Issuer Validation
+
+The **issuer (`iss`) claim** identifies the Authorization Server that issued the token.
+
+For example:
+
+```json
+{
+  "iss": "https://auth.example.com",
+  "aud": "orders-api",
+  "scope": "orders.read"
+}
+```
+
+The Resource Server may be configured to trust:
+
+```text
+https://auth.example.com
+```
+
+It therefore checks:
+
+```text
+Token issuer:
+    https://auth.example.com
+
+Trusted issuer:
+    https://auth.example.com
+
+Result:
+    VALID
+```
+
+If instead the token says:
+
+```json
+{
+  "iss": "https://malicious.example"
+}
+```
+
+the Resource Server should reject it.
+
+#### Issuer vs audience
+
+These two claims answer different questions:
+
+| Claim | Question                            |
+| ----- | ----------------------------------- |
+| `iss` | **Who issued this token?**          |
+| `aud` | **Who is this token intended for?** |
+
+For example:
+
+```json
+{
+  "iss": "https://auth.example.com",
+  "aud": "orders-api"
+}
+```
+
+means approximately:
+
+```text
+iss → Auth Server
+      "I issued this token."
+
+aud → Orders API
+      "This token is intended for you."
+```
+
+Both checks are important.
+
+## Token Introspection
+
+**Token introspection** allows the Resource Server to ask the Authorization Server about an access token.
+
+This is especially useful for **opaque/reference tokens**.
+
+Imagine the client sends:
+
+```http
+Authorization: Bearer 7f8a9b...
+```
+
+The Resource Server doesn't necessarily know anything about the token from its value alone.
+
+It can call the Authorization Server's introspection endpoint:
+
+```http
+POST /oauth2/introspect
+Authorization: Basic ...
+Content-Type: application/x-www-form-urlencoded
+
+token=7f8a9b...
+```
+
+The Authorization Server might return:
+
+```json
+{
+  "active": true,
+  "client_id": "web-client",
+  "username": "alice",
+  "scope": "orders.read orders.write",
+  "aud": "orders-api",
+  "iss": "https://auth.example.com",
+  "exp": 1790845200
+}
+```
+
+The Resource Server can then use this information to make its authorization decision.
+
+```text
+             Resource Server
+                    │
+                    │ token
+                    ▼
+          Authorization Server
+                    │
+                    │ introspection response
+                    ▼
+             Resource Server
+                    │
+              ┌─────┴─────┐
+              │           │
+        active=true   active=false
+              │           │
+              ▼           ▼
+          continue      reject
+```
+This is a good way to handle verifying access tokens across a large number of resource servers, since it means you can encapsulate all of the logic of access tokens in a single server, exposing the information via an API to other parts of the system. The token introspection endpoint is intended to be used only internally, so you will want to protect it with some internal authorization, or only enable it on a server within the firewall of the system.
+
+
+#### Introspection is particularly useful for revocation
+
+Suppose an access token has not yet expired but has been revoked.
+
+With introspection:
+
+```text
+Resource Server
+      │
+      │ introspect token
+      ▼
+Authorization Server
+      │
+      │ active: false
+      ▼
+Resource Server
+      │
+      ▼
+Reject request
+```
+
+This allows the Authorization Server to maintain the authoritative token status.
+
+The tradeoff is that introspection introduces a dependency on the Authorization Server and potentially an additional network request.
+
+## Resource Authorization
+
+After authentication and token validation, the Resource Server still has to determine:
+
+> **Is this particular request authorized to access this particular resource?**
+
+This is the final authorization decision.
+
+Suppose:
+
+```http
+GET /api/users/123/profile
+Authorization: Bearer ...
+```
+
+The token might contain:
+
+```json
+{
+  "sub": "user-123",
+  "scope": "profile.read"
+}
+```
+
+The Resource Server can determine:
+
+```text
+Token valid?
+      │
+      ▼
+     YES
+      │
+Audience correct?
+      │
+      ▼
+     YES
+      │
+Scope sufficient?
+      │
+      ▼
+     YES
+      │
+Does user-123 have access to
+the requested resource?
+      │
+      ▼
+     YES
+      │
+      ▼
+Return profile
+```
+
+Resource authorization can involve more than OAuth scopes.
+
+For example:
+
+```text
+Token
+ │
+ ├── subject = user-123
+ ├── scope = orders.read
+ └── role = customer
+          │
+          ▼
+Application authorization rules
+          │
+          ├── Can user access this order?
+          ├── Does user own this resource?
+          ├── Is this operation permitted?
+          └── Are additional policies satisfied?
+          │
+          ▼
+       Decision
+```
+
+For example, having:
+
+```text
+orders.read
+```
+
+doesn't necessarily mean the user can read **every user's order**.
+
+The application might enforce:
+
+```text
+GET /orders/100
+       │
+       ▼
+order.owner == token.sub
+```
+
+If:
+
+```text
+order.owner = user-456
+token.sub   = user-123
+```
+
+the request can be denied even though the token has:
+
+```text
+orders.read
+```
+
+This is why **scope validation and resource authorization are separate concepts**.
+
+## Error Codes and Unauthorized Access
+
+If the access token does not allow access to the requested resource, or if there is no access token in the request, then the server must reply with an HTTP 401 response and include a WWW-Authenticate header in the response.
+
+The minimum WWW-Authenticate header includes the string Bearer, indicating that a bearer token is required. The header can also indicate additional information such as a “realm” and “scope”. The “realm” value is used in the traditional HTTP authentication sense. The “scope” value allows the resource server to indicate the list of scopes required to access the resource, so the application can request the appropriate scope from the user when starting the authorization flow. The response should also include an appropriate “error” value depending on the type of error that occurred.
+
+- **invalid_request (HTTP 400)** – The request is missing a parameter, or is otherwise malformed.
+- **invalid_token (HTTP 401)** – The access token is expired, revoked, malformed, or invalid for other reasons. The client can - obtain a new access token and try again.
+- **insufficient_scope (HTTP 403)** – The access token
+
+For example:
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer realm="example",
+                  scope="delete",
+                  error="insufficient_scope"
+```
+If the request does not have authentication, then no error code or other error information is necessary.
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer realm="example"
+```
+
+## Summary
+
+A Resource Server can be understood as a pipeline:
+
+```text
+                 HTTP Request
+                      │
+                      ▼
+            ┌───────────────────┐
+            │ Bearer Token      │
+            │ Processing        │
+            └─────────┬─────────┘
+                      │
+                      ▼
+            ┌───────────────────┐
+            │ Token Validation  │
+            └─────────┬─────────┘
+                      │
+                      ▼
+            ┌───────────────────┐
+            │ Issuer Validation │
+            └─────────┬─────────┘
+                      │
+                      ▼
+            ┌───────────────────┐
+            │ Audience          │
+            │ Validation        │
+            └─────────┬─────────┘
+                      │
+                      ▼
+            ┌───────────────────┐
+            │ Scope Validation  │
+            └─────────┬─────────┘
+                      │
+                      ▼
+            ┌───────────────────┐
+            │ Resource          │
+            │ Authorization     │
+            └─────────┬─────────┘
+                      │
+                ┌─────┴─────┐
+                │           │
+             ALLOW         DENY
+                │           │
+                ▼           ▼
+         Protected       403 /
+          Resource        401
+```
+
+And when opaque/reference tokens are used, **token introspection** can be inserted into the validation stage:
+
+```text
+Client
+  │
+  │ Bearer Token
+  ▼
+Resource Server
+  │
+  │ Introspect
+  ▼
+Authorization Server
+  │
+  │ Token status + claims
+  ▼
+Resource Server
+  │
+  ├── issuer validation
+  ├── audience validation
+  ├── expiration validation
+  ├── scope validation
+  └── resource authorization
+  │
+  ▼
+Protected Resource
+```
+
+The most important way to organize these concepts in your OAuth 2.0 notes is:
+
+| Responsibility              | Main question                                                     |
+| --------------------------- | ----------------------------------------------------------------- |
+| **Bearer Token Processing** | How do I extract the access token from the request?               |
+| **Token Validation**        | Is this access token valid?                                       |
+| **Issuer Validation**       | Did a trusted Authorization Server issue it?                      |
+| **Audience Validation**     | Is this token intended for this Resource Server?                  |
+| **Scope Validation**        | Does the token permit this type of operation?                     |
+| **Token Introspection**     | What does the Authorization Server say about this token?          |
+| **Resource Authorization**  | Can this authenticated principal access this particular resource? |
+
+So the overall model is:
+
+```text
+                 ACCESS TOKEN
+                      │
+                      ▼
+             ┌────────────────┐
+             │ Authentication │
+             │ / Validation  │
+             └───────┬────────┘
+                     │
+              "Is the token
+                 trustworthy?"
+                     │
+                     ▼
+             ┌────────────────┐
+             │ Authorization  │
+             └───────┬────────┘
+                     │
+              "Is this request
+                 permitted?"
+                     │
+                     ▼
+              Protected Resource
+```
+
+**token validation establishes trust in the token; resource authorization decides what the trusted token is allowed to do.**

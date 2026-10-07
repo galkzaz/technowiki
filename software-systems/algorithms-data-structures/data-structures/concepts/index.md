@@ -540,6 +540,7 @@ Data Structures
 ```
 
 ## Core Idea
+data structures provide concrete ways to organize data in computer memory. Different data structures require different operations for storing, deleting, searching, and running though stored data. There’s no silver bullet: you should choose which data structure to use according to the situation at hand.
 
 A data structure is fundamentally a trade-off between:
 
@@ -562,3 +563,9 @@ Graph        → Relationships
 
 Algorithms become efficient only when paired with the right data structure.
 
+instead of using data structures directly in our
+code, it’s better to use Abstract Data Types. This isolates your code
+from data manipulation details, and lets you easily switch the data
+structure of your programs without changing any of the code.
+
+Don’t reinvent the wheel by trying to create the basic data structures and abstract data types from scratch. Unless if you’re doing it for fun, for learning, or for research. Use third-party data handling libraries that were already well tested. Most languages have built-in support for these structures.

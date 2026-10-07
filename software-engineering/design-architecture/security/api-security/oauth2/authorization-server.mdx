@@ -1,0 +1,1122 @@
+
+## Authorization Server
+
+The **Authorization Server** is the OAuth 2.0 component responsible for **authenticating the user, obtaining authorization, and issuing tokens that allow a client to access protected resources**.
+
+A useful way to think about it is:
+
+> The Authorization Server decides **who can obtain which tokens, for which client, with which permissions, and under what conditions**.
+
+It is important to distinguish the **Authorization Server** from the **Resource Server**.
+
+```text
+                         OAuth 2.0
+
+              ┌──────────────────────────┐
+              │   Authorization Server   │
+              │                          │
+              │  User authentication     │
+              │  Authorization           │
+              │  Client registration     │
+              │  Token issuance          │
+              │  Token revocation        │
+              │  Token introspection     │
+              └────────────┬─────────────┘
+                           │
+                 access token
+                           │
+                           ▼
+┌──────────────┐     ┌────────────────────┐
+│    Client    │────>│  Resource Server   │
+│              │     │                    │
+│ Web / Mobile │     │ Protected APIs     │
+│ / Backend    │     │                    │
+└──────────────┘     └────────────────────┘
+```
+
+For example, you might have:
+
+```text
+Authorization Server:
+    https://auth.example.com
+
+Resource Server:
+    https://api.example.com
+
+Client:
+    https://app.example.com
+```
+
+The Authorization Server issues the access token; the Resource Server uses that token to decide whether an API request is authorized.
+
+---
+
+At the highest level, the Authorization Server provides OAuth 2.0 authorization services.
+
+It typically exposes several endpoints:
+
+```text
+Authorization Server
+│
+├── Authorization Endpoint
+│      └── /authorize
+│
+├── Token Endpoint
+│      └── /token
+│
+├── Token Revocation Endpoint
+│      └── /revoke
+│
+├── Token Introspection Endpoint
+│      └── /introspect
+│
+└── Discovery / Metadata
+       └── /.well-known/...
+```
+
+It also has internal functionality that may not be directly exposed as HTTP endpoints:
+
+```text
+Authorization Server
+│
+├── Client Registration
+├── User Authentication
+├── Consent Management
+├── Authorization Policies
+├── Token Issuance
+├── Token Revocation
+└── Security Controls
+```
+
+A simplified architecture is:
+
+```text
+                         ┌──────────────────────┐
+                         │ Authorization Server │
+                         │                      │
+                         │ ┌──────────────────┐ │
+Client ────────────────> │ │ Authorization    │ │
+                         │ │ Endpoint         │ │
+                         │ └──────────────────┘ │
+                         │                      │
+Client ────────────────> │ ┌──────────────────┐ │
+                         │ │ Token Endpoint   │ │
+                         │ └──────────────────┘ │
+                         │                      │
+Resource Server ───────> │ ┌──────────────────┐ │
+                         │ │ Introspection     │ │
+                         │ └──────────────────┘ │
+                         │                      │
+                         │ Client Registry      │
+                         │ Consent Store        │
+                         │ Token Store          │
+                         │ Security Policies    │
+                         └──────────────────────┘
+```
+
+---
+
+When implementing an OAuth server, you are enabling a developer community to build applications that leverage your platform, allowing applications to access and potentially modify private user content, or act on behalf of users. Because of this, you need to ensure you are empowering your users with as much information as possible to protect their accounts and ensure they are informed as to what applications are doing with their accounts.
+
+### Responsibilities
+
+The Authorization Server has several major responsibilities.
+
+#### Authenticate users
+
+Before granting authorization, the Authorization Server may need to establish who the user is.
+
+For example:
+
+```text
+User
+ │
+ │ username/password
+ │ MFA
+ │ passkey
+ ▼
+Authorization Server
+ │
+ │ authenticated user
+ ▼
+Authorization process
+```
+
+OAuth 2.0 itself is primarily an **authorization framework**, not an authentication protocol. When you need standardized user authentication and identity information, **OpenID Connect** builds an identity layer on top of OAuth 2.0.
+
+---
+
+#### Authenticate clients
+
+The Authorization Server may also need to establish which application is making a request.
+
+For a confidential client:
+
+```text
+Client
+ │
+ │ client_id
+ │ client_secret
+ ▼
+Authorization Server
+```
+
+Other authentication mechanisms include:
+
+* mutual TLS
+* private-key JWT
+* other registered client-authentication mechanisms
+
+Public clients, such as mobile apps or browser-based applications, cannot safely keep a client secret, so their security model is different.
+
+---
+
+#### Determine authorization
+
+The server determines whether the requested authorization can be granted.
+
+It may consider:
+
+```text
+User
+Client
+Scopes
+Requested resource
+Consent
+Policies
+Client type
+Authentication strength
+```
+
+Conceptually:
+
+```text
+User
+ │
+Client
+ │
+Scope
+ │
+Policy
+ │
+Consent
+ ▼
+Authorization Decision
+```
+
+---
+
+#### Issue tokens
+
+After successful authorization, the server can issue:
+
+```text
+Access Token
+Refresh Token
+```
+
+depending on the grant and server policy.
+
+---
+
+#### Manage token lifecycle
+
+The Authorization Server may also support:
+
+```text
+Issue
+  │
+  ▼
+Use
+  │
+  ├── refresh
+  │
+  ├── revoke
+  │
+  └── introspect
+```
+
+So the Authorization Server isn't simply a "token generator."
+
+It manages the **authorization lifecycle**.
+
+---
+
+### Authorization Endpoint
+
+The **Authorization Endpoint** is where the user-facing authorization process begins.
+
+For example:
+
+```text
+GET /authorize
+```
+
+A client might redirect the browser to:
+
+```http
+GET /authorize?
+    response_type=code
+    &client_id=web-client
+    &redirect_uri=https://app.example.com/callback
+    &scope=openid%20profile
+    &state=abc123
+```
+
+The Authorization Server then:
+
+```text
+Authorization Request
+        │
+        ▼
+Validate request
+        │
+        ▼
+Authenticate user
+        │
+        ▼
+Determine requested permissions
+        │
+        ▼
+Request consent if required
+        │
+        ▼
+Authorization decision
+        │
+   ┌────┴─────┐
+   │          │
+ Allow       Deny
+   │          │
+   ▼          ▼
+ code       error
+```
+
+For Authorization Code Flow:
+
+```text
+Client
+   │
+   │ authorization request
+   ▼
+Authorization Endpoint
+   │
+   │ code
+   ▼
+Client
+```
+
+The important point is that the **Authorization Endpoint is primarily concerned with the user's authorization interaction**, whereas the Token Endpoint handles token issuance.
+
+---
+
+### Token Endpoint
+
+The **Token Endpoint** is where the client exchanges an authorization grant for tokens.
+
+For Authorization Code Flow:
+
+```text
+Client
+   │
+   │ authorization_code
+   ▼
+Token Endpoint
+   │
+   │ validate
+   │
+   ▼
+Access Token
+Refresh Token
+```
+
+For example:
+
+```http
+POST /token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&code=ABC123
+&redirect_uri=https://app.example.com/callback
+&client_id=web-client
+&code_verifier=...
+```
+
+The Authorization Server validates the request.
+
+For example:
+
+```text
+Authorization Code
+        │
+        ├── valid?
+        ├── expired?
+        ├── already used?
+        ├── correct client?
+        ├── redirect URI matches?
+        └── PKCE valid?
+                 │
+                 ▼
+          Issue tokens
+```
+
+The response might contain:
+
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "..."
+}
+```
+
+The Token Endpoint is therefore the main **token issuance interface**.
+
+---
+
+### Client Registration
+
+Before a client can use the Authorization Server, it generally needs to be **registered**.
+
+The Authorization Server creates a client record such as:
+
+```text
+Client Registration
+────────────────────────────
+client_id:
+    web-client-123
+
+client type:
+    confidential
+
+redirect URIs:
+    https://app.example.com/oauth/callback
+
+allowed grant types:
+    authorization_code
+    refresh_token
+
+allowed scopes:
+    openid
+    profile
+    products:read
+```
+
+The server may also associate authentication credentials with the client.
+
+For a confidential client:
+
+```text
+client_id
+client_secret
+```
+
+For a public client:
+
+```text
+client_id
+```
+
+plus mechanisms such as PKCE rather than relying on a client secret.
+
+The relationship is:
+
+```text
+                   Authorization Server
+                           │
+                           │
+                    Client Registry
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+      client_id       redirect_uri       scopes
+          │
+          ▼
+       Client
+```
+
+Client registration is important because the Authorization Server needs to know:
+
+> **Which client is this, what is it allowed to do, and where may authorization responses be sent?**
+
+---
+
+### Consent Management
+
+The Authorization Server may maintain information about **user consent**.
+
+For example:
+
+```text
+User: Alice
+
+Client: Example App
+
+Granted:
+    profile
+    email
+    products:read
+```
+
+Conceptually:
+
+```text
+             Consent Store
+
+User ────────┐
+             │
+Client ──────┼──> Granted Scopes
+             │
+Scopes ──────┘
+```
+
+Suppose the application previously received:
+
+```text
+profile
+email
+```
+
+and later asks for:
+
+```text
+profile
+email
+calendar
+```
+
+The Authorization Server may need to obtain authorization for the newly requested `calendar` scope according to its policies.
+
+Consent management can therefore involve:
+
+```text
+Grant consent
+      │
+      ▼
+Store consent
+      │
+      ▼
+Reuse existing consent where appropriate
+      │
+      ▼
+Withdraw/revoke consent
+```
+
+A user may also be given a way to revoke previously granted access.
+
+For example:
+
+```text
+Connected Applications
+
+Example App
+    ✓ Profile
+    ✓ Email
+    ✓ Products
+
+    [Revoke Access]
+```
+
+Consent and authorization are related but not identical concepts.
+
+The Authorization Server ultimately makes the authorization decision according to its policies; a consent screen is one mechanism for obtaining the user's authorization.
+
+---
+
+### Token Issuance
+
+**Token issuance** is the process by which the Authorization Server creates and returns tokens.
+
+For example:
+
+```text
+Authorization Code
+       │
+       ▼
+Token Endpoint
+       │
+       ▼
+┌───────────────────┐
+│ Token Issuance    │
+│                   │
+│ Access Token      │
+│ Refresh Token     │
+└───────────────────┘
+```
+
+The server determines properties such as:
+
+```text
+subject
+client
+audience
+scope
+expiration
+token type
+```
+
+A JWT access token might conceptually contain:
+
+```json
+{
+  "iss": "https://auth.example.com",
+  "sub": "user123",
+  "aud": "products-api",
+  "scope": "products:read",
+  "exp": 1790000000
+}
+```
+
+The exact contents depend on the token format and Authorization Server.
+
+The server should ensure that the issued token represents only the authorization actually granted.
+
+For example:
+
+```text
+Requested:
+
+products:read
+products:write
+users:read
+
+Granted:
+
+products:read
+users:read
+```
+
+The resulting token should reflect the granted authorization, not automatically all requested permissions.
+
+---
+
+### Token Revocation
+
+**Token revocation** allows a token to be invalidated before its natural expiration.
+
+A revocation endpoint might be:
+
+```text
+POST /revoke
+```
+
+For example:
+
+```http
+POST /revoke
+
+token=8xLOxBtZp8
+token_type_hint=refresh_token
+```
+
+Conceptually:
+
+```text
+Client
+ │
+ │ revoke token
+ ▼
+Authorization Server
+ │
+ │ mark token invalid
+ ▼
+Token Store
+```
+
+A common use case is when a user disconnects an application:
+
+```text
+User
+ │
+ │ "Revoke Example App"
+ ▼
+Authorization Server
+ │
+ ├── invalidate refresh tokens
+ └── invalidate/restrict associated authorization
+```
+
+Revocation behavior depends on the token architecture.
+
+For example, with self-contained JWT access tokens, immediate revocation is more complicated because the resource server may validate the JWT without contacting the Authorization Server.
+
+This is one reason access tokens are commonly made relatively short-lived.
+
+---
+
+### Token Introspection
+
+**Token introspection** allows a Resource Server or another authorized party to ask the Authorization Server whether a token is currently active and obtain token metadata.
+
+For example:
+
+```text
+POST /introspect
+```
+
+The Resource Server sends:
+
+```text
+token=eyJ...
+```
+
+The Authorization Server might respond:
+
+```json
+{
+  "active": true,
+  "client_id": "web-client",
+  "username": "alice",
+  "scope": "products:read",
+  "aud": "products-api",
+  "iss": "https://auth.example.com",
+  "exp": 1790000000
+}
+```
+
+The important field is:
+
+```text
+active
+```
+
+For example:
+
+```text
+Resource Server
+       │
+       │ Is this token valid?
+       ▼
+Authorization Server
+       │
+       │ active=true
+       ▼
+Resource Server
+       │
+       ▼
+Process API request
+```
+
+If the token has been revoked:
+
+```text
+Resource Server
+       │
+       │ introspect
+       ▼
+Authorization Server
+       │
+       │ active=false
+       ▼
+Resource Server
+       │
+       ▼
+Reject request
+```
+
+Introspection is particularly useful with **opaque access tokens**, because the Resource Server cannot necessarily determine the token's authorization information by itself.
+
+### Listing Authorizations 
+Once users have begun to authorize multiple applications, giving many apps access to their account, it becomes necessary to provide a way to allow the user to manage the apps that have access. This is usually presented to the user in an account settings page or an account privacy page.
+
+There is nothing in the OAuth 2.0 spec that requires users be able to revoke accesss or even suggests how to do this, so instead we’ll look at several major API providers for inspiration on how to accomplish this.
+
+Most providers have a page which lists all applications the user has authorized to their account. Usually there is some information displayed about the application, and information meant to give context to the user about when and why this application has access.
+Google
+
+Google provides a list of applications you’ve authorized on your account at https://security.google.com/settings/security/permissions.
+List of applications you’ve authorized to access your Google account
+
+The list shows the application icon, name, and a summary of the scope that the application is granted. Clicking on one of them expands that section to show more details.
+Details of one application authorized to access your Google account
+
+This view provides a more detailed list of scopes that have been granted, as well as the date that you authorized the application.
+Twitter
+
+Twitter provides a list of applications you’ve authorized at https://twitter.com/settings/applications.
+List of applications you’ve authorized to access your Twitter account
+
+Twitter shows the scope that was granted (read-only, read/write, read/write/direct messasges), as well as whether the app can see your email address. The list includes the date you authorized the application. This makes it easy for users to revoke credentials from apps they haven’t used in a while.
+GitHub
+
+GitHub provides a list of applications you’ve authorized at https://github.com/settings/applications.
+List of applications you’ve authorized to access your GitHub account
+
+The list that GitHub provides includes a description of the last time the application was used, to give you an idea of whether you can safely revoke an application’s credentials if it hasn’t been used in a while.
+
+Clicking on an application provides more details about that application’s access.
+Details of one application authorized to access your GitHub account
+
+Here you can see the permissions (scope) the application has on your account.
+
+You can find links to other services’ authorization pages here.
+Revoking Access
+
+All of these services provide a way for the user to revoke a particular application’s access to their account. 
+
+### Authorization Server Security
+
+The Authorization Server is a **high-value security component** because compromise can allow an attacker to obtain or manipulate authorization and tokens.
+
+Security must therefore exist at multiple levels.
+
+#### Protect user authentication
+
+The Authorization Server should securely handle:
+
+```text
+User authentication
+Password credentials
+MFA
+Passkeys
+Sessions
+Authentication cookies
+Account recovery
+```
+
+The exact mechanisms depend on the identity system.
+
+---
+
+#### Protect client authentication
+
+Confidential clients need secure authentication.
+
+For example:
+
+```text
+Client
+ │
+ │ client authentication
+ ▼
+Authorization Server
+```
+
+Possible mechanisms include:
+
+```text
+client_secret
+private_key_jwt
+mTLS
+```
+
+Client secrets must not be exposed to browser-based or other public clients.
+
+---
+
+#### Validate redirect URIs
+
+The server must strictly validate:
+
+```text
+redirect_uri
+```
+
+because an incorrectly validated redirect URI can expose authorization codes.
+
+```text
+Registered:
+https://app.example.com/callback
+
+Requested:
+https://attacker.example.com/callback
+
+                    ↓
+
+                  REJECT
+```
+
+---
+
+#### Use PKCE
+
+For Authorization Code Flow, PKCE provides protection against authorization-code interception.
+
+The client creates:
+
+```text
+code_verifier
+```
+
+and derives:
+
+```text
+code_challenge
+```
+
+The authorization request contains:
+
+```text
+code_challenge
+```
+
+The token request contains:
+
+```text
+code_verifier
+```
+
+The Authorization Server verifies that they correspond.
+
+```text
+Authorization Request
+       │
+       │ code_challenge
+       ▼
+Authorization Server
+       │
+       │ authorization code
+       ▼
+Client
+       │
+       │ code + code_verifier
+       ▼
+Token Endpoint
+       │
+       │ verify PKCE
+       ▼
+Access Token
+```
+
+---
+
+#### Protect authorization codes
+
+Authorization codes should be:
+
+* short-lived
+* single-use
+* bound to the client
+* bound to the redirect URI
+* protected by PKCE where applicable
+
+For example:
+
+```text
+code issued
+    │
+    ├── expires quickly
+    │
+    ├── used once
+    │
+    └── exchanged only by intended client
+```
+
+---
+
+#### Protect tokens
+
+Tokens must be protected both while being transmitted and while being stored.
+
+Examples include:
+
+```text
+HTTPS/TLS
+Secure storage
+Limited token lifetime
+Appropriate scopes
+Refresh-token protection
+Token rotation
+```
+
+---
+
+#### Prevent excessive privileges
+
+The Authorization Server should apply the **least-privilege principle**.
+
+Instead of:
+
+```text
+scope = everything
+```
+
+the client should request only what it needs:
+
+```text
+scope = products:read
+```
+
+Then:
+
+```text
+Client
+   │
+   │ products:read
+   ▼
+Authorization Server
+   │
+   ▼
+Access Token
+   │
+   │ products:read
+   ▼
+Resource Server
+```
+
+
+
+### Security Considerations 
+Below are some known issues that should be taken into consideration when building an authorization server.
+
+In addition to the considerations listed here, there is more information available in the OAuth 2.0 Thread Model and Security Considerations RFC as well as OAuth 2.0 Security Best Current Practice.
+
+#### Phishing Attacks
+
+One potential attack against OAuth servers is a phishing attack. This is where an attacker makes a web page that looks identical to the service’s authorization page, which typically contain username and password fields. Then, through various means, the attacker can trick the user in to visiting the page. Unless the user can inspect the address bar of the browser, the page may look otherwise identical to the genuine authorization page, and the user may enter their username and password.
+
+One way attackers can attempt to trick the user into visiting the counterfeit server is by embedding this phishing page in an embedded web view in a native application. Since embedded web views don’t show the address bar, the user then has no way to visually confirm they are on the legitimate site. This is unfortunately common in mobile applications, and often justified by the developer wanting to provide a better user experience by keeping the user in the application through the entire login process. Some OAuth providers encourage third party applications to either open a web browser or launch the provider’s native application instead of allowing them to embed an authorization page in a web view.
+
+**Countermeasures**
+
+Ensure the authorization server is served via https to avoid DNS spoofing.
+
+The authorization server should educate developers of the risks of phishing attacks, and can take steps to prevent the page from being embedded in native applications or in iframes.
+
+Users should be educated about the dangers of phishing attacks, and should be taught best practices such as only accessing applications that they trust, and periodically reviewing the list of applications they’ve authorized to revoke access to apps they no longer use.
+
+The service may want to validate third-party applications prior to allowing other users to use the application. Services such as Instagram and Dropbox currently do this, where upon initial creation of an application, the app is only usable by the developer or other whitelisted user accounts. After the app is submitted for approval and reviewed, then it can be used by the whole user base of the service. This gives the service a chance to inspect how the application interacts with the service.
+#### Clickjacking
+
+In a clickjacking attack, the attacker creates a malicious website in which it loads the authorization server URL in a transparent iframe above the attacker’s web page. The attacker’s web page is stacked below the iframe, and has some innocuous-looking buttons or links, placed very carefully to be directly under the authorization server’s confirmation button. When the user clicks the misleading visible button, they are actually clicking the invisible button on the authorization page, thereby granting access to the attacker’s application. This allows the attacker to trick the user into granting access without their knowledge.
+
+**Countermeasures**
+
+This kind of attack can be prevented by ensuring the authorization URL is always loaded directly in a native browser, and not embedded in an iframe. Newer browsers have the ability for the authorization server to set an HTTP header, X-Frame-Options, and older browsers can use common Javascript “frame-busting” techniques.
+#### Redirect URL Manipulation
+
+An attacker can construct an authorization URL using a client ID that belongs to a known good application, but set the redirect URL to a URL under the control of the attacker. If the authorization server does not validate redirect URLs, and the attacker uses the “token” response type, the user will be returned to the attacker’s application with the access token in the URL. If the client is a public client, and the attacker intercepts the authorization code, then the attacker can also exchange the code for an access token.
+
+Another similar attack is when the attacker can spoof the user’s DNS, and the registered redirect is not an https URL. This would allow the attacker to pretend to be the valid redirect URL, and steal the access token that way.
+
+The “Open Redirect” attack is when the authorization server does not require an exact match of the redirect URL, and instead allows an attacker to construct a URL that will redirect to the attacker’s website. Whether or not this ends up being used to steal authorization codes or access tokens, this is also a danger in that it can be used to launch other unrelated attacks. More details about the Open Redirect attack can be found at https://oauth.net/advisories/2014-1-covert-redirect/.
+
+**Countermeasures**
+
+The authorization server must require that one or more redirect URLs are registered by the application, and only redirect to an exact match of a previously registered URL.
+
+The authorization server should also require that all redirect URLs are https. Since this can sometimes be a burden during development, it is also acceptable to allow non-https redirect URLs while the application is “in development” and can only be accessed by the developer, and then require that the redirect URL is changed to an https URL before the application is published and available to other users.
+
+### Summary
+
+All the concepts form one system:
+
+```text
+                         Authorization Server
+┌────────────────────────────────────────────────────────────┐
+│                                                            │
+│  ┌────────────────────┐       ┌────────────────────────┐  │
+│  │ Client Registration│       │ Consent Management     │  │
+│  └─────────┬──────────┘       └────────────┬───────────┘  │
+│            │                               │              │
+│            └───────────────┬───────────────┘              │
+│                            ▼                              │
+│                 ┌─────────────────────┐                  │
+│                 │ Authorization        │                  │
+│                 │ Endpoint             │                  │
+│                 └──────────┬──────────┘                  │
+│                            │                             │
+│                            │ authorization code           │
+│                            ▼                             │
+│                 ┌─────────────────────┐                  │
+│                 │ Token Endpoint       │                  │
+│                 └──────────┬──────────┘                  │
+│                            │                             │
+│                            ▼                             │
+│                 ┌─────────────────────┐                  │
+│                 │ Token Issuance       │                  │
+│                 └──────────┬──────────┘                  │
+│                            │                             │
+│                  ┌─────────┴──────────┐                  │
+│                  ▼                    ▼                  │
+│             Access Token         Refresh Token           │
+│                  │                    │                  │
+│                  │                    │                  │
+│                  ▼                    ▼                  │
+│          Resource Server          Token Endpoint          │
+│                                       │                  │
+│                                       ▼                  │
+│                              New Access Token             │
+│                                                            │
+│  ┌──────────────────┐       ┌─────────────────────────┐   │
+│  │ Token Revocation │       │ Token Introspection     │   │
+│  └──────────────────┘       └─────────────────────────┘   │
+│                                                            │
+│                  Security Controls                         │
+│        TLS • PKCE • redirect validation •                 │
+│        client authentication • token protection            │
+└────────────────────────────────────────────────────────────┘
+```
+
+**The key distinction**
+
+It helps to organize the Authorization Server around **three responsibilities**:
+
+```text
+             AUTHORIZATION SERVER
+                     │
+       ┌─────────────┼─────────────┐
+       │             │             │
+       ▼             ▼             ▼
+  Authorization   Token          Token
+   Decision       Lifecycle      Validation
+       │             │             │
+       ▼             ▼             ▼
+ /authorize       /token       /introspect
+                  /revoke
+```
+
+**Authorization**
+
+```text
+Who is the user?
+What client is requesting access?
+What scopes are requested?
+Has authorization/consent been granted?
+Where should the response go?
+```
+
+**Token lifecycle**
+
+```text
+Issue
+  ↓
+Refresh
+  ↓
+Revoke
+```
+
+**Token validation**
+
+```text
+Introspection
+     ↓
+Is the token active?
+What client owns it?
+What scopes does it have?
+When does it expire?
+```
+
+So the **Authorization Server** sits at the center of OAuth 2.0:
+
+```text
+                         ┌─────────────────────┐
+                         │ Authorization       │
+                         │ Server              │
+                         │                     │
+                         │ "Who gets access?"  │
+                         └──────────┬──────────┘
+                                    │
+                     ┌──────────────┼──────────────┐
+                     │              │              │
+                     ▼              ▼              ▼
+                  Client          Tokens        Resource
+                 Registry       Lifecycle       Server
+                                    │
+                         ┌──────────┼──────────┐
+                         ▼          ▼          ▼
+                       Issue      Revoke    Introspect
+```
+
+That makes the relationship with your previous **Authorization Endpoint** topic especially clear: **the Authorization Endpoint is one interface of the Authorization Server**, not the Authorization Server itself. The same Authorization Server can expose the authorization endpoint, token endpoint, revocation endpoint, and introspection endpoint while maintaining the client, consent, authorization, and token state behind those interfaces.

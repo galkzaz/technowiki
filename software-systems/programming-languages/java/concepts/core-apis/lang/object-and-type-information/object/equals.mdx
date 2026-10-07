@@ -1,0 +1,9632 @@
+
+
+Java `Object.equals()` answers a very important question:
+
+> **Are these two objects logically equal?**
+
+It is defined in `java.lang.Object`:
+
+```java
+public boolean equals(Object obj)
+```
+
+Because every Java class ultimately extends `Object`, every object has an `equals()` method.
+
+## The basic idea
+
+Consider two `Person` objects:
+
+```java
+Person p1 = new Person("Gamal", 30);
+Person p2 = new Person("Gamal", 30);
+```
+
+They contain the same data:
+
+```text
+p1 ──────> Person("Gamal", 30)
+
+p2 ──────> Person("Gamal", 30)
+```
+
+But they are **two different objects**.
+
+If we write:
+
+```java
+System.out.println(p1 == p2);
+```
+
+the result is: `false`, because `==` compares object references.
+
+Now:
+
+```java
+System.out.println(p1.equals(p2));
+```
+
+The result depends on how `Person` implements `equals()`.
+
+## Default `Object.equals()`
+
+Default `Object.equals()` means identity equality, If your class does **not** override `equals()`, it inherits the implementation from `Object`.
+
+Conceptually, `Object.equals()` behaves like:
+
+```java
+public boolean equals(Object obj) {
+    return this == obj;
+}
+```
+
+So the default behavior is essentially **identity equality**.
+
+For example:
+
+```java
+class Person {
+    String name;
+
+    Person(String name) {
+        this.name = name;
+    }
+}
+```
+
+Then:
+
+```java
+Person p1 = new Person("Gamal");
+Person p2 = new Person("Gamal");
+
+System.out.println(p1.equals(p2)); // false
+```
+
+produces: `false`, because:
+
+```text
+p1 != p2
+```
+
+even though:
+
+```text
+p1.name.equals(p2.name)
+```
+
+is `true`.
+
+
+Even though the objects contain the same data, they are **different object instances**.
+
+```text
+p1 ──────► Person("Gamal")
+            ↑
+            │ different objects
+            ↓
+p2 ──────► Person("Gamal")
+```
+
+This is called **identity equality**.
+
+By contrast, if you override `equals()` to compare the person's fields, you are defining **logical equality**.
+
+```text
+p1 ──────► Person("Gamal")
+                    │
+                    │ same logical value
+                    ▼
+p2 ──────► Person("Gamal")
+```
+---
+
+## `equals()` vs identity equality `==`
+
+This is one of the most important distinctions in Java.
+
+### identity equality `==`
+
+For object references:
+
+```java
+p1 == p2
+```
+
+asks: **Do these two references point to the exact same object?**
+
+### `equals()`
+
+```java
+p1.equals(p2)
+```
+
+asks: **According to this class's definition, are these objects equal?**
+
+So:
+
+```text
+             Two objects
+                  │
+          ┌───────┴───────┐
+          │               │
+         ==            equals()
+          │               │
+   same object?      logically equal?
+```
+
+|                          | `==`                | `equals()`                           |
+| ------------------------ | ------------------- | ------------------------------------ |
+| Main question            | Same object?        | Logically equal?                     |
+| Reference types          | Compares references | Compares according to class contract |
+| Can be overridden?       | No                  | Yes                                  |
+| Default object behavior  | Identity            | Identity                             |
+| Used for value equality? | Usually no          | Yes                                  |
+| Example                  | `a == b`            | `a.equals(b)`                        |
+
+For example:
+
+```java
+String a = new String("Java");
+String b = new String("Java");
+
+System.out.println(a == b);       // false
+System.out.println(a.equals(b));  // true
+```
+
+---
+
+**Why `String.equals()` behaves differently**
+
+`String` overrides `Object.equals()`.
+
+```java
+String s1 = new String("Java");
+String s2 = new String("Java");
+
+System.out.println(s1 == s2);
+System.out.println(s1.equals(s2));
+```
+
+Output:
+
+```text
+false
+true
+```
+
+Why?Because `String` defines equality based on its characters.
+
+```text
+s1 → "Java"
+s2 → "Java"
+
+same characters
+     ↓
+equals() → true
+```
+
+So **`equals()` is designed to be overridden** when a class has a meaningful notion of logical equality.
+
+---
+
+## Implementing `equals()`
+{/* Creating your own `equals()` */}
+
+Suppose we have:
+
+```java
+class Person {
+    private final String name;
+    private final int age;
+
+    Person(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+}
+```
+
+We might decide that two `Person` objects are equal when their `name` and `age` are equal.
+
+Then:
+
+```java
+@Override
+public boolean equals(Object obj) {
+    if (this == obj) {
+        return true;
+    }
+
+    if (!(obj instanceof Person other)) {
+        return false;
+    }
+
+    return age == other.age &&
+           Objects.equals(name, other.name);
+}
+```
+
+We also need:
+
+```java
+import java.util.Objects;
+```
+
+Now:
+
+```java
+Person p1 = new Person("Gamal", 30);
+Person p2 = new Person("Gamal", 30);
+
+System.out.println(p1.equals(p2));
+```
+
+produces:
+
+```text
+true
+```
+
+---
+
+### Understanding the implementation
+
+Let's examine it piece by piece.
+
+1. **Step 1 — Same object**
+
+    ```java
+    if (this == obj) {
+        return true;
+    }
+    ```
+
+    Suppose:
+
+    ```java
+    Person p = new Person("Gamal", 30);
+
+    p.equals(p);
+    ```
+
+    Both references point to exactly the same object.
+
+    So we immediately return `true`.
+
+    This is also a useful optimization.
+
+---
+
+2. **Step 2 — Check the type**
+
+    ```java
+    if (!(obj instanceof Person other)) {
+        return false;
+    }
+    ```
+
+    Suppose:
+
+    ```java
+    Person p = new Person("Gamal", 30);
+    String s = "Gamal";
+
+    p.equals(s);
+    ```
+
+    A `Person` isn't equal to a `String`, so:
+
+    ```text
+    false
+    ```
+
+    The pattern:
+
+    ```java
+    obj instanceof Person other
+    ```
+
+    does two things:
+
+    1. checks whether `obj` is a `Person`
+    2. creates the variable `other`
+
+    So after this line, we can use:
+
+    ```java
+    other.name
+    other.age
+    ```
+
+---
+
+3. **Step 3 — Compare the fields**
+
+```java
+return age == other.age &&
+       Objects.equals(name, other.name);
+```
+
+For `age`:
+
+```java
+age == other.age
+```
+
+is appropriate because `int` is a primitive.
+
+For `name`:
+
+```java
+Objects.equals(name, other.name)
+```
+
+is useful because `name` is a reference and may be `null`.
+
+For example:
+
+```java
+Objects.equals(null, null)
+```
+
+returns:
+
+```text
+true
+```
+
+while:
+
+```java
+null.equals(...)
+```
+
+would cause a `NullPointerException`.
+
+---
+
+## General Contract of equals()
+
+This is probably the **most important part** of `equals()`.
+
+no class is an island.Your class doesn't exist in isolation. Instances of one class are
+frequently passed to another. 
+
+Many classes, including all collections classes,
+depend on the objects passed to them obeying the `equals` contract.
+
+For example:
+
+```java
+Set<Person> people = new HashSet<>();
+```
+
+`HashSet` doesn't know how your `Person` class works internally.
+
+It assumes that:
+
+```java
+person1.equals(person2)
+```
+
+behaves according to Java's rules.
+
+Similarly:
+
+```text
+Your class
+    │
+    │ objects passed to
+    ▼
+┌───────────────────────┐
+│ Java Collections       │
+│                       │
+│ HashSet               │
+│ HashMap               │
+│ ArrayList             │
+│ etc.                  │
+└───────────────────────┘
+    │
+    ▼
+depends on equals()
+```
+
+If your `equals()` implementation violates its contract, the problem might appear somewhere completely different from where the bad `equals()` implementation was written.
+
+---
+
+**Why violations can be difficult to debug**
+
+Imagine:
+
+```java
+Set<Person> people = new HashSet<>();
+
+people.add(person1);
+```
+
+Later:
+
+```java
+people.contains(person2);
+```
+
+You expect:
+
+```text
+person1.equals(person2) → true
+```
+
+but your implementation violates the contract.
+
+You might see:
+
+```java
+people.contains(person2); // false
+```
+
+The failure occurs in `HashSet`, but the real bug may be in:
+
+```java
+Person.equals()
+```
+
+That's what the author means by:
+
+> "it can be very difficult to pin down the source of the failure."
+
+The bug can cross class boundaries.
+
+---
+
+Every properly implemented `equals()` must satisfy **five rules**.
+
+| Rule           | Meaning                                                               |
+| -------------- | --------------------------------------------------------------------- |
+| **Reflexive**  | `x.equals(x)` must be `true`                                          |
+| **Symmetric**  | `x.equals(y)` must equal `y.equals(x)`                                |
+| **Transitive** | If `x.equals(y)` and `y.equals(z)`, then `x.equals(z)`                |
+| **Consistent** | Repeated calls give the same result while relevant state is unchanged |
+| **Non-null**   | `x.equals(null)` must be `false` 
+
+In one diagram
+
+```text
+                    equals()
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+      Reflexive     Symmetric    Transitive
+          │            │            │
+          └────────────┼────────────┘
+                       │
+                 Consistent
+                       │
+                   Non-null
+```
+
+These aren't merely recommendations. They are the **contract** of `Object.equals()`.
+
+### Equivalence Relation
+
+**Equivalence relation** is an operator that
+partitions a set of elements into subsets whose elements are deemed equal to one
+another. These subsets are known as **equivalence classes**. 
+
+An **equivalence relation** is simply a way of saying:
+
+> **These objects belong to the same group because we consider them equal.**
+
+Suppose we have:
+
+```text
+A = Person("Gamal", 30)
+B = Person("Gamal", 30)
+C = Person("Ali", 25)
+D = Person("Ali", 25)
+```
+
+If equality is based on name and age:
+
+```text
+A equals B
+C equals D
+```
+
+Then we can partition the objects into groups:
+
+```text
+┌─────────────────────┐
+│ Equivalence Class 1 │
+│                     │
+│ A = Person(Gamal,30)│
+│ B = Person(Gamal,30)│
+└─────────────────────┘
+
+┌─────────────────────┐
+│ Equivalence Class 2 │
+│                     │
+│ C = Person(Ali,25)  │
+│ D = Person(Ali,25)  │
+└─────────────────────┘
+```
+
+Each group contains objects that are considered equal.
+
+---
+
+**Partition** simply means:
+
+> Divide a set into separate groups.
+
+For example:
+
+```text
+All Person objects
+       │
+       ├── Group 1: (Gamal, 30)
+       │      ├── person1
+       │      └── person2
+       │
+       ├── Group 2: (Ali, 25)
+       │      ├── person3
+       │      └── person4
+       │
+       └── Group 3: (John, 40)
+              └── person5
+```
+
+Every object belongs to an equality group.
+
+And importantly, the groups don't overlap.
+
+---
+
+An **equivalence class** is simply:
+
+> **The group of objects that are equal to each other.**
+
+If:
+
+```java
+person1.equals(person2) == true
+```
+
+then they belong to the same equivalence class.
+
+For example:
+
+```text
+Equivalence class:
+────────────────────────
+Person("Gamal", 30)
+Person("Gamal", 30)
+Person("Gamal", 30)
+```
+
+From the perspective of your program, these objects are interchangeable with respect to the equality definition.
+
+---
+
+For an equals method to be useful:
+
+> "all of the elements in each equivalence class must be interchangeable from the perspective of the user."
+
+Suppose:
+
+```java
+Money m1 = new Money(100, USD);
+Money m2 = new Money(100, USD);
+```
+
+If:
+
+```java
+m1.equals(m2)
+```
+
+returns `true`, then your program is saying:
+
+```text
+m1 and m2 represent the same value
+```
+
+Therefore, code should generally be able to substitute one for the other wherever equality is the relevant concept.
+
+```text
+m1
+ │
+ │ equals
+ ▼
+m2
+
+"These two are equivalent."
+```
+
+If they compare equal but behave fundamentally differently in ways that matter to the equality concept, you've created a problematic equality definition.
+
+This leads directly to the five requirements.
+Java's `equals()` contract has five requirements:
+
+```text
+equals() Contract
+       │
+       ├── 1. Reflexive
+       │
+       ├── 2. Symmetric
+       │
+       ├── 3. Transitive
+       │
+       ├── 4. Consistent
+       │
+       └── 5. Non-null
+```
+
+These aren't five unrelated rules.
+
+Together they ensure that `equals()` really behaves like an **equivalence relation**.
+
+### Properties
+When you override the equals method, you must adhere to its general contract. Here is the contract, from the specification for Object :
+The equals method implements an **equivalence relation**. 
+
+Java specifies several properties that an implementation of `equals()` should satisfy:
+
+#### Reflexive
+
+The first requirement says merely that an object must be equal
+to itself. It’s hard to imagine violating this one unintentionally. If you were to vio-
+late it and then add an instance of your class to a collection, the contains method
+might well say that the collection didn’t contain the instance that you just added.
+
+So **Every object must equal itself**:
+
+```java
+x.equals(x) == true
+```
+
+Example:
+
+```java
+Person p = new Person("Gamal");
+
+p.equals(p); // true
+```
+
+Visual:
+
+```text
+A
+│
+└── equals ──► A
+    
+```
+
+---
+
+#### Symmetric
+The second requirement says that any two objects must agree on
+whether they are equal.
+
+If:
+
+```java
+x.equals(y)
+```
+
+is `true`, then:
+
+```java
+y.equals(x)
+```
+
+must also be `true`.
+
+In other words:
+
+```text
+x.equals(y)
+     ↕
+y.equals(x)
+```
+
+must agree.
+
+``text
+A equals B
+   ↓
+B equals A
+```
+
+You cannot have:
+
+```text
+A.equals(B) → true
+B.equals(A) → false
+```
+
+because then the objects don't have a consistent equality relationship.
+
+
+##### Avoid Cross-Type Equality
+Unlike the first requirement, it’s not hard to imagine vio-
+lating this one unintentionally. For example, consider the following class, which
+implements a case-insensitive string. The case of the string is preserved by
+toString but ignored in equals comparisons:
+```java
+// Broken - violates symmetry!
+public final class CaseInsensitiveString {
+    private final String s;
+
+    public CaseInsensitiveString(String s) {
+        this.s = Objects.requireNonNull(s);
+    }
+    // Broken - violates symmetry!
+    @Override public boolean equals(Object o) {
+        if (o instanceof CaseInsensitiveString)
+            return s.equalsIgnoreCase(((CaseInsensitiveString) o).s);
+        
+        if (o instanceof String) // One-way interoperability!
+            return s.equalsIgnoreCase((String) o);
+        
+        return false;
+    }
+    ... // Remainder omitted
+}
+```
+The class represents a string where capitalization is ignored for equality.
+
+For example:
+
+```text
+"Polish"
+"polish"
+"POLISH"
+```
+
+are considered logically equal.
+
+```java
+CaseInsensitiveString a =
+    new CaseInsensitiveString("Polish");
+
+CaseInsensitiveString b =
+    new CaseInsensitiveString("polish");
+
+a.equals(b); // true
+```
+
+That's perfectly reasonable.
+
+The problem comes from this part:
+
+```java
+if (o instanceof String)
+    return s.equalsIgnoreCase((String) o);
+```
+The well-intentioned equals method in this class naively attempts to interoperate with ordinary strings, This seems convenient—but it breaks the equality contract.
+
+The developer is trying to make the custom class work with Java's `String`:
+
+```text
+CaseInsensitiveString("Polish")
+             ↕
+        String("polish")
+```
+Let’s suppose that we have one case-insensitive string
+and one ordinary one:
+```java
+CaseInsensitiveString cis =
+    new CaseInsensitiveString("Polish");
+
+String s = "polish";
+```
+As expected, `cis.equals(s)` returns true. 
+
+he `CaseInsensitiveString.equals()` method says:
+
+```java
+if (o instanceof String)
+    return s.equalsIgnoreCase((String) o);
+```
+
+Therefore:
+
+```text
+cis.equals(s)
+       ↓
+"Polish".equalsIgnoreCase("polish")
+       ↓
+      true
+```
+
+So:
+
+```java
+cis.equals(s); // true
+```
+The problem is that while the
+equals method in `CaseInsensitiveString` knows about ordinary strings, the equals method in `String` is oblivious to case-insensitive strings. Therefore, `s.equals(cis)` returns false, a clear violation of symmetry.
+```java
+s.equals(cis)
+```
+
+?
+
+Now **`String.equals()`** is executing. `String` knows how to compare itself with another `String`. But it does **not** know about your: `CaseInsensitiveString`, So:
+
+```text
+String.equals(CaseInsensitiveString)
+              ↓
+       not a String
+              ↓
+           false
+```
+
+Therefore:
+
+```java
+s.equals(cis); // false
+```
+
+We now have:
+
+```text
+cis.equals(s) → true
+
+s.equals(cis) → false
+```
+
+That's a direct violation of symmetry.
+
+The equality relationship is supposed to look like this:
+
+```text
+        equals
+A ─────────────────► B
+▲                    │
+│                    │ equals
+└────────────────────┘
+```
+
+Both objects must agree.
+
+But the broken implementation creates:
+
+```text
+CaseInsensitiveString
+        │
+        │ equals → true
+        ▼
+      String
+
+      String
+        │
+        │ equals → false
+        ▼
+CaseInsensitiveString
+```
+
+So equality becomes **one-way**:
+
+```text
+A ──true──► B
+A ◄─false── B
+```
+
+That cannot be a valid equality relationship.
+
+**Why "interoperability" is dangerous**
+
+The developer's intention was understandable: "It would be nice if my `CaseInsensitiveString` could compare directly with ordinary `String` objects.", But there is a fundamental problem: You don't control `String.equals()`. You control: `CaseInsensitiveString.equals()`, but you don't control: `String.equals()`, You cannot modify Java's `String` class to make it understand: `CaseInsensitiveString`. So you can create:
+
+```text
+CaseInsensitiveString
+       │
+       │ knows about
+       ▼
+     String
+```
+
+but:
+
+```text
+String
+   │
+   ✕
+   │ doesn't know about
+   ▼
+CaseInsensitiveString
+```
+
+That creates asymmetric equality.
+
+---
+
+**Why collections make this especially dangerous**
+
+Suppose you put a case-insensitive string into a collection:
+```java
+List<CaseInsensitiveString> list =
+    new ArrayList<>();
+
+list.add(cis);
+```
+Then:
+
+```java
+list.contains(s);
+```
+
+What should happen?
+
+You might expect:
+
+```text
+cis.equals(s)
+       ↓
+     true
+       ↓
+contains(s)
+       ↓
+true
+```
+
+But collection behavior depends on how the collection performs its equality checks.
+
+In the current OpenJDK implementation, it happens to return false, but that’s just an implementation artifact. In another implementation, it could just as easily return true or throw a runtime exception. Once you’ve violated the equals contract, you simply don’t know how other objects will behave when confronted with
+your object.
+
+The important point is:
+
+> **Once your `equals()` contract is broken, you cannot safely predict how library classes will behave.**
+
+Different implementations or algorithms may encounter the comparison in different directions.
+
+The collection might effectively ask:
+
+```java
+cis.equals(s)
+```
+
+or another operation may end up involving:
+
+```java
+s.equals(cis)
+```
+
+And those produce different results.
+
+That's why violating the contract is so dangerous.
+
+---
+
+**The correct solution**
+
+The solution is surprisingly simple:
+
+> **Don't make unrelated classes equal to each other.**
+
+To eliminate the problem, merely remove the ill-conceived(the idea sounds convenient, but it makes a fundamental guarantee of Java equality impossible to maintain) attempt to interoperate with String from the equals method. 
+
+```java
+if (o instanceof String)
+    return s.equalsIgnoreCase((String) o);
+```
+
+Only compare with another: `CaseInsensitiveString`, Once you do this, you can refactor the method into a single return statement:
+
+```java
+@Override
+public boolean equals(Object o) {
+    return o instanceof CaseInsensitiveString
+        && ((CaseInsensitiveString) o).s.equalsIgnoreCase(s);
+}
+```
+
+Now:
+
+```java
+CaseInsensitiveString a =
+    new CaseInsensitiveString("Polish");
+
+CaseInsensitiveString b =
+    new CaseInsensitiveString("polish");
+```
+
+gives:
+
+```java
+a.equals(b); // true
+b.equals(a); // true
+```
+
+Symmetry is preserved.
+
+---
+
+**Why this works**
+
+Now both objects are the **same logical type**:
+
+```text
+CaseInsensitiveString
+        │
+        ├── "Polish"
+        │
+        └── "polish"
+```
+
+Both instances use the same equality rules:
+
+```text
+"Polish"
+    │
+    │ equalsIgnoreCase
+    ▼
+"polish"
+
+        ↓
+
+       true
+```
+
+And reversing the comparison uses the exact same rule:
+
+```text
+"polish"
+    │
+    │ equalsIgnoreCase
+    ▼
+"Polish"
+
+        ↓
+
+       true
+```
+
+Therefore:
+
+```text
+a.equals(b) == b.equals(a)
+```
+
+---
+
+**General lesson: Don't mix equality domains**
+
+This is the bigger design lesson.
+
+Suppose you have:
+
+```text
+Money
+UserId
+EmailAddress
+DateRange
+CaseInsensitiveString
+```
+
+Each type defines its own equality semantics.
+
+You generally don't want:
+
+```text
+Money.equals(BigDecimal)
+EmailAddress.equals(String)
+UserId.equals(Long)
+CaseInsensitiveString.equals(String)
+```
+
+because the other type may not understand your equality rules.
+
+Instead:
+
+```text
+Money        ↔ Money
+UserId       ↔ UserId
+EmailAddress ↔ EmailAddress
+```
+
+This makes the equality relationship much easier to reason about.
+
+---
+
+**A useful rule for `equals()`**
+
+When implementing `equals()`, a very safe pattern is:
+
+```java
+@Override
+public boolean equals(Object obj) {
+    if (this == obj)
+        return true;
+
+    if (!(obj instanceof MyClass other))
+        return false;
+
+    // Compare equality-relevant fields
+    return ...;
+}
+```
+
+The important part is:
+
+```java
+if (!(obj instanceof MyClass other))
+    return false;
+```
+
+You are saying:
+
+> "I only consider objects from the appropriate equality domain."
+
+---
+
+The key principle
+
+> **An `equals()` implementation should not try to make your class equal to an unrelated class whose `equals()` method you cannot control.**
+
+#### Transitive
+The third requirement of the equals contract says that if one
+object is equal to a second and the second object is equal to a third, then the first
+object must be equal to the third. 
+
+If:
+
+```java
+x.equals(y)
+y.equals(z)
+```
+
+then:
+
+```java
+x.equals(z)
+```
+
+must also be true.
+
+Visually:
+
+```text
+x = y
+y = z
+──────
+x = z
+```
+
+##### Equality and Inheritance
+Again, it’s not hard to imagine violating this
+requirement unintentionally. 
+
+Suppose:
+
+```java
+Point p1 = new Point(1, 2);
+Point p2 = new Point(1, 2);
+Point p3 = new Point(1, 2);
+```
+
+If `Point` defines equality based on `x` and `y`:
+
+```text
+p1 == p2  → false   // different objects
+p1.equals(p2) → true
+
+p2.equals(p3) → true
+
+therefore:
+
+p1.equals(p3) → must be true
+```
+
+That's straightforward.
+
+The problem starts when **inheritance adds another value component**.
+
+Consider:
+
+```java
+public class Point {
+    private final int x;
+    private final int y;
+
+    public Point(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof Point))
+            return false;
+
+        Point p = (Point) o;
+
+        return p.x == x && p.y == y;
+    }
+}
+```
+Now Consider the case of a subclass that adds a new value
+component to its superclass. In other words, the subclass adds a piece of information that affects equals comparisons, Suppose you want to extend this class, adding the notion of color to a point:
+```java
+public class ColorPoint extends Point {
+    private final Color color;
+
+    public ColorPoint(int x, int y, Color color) {
+        super(x, y);
+        this.color = color;
+    }
+}
+```
+Now `ColorPoint` has an additional value:
+
+```text
+Point
+├── x
+└── y
+
+ColorPoint
+├── x
+├── y
+└── color
+```
+
+For example:
+
+```java
+ColorPoint cp = new ColorPoint(1, 2, Color.RED);
+```
+
+Conceptually, its value is:
+
+```text
+(1, 2, RED)
+```
+
+while a normal `Point` is:
+
+```text
+(1, 2)
+```
+
+This creates a fundamental problem.
+How should the equals method look? If you leave it out entirely, the implementation is inherited from Point and color information is ignored in equals
+comparisons. While this does not violate the equals contract, it is clearly unacceptable. 
+
+Suppose `ColorPoint` inherits `Point.equals()`.
+
+Then:
+
+```java
+Point p = new Point(1, 2);
+
+ColorPoint cp1 =
+    new ColorPoint(1, 2, Color.RED);
+
+ColorPoint cp2 =
+    new ColorPoint(1, 2, Color.BLUE);
+```
+
+Because `ColorPoint` inherits `Point.equals()`, only `x` and `y` are compared.
+
+Therefore:
+
+```java
+cp1.equals(cp2)
+```
+
+returns:
+
+```text
+true
+```
+
+because:
+
+```text
+x = 1
+y = 2
+```
+
+are the same.
+
+But:
+
+```text
+RED != BLUE
+```
+
+So this is probably **not what we want**.
+
+If color is part of the meaning of a `ColorPoint`, we want:
+
+```text
+(1,2,RED) != (1,2,BLUE)
+```
+
+So we might try to override `equals()`.
+
+###### Real-world Java API example: java.sql.Timestamp
+
+There are some classes in the Java platform libraries that do extend an instantiable class and add a value component. For example, `java.sql.Timestamp` extends `java.util.Date` and adds a nanoseconds field. The equals implementation for `Timestamp` does violate symmetry and can cause erratic behavior if
+`Timestamp` and Date objects are used in the same collection or are otherwise intermixed. The `Timestamp` class has a disclaimer cautioning programmers against
+mixing dates and timestamps. While you won’t get into trouble as long as you
+keep them separate, there’s nothing to prevent you from mixing them, and the
+resulting errors can be hard to debug. This behavior of the `Timestamp` class was a
+mistake and should not be emulated.
+
+```Java
+public class Date
+    implements java.io.Serializable, Cloneable, Comparable<Date>
+{
+    /**
+     * Compares two dates for equality.
+     * The result is {@code true} if and only if the argument is
+     * not {@code null} and is a {@code Date} object that
+     * represents the same point in time, to the millisecond, as this object.
+     * <p>
+     * Thus, two {@code Date} objects are equal if and only if the
+     * {@code getTime} method returns the same {@code long}
+     * value for both.
+     *
+     * @param   obj   the object to compare with.
+     * @return  {@code true} if the objects are the same;
+     *          {@code false} otherwise.
+     * @see     java.util.Date#getTime()
+     */
+    public boolean equals(Object obj) {
+        return obj instanceof Date && getTime() == ((Date) obj).getTime();
+    }
+}
+```
+```Java
+public class Timestamp extends java.util.Date {
+    /**
+     * @serial
+     */
+    private int nanos;
+    /**
+     * Tests to see if this {@code Timestamp} object is
+     * equal to the given {@code Timestamp} object.
+     *
+     * @param ts the {@code Timestamp} value to compare with
+     * @return {@code true} if the given {@code Timestamp}
+     *         object is equal to this {@code Timestamp} object;
+     *         {@code false} otherwise
+     */
+    public boolean equals(Timestamp ts) {
+        if (super.equals(ts)) {
+            if  (nanos == ts.nanos) {
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * Tests to see if this {@code Timestamp} object is
+     * equal to the given object.
+     *
+     * This version of the method {@code equals} has been added
+     * to fix the incorrect
+     * signature of {@code Timestamp.equals(Timestamp)} and to preserve backward
+     * compatibility with existing class files.
+     *
+     * Note: This method is not symmetric with respect to the
+     * {@code equals(Object)} method in the base class.
+     *
+     * @param ts the {@code Object} value to compare with
+     * @return {@code true} if the given {@code Object} is an instance
+     *         of a {@code Timestamp} that
+     *         is equal to this {@code Timestamp} object;
+     *         {@code false} otherwise
+     */
+    public boolean equals(java.lang.Object ts) {
+      if (ts instanceof Timestamp) {
+        return this.equals((Timestamp)ts);
+      } else {
+        return false;
+      }
+    }
+}
+```
+The current Java 26 documentation explicitly says:
+
+> `Timestamp.equals(Object)` is not symmetric with `java.util.Date.equals(Object)`.
+
+It also explicitly recommends that code **not view `Timestamp` generically as a `java.util.Date`**, because the inheritance relationship represents **implementation inheritance, not type inheritance**. ([Oracle Docs][1])
+
+Consider:
+
+```java
+Date date = new Date(1000);
+
+Timestamp timestamp = new Timestamp(1000);
+timestamp.setNanos(123456789);
+```
+
+Now:
+
+```java
+date.equals(timestamp)
+```
+
+and:
+
+```java
+timestamp.equals(date)
+```
+
+can disagree.
+
+Conceptually:
+
+```text
+Date.equals(Timestamp)
+        ↓
+   compares Date's
+   millisecond value
+        ↓
+       true
+
+
+Timestamp.equals(Date)
+        ↓
+   Date doesn't contain
+   the nanos component
+        ↓
+       false
+```
+
+So:
+
+```text
+date.equals(timestamp)       → true
+timestamp.equals(date)       → false
+```
+
+That violates:
+
+```text
+Symmetry:
+x.equals(y) == y.equals(x)
+```
+
+The Java 26 documentation explicitly describes this behavior. ([Oracle Docs][1])
+
+:::note
+
+**Why hasn't Java fixed it?**
+
+Because `Timestamp` is a very old API.
+
+It has existed since **Java 1.1**, and changing its inheritance relationship or equality behavior could break existing applications and binary/source compatibility. The current API therefore documents the problem rather than pretending the design is good. ([Oracle Docs][1])
+
+In fact, the current JDK documentation is unusually explicit:
+
+```text
+Timestamp
+    extends Date
+```
+
+but essentially says:
+
+```text
+This should NOT be treated as a normal
+Date subtype.
+```
+
+The docs describe the relationship as:
+
+```text
+implementation inheritance
+```
+
+rather than:
+
+```text
+type inheritance
+```
+
+That's a very useful phrase to understand for your `equals()`/inheritance section. ([Oracle Docs][1])
+
+**What should we use in modern Java?**
+
+For new code, generally prefer the `java.time` API rather than building new designs around `java.util.Date` / `java.sql.Timestamp`.
+
+For example:
+
+```java
+Instant instant = Instant.now();
+```
+
+or:
+
+```java
+LocalDateTime dateTime = LocalDateTime.now();
+```
+
+The modern date/time classes have much cleaner value semantics. For example, `Instant.equals()` compares the represented point on the timeline, and `LocalDateTime` is an immutable value-based class. ([Oracle Docs][2])
+
+:::
+
+##### Adding Value Components
+The central issue is:
+
+> **Adding a value component to an instantiable superclass can make it impossible to implement `equals()` correctly while preserving transitivity.**
+
+**The First Attempt: Compare Only `ColorPoint`**
+
+Suppose you write an equals method that returns true only if its argument is another color point with the same position and color:
+```java
+@Override
+public boolean equals(Object o) {
+    if (!(o instanceof ColorPoint))
+        return false;
+
+    ColorPoint cp = (ColorPoint) o;
+
+    return super.equals(cp)
+            && color.equals(cp.color);
+}
+```
+
+This says:
+
+> Two `ColorPoint`s are equal if their coordinates and colors are equal.
+
+That seems reasonable.
+
+For example:
+
+```java
+ColorPoint cp1 =
+    new ColorPoint(1, 2, Color.RED);
+
+ColorPoint cp2 =
+    new ColorPoint(1, 2, Color.RED);
+
+cp1.equals(cp2);   // true
+```
+
+But now we have a problem with `Point`.
+
+Consider:
+
+```java
+Point p = new Point(1, 2);
+
+ColorPoint cp =
+    new ColorPoint(1, 2, Color.RED);
+```
+
+Remember that `Point.equals()` says:
+
+```java
+if (!(o instanceof Point))
+    return false;
+
+return x == p.x && y == p.y;
+```
+
+Therefore:
+
+```java
+p.equals(cp)
+```
+
+is:
+
+```text
+true
+```
+
+because `ColorPoint` **is a `Point`**, and their coordinates match.
+
+But:
+
+```java
+cp.equals(p)
+```
+
+is:
+
+```text
+false
+```
+
+because `ColorPoint.equals()` requires another `ColorPoint`.
+
+So:
+
+```text
+p.equals(cp)  → true
+cp.equals(p)  → false
+```
+
+We've broken **symmetry**.
+
+This is the same problem we discussed earlier with `CaseInsensitiveString`.
+
+---
+
+**Why Not Make Mixed `Point`/`ColorPoint` Comparisons Equal?**
+
+You might try to fix the problem by having ColorPoint.equals ignore color when doing “mixed comparisons”, Someone might try to fix that by saying:
+
+> If I'm comparing a `ColorPoint` with a normal `Point`, just ignore the color.
+
+For example:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (!(o instanceof Point))
+        return false;
+
+    if (!(o instanceof ColorPoint))
+        return o.equals(this);
+
+    ColorPoint cp = (ColorPoint) o;
+
+    return super.equals(cp)
+            && color.equals(cp.color);
+}
+```
+
+The idea is:
+
+```text
+ColorPoint vs ColorPoint
+    → compare x, y, color
+
+ColorPoint vs Point
+    → compare x, y only
+```
+
+At first this looks clever. This approach does provide symmetry, but at the expense of transitivity,its now **transitivity breaks**.
+
+---
+
+**How Transitivity Breaks**
+
+Consider three objects:
+
+```java
+ColorPoint p1 =
+    new ColorPoint(1, 2, Color.RED);
+
+Point p2 =
+    new Point(1, 2);
+
+ColorPoint p3 =
+    new ColorPoint(1, 2, Color.BLUE);
+```
+
+Think about the equality relationships.
+
+1. First:
+
+    ```java
+    p1.equals(p2)
+    ```
+
+    `p2` is a `Point`.
+
+    The `ColorPoint` says:
+
+    > When comparing against a plain `Point`, ignore color.
+
+    Therefore:
+
+    ```text
+    p1.equals(p2) → true
+    ```
+
+2. Second:
+
+    ```java
+    p2.equals(p3)
+    ```
+
+    `p2` is a `Point`.
+
+    `Point.equals()` only cares about coordinates.
+
+    Therefore:
+
+    ```text
+    p2.equals(p3) → true
+    ```
+
+    So we have:
+
+    ```text
+    p1.equals(p2) → true
+    p2.equals(p3) → true
+    ```
+
+2. Third:
+
+    Therefore transitivity requires:
+
+    ```text
+    p1.equals(p3) → true
+    ```
+
+    But:
+
+    ```java
+    p1 = (1, 2, RED)
+    p3 = (1, 2, BLUE)
+    ```
+
+    and `ColorPoint.equals()` compares color.
+
+    Therefore:
+
+    ```text
+    p1.equals(p3) → false
+    ```
+
+    We get:
+
+    ```text
+    p1 ──equals──> p2
+    │              │
+    │              │ equals
+    │              ▼
+    └───────────? p3
+    ```
+
+    Specifically:
+
+    ```text
+    p1.equals(p2) = true
+    p2.equals(p3) = true
+    p1.equals(p3) = false
+    ```
+
+**Transitivity is violated.**, The first two comparisons are
+“color-blind,” while the third takes color into account.
+
+---
+
+Also, this approach can cause infinite recursion: Suppose there are two
+subclasses of Point, say ColorPoint and SmellPoint, each with this sort of
+equals method. Then a call to myColorPoint.equals(mySmellPoint) will
+throw a StackOverflowError.
+
+---
+
+So what’s the solution? It turns out that this is a fundamental problem of
+equivalence relations in object-oriented languages. There is no way to extend an
+instantiable class and add a value component while preserving the equals
+contract, unless you’re willing to forgo the benefits of object-oriented abstraction.
+
+At this point, the important lesson is:
+
+> You cannot safely extend an instantiable class with a new value component and simultaneously preserve the `equals()` contract.
+
+Why?
+
+Because the superclass and subclass have different ideas about what makes two objects equal.
+
+`Point` says:
+
+```text
+Point equality = x + y
+```
+
+`ColorPoint` says:
+
+```text
+ColorPoint equality = x + y + color
+```
+
+Now ask:
+
+```text
+Should a Point and ColorPoint be equal?
+```
+
+If **yes**, color must sometimes be ignored.
+
+If **no**, you risk breaking symmetry.
+
+And attempts to mix the two rules can break transitivity.
+
+This is the fundamental problem.
+
+##### instanceof vs getClass()
+One possible response is:
+
+> you can extend an instantiable class and add a value
+component while preserving the equals contract by using a `getClass` test in
+place of the `instanceof` test in the equals method(Let's make `Point.equals()` compare only objects of exactly the same class):
+Instead of:
+
+```java
+if (!(o instanceof Point))
+    return false;
+```
+
+we could use:
+
+```java
+// Broken - violates Liskov substitution principle (page 43)
+@Override public boolean equals(Object o) {
+    if (o == null || o.getClass() != getClass())
+        return false;
+    
+    Point p = (Point) o;
+    
+    return p.x == x && p.y == y;
+}
+```
+
+So:
+
+```java
+Point p1 = new Point(1, 2);
+ColorPoint cp = new ColorPoint(1, 2, Color.RED);
+```
+
+would produce:
+
+```java
+p1.equals(cp)   // false
+cp.equals(p1)   // false
+```
+
+because:
+
+```text
+p1.getClass()  = Point.class
+cp.getClass()  = ColorPoint.class
+```
+
+This has the effect of equating objects only if they have the same implementation
+class, This solves the equality problem between `Point` and `ColorPoint`.
+
+But it introduces another issue it violates **Liskov Substitution Principle**
+
+Remember:
+
+```text
+ColorPoint extends Point
+```
+
+Therefore:
+
+```text
+ColorPoint IS-A Point
+```
+
+Normally, a `ColorPoint` should be usable wherever a `Point` is expected. An
+instance of a subclass of Point is still a Point, and it still needs to function as one,
+but it fails to do so if you take this approach!
+
+Let’s suppose we want to write a
+method to tell whether a point is on the unit circle. Here is one way we could do it:
+
+```java
+public static boolean onUnitCircle(Point p) {
+    return UNIT_CIRCLE_POINTS.contains(p);
+}
+```
+
+where:
+
+```java
+static final Set<Point> UNIT_CIRCLE_POINTS = Set.of(
+    new Point(1, 0),
+    new Point(0, 1),
+    new Point(-1, 0),
+    new Point(0, -1)
+);
+```
+
+Suppose you extend `Point` in some trivial way that doesn’t add a value component,
+say, by having its constructor keep track of how many instances have been created:
+```Java
+public class CounterPoint extends Point {
+    private static final AtomicInteger counter = new AtomicInteger();
+    
+    public CounterPoint(int x, int y) {
+        super(x, y);
+        counter.incrementAndGet();
+    }
+
+    public static int numberCreated() { return counter.get(); }
+}
+```
+The **Liskov substitution principle** says that any important property of a type
+should also hold for all its subtypes so that any method written for the type should
+work equally well on its subtypes [Liskov87]. This is the formal statement of our his is the formal statement of our earlier claim that a subclass of `Point` (such as `CounterPoint`) is still a `Point` and
+must act as one. But suppose we pass a `CounterPoint` to the `onUnitCircle`
+method. If the `Point` class uses a getClass-based equals method, the
+`onUnitCircle` method will return `false` regardless of the `CounterPoint` instance’s `x` and `y` coordinates. This is so because most collections, including the
+HashSet used by the `onUnitCircle` method, use the equals method to test for
+containment, and no `CounterPoint` instance is equal to any `Point`. If, however,
+you use a proper `instanceof`-based equals method on `Point`, the same
+`onUnitCircle` method works fine when presented with a `CounterPoint` instance.
+
+A `ColorPoint` such as:
+
+```java
+ColorPoint cp =
+    new ColorPoint(1, 0, Color.RED);
+```
+
+is still a `Point`.
+
+We would expect:
+
+```java
+onUnitCircle(cp);
+```
+
+to work.
+
+But if `Point.equals()` uses:
+
+```java
+o.getClass() != getClass()
+```
+
+then:
+
+```text
+Point(1,0)
+```
+
+and:
+
+```text
+ColorPoint(1,0,RED)
+```
+
+are never equal.
+
+Consequently, operations such as:
+
+```java
+Set.contains(cp)
+```
+
+can behave unexpectedly.
+
+So the problem is no longer simply `equals()`.
+
+It's now connected to **subtyping and substitutability**.
+
+##### Composition over Inheritance
+While there is no satisfactory way to extend an instantiable class and add a
+value component, there is a fine workaround: Follow the advice of Item 18,
+“Favor composition over inheritance.” Instead of having `ColorPoint` extend
+`Point`, give `ColorPoint` a private `Point` field and a public view method (Item 6)
+that returns the point at the same position as this color point.
+
+So the recommended solution is:
+
+> **Favor composition over inheritance** when the subclass would add value components that affect equality.
+
+Instead of:
+
+```java
+class ColorPoint extends Point
+```
+
+use:
+
+```java
+class ColorPoint {
+    private final Point point;
+    private final Color color;
+
+    public ColorPoint(int x, int y, Color color) {
+        this.point = new Point(x, y);
+        this.color = Objects.requireNonNull(color);
+    }
+
+    public Point asPoint() {
+        return point;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof ColorPoint))
+            return false;
+
+        ColorPoint cp = (ColorPoint) o;
+
+        return point.equals(cp.point)
+                && color.equals(cp.color);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(point, color);
+    }
+}
+```
+
+Now there is no inheritance relationship:
+
+```text
+ColorPoint
+├── Point
+│   ├── x
+│   └── y
+└── Color
+```
+
+Equality is much cleaner:
+
+```text
+ColorPoint
+    ↓
+Point equality + Color equality
+```
+
+Two `ColorPoint`s are equal when:
+
+```text
+their Point values are equal
+AND
+their Color values are equal
+```
+
+For example:
+
+```java
+ColorPoint a =
+    new ColorPoint(1, 2, Color.RED);
+
+ColorPoint b =
+    new ColorPoint(1, 2, Color.RED);
+
+ColorPoint c =
+    new ColorPoint(1, 2, Color.BLUE);
+```
+
+Then:
+
+```text
+a.equals(b) → true
+a.equals(c) → false
+```
+
+No superclass/subclass equality conflict exists.
+
+---
+
+The most important thing to remember is:
+
+> **Adding a value component to a concrete superclass/subclass hierarchy is dangerous when `equals()` is based on value.**
+
+For:
+
+```text
+Point
+```
+
+equality is:
+
+```text
+x + y
+```
+
+For:
+
+```text
+ColorPoint
+```
+
+equality wants to be:
+
+```text
+x + y + color
+```
+
+There is no clean way to make both coexist while preserving all the `equals()` rules and normal substitutability.
+
+So when designing a value-like class:
+
+```text
+Need to add value data?
+        │
+        ▼
+Can inheritance preserve equality?
+        │
+       No
+        │
+        ▼
+Prefer composition
+```
+
+That is why **`Composition over Inheritance`** is the practical design recommendation
+
+##### Abstract Classes and Value Components
+There is an important exception.
+
+The problem is especially bad when the superclass itself can be instantiated:
+
+```text
+Point
+├── can create Point
+└── can create ColorPoint
+```
+
+Now we have to compare:
+
+```text
+Point ↔ ColorPoint
+```
+you can add a value component to a subclass of an abstract class
+without violating the equals contract. 
+
+if the superclass is **abstract**, there are no actual superclass instances.
+
+This is important for the sort of class hierarchies that you get by following the advice in Item 23, “Prefer class hierarchies to
+tagged classes.” For example, you could have an abstract class Shape with no
+value components, a subclass Circle that adds a radius field, and a subclass
+Rectangle that adds length and width fields.
+
+For example:
+
+```java
+abstract class Shape {
+}
+```
+
+with:
+
+```java
+class Circle extends Shape {
+    private final int radius;
+}
+
+class Rectangle extends Shape {
+    private final int width;
+    private final int height;
+}
+```
+
+There isn't an actual:
+
+```java
+new Shape(...)
+```
+
+So we don't have the same problem of:
+
+```text
+Shape instance ↔ Circle instance
+```
+
+Equality can be defined independently by the concrete subclasses.
+
+Conceptually:
+
+```text
+             Shape
+            /     \
+           /       \
+       Circle    Rectangle
+       radius    width + height
+```
+
+This is much safer. There are no actual `Shape` instances to compare against.
+
+So each concrete subclass can define its own value semantics.
+
+This is one reason adding value components to subclasses of an **abstract** class can be reasonable.
+
+
+
+---
+
+Problems of the sort shown earlier
+won’t occur so long as it is impossible to create a superclass instance directly.
+
+#### Consistent
+
+if two
+objects are equal, they must remain equal for all time unless one (or both) of them
+is modified. In other words, mutable objects can be equal to different objects at
+different times while immutable objects can’t.
+
+> If two objects are equal, repeated calls to `equals()` should continue to return the same result **as long as neither object's equality-relevant state has changed**.
+
+If neither object changes, repeated calls should produce the same result.
+
+```java
+x.equals(y)
+x.equals(y)
+x.equals(y)
+```
+shouldn't randomly change from:
+
+```text
+true → false → true
+```
+and should consistently return the same value. without the relevant objects changing.
+
+##### Simple example
+
+Suppose we have:
+
+```java
+public class Person {
+    private String name;
+
+    public Person(String name) {
+        this.name = name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof Person))
+            return false;
+
+        Person other = (Person) o;
+        return name.equals(other.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return name.hashCode();
+    }
+}
+```
+
+Now:
+
+```java
+Person p1 = new Person("Alice");
+Person p2 = new Person("Alice");
+```
+
+Initially:
+
+```java
+p1.equals(p2);    // true
+```
+
+Because:
+
+```text
+p1.name = "Alice"
+p2.name = "Alice"
+```
+
+Now modify `p2`:
+
+```java
+p2.setName("Bob");
+```
+
+The equality result can legitimately change:
+
+```java
+p1.equals(p2);    // false
+```
+
+That's **not a violation of consistency**.
+
+Why?
+
+Because the object was modified.
+
+```text
+Before modification:
+
+Alice == Alice
+    ↓
+  true
+
+       ↓ p2 modified
+
+After modification:
+
+Alice != Bob
+    ↓
+  false
+```
+
+The contract says the result must remain stable **while the relevant state remains unchanged**.
+
+##### Mutable vs Immutable Objects
+###### Mutable objects can change equality
+
+mutable objects can be equal to different objects at different times.
+
+For example:
+
+```java
+Person p1 = new Person("Alice");
+Person p2 = new Person("Alice");
+Person p3 = new Person("Bob");
+```
+
+Initially:
+
+```text
+p1.equals(p2) → true
+p1.equals(p3) → false
+```
+
+Then:
+
+```java
+p2.setName("Bob");
+```
+
+Now:
+
+```text
+p1.equals(p2) → false
+p1.equals(p3) → false
+```
+
+If we instead modify `p1`:
+
+```java
+p1.setName("Bob");
+```
+
+then:
+
+```text
+p1.equals(p2) → true
+p1.equals(p3) → true
+```
+
+The important thing is:
+
+```text
+Equality can change
+        │
+        ▼
+only because equality-relevant state changed
+```
+
+---
+
+this does **not** mean mutable objects violate the `equals()` contract.
+
+This is perfectly legal:
+
+```java
+Person p1 = new Person("Alice");
+Person p2 = new Person("Alice");
+
+p1.equals(p2);    // true
+
+p2.setName("Bob");
+
+p1.equals(p2);    // false
+```
+
+There is no violation because `p2` was modified.
+
+The actual rule is:
+
+```text
+No relevant state changed
+        │
+        ▼
+equals() result must remain the same
+```
+
+Not:
+
+```text
+equals() must always return the same result forever
+```
+
+That's an important distinction.
+
+---
+
+###### Immutable objects are much simpler
+
+Now imagine:
+
+```java
+public final class Money {
+    private final int amount;
+    private final String currency;
+
+    public Money(int amount, String currency) {
+        this.amount = amount;
+        this.currency = currency;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof Money))
+            return false;
+
+        Money other = (Money) o;
+
+        return amount == other.amount
+                && currency.equals(other.currency);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(amount, currency);
+    }
+}
+```
+
+There is no:
+
+```java
+setAmount(...)
+setCurrency(...)
+```
+
+After construction:
+
+```java
+Money m1 = new Money(100, "USD");
+Money m2 = new Money(100, "USD");
+```
+
+we have:
+
+```text
+m1.equals(m2) → true
+```
+
+and because neither object can change:
+
+```text
+m1.equals(m2)
+      ↓
+   always true
+```
+
+for their entire lifetime.
+
+That's one of the major advantages of immutable value objects.
+
+
+---
+
+When you write a class, think hard
+about whether it should be immutable (Item 17). If you conclude that it should,
+make sure that your equals method enforces the restriction that equal objects
+remain equal and unequal objects remain unequal for all time
+
+**Equal objects remain equal**
+
+Suppose:
+
+```java
+Money a = new Money(100, "USD");
+Money b = new Money(100, "USD");
+```
+
+Then:
+
+```text
+a.equals(b) → true
+```
+
+If `Money` is immutable, there is no operation that can turn:
+
+```text
+a = $100 USD
+b = $100 USD
+```
+
+into:
+
+```text
+a = $100 USD
+b = $200 USD
+```
+
+Therefore:
+
+```text
+a.equals(b)
+```
+
+remains:
+
+```text
+true
+```
+
+for the lifetime of the objects.
+
+**Unequal objects remain unequal**
+
+Suppose:
+
+```java
+Money a = new Money(100, "USD");
+Money b = new Money(200, "USD");
+```
+
+Initially:
+
+```text
+a.equals(b) → false
+```
+
+If `Money` is immutable, neither object can change.
+
+Therefore they remain:
+
+```text
+a.equals(b) → false
+```
+
+forever.
+
+So for immutable value objects:
+
+```text
+Equal
+  ↓
+remain equal
+
+Unequal
+  ↓
+remain unequal
+```
+
+assuming neither object can somehow be replaced/changed.
+
+##### Equality-Relevant State
+**What does "equality-relevant state" mean?**
+
+Not every field necessarily affects equality. For example:
+
+```java
+public class User {
+    private final long id;
+    private String displayName;
+    private int loginCount;
+}
+```
+
+Suppose equality is defined only by:
+
+```text
+id
+```
+
+Then:
+
+```java
+u1.setDisplayName("Alice");
+u1.incrementLoginCount();
+```
+
+shouldn't affect:
+
+```java
+u1.equals(u2)
+```
+
+because those fields aren't part of equality.
+
+So consistency means:
+
+> **If none of the state used to determine equality changes, the equality result must not change.**
+
+Consider:
+
+```java
+Point p1 = new Point(10, 20);
+Point p2 = new Point(10, 20);
+```
+
+If `Point.equals()` uses:
+
+```text
+x + y
+```
+
+then:
+
+```text
+p1.equals(p2) → true
+```
+
+If `Point` is mutable:
+
+```java
+p2.setX(50);
+```
+
+then:
+
+```text
+p1 = (10,20)
+p2 = (50,20)
+```
+
+so:
+
+```text
+p1.equals(p2) → false
+```
+
+Again, this is allowed because the equality-relevant state changed.
+
+If `Point` is immutable:
+
+```java
+public final class Point {
+    private final int x;
+    private final int y;
+}
+```
+
+then once:
+
+```text
+p1 = (10,20)
+p2 = (10,20)
+```
+
+are equal, they remain equal.
+
+#### equals(), hashCode(), and Mutable State
+
+This becomes particularly important with:
+
+```java
+HashSet
+HashMap
+```
+
+Suppose:
+
+```java
+Set<Person> people = new HashSet<>();
+
+Person p = new Person("Alice");
+
+people.add(p);
+```
+
+When the object is inserted, the hash-based collection uses:
+
+```java
+p.hashCode()
+```
+
+to determine where to store it.
+
+Now suppose you change the field used by both:
+
+```java
+equals()
+hashCode()
+```
+
+```java
+p.setName("Bob");
+```
+
+The object's hash code changes.
+
+Conceptually:
+
+```text
+Before:
+
+"Alice"
+   ↓
+hashCode()
+   ↓
+bucket 5
+```
+
+After:
+
+```text
+"Bob"
+  ↓
+hashCode()
+  ↓
+bucket 12
+```
+
+But the `HashSet` still has the object in the **old bucket**.
+
+So:
+
+```java
+people.contains(p)
+```
+
+may unexpectedly return:
+
+```text
+false
+```
+
+even though `p` is physically still inside the set.
+
+This is why **mutable equality state is particularly dangerous**.
+
+---
+
+connecting `equals()` to immutability
+
+The relationship is:
+
+```text
+Mutable equality fields
+        │
+        ▼
+equals()/hashCode() can change
+        │
+        ▼
+more difficult to reason about
+        │
+        ▼
+dangerous as HashMap keys / HashSet elements
+```
+
+Whereas:
+
+```text
+Immutable equality fields
+        │
+        ▼
+equals()/hashCode() remain stable
+        │
+        ▼
+predictable equality
+        │
+        ▼
+safe value-object behavior
+```
+
+This is one reason Effective Java strongly encourages considering immutability when designing value classes.
+
+---
+
+The key takeaway for **Consistent**
+
+> **`equals()` does not have to return the same result forever. It must return the same result whenever the equality-relevant state of the compared objects has not changed.**
+
+And for value objects, the easiest way to guarantee this is:
+
+> **Make the equality-relevant state immutable.**
+
+#### Avoid Unreliable Resources
+Whether or not a class is immutable, do not write an equals method that
+depends on unreliable resources. It’s extremely difficult to satisfy the consistency requirement if you violate this prohibition.
+
+`equals()` should be deterministic and self-contained. `equals()` should depend only on deterministic, locally available state. It should not depend on external resources or operations whose result can change independently of the objects being compared. It should not perform network access, database queries, DNS resolution, file-system operations, or other external operations whose results can change independently of the compared objects.
+
+We said:
+
+```java
+a.equals(b)
+```
+
+must continue returning the same result if neither object has changed.
+
+```text
+a.equals(b)
+```
+
+should always produce:
+
+```text
+true
+```
+
+But there's another hidden requirement:
+
+> The result shouldn't change because something **outside the objects** changed.
+
+That's the problem with unreliable resources.
+
+---
+
+**What is an unreliable resource?**
+
+An unreliable resource is something outside the objects being compared whose state can change independently.
+
+Examples include:
+
+```text
+Network
+DNS
+Database
+File system
+Current time
+External service
+Operating system state
+Random number generator
+```
+
+Imagine:
+
+```java
+@Override
+public boolean equals(Object other) {
+    // Call network service...
+}
+```
+
+That's a huge red flag.
+
+Why?
+
+Because:
+
+```text
+same objects
+     +
+same equals() call
+     ↓
+could produce different results
+```
+
+depending on what is happening outside the objects.
+
+##### What should NOT happen inside `equals()`?
+
+Avoid designs such as:
+
+```java
+@Override
+public boolean equals(Object o) {
+    // ❌ database query
+}
+```
+
+or:
+
+```java
+@Override
+public boolean equals(Object o) {
+    // ❌ network request
+}
+```
+
+or:
+
+```java
+@Override
+public boolean equals(Object o) {
+    // ❌ DNS lookup
+}
+```
+
+or:
+
+```java
+@Override
+public boolean equals(Object o) {
+    // ❌ current time determines equality
+}
+```
+
+or:
+
+```java
+@Override
+public boolean equals(Object o) {
+    // ❌ call external service
+}
+```
+
+Even if these technically produce a result, they make equality difficult or impossible to reason about.
+
+##### `equals()` should also be cheap
+
+There's another practical benefit.
+
+`equals()` is called **a lot** by Java collections and libraries.
+
+For example:
+
+```java
+list.contains(object);
+```
+
+may call:
+
+```java
+element.equals(object)
+```
+
+many times.
+
+Similarly:
+
+```java
+set.contains(object);
+map.get(key);
+```
+
+can invoke equality internally.
+
+Imagine if:
+
+```java
+set.contains(url)
+```
+
+required:
+
+```text
+DNS lookup
+    ↓
+network
+    ↓
+timeout
+    ↓
+DNS lookup
+    ↓
+comparison
+```
+
+That would be terrible for both correctness and performance.
+
+So a good `equals()` should generally be:
+
+```text
+deterministic
++
+local
++
+reasonably cheap
+```
+
+##### Real-world Java API example: `java.net.URL`’s `equals` method
+For example, java.net.URL’s
+equals method relies on comparison of the IP addresses of the hosts associated
+with the URLs. Translating a host name to an IP address can require network
+access, and it isn’t guaranteed to yield the same results over time. 
+
+
+For example:
+
+```java
+URL a = new URL("https://example.com");
+URL b = new URL("https://example.com");
+```
+
+You might expect:
+
+```java
+a.equals(b)
+```
+
+to be a simple deterministic comparison.
+
+But historically, URL equality can involve:
+
+```text
+example.com
+      │
+      ▼
+DNS resolution
+      │
+      ▼
+IP address
+      │
+      ▼
+comparison
+```
+
+Now the result can depend on the network/DNS environment.
+
+This can cause
+the URL equals method to violate the equals contract and has caused problems in
+practice. 
+
+**Why is DNS a problem?**
+
+Suppose:
+
+```text
+example.com
+      ↓
+192.0.2.10
+```
+
+at one point in time.
+
+Later, DNS might return:
+
+```text
+example.com
+      ↓
+192.0.2.20
+```
+
+The URL objects themselves haven't changed.
+
+But the external resource has changed.
+
+So conceptually:
+
+```text
+Time 1:
+
+url1.equals(url2)
+        ↓
+     DNS lookup
+        ↓
+same IP
+        ↓
+      true
+```
+
+Later:
+
+```text
+Time 2:
+
+url1.equals(url2)
+        ↓
+     DNS lookup
+        ↓
+different IP
+        ↓
+      false
+```
+
+The objects didn't change.
+
+The external environment did.
+
+That's exactly what the **Consistency** requirement is trying to prevent.
+
+The behavior of URL’s equals method was a big mistake and should not
+be emulated. Unfortunately, it cannot be changed due to compatibility requirements. To avoid this sort of problem, equals methods should perform only deterministic computations on memory-resident objects.
+
+```java
+public final class URL implements java.io.Serializable {
+    transient URLStreamHandler handler;
+    
+    public boolean equals(Object obj) {
+        if (!(obj instanceof URL u2))
+            return false;
+
+        return handler.equals(this, u2);
+    }
+}
+```
+```java
+public abstract class URLStreamHandler {
+    protected boolean equals(URL u1, URL u2) {
+        return Objects.equals(u1.getRef(), u2.getRef()) && sameFile(u1, u2);
+    }
+    protected boolean sameFile(URL u1, URL u2) {
+        // Compare the protocols.
+        if (!((u1.getProtocol() == u2.getProtocol()) ||
+              (u1.getProtocol() != null &&
+               u1.getProtocol().equalsIgnoreCase(u2.getProtocol()))))
+            return false;
+
+        // Compare the files.
+        if (!(u1.getFile() == u2.getFile() ||
+              (u1.getFile() != null && u1.getFile().equals(u2.getFile()))))
+            return false;
+
+        // Compare the ports.
+        int port1, port2;
+        port1 = (u1.getPort() != -1) ? u1.getPort() : u1.handler.getDefaultPort();
+        port2 = (u2.getPort() != -1) ? u2.getPort() : u2.handler.getDefaultPort();
+        if (port1 != port2)
+            return false;
+
+        // Compare the hosts.
+        if (!hostsEqual(u1, u2))
+            return false;
+
+        return true;
+    }
+    protected boolean hostsEqual(URL u1, URL u2) {
+        InetAddress a1 = getHostAddress(u1);
+        InetAddress a2 = getHostAddress(u2);
+        // if we have internet address for both, compare them
+        if (a1 != null && a2 != null) {
+            return a1.equals(a2);
+        // else, if both have host names, compare them
+        } else if (u1.getHost() != null && u2.getHost() != null)
+            return u1.getHost().equalsIgnoreCase(u2.getHost());
+         else
+            return u1.getHost() == null && u2.getHost() == null;
+    }
+    protected InetAddress getHostAddress(URL u) {
+        return u.getHostAddress();
+    }
+    synchronized InetAddress getHostAddress() {
+        if (hostAddress != null) {
+            return hostAddress;
+        }
+
+        if (host == null || host.isEmpty()) {
+            return null;
+        }
+        try {
+            hostAddress = InetAddress.getByName(host);
+        } catch (UnknownHostException e) {
+            return null;
+        }
+        return hostAddress;
+    }
+}
+```
+the interesting work is actually delegated to the URL's **protocol handler**:
+
+```text
+URL.equals()
+    │
+    ▼
+URLStreamHandler.equals()
+    │
+    ├── same protocol
+    ├── same file
+    ├── same port
+    └── hostsEqual()
+           │
+           ▼
+       host comparison
+           │
+           ▼
+       InetAddress.getAllByName(...)
+```
+And the address lookup eventually goes through the networking APIs, potentially performing DNS resolution.
+
+:::note
+
+Although `URL.equals()` **does not necessarily perform a DNS lookup every time** as The JDK caches the resolved `InetAddress` in the `URL` object. Caching does not make `URL.equals()` purely local or deterministic.
+
+Consider:
+
+```java
+URL a = new URL("https://example.com");
+URL b = new URL("https://93.184.216.34");
+
+a.equals(b);
+```
+
+If `a` hasn't resolved its host yet, the equality operation may need to resolve:
+
+```text
+example.com
+     │
+     ▼
+ DNS lookup
+     │
+     ▼
+93.184.216.34
+```
+
+Once resolved:
+
+```text
+a.hostAddress
+      │
+      ▼
+cached InetAddress
+```
+
+the next comparison can use the cached value.
+
+**The deeper problem: the cache itself can become stale**
+
+Suppose:
+
+```text
+Time 1
+
+example.com
+     │
+     ▼
+203.0.113.10
+```
+
+The URL caches that address.
+
+Later DNS changes:
+
+```text
+Time 2
+
+example.com
+     │
+     ▼
+203.0.113.20
+```
+
+But your existing `URL` object may still have its previously resolved address cached.
+
+So equality can depend on **when/how the URL was resolved**, not just the textual state of the URL.
+
+That's the real issue from an `equals()`-contract perspective.
+
+And And there is another important detail
+
+The JDK documentation doesn't claim:
+
+> "`URL.equals()` performs DNS lookup every time."
+
+It says, in essence, that host comparison may require name resolution and therefore `equals()` **can be a blocking operation**.
+
+The problem isn't simply **performance**.
+
+The stronger principle is:
+
+> `equals()` should ideally depend only on stable, locally available object state.
+
+`URL.equals()` can depend on DNS state and therefore external environmental state. Caching reduces how often that happens, but it doesn't eliminate the fundamental design issue.
+
+:::
+
+---
+
+In practical terms, it means that equality should normally compare data already available in memory.
+
+For example:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (!(o instanceof Person))
+        return false;
+
+    Person other = (Person) o;
+
+    return id == other.id
+            && name.equals(other.name);
+}
+```
+
+Everything needed for the comparison is already inside:
+
+```text
+Person
+├── id
+└── name
+```
+
+No:
+
+```text
+network
+database
+file
+DNS
+external API
+```
+
+is needed.
+
+---
+
+This is different from mutable objects, Compare the two situations.
+
+1. Mutable object
+
+    ```java
+    Person p = new Person("Alice");
+    Person q = new Person("Alice");
+
+    p.equals(q);       // true
+
+    p.setName("Bob");
+
+    p.equals(q);       // false
+    ```
+
+    This is allowed.
+
+    Why?
+
+    Because:
+
+    ```text
+    object state changed
+        ↓
+    equality-relevant state changed
+        ↓
+    equality result changed
+    ```
+
+    That's legitimate.
+
+2.  External resource
+
+    With a problematic URL-style design:
+
+    ```text
+    url1.equals(url2)
+        ↓
+    DNS
+        ↓
+    true
+
+    DNS changes
+
+    url1.equals(url2)
+        ↓
+    DNS
+        ↓
+    false
+    ```
+
+    But:
+
+    ```text
+    url1 didn't change
+    url2 didn't change
+    ```
+
+    The equality result changed anyway.
+
+    That's the problem.
+
+---
+
+**`equals()` should be a pure calculation**
+
+A useful mental model is:
+
+> **Treat `equals()` like a pure function over the objects' state.**
+
+Conceptually:
+
+```text
+equals(a, b)
+    =
+f(state(a), state(b))
+```
+
+It should not be:
+
+```text
+equals(a, b)
+    =
+f(state(a), state(b), network, database, currentTime, DNS, ...)
+```
+
+The first is predictable. The second is dangerous.
+
+:::note
+
+`URL` vs `URI`
+
+There's also a useful modern Java distinction here.
+
+When you need to represent a URI rather than a resource-accessing URL, Java provides:
+
+```java
+java.net.URI
+```
+
+A `URI` represents the identifier itself and doesn't have the same resource-resolution semantics associated with `URL`.
+
+For example:
+
+```java
+URI a = URI.create("https://example.com");
+URI b = URI.create("https://example.com");
+
+System.out.println(a.equals(b));
+```
+
+The equality operation is based on the URI representation rather than requiring a DNS lookup.
+
+This illustrates the general design principle:
+
+```text
+Identifier/value
+      ↓
+compare representation
+
+Resource/location requiring resolution
+      ↓
+may involve external state
+```
+
+:::
+
+##### Summary
+For unchanged equality-relevant state, `equals()` must consistently return the same result. Therefore, `equals()` should be based only on deterministic, locally available state and should not depend on external resources whose state can change independently of the objects.
+
+The mental model is:
+
+```text
+             equals(a, b)
+                  │
+                  ▼
+       ┌─────────────────────┐
+       │ State of a and b    │
+       │ already in memory   │
+       └─────────────────────┘
+                  │
+                  ▼
+            deterministic
+                result
+                  │
+                  ▼
+      
+```
+And the two major dangers are:
+
+```text
+Consistency
+│
+├── Object changes
+│      └── Mutable equality state
+│
+└── Outside world changes
+       └── Network / DNS / DB / time / etc.
+```
+
+The first can be legitimate **if the object was modified**.
+
+The second is something your `equals()` implementation should **avoid entirely**.
+
+#### Non-null
+ll objects must be unequal to
+null. 
+
+For any non-null object:
+
+```java
+x.equals(null)
+```
+
+must return:
+
+```text
+false
+```
+
+It should not throw an exception merely because the argument is `null`.
+
+While it is hard to imagine accidentally returning true in response to the
+invocation `o.equals(null)`, it isn’t hard to imagine accidentally throwing a `NullPointerException`. The general contract prohibits this. Many classes have
+equals methods that guard against it with an explicit test for `null`:
+```java
+@Override public boolean equals(Object o) {
+    if(o == null){
+        return false;
+        //...
+    }
+```
+If this type check were missing and the equals method were passed an argument
+of the wrong type, the equals method would throw a `ClassCastException`,
+which violates the equals contract. But the `instanceof` operator is specified to
+return false if its first operand is `null`, regardless of what type appears in the
+second operand [JLS, 15.20.2]. Therefore, the type check will return false if
+null is passed in, so you don’t need an explicit null check.
+## equals() and inheritance
+
+Inheritance makes `equals()` more subtle than it first appears.
+
+The key question is:
+
+> **When a subclass inherits or overrides `equals()`, what does it mean for an object of the subclass to be equal to an object of the superclass?**
+
+This matters because `equals()` must obey **symmetry** and **transitivity**.
+### superclass/subclass equality
+Start with a simple inheritance hierarchy
+
+Suppose we have:
+
+```java
+class Animal {
+    private final String name;
+
+    Animal(String name) {
+        this.name = name;
+    }
+}
+```
+
+and:
+
+```java
+class Dog extends Animal {
+    private final String breed;
+
+    Dog(String name, String breed) {
+        super(name);
+        this.breed = breed;
+    }
+}
+```
+
+The hierarchy is:
+
+```text
+Object
+   │
+ Animal
+   │
+  Dog
+```
+
+Because `Dog` extends `Animal`, a `Dog` **is an** `Animal`.
+
+Therefore:
+
+```java
+Animal animal = new Dog("Max", "Labrador");
+```
+
+is valid.
+
+But this creates an important question for equality:
+
+```java
+Animal a = ...
+Dog d = ...
+```
+
+Can:
+
+```java
+a.equals(d)
+```
+
+be `true`?
+
+And if it is:
+
+```java
+d.equals(a)
+```
+
+must also be `true`.
+
+That's where inheritance becomes tricky.
+
+---
+
+**The problem with adding equality fields in a subclass**
+
+Imagine `Animal` defines equality based only on `name`:
+
+```java
+class Animal {
+    protected final String name;
+
+    Animal(String name) {
+        this.name = name;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (!(obj instanceof Animal other)) {
+            return false;
+        }
+
+        return Objects.equals(name, other.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name);
+    }
+}
+```
+
+Now `Dog` adds:
+
+```java
+breed
+```
+
+and wants `breed` to participate in equality.
+
+You might naturally write:
+
+```java
+class Dog extends Animal {
+    private final String breed;
+
+    Dog(String name, String breed) {
+        super(name);
+        this.breed = breed;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (!(obj instanceof Dog other)) {
+            return false;
+        }
+
+        return Objects.equals(breed, other.breed)
+                && super.equals(other);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), breed);
+    }
+}
+```
+
+At first glance this looks reasonable.
+
+But now we have a problem.
+
+---
+
+**Symmetry can break**
+
+Create:
+
+```java
+Animal animal = new Animal("Max");
+
+Dog dog = new Dog("Max", "Labrador");
+```
+
+Now:
+
+```java
+animal.equals(dog)
+```
+
+The `Animal.equals()` implementation sees:
+
+```text
+dog is an Animal
+```
+
+and compares the `name`:
+
+```text
+"Max" == "Max"
+```
+
+So:
+
+```text
+animal.equals(dog) → true
+```
+
+But now:
+
+```java
+dog.equals(animal)
+```
+
+The `Dog.equals()` implementation checks:
+
+```java
+if (!(obj instanceof Dog other)) {
+    return false;
+}
+```
+
+`animal` isn't a `Dog`.
+
+Therefore:
+
+```text
+dog.equals(animal) → false
+```
+
+We have:
+
+```text
+animal.equals(dog) → true
+
+dog.equals(animal) → false
+```
+
+That's a violation of the `equals()` contract.
+
+Specifically, **symmetry** is broken.
+
+---
+
+**But there is another design question**
+
+Suppose we have:
+
+```java
+class Animal {
+    String name;
+}
+```
+
+and:
+
+```java
+class Dog extends Animal {
+    String breed;
+}
+```
+
+What should equality mean?
+
+There are at least two possible designs.
+
+1. Design A — Equality only within the same class
+
+```text
+Animal("Max") != Dog("Max", "Labrador")
+```
+
+because they are different types.
+
+2. Design B — Equality across the hierarchy
+
+Maybe you decide:
+
+```text
+Animal("Max") == Dog("Max", "Labrador")
+```
+
+because the `Animal` portion is considered sufficient for equality.
+
+But then what happens when `Dog` adds `breed`?
+
+```text
+Dog("Max", "Labrador")
+Dog("Max", "Beagle")
+```
+
+Should these be equal?
+
+If `breed` participates in equality:
+
+```text
+false
+```
+
+But then we have difficulty making equality consistent with the superclass.
+
+This is the core inheritance problem.
+
+---
+
+### The classic inheritance problem
+
+Think of it like this:
+
+```text
+              Animal
+             /      \
+            /        \
+        name only    Dog
+                     │
+                 name + breed
+```
+
+The superclass equality says:
+
+```text
+Animal equality:
+name
+```
+
+The subclass wants:
+
+```text
+Dog equality:
+name + breed
+```
+
+Now consider:
+
+```text
+Animal("Max")
+Dog("Max", "Labrador")
+Dog("Max", "Beagle")
+```
+
+The `Animal` implementation may say:
+
+```text
+Animal("Max") == Dog("Max", "Labrador")
+Animal("Max") == Dog("Max", "Beagle")
+```
+
+But the `Dog` implementation may say:
+
+```text
+Dog("Max", "Labrador") != Dog("Max", "Beagle")
+```
+
+Now consider transitivity:
+
+```text
+A = Animal("Max")
+B = Dog("Max", "Labrador")
+C = Dog("Max", "Beagle")
+```
+
+If:
+
+```text
+A.equals(B) == true
+
+A.equals(C) == true
+```
+
+but:
+
+```text
+B.equals(C) == false
+```
+
+then equality is not behaving transitively.
+
+So inheritance can cause **both symmetry and transitivity problems**.
+
+---
+
+**A useful rule: equality should have a stable definition**
+
+When designing a class hierarchy, ask:
+
+> **Can the subclass add state that changes the meaning of equality?**
+
+If yes, inheriting equality from the superclass can become problematic.
+
+For example:
+
+```text
+Person
+  │
+  └── Employee
+          │
+          └── salary
+```
+
+Suppose `Person.equals()` compares:
+
+```text
+name + dateOfBirth
+```
+
+Then `Employee` adds:
+
+```text
+employeeId
+salary
+department
+```
+
+Should those fields participate in equality?
+
+If the subclass changes the equality definition, the superclass and subclass can easily disagree.
+
+---
+
+### instanceof
+Why `instanceof` can cause this problem
+
+This is the important part.
+
+The superclass says:
+
+```java
+obj instanceof Animal
+```
+
+The subclass says:
+
+```java
+obj instanceof Dog
+```
+
+Since:
+
+```text
+Dog IS-A Animal
+```
+
+we get:
+
+```text
+Dog instanceof Animal → true
+
+Animal instanceof Dog → false
+```
+
+So the two `equals()` methods can disagree about which objects are eligible for comparison.
+
+This is why inheritance and `equals()` require careful design.
+
+### getClass()
+`getClass()` doesn't automatically solve everything
+
+A common alternative is:
+
+```java
+if (obj == null || getClass() != obj.getClass()) {
+    return false;
+}
+```
+
+For example:
+
+```java
+@Override
+public boolean equals(Object obj) {
+    if (this == obj) {
+        return true;
+    }
+
+    if (obj == null || getClass() != obj.getClass()) {
+        return false;
+    }
+
+    Animal other = (Animal) obj;
+
+    return Objects.equals(name, other.name);
+}
+```
+
+Now:
+
+```java
+Animal animal = new Animal("Max");
+Dog dog = new Dog("Max", "Labrador");
+```
+
+gives:
+
+```text
+animal.equals(dog) → false
+dog.equals(animal) → false
+```
+
+because:
+
+```text
+animal.getClass() == Animal.class
+
+dog.getClass() == Dog.class
+```
+
+So the equality comparison is restricted to objects of exactly the same runtime class.
+
+This avoids the symmetry problem.
+
+---
+
+**But there is another design question**
+
+Suppose we have:
+
+```java
+class Animal {
+    String name;
+}
+```
+
+and:
+
+```java
+class Dog extends Animal {
+    String breed;
+}
+```
+
+What should equality mean?
+
+There are at least two possible designs.
+
+1. Design A — Equality only within the same class
+
+    ```text
+    Animal("Max") != Dog("Max", "Labrador")
+    ```
+
+    because they are different types.
+
+2. Design B — Equality across the hierarchy
+
+    Maybe you decide:
+
+    ```text
+    Animal("Max") == Dog("Max", "Labrador")
+    ```
+
+    because the `Animal` portion is considered sufficient for equality.
+
+    But then what happens when `Dog` adds `breed`?
+
+    ```text
+    Dog("Max", "Labrador")
+    Dog("Max", "Beagle")
+    ```
+
+    Should these be equal?
+
+    If `breed` participates in equality:
+
+    ```text
+    false
+    ```
+
+    But then we have difficulty making equality consistent with the superclass.
+
+    This is the core inheritance problem.
+
+---
+### `instanceof` vs `getClass()`
+
+This is one of the most important choices when implementing `equals()`.
+
+#### Using `instanceof`
+
+```java
+if (!(obj instanceof Person other)) {
+    return false;
+}
+```
+
+Means approximately:
+
+> This object can be compared with any `Person` or subclass of `Person`.
+
+This can work well when the equality semantics are intentionally designed to work across the hierarchy.
+
+But subclasses must not break the contract.
+
+---
+
+#### Using `getClass()`
+
+```java
+if (obj == null || getClass() != obj.getClass()) {
+    return false;
+}
+```
+
+Means:
+
+> Only objects of exactly the same runtime class can be equal.
+
+This makes inheritance-related equality problems easier to avoid.
+
+---
+
+### symmetry problem
+Create:
+
+```java
+Animal animal = new Animal("Max");
+
+Dog dog = new Dog("Max", "Labrador");
+```
+
+Now:
+
+```java
+animal.equals(dog)
+```
+
+The `Animal.equals()` implementation sees:
+
+```text
+dog is an Animal
+```
+
+and compares the `name`:
+
+```text
+"Max" == "Max"
+```
+
+So:
+
+```text
+animal.equals(dog) → true
+```
+
+But now:
+
+```java
+dog.equals(animal)
+```
+
+The `Dog.equals()` implementation checks:
+
+```java
+if (!(obj instanceof Dog other)) {
+    return false;
+}
+```
+
+`animal` isn't a `Dog`.
+
+Therefore:
+
+```text
+dog.equals(animal) → false
+```
+
+We have:
+
+```text
+animal.equals(dog) → true
+
+dog.equals(animal) → false
+```
+
+That's a violation of the `equals()` contract.
+
+Specifically, **symmetry** is broken.
+
+---
+
+### transitivity problem
+
+## When to Override and When Not to Override
+Overriding the equals method seems simple, but there are many ways to get it
+wrong, and consequences can be **dire** because `equals()` is not an isolated method.
+
+It participates in many Java APIs:
+
+```text
+                 equals()
+                    │
+       ┌────────────┼─────────────┐
+       │            │             │
+   HashSet       HashMap       List.contains()
+       │            │             │
+       └────────────┼─────────────┘
+                    │
+             object equality
+```
+
+For example:
+
+```java
+Set<Person> people = new HashSet<>();
+
+people.add(person1);
+
+System.out.println(people.contains(person2));
+```
+
+Whether this works as you expect depends on the equality contract—and for hash-based collections, also `hashCode()`.
+
+That's why this rule is so important:
+
+> **If you override `equals()`, you are not merely writing a comparison method. You are defining a contract that other Java APIs will depend on.**
+
+---
+
+### When Not To Override 
+
+The easiest way to avoid problems is not to
+override the equals method, in which case each instance of the class is equal only
+to itself. 
+
+**you should not automatically override `equals()` just because your class has fields.** In many cases, the default `Object.equals()` behavior is exactly what you want.
+
+The key question is:
+
+> **Does this class have a meaningful notion of “two different objects represent the same thing/value”?**
+
+If the answer is **no**, keep the inherited `Object.equals()`.
+
+This is the right thing to do if any of the following conditions apply:
+
+#### Case #1 — Each instance is inherently unique
+
+This is true for classes such as Thread that represent active entities rather than values. The equals implementation provided by Object has exactly the right behavior for these classes.
+
+Consider:
+
+```java
+Thread t1 = new Thread();
+Thread t2 = new Thread();
+```
+
+Even if both threads happen to have the same configuration, they represent **different active threads**.
+
+```text
+Thread t1 ──► [one active thread]
+Thread t2 ──► [another active thread]
+```
+
+It wouldn't make much sense to say:
+
+```java
+t1.equals(t2) == true
+```
+
+just because some fields happen to match.
+
+**Entity vs value**
+
+This connects directly to the **Value Object** concept we discussed:
+
+| Object type | What defines equality? | Example                          |
+| ----------- | ---------------------- | -------------------------------- |
+| Entity      | Identity               | `Thread`, `Order`, `Customer`    |
+| Value       | State/value            | `Money`, `EmailAddress`, `Point` |
+
+For an entity, identity often matters:
+
+```java
+Thread t1 = new Thread();
+Thread t2 = new Thread();
+
+t1.equals(t2); // false
+```
+
+That's perfectly reasonable.
+
+**Mental model**
+
+```text
+Entity
+   │
+   └── "Which object is this?"
+           ↓
+       identity matters
+
+
+Value Object
+   │
+   └── "What value does this represent?"
+           ↓
+       state matters
+```
+
+So if your class represents a unique entity, **don't override `equals()` merely to compare fields.**
+
+---
+
+#### Case #2 — There is no useful logical equality
+
+There is no need for the class to provide a “logical equality” test. Your class might contain values that *could* technically be compared, but there is no useful equality concept that clients actually need.
+
+For
+example, java.util.regex.Pattern could have overridden equals to check
+whether two Pattern instances represented exactly the same regular
+expression, but the designers didn’t think that clients would need or want this
+functionality. Under these circumstances, the equals implementation
+inherited from Object is ideal.
+
+Imagine:
+
+```java
+Pattern p1 = Pattern.compile("\\d+");
+Pattern p2 = Pattern.compile("\\d+");
+```
+
+You could imagine defining:
+
+```java
+p1.equals(p2) == true
+```
+
+because both represent the same regular expression.
+
+But Java's designers chose not to give `Pattern` this logical equality behavior.
+
+Why? Because the useful purpose of a `Pattern` object is not simply:
+
+> "Does this object represent the same text as another object?"
+
+It is an object used for regex operations. Therefore, the inherited identity-based behavior is acceptable.
+
+```java
+p1.equals(p2); // false
+```
+
+even though:
+
+```text
+p1 pattern = "\d+"
+p2 pattern = "\d+"
+```
+
+The important distinction is:
+
+> **Being able to define equality doesn't mean that you should define equality.**
+
+---
+
+#### Case #3 — The superclass already defines the correct equality
+A superclass has already overridden equals, and the superclass behavior
+is appropriate for this class.
+
+Suppose your class extends a superclass that already implements `equals()` correctly for the entire class hierarchy. Then you don't necessarily need to override it.
+
+For example, most `Set` implementations inherit
+their equals implementation from `AbstractSet`, `List` implementations from
+`AbstractList`, and `Map` implementations from `AbstractMap`.
+
+```text
+AbstractSet
+    │
+    ├── HashSet
+    ├── TreeSet
+    └── ...
+```
+
+`AbstractSet` provides equality behavior appropriate for sets.
+
+Conceptually:
+
+```java
+Set<Integer> a = new HashSet<>();
+Set<Integer> b = new HashSet<>();
+
+a.add(1);
+a.add(2);
+
+b.add(1);
+b.add(2);
+
+System.out.println(a.equals(b)); // true
+```
+
+The two sets are different objects:
+
+```text
+a ──► HashSet {1, 2}
+
+b ──► HashSet {1, 2}
+```
+
+but they represent the same **set value**, so the inherited implementation is appropriate.
+
+The same general idea applies to:
+
+```text
+AbstractSet  → Set implementations
+AbstractList → List implementations
+AbstractMap  → Map implementations
+```
+
+The subclass doesn't need to reinvent equality if the superclass already provides the right semantics.
+
+---
+
+#### Case #4 — Private or package-private class that nobody can meaningfully compare
+
+The class is private or package-private, and you are certain that its equals
+method will never be invoked. 
+
+Suppose you have:
+
+```java
+class InternalHelper {
+    private int value;
+
+    // ...
+}
+```
+
+and the class is:
+
+* `private` nested class, or
+* package-private
+* never exposed outside the implementation
+* never used in a way where `equals()` makes sense
+
+Then you might simply inherit `Object.equals()`.
+
+If you are extremely risk-averse, you can override the equals method to ensure that it isn’t invoked accidentally:
+
+```java
+@Override
+public boolean equals(Object o) {
+    throw new AssertionError();
+}
+```
+
+This means:
+
+> "If somebody ever calls `equals()` on this class, something has gone wrong."
+
+For example:
+
+```java
+class InternalState {
+    @Override
+    public boolean equals(Object o) {
+        throw new AssertionError("equals should never be called");
+    }
+}
+```
+
+Then:
+
+```java
+InternalState a = new InternalState();
+InternalState b = new InternalState();
+
+a.equals(b);
+```
+
+throws:
+
+```text
+java.lang.AssertionError: equals should never be called
+```
+
+**Why would anyone do this?**
+
+Because the developer has made a strong design assumption:
+
+```text
+This class should never participate in equality comparisons.
+```
+
+If that assumption is violated later, the error is detected immediately instead of silently producing potentially incorrect behavior.
+
+This is generally only appropriate for tightly controlled internal classes—not ordinary application/domain classes.
+
+---
+
+**The important decision tree**
+
+When creating a class, don't start with: "Should I override `equals()`?"
+
+Start with: **"What does equality mean for this class?"**
+
+Then:
+
+```text
+                     Do I need equals()?
+                             │
+                             ▼
+              Does the class have meaningful
+                  logical/value equality?
+                       /             \
+                     NO               YES
+                     │                 │
+                     ▼                 ▼
+            Keep Object.equals()   Override equals()
+                     │                 │
+                     │                 ▼
+                     │          Must also override
+                     │             hashCode()
+                     │
+                     ▼
+       Is superclass equality already
+             appropriate?
+              /          \
+            YES           NO
+             │             │
+             ▼             ▼
+      Inherit it       Define your own
+```
+
+---
+
+**A very useful comparison**
+
+Consider these two classes.
+
+1. **Entity**
+
+```java
+public final class Customer {
+    private final long id;
+    private final String name;
+
+    public Customer(long id, String name) {
+        this.id = id;
+        this.name = name;
+    }
+}
+```
+
+Suppose:
+
+```java
+Customer c1 = new Customer(100, "Gamal");
+Customer c2 = new Customer(100, "Gamal");
+```
+
+Should:
+
+```java
+c1.equals(c2)
+```
+
+be `true`?
+
+It depends on the domain.
+
+If a customer is identified by its identity:
+
+```text
+Customer #100
+```
+
+then perhaps the class should define equality using the identity:
+
+```text
+Customer #100 == Customer #100
+```
+
+But if each object represents a unique in-memory entity and identity is intentionally reference-based, the default behavior may be appropriate.
+
+---
+
+2. **Value object**
+
+Now consider:
+
+```java
+public final class Money {
+    private final BigDecimal amount;
+    private final Currency currency;
+
+    public Money(BigDecimal amount, Currency currency) {
+        this.amount = amount;
+        this.currency = currency;
+    }
+}
+```
+
+Here logical equality is much more natural:
+
+```text
+Money(100 USD)
+        ==
+Money(100 USD)
+```
+
+So a value object normally needs value-based `equals()` and `hashCode()`.
+
+---
+
+#### In Summary
+
+Keep `Object.equals()` when:
+
+1. **The object has identity rather than value semantics.**
+
+   ```text
+   Thread
+   ```
+2. **There is no useful logical equality that clients need.**
+
+   ```text
+   Pattern
+   ```
+3. **A superclass already provides the correct equality behavior.**
+
+   ```text
+   HashSet → AbstractSet
+   ArrayList → AbstractList
+   HashMap → AbstractMap
+   ```
+4. **The class is tightly controlled/internal and equality is intentionally irrelevant.**
+
+Override `equals()` when:
+
+```text
+Two separate instances can represent the SAME logical value
+                    ↓
+           logical equality matters
+                    ↓
+              override equals()
+                    +
+              override hashCode()
+```
+
+That is the central connection to **value objects**: a value object usually exists precisely because its **value**, rather than its object identity, is what matters.
+
+### When to Override `equals()`
+Override `equals()` when the class has meaningful logical equality that is different from object identity, and the superclass has not already provided that equality.
+
+***The basic rule***
+
+There are two questions to ask:
+
+```text
+Does this class have logical equality?
+              │
+        ┌─────┴─────┐
+       NO           YES
+       │             │
+       ▼             ▼
+ Keep Object    Has superclass
+   equals()     already implemented it?
+                    │
+              ┌─────┴─────┐
+             YES          NO
+              │            │
+              ▼            ▼
+         Inherit it    Override equals()
+```
+
+So the appropriate heading for this passage in your TOC is:
+
+**What does "logical equality" mean?**
+
+Suppose we have:
+
+```java
+String s1 = new String("Java");
+String s2 = new String("Java");
+```
+
+There are two different objects:
+
+```text
+s1 ───────► String("Java")
+                    ≠
+s2 ───────► String("Java")
+```
+
+Object identity says:
+
+```java
+s1 == s2
+```
+
+is:
+
+```text
+false
+```
+
+because they are different objects.
+
+But logically:
+
+```text
+"Java" == "Java"
+```
+
+So `String` defines logical equality:
+
+```java
+s1.equals(s2)  // true
+```
+
+That's exactly what users of `String` expect.
+
+---
+
+This is generally the case for value classes. A value
+class is simply a class that represents a value, such as Integer or String. A
+programmer who compares references to value objects using the equals method
+expects to find out whether they are logically equivalent, not whether they refer to
+the same object.
+
+**value classes**:Their meaning comes primarily from the value they contain.
+
+For example:
+
+```java
+Integer a = new Integer(100);
+Integer b = new Integer(100);
+```
+
+Conceptually:
+
+```text
+a ──► Integer(100)
+
+b ──► Integer(100)
+```
+
+Different objects, same value.
+
+Therefore:
+
+```java
+a.equals(b)
+```
+
+should be:
+
+```text
+true
+```
+
+rather than:
+
+```text
+false
+```
+
+The same idea applies to:
+
+```text
+String
+Integer
+BigDecimal
+LocalDate
+UUID
+...
+```
+
+when their equality semantics are value-based.
+
+---
+
+some **value classes don't need to override `equals()`**.
+One kind of value class that does not require the equals method to be overridden is a class that uses **instance control** to ensure that at most one object
+exists with each value. 
+
+The classic example is an enum, Enum types fall into this category. For these
+classes, logical equality is the same as object identity, so Object’s equals method
+functions as a logical equals method.
+
+Consider:
+
+```java
+enum Day {
+    MONDAY,
+    TUESDAY,
+    WEDNESDAY
+}
+```
+
+Java guarantees that:
+
+```java
+Day.MONDAY
+```
+
+refers to the unique enum instance representing `MONDAY`.
+
+There isn't going to be:
+
+```text
+Day.MONDAY #1
+Day.MONDAY #2
+Day.MONDAY #3
+```
+
+Instead:
+
+```text
+Day.MONDAY
+     │
+     ▼
+ one unique object
+```
+
+Therefore:
+
+```java
+Day d1 = Day.MONDAY;
+Day d2 = Day.MONDAY;
+
+System.out.println(d1 == d2);       // true
+System.out.println(d1.equals(d2));  // true
+```
+
+Here:
+
+```text
+logical equality
+       =
+object identity
+```
+
+So `Day` does not need to override `equals()`. the inherited `Object.equals()` is sufficient. This gives us an important distinction
+
+Normally:
+
+```text
+Object identity ≠ logical equality
+```
+
+For a value class:
+
+```text
+Money(100, USD)
+Money(100, USD)
+
+different objects
+       ↓
+same logical value
+       ↓
+equals() should return true
+```
+
+But for an enum:
+
+```text
+Day.MONDAY
+       ↓
+unique instance
+       ↓
+identity itself represents the value
+```
+
+Therefore:
+
+```text
+identity = logical equality
+```
+
+No custom `equals()` is necessary.
+
+### Decision rule
+
+```text
+Should I override equals()?
+│
+├── Does the class have logical equality?
+│      │
+│      ├── No
+│      │    └── Don't override equals()
+│      │
+│      └── Yes
+│           │
+│           ├── Has superclass already implemented
+│           │   appropriate equality?
+│           │       │
+│           │       ├── Yes
+│           │       │    └── Inherit equals()
+│           │       │
+│           │       └── No
+│           │            │
+│           │            ├── Is each value represented
+│           │            │   by a unique instance?
+│           │            │
+│           │            ├── Yes
+│           │            │    └── Object.equals() is sufficient
+│           │            │
+│           │            └── No
+│           │                 └── Override equals()
+│           │                     + hashCode()
+```
+**Override `equals()` when two different instances can represent the same logical value and users reasonably expect those instances to compare equal.**
+
+Examples:
+
+| Class kind           | Override `equals()`? | Reason                                             |
+| -------------------- | -------------------: | -------------------------------------------------- |
+| `String`             |                  Yes | Same characters = same logical value               |
+| `Integer`            |                  Yes | Same integer value = same logical value            |
+| `Money` value object |          Usually yes | Same amount/currency = same value                  |
+| `Thread`             |                   No | Each instance represents a distinct active entity  |
+| `Pattern`            |                   No | No useful logical equality defined                 |
+| `HashSet`            |            Inherited | `AbstractSet` already defines appropriate equality |
+| `Enum`               |                   No | Unique instance represents each value              |
+
+## Eqaulity and Collections
+equals method enables instances to serve as map keys or set
+elements with predictable, desirable behavior.
+
+Suppose you create your own value class:
+
+```java
+public final class Money {
+    private final int amount;
+    private final String currency;
+
+    public Money(int amount, String currency) {
+        this.amount = amount;
+        this.currency = currency;
+    }
+}
+```
+
+Without overriding `equals()`:
+
+```java
+Money m1 = new Money(100, "USD");
+Money m2 = new Money(100, "USD");
+
+System.out.println(m1.equals(m2));
+```
+
+You get:
+
+```text
+false
+```
+
+because `Object.equals()` compares identity.
+
+But logically:
+
+```text
+Money(100, USD)
+        =
+Money(100, USD)
+```
+
+So `Money` should override `equals()`.
+
+And because `Money` is a value object, it should also override `hashCode()` consistently.
+
+Then:
+
+```java
+Set<Money> prices = new HashSet<>();
+
+prices.add(m1);
+
+System.out.println(prices.contains(m2));
+```
+
+can correctly produce:
+
+```text
+true
+```
+
+This is one of the major reasons `equals()` matters.
+### `equals()` in Java collections
+
+A useful mental model is:
+
+```text
+                    equals()
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+     List           Set           Map keys
+        │              │              │
+   contains()     duplicates      get()
+   remove()       detection       containsKey()
+   indexOf()                     remove()
+```
+
+But hash-based collections have an additional dependency:
+
+```text
+              HashMap / HashSet
+                     │
+              ┌──────┴──────┐
+              │             │
+         hashCode()      equals()
+              │             │
+       locate candidates   confirm
+             bucket        equality
+```
+
+Therefore:
+
+> **If you override `equals()`, you must also override `hashCode()` consistently.**
+## equals() and mutable fields
+
+Suppose equality depends on:
+
+```java
+name
+age
+```
+
+and you put the object into a `HashSet`.
+
+If those fields can later change, the object's hash code can change while it is inside the set.
+
+Conceptually:
+
+```text
+HashSet
+   │
+   └── Person
+         │
+       hashCode = 123
+```
+
+Then you change the person:
+
+```text
+Person
+  │
+  └── age changes
+          │
+          ▼
+    hashCode = 456
+```
+
+The object may now be in the bucket corresponding to `123`, while searches calculate `456`.
+
+This is one reason immutable objects are particularly convenient as keys in hash-based collections.
+
+---
+
+## Equality design
+
+### Implementation recipe for `equals()`
+
+For many ordinary classes, if equality is supposed to be specific to the concrete class, this is straightforward:
+
+```java
+@Override
+public boolean equals(Object obj) {
+    if (this == obj) {
+        return true;
+    }
+
+    if (obj == null || getClass() != obj.getClass()) {
+        return false;
+    }
+
+    Person other = (Person) obj;
+
+    return age == other.age &&
+           Objects.equals(name, other.name);
+}
+```
+
+Now:
+
+```java
+Person p1 = new Person("Gamal", 30);
+Person p2 = new Person("Gamal", 30);
+Employee e = new Employee("Gamal", 30);
+```
+
+You can have:
+
+```text
+p1.equals(p2) → true
+
+p1.equals(e)  → false
+e.equals(p1)  → false
+```
+
+The equality boundary is clear.
+
+---
+This is the practical **implementation recipe for for a high-quality `equals()`** method. The four steps are basically: **same object → correct type → cast → compare significant state**.
+
+
+#### 1. Same Object
+Use the `==` operator to check if the argument is a reference to this object
+
+
+If so, return true. 
+Start with:
+
+```java
+if (this == o) {
+    return true;
+}
+```
+This checks **object identity**.
+
+```java
+Person p = new Person("Alice");
+
+p.equals(p);   // true
+```
+
+Since an object must always equal itself, we can immediately return `true`.
+
+This is just a **performance optimization** but one that is worth doing if the comparison is potentially expensive.
+
+Suppose the class has many fields:
+
+```java
+if (this == o) {
+    return true;
+}
+```
+
+avoids doing all the field comparisons when the two references point to exactly the same object.
+
+It's especially useful if equality is expensive.
+
+#### 2. Correct Type
+Next:
+
+```java
+if (!(o instanceof Person)) {
+    return false;
+}
+```
+Use the `instanceof` operator to check if the argument has the correct type.
+
+If not, return `false`. 
+
+For example:
+
+```java
+Person p = new Person("Alice");
+
+p.equals("Alice");    // false
+p.equals(null);       // false
+p.equals(new Object()); // false
+```
+
+`instanceof` handles `null` too:
+
+```java
+null instanceof Person
+```
+
+is simply:
+
+```text
+false
+```
+
+So you don't normally need a separate:
+
+```java
+if (o == null)
+```
+
+check.
+
+Typically, the correct type is the class in which the method
+occurs. Occasionally, it is some interface implemented by this class.
+
+Use an
+interface if the class implements an interface that refines the equals contract
+to permit comparisons across classes that implement the interface. 
+
+Collection
+interfaces such as Set, List, Map, and Map.Entry have this property.
+
+Java's collection interfaces have special equality contracts.
+
+For example, `Set` defines equality in terms of set contents, so different implementations can compare equal:
+
+```java
+Set<String> a = new HashSet<>();
+Set<String> b = new TreeSet<>();
+
+a.add("A");
+b.add("A");
+
+a.equals(b);  // true
+b.equals(a);  // true
+```
+
+The objects have different concrete classes:
+
+```text
+HashSet
+   │
+   └── Set
+
+TreeSet
+   │
+   └── Set
+```
+
+but the `Set` contract defines equality across implementations.
+
+That's why the Effective Java rule says:
+
+```text
+Usually:
+    compare against the class
+
+Exception:
+    compare against an interface
+    when that interface explicitly defines
+    cross-implementation equality
+```
+
+You **should not generalize this** to "use an interface whenever possible."
+
+The interface itself must establish an equality contract that allows cross-class comparisons.
+
+#### 3. Cast
+Cast the argument to the correct type. Because this cast was preceded by an instanceof test, it is guaranteed to succeed.
+
+Now:
+
+```java
+Person other = (Person) o;
+```
+
+The cast is safe because we just checked:
+
+```java
+o instanceof Person
+```
+
+So:
+
+```java
+if (!(o instanceof Person)) {
+    return false;
+}
+
+Person other = (Person) o;
+```
+
+is effectively saying:
+
+> "If this isn't a `Person`, we're done. Otherwise, treat it as a `Person`."
+
+Modern Java can combine these two steps using pattern matching:
+
+```java
+if (!(o instanceof Person other)) {
+    return false;
+}
+```
+
+Now `other` is already the correctly typed variable.
+
+#### 4. Compare significant state
+This is the most important part.
+
+For each “significant” field in the class, check if that field of the argument
+matches the corresponding field of this object. If all these tests succeed, return true; otherwise, return false. 
+Suppose:
+
+```java
+public final class Person {
+    private final String name;
+    private final int age;
+
+    public Person(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+
+        if (!(o instanceof Person other)) {
+            return false;
+        }
+
+        return age == other.age
+                && name.equals(other.name);
+    }
+}
+```
+
+Here the significant fields are:
+
+```text
+Person
+├── name  ← significant
+└── age   ← significant
+```
+
+Therefore:
+
+```java
+return age == other.age
+        && name.equals(other.name);
+```
+
+means:
+
+```text
+this.age    == other.age
+AND
+this.name   == other.name
+```
+
+Only when **all significant fields match** are the objects considered equal.
+
+
+If the type in Step 2 is an interface, you
+must access the argument’s fields via interface methods; if the type is a class,
+you may be able to access the fields directly, depending on their accessibility.
+
+---
+
+The recipe becomes:
+
+```java
+@Override
+public boolean equals(Object o) {
+
+    // 1. Same object?
+    if (this == o) {
+        return true;
+    }
+
+    // 2 + 3. Correct type and cast
+    if (!(o instanceof Person other)) {
+        return false;
+    }
+
+    // 4. Compare significant fields
+    return age == other.age
+            && name.equals(other.name);
+}
+```
+
+The structure is therefore:
+
+```text
+equals(Object o)
+       │
+       ▼
+┌──────────────────────┐
+│ 1. this == o ?       │
+└──────────┬───────────┘
+           │ yes
+           ▼
+         true
+
+           │ no
+           ▼
+┌──────────────────────┐
+│ 2. instanceof ?      │
+└──────────┬───────────┘
+           │ no
+           ▼
+         false
+
+           │ yes
+           ▼
+┌──────────────────────┐
+│ 3. Cast to type      │
+└──────────┬───────────┘
+           ▼
+┌──────────────────────┐
+│ 4. Compare fields    │
+└──────────┬───────────┘
+           │
+       all match?
+        /       \
+      yes        no
+       │          │
+       ▼          ▼
+     true       false
+```
+
+##### Comparison Guidelines
+once you've identified the significant fields, **how should each field type be compared?** The important idea is:
+
+> **Don't compare every field with the same operator. Choose the comparison based on the field's type.**
+
+
+###### 1. Primitive fields
+
+For primitive types other than `float` and `double`, use `==`.
+
+| Type      | Comparison |
+| --------- | ---------- |
+| `int`     | `==`       |
+| `long`    | `==`       |
+| `short`   | `==`       |
+| `byte`    | `==`       |
+| `char`    | `==`       |
+| `boolean` | `==`       |
+
+For example:
+
+```java
+return age == other.age
+        && id == other.id
+        && active == other.active;
+```
+
+---
+
+###### 2. `float` → `Float.compare()`
+
+Don't simply do:
+
+```java
+this.value == other.value
+```
+
+for a `float` field.
+
+Instead:
+
+```java
+Float.compare(this.value, other.value) == 0
+```
+
+For example:
+
+```java
+public final class Measurement {
+    private final float value;
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Measurement other)) return false;
+
+        return Float.compare(value, other.value) == 0;
+    }
+
+    @Override
+    public int hashCode() {
+        return Float.hashCode(value);
+    }
+}
+```
+
+Why? Because floating-point has special values such as:
+
+```text
+NaN
++0.0
+-0.0
+```
+
+and the behavior of `==` doesn't line up with the equality semantics you generally want for an object's value.
+
+For example:
+
+```java
+Float.NaN == Float.NaN
+```
+
+is:
+
+```text
+false
+```
+
+whereas:
+
+```java
+Float.compare(Float.NaN, Float.NaN) == 0
+```
+
+is:
+
+```text
+true
+```
+
+That's much more appropriate for an equality implementation.
+
+---
+
+###### 3. `double` → `Double.compare()`
+
+Same idea:
+
+```java
+Double.compare(this.value, other.value) == 0
+```
+
+For example:
+
+```java
+return Double.compare(price, other.price) == 0;
+```
+
+Don't use:
+
+```java
+price == other.price
+```
+
+when following this `equals()` recipe.
+
+
+While you could compare float and double fields with the static methods `Float.equals` and `Double.equals`, this would entail autoboxing on every comparison, which would have poor performance.
+
+---
+
+###### 4. Object references → `equals()`
+
+For an object field such as:
+
+```java
+private String name;
+private Address address;
+private Money balance;
+```
+
+you generally compare the objects using their `equals()` methods.
+
+For example:
+
+```java
+return name.equals(other.name)
+        && address.equals(other.address);
+```
+
+This is called **recursive equality**.
+
+For example:
+
+```text
+Person.equals()
+      │
+      ├── name.equals()
+      │
+      └── address.equals()
+              │
+              ├── city.equals()
+              └── street.equals()
+```
+
+Each object is responsible for defining what equality means for itself.
+
+---
+
+**But what if the reference can be `null`?**
+
+Some object reference fields may legitimately contain `null`. To avoid the
+possibility of a `NullPointerException`, check such fields for equality using
+the static method `Objects.equals(Object, Object)`.
+
+```java
+name.equals(other.name)
+```
+
+because:
+
+```java
+name == null
+```
+
+would cause:
+
+```text
+NullPointerException
+```
+
+Instead, use:
+
+```java
+Objects.equals(name, other.name)
+```
+
+`Objects.equals()` safely handles all three cases:
+
+```text
+this.name      other.name       result
+───────────────────────────────────────
+"Alice"        "Alice"          true
+"Alice"        "Bob"            false
+null           null             true
+"Alice"        null             false
+null           "Alice"          false
+```
+
+So this is usually the safest form:
+
+```java
+return Objects.equals(name, other.name);
+```
+
+---
+
+###### 5. Arrays → `Arrays.equals()`
+
+Arrays are another special case. For array fields, apply these guidelines to each element. If every
+element in an array field is significant, use one of the Arrays.equals methods
+
+Don't do:
+
+```java
+array == other.array
+```
+
+because that checks whether the two arrays are the **same array object**.
+
+For example:
+
+```java
+int[] a = {1, 2, 3};
+int[] b = {1, 2, 3};
+
+a == b
+```
+
+is:
+
+```text
+false
+```
+
+even though their contents are equal.
+
+Instead:
+
+```java
+Arrays.equals(a, b)
+```
+
+returns:
+
+```text
+true
+```
+
+So:
+
+```java
+private final int[] values;
+```
+
+would typically be compared with:
+
+```java
+Arrays.equals(values, other.values)
+```
+
+---
+
+**Why `Arrays.equals()`?**
+
+Think of an array as containing multiple equality-relevant fields:
+
+```text
+values
+  │
+  ├── values[0]
+  ├── values[1]
+  ├── values[2]
+  └── ...
+```
+
+`Arrays.equals()` effectively compares corresponding elements.
+
+For:
+
+```java
+int[] a = {1, 2, 3};
+int[] b = {1, 2, 3};
+```
+
+it performs conceptually:
+
+```text
+a[0] == b[0]  → true
+a[1] == b[1]  → true
+a[2] == b[2]  → true
+```
+
+and therefore the arrays are equal.
+
+For object arrays, the corresponding elements are compared using equality semantics rather than reference identity.
+
+---
+
+**The complete comparison table**
+
+| Significant field                                 | Compare using      |
+| ------------------------------------------------- | ------------------ |
+| `int`, `long`, `short`, `byte`, `char`, `boolean` | `==`               |
+| `float`                                           | `Float.compare()`  |
+| `double`                                          | `Double.compare()` |
+| Object reference                                  | `Objects.equals()` |
+| Primitive array                                   | `Arrays.equals()`  |
+| Object array                                      | `Arrays.equals()`  |
+
+So your `equals()` method might look like:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (this == o) {
+        return true;
+    }
+
+    if (!(o instanceof Example other)) {
+        return false;
+    }
+
+    return id == other.id
+            && Float.compare(score, other.score) == 0
+            && Double.compare(price, other.price) == 0
+            && Objects.equals(name, other.name)
+            && Objects.equals(address, other.address)
+            && Arrays.equals(values, other.values);
+}
+```
+
+---
+
+###### 6. Canonical forms
+
+For some classes, such as CaseInsensitiveString above, field comparisons
+are more complex than simple equality tests. If this is the case, you may want
+to store a canonical form of the field so the equals method can do a cheap exact comparison on canonical forms rather than a more costly nonstandard comparison. This technique is most appropriate for immutable classes (Item 17); if
+the object can change, you must keep the canonical form up to date.
+
+This is a more advanced optimization.
+
+Suppose equality requires an expensive comparison.
+
+The earlier `CaseInsensitiveString` example is a good case:
+
+```java
+"Java".equalsIgnoreCase("JAVA")
+```
+
+The equality operation isn't just a simple field comparison.
+
+You could instead store a **canonical form**.
+
+For example:
+
+```java
+public final class CaseInsensitiveString {
+    private final String original;
+    private final String canonical;
+
+    public CaseInsensitiveString(String value) {
+        this.original = Objects.requireNonNull(value);
+        this.canonical = value.toLowerCase(Locale.ROOT);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof CaseInsensitiveString other)) {
+            return false;
+        }
+
+        return canonical.equals(other.canonical);
+    }
+
+    @Override
+    public int hashCode() {
+        return canonical.hashCode();
+    }
+}
+```
+
+Now:
+
+```text
+Original value
+     │
+     ▼
+"JAVA"
+     │
+     ▼
+canonical form
+     │
+     ▼
+"java"
+```
+
+Equality becomes:
+
+```java
+canonical.equals(other.canonical)
+```
+
+instead of repeatedly performing a more complicated case-insensitive comparison.
+
+---
+
+**Why immutability matters here**
+
+This technique works especially well with immutable objects.
+
+Suppose:
+
+```java
+private final String canonical;
+```
+
+The canonical form is calculated once:
+
+```text
+Constructor
+    │
+    ├── original = "JAVA"
+    └── canonical = "java"
+```
+
+and never changes.
+
+Therefore:
+
+```java
+equals()
+hashCode()
+```
+
+can safely use:
+
+```java
+canonical
+```
+
+throughout the object's lifetime.
+
+With a mutable object, however:
+
+```text
+original changes
+      │
+      ▼
+canonical must also change
+      │
+      ▼
+equals/hashCode must remain consistent
+```
+
+If you forget to update the canonical form, your object's equality semantics become incorrect.
+
+---
+
+###### Putting the entire recipe together
+
+You can think of Effective Java's whole rule as:
+
+```text
+                    equals(Object o)
+                           │
+                           ▼
+                   ┌───────────────┐
+                   │ this == o ?   │
+                   └───────┬───────┘
+                           │ yes
+                           ▼
+                         true
+
+                           │ no
+                           ▼
+                   ┌───────────────┐
+                   │ correct type? │
+                   └───────┬───────┘
+                           │ no
+                           ▼
+                         false
+
+                           │ yes
+                           ▼
+                        cast
+                           │
+                           ▼
+                 Compare significant fields
+                           │
+           ┌───────────────┼────────────────┐
+           │               │                │
+           ▼               ▼                ▼
+       primitive        object           array
+           │            reference           │
+           │               │                │
+           ▼               ▼                ▼
+          ==       Objects.equals()   Arrays.equals()
+           │
+     ┌─────┴─────┐
+     ▼           ▼
+  float        double
+     │           │
+     ▼           ▼
+Float.compare  Double.compare
+```
+
+And there is one rule tying everything together:
+
+```text
+                 significant fields
+                        │
+              ┌─────────┴─────────┐
+              ▼                   ▼
+          equals()            hashCode()
+              │                   │
+              └─────────┬─────────┘
+                        ▼
+              SAME equality state
+```
+
+So when implementing `equals()`, the difficult part isn't actually writing the `if` statements. The difficult part is deciding **what the significant fields are and what equality means for the class**. Once that decision is correct, the field-comparison rules above give you a fairly mechanical way to implement it.
+
+
+##### Performance  of `equals()`
+The performance of the equals method may be affected by the order in which
+fields are compared. 
+
+> Once you know which fields participate in equality, **the order in which you compare them can make `equals()` faster.**
+
+**Why does field order matter?**
+
+Consider:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (this == o) return true;
+    if (!(o instanceof Person other)) return false;
+
+    return name.equals(other.name)
+            && age == other.age
+            && address.equals(other.address);
+}
+```
+
+Java evaluates `&&` from left to right and stops as soon as one condition is `false`.
+
+For example:
+
+```text
+name differs
+   │
+   ▼
+false
+   │
+   └── stop
+       └── don't compare age
+       └── don't compare address
+```
+
+So if `name` is very likely to differ, putting it first can save work.
+
+###### 1. Compare likely-to-differ fields early
+For best performance, you should first compare fields that
+are more likely to differ.
+Suppose you have:
+
+```java
+class Person {
+    String firstName;
+    String lastName;
+    int age;
+}
+```
+
+Imagine most comparisons involve completely different people.
+
+You could write:
+
+```java
+return firstName.equals(other.firstName)
+        && lastName.equals(other.lastName)
+        && age == other.age;
+```
+
+If `firstName` usually differs, the method often stops immediately:
+
+```text
+firstName
+   │
+   ├── different → false
+   │
+   └── same
+        │
+        ▼
+     lastName
+        │
+        ├── different → false
+        │
+        └── same
+             │
+             ▼
+            age
+```
+
+That's generally better than checking `age` first if age is usually the same.
+
+###### Compare cheap fields before expensive fields
+
+There are also differences in **comparison cost**.
+
+For example:
+
+```java
+int id;
+String name;
+byte[] data;
+```
+
+Comparing:
+
+```java
+id == other.id
+```
+
+is extremely cheap.
+
+Comparing:
+
+```java
+Arrays.equals(data, other.data)
+```
+
+could be expensive because the array might contain thousands or millions of elements.
+
+So you might write:
+
+```java
+return id == other.id
+        && name.equals(other.name)
+        && Arrays.equals(data, other.data);
+```
+
+instead of:
+
+```java
+return Arrays.equals(data, other.data)
+        && name.equals(other.name)
+        && id == other.id;
+```
+
+If `id` differs, the expensive array comparison is avoided.
+
+###### Prefer The ideal field
+
+The best field to compare early is one that is:
+
+```text
+likely to differ
+        +
+cheap to compare
+        ↓
+excellent early comparison
+```
+
+For example:
+
+```java
+return id == other.id
+        && name.equals(other.name)
+        && Arrays.equals(data, other.data);
+```
+
+If `id` is unique, it's especially effective.
+
+Suppose:
+
+```text
+this.id = 100
+other.id = 200
+```
+
+Then:
+
+```java
+id == other.id
+```
+
+immediately gives:
+
+```text
+false
+```
+
+and nothing else needs to be compared.
+
+###### don't compare fields that aren't part of equality
+You must
+not compare fields that are not part of an object’s logical state, such as lock
+fields used to synchronize operations.
+
+This is much more important than performance.
+
+Suppose:
+
+```java
+class Account {
+    private final long id;
+    private final String username;
+
+    // Not part of logical identity
+    private boolean locked;
+    private int activeConnections;
+}
+```
+
+If the logical equality definition is:
+
+```text
+Account equality = same id + same username
+```
+
+then **do not** write:
+
+```java
+return id == other.id
+        && username.equals(other.username)
+        && locked == other.locked
+        && activeConnections == other.activeConnections;
+```
+
+That would change the meaning of equality.
+
+For example:
+
+```text
+Account A
+id = 10
+username = "alice"
+locked = false
+
+Account B
+id = 10
+username = "alice"
+locked = true
+```
+
+If `locked` isn't part of the logical value, these should still be equal.
+
+So:
+
+> **Performance considerations may determine the order of significant fields, but they must never cause you to include insignificant fields.**
+
+---
+
+Also Don't compare synchronization/lock state
+
+Imagine an object internally has:
+
+```java
+private final Object lock = new Object();
+```
+
+You might have:
+
+```java
+synchronized (lock) {
+    ...
+}
+```
+
+The lock object exists to implement **thread synchronization**.
+
+It doesn't describe the logical value of your object.
+
+Therefore:
+
+```java
+lock.equals(other.lock)
+```
+
+has no place in your `equals()` method.
+
+Think of the distinction as:
+
+```text
+Object state
+│
+├── Logical state
+│     ├── id
+│     ├── name
+│     └── amount
+│
+└── Implementation state
+      ├── lock
+      ├── cache
+      ├── synchronization state
+      └── internal bookkeeping
+```
+
+`equals()` should normally care about the **logical state**, not implementation machinery.
+
+---
+
+
+###### Derived fields can be useful shortcuts
+A **derived field** is something calculated from other significant fields.
+
+For example:
+
+```java
+class Rectangle {
+    private final int width;
+    private final int height;
+
+    private final int area;
+}
+```
+
+`area` isn't independent state:
+
+```text
+width × height
+      │
+      ▼
+    area
+```
+
+You need not compare derived fields,
+which can be calculated from “significant fields,”
+
+You could define equality using only:
+
+```java
+width == other.width
+&& height == other.height
+```
+
+You don't necessarily need:
+
+```java
+area == other.area
+```
+
+because `area` is already determined by width and height.
+
+
+but doing so may improve
+the performance of the equals method. If a derived field amounts to a summary description of the entire object, comparing this field will save you the ex-
+pense of comparing the actual data if the comparison fails. For example,
+suppose you have a Polygon class, and you cache the area. If two polygons
+have unequal areas, you needn’t bother comparing their edges and vertices.
+
+a derived field can be useful as an early rejection
+
+Suppose you have a large polygon:
+
+```java
+class Polygon {
+    private final List<Point> vertices;
+    private final double area;
+}
+```
+
+Imagine two polygons:
+
+```text
+Polygon A                    Polygon B
+─────────                    ─────────
+vertices: 100,000 points    vertices: 100,000 points
+area: 100.0                 area: 250.0
+```
+
+If your equality definition guarantees that equal polygons must have equal area, you can first check:
+
+```java
+if (Double.compare(area, other.area) != 0) {
+    return false;
+}
+```
+
+Then only if the areas match do you perform the expensive comparison:
+
+```java
+return vertices.equals(other.vertices);
+```
+
+So:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (this == o) {
+        return true;
+    }
+
+    if (!(o instanceof Polygon other)) {
+        return false;
+    }
+
+    // Cheap rejection
+    if (Double.compare(area, other.area) != 0) {
+        return false;
+    }
+
+    // Expensive comparison
+    return vertices.equals(other.vertices);
+}
+```
+
+The flow becomes:
+
+```text
+                 equals()
+                    │
+                    ▼
+              same reference?
+                    │
+                    ▼
+              correct type?
+                    │
+                    ▼
+               area equal?
+               /          \
+             NO            YES
+             │              │
+             ▼              ▼
+           false       compare vertices
+                              │
+                       potentially expensive
+```
+
+---
+
+---
+
+**Important: a derived field must be a valid equality shortcut**
+
+There's an important subtlety here.
+
+You **cannot** say:
+
+> "If the areas are different, they're not equal."
+
+unless your equality definition guarantees that equal polygons always have equal areas.
+
+For normal polygon equality based on vertices, that's true:
+
+```text
+same vertices
+     ↓
+same shape
+     ↓
+same area
+```
+
+Therefore:
+
+```java
+area != other.area
+```
+
+is a valid **early rejection**.
+
+But the reverse is not true:
+
+```text
+same area
+    ≠
+same polygon
+```
+
+Two completely different polygons can have the same area.
+
+So:
+
+```text
+different area → definitely not equal
+same area       → maybe equal
+```
+
+That's exactly how a useful derived field works.
+
+---
+
+###### Cached derived fields
+
+If a derived field amounts to a summary description of the entire object, comparing this field will save you the ex-
+pense of comparing the actual data if the comparison fails. For example,
+suppose you have a Polygon class, and you cache the area. If two polygons
+have unequal areas, you needn’t bother comparing their edges and vertices.
+
+This becomes particularly useful when the derived value is expensive to calculate.
+
+For example:
+
+```java
+class Document {
+    private final byte[] content;
+
+    // Calculated once
+    private final int hash;
+}
+```
+
+Then:
+
+```java
+if (hash != other.hash) {
+    return false;
+}
+
+return Arrays.equals(content, other.content);
+```
+
+The hash is a **summary** of the content.
+
+```text
+                   content
+                      │
+                      ▼
+                calculate hash
+                      │
+                      ▼
+                  hash value
+```
+
+During equality:
+
+```text
+hash differs
+     │
+     ▼
+false
+```
+
+and you avoid:
+
+```text
+potentially huge content comparison
+```
+
+But remember:
+
+> A hash collision is possible.
+
+Therefore you cannot do:
+
+```java
+return hash == other.hash;
+```
+
+unless the hash itself is the complete logical representation—which a normal hash isn't.
+
+Instead:
+
+```java
+if (hash != other.hash) {
+    return false;
+}
+
+return Arrays.equals(content, other.content);
+```
+
+The hash provides a **fast rejection**, not proof of equality.
+
+The **most important distinction** is:
+
+> **Correctness comes first; field ordering is only an optimization.**
+
+You should first determine the exact logical equality of the class. **Then** arrange those comparisons so that the common unequal case exits as early and cheaply as possible
+
+#### 5. verification step
+This is the **final verification step** for implementing `equals()`. 
+
+When you are finished writing your equals method, ask yourself three
+questions: Is it symmetric? Is it transitive? Is it consistent? 
+
+The idea is simple:
+
+> Writing an `equals()` method isn't enough. You should **test the equality contract**, especially the three properties most likely to be broken by a bad implementation: **symmetry, transitivity, and consistency**.
+###### 1. Check symmetry
+
+Symmetry means:
+
+```text
+x.equals(y) == y.equals(x)
+```
+
+If:
+
+```java
+x.equals(y)
+```
+
+is `true`, then:
+
+```java
+y.equals(x)
+```
+
+must also be `true`.
+
+**Unit test**
+
+```java
+@Test
+void equalsIsSymmetric() {
+    Person a = new Person("Alice", 30);
+    Person b = new Person("Alice", 30);
+
+    assertEquals(a, b);
+    assertEquals(b, a);
+}
+```
+
+A more useful test is to deliberately use objects with different values:
+
+```java
+@Test
+void equalsIsSymmetricForUnequalObjects() {
+    Person a = new Person("Alice", 30);
+    Person b = new Person("Bob", 30);
+
+    assertEquals(a.equals(b), b.equals(a));
+}
+```
+
+The important point is that **both directions must agree**.
+
+---
+
+###### 2. Check transitivity
+
+Transitivity means:
+
+```text
+if x.equals(y)
+and y.equals(z)
+
+then x.equals(z)
+```
+
+For example:
+
+```java
+Person a = new Person("Alice", 30);
+Person b = new Person("Alice", 30);
+Person c = new Person("Alice", 30);
+```
+
+Then:
+
+```java
+a.equals(b); // true
+b.equals(c); // true
+a.equals(c); // must be true
+```
+
+A test:
+
+```java
+@Test
+void equalsIsTransitive() {
+    Person a = new Person("Alice", 30);
+    Person b = new Person("Alice", 30);
+    Person c = new Person("Alice", 30);
+
+    assertEquals(a, b);
+    assertEquals(b, c);
+    assertEquals(a, c);
+}
+```
+
+This becomes particularly important with **inheritance**, where adding equality-relevant state can easily break transitivity.
+
+---
+
+###### 3. Check consistency
+
+Consistency means:
+
+> If neither object has changed in a way that affects equality, repeated calls to `equals()` should produce the same result.
+
+For example:
+
+```java
+Person a = new Person("Alice", 30);
+Person b = new Person("Alice", 30);
+```
+
+Repeated calls should remain:
+
+```java
+a.equals(b) // true
+a.equals(b) // true
+a.equals(b) // true
+```
+
+A simple test:
+
+```java
+@Test
+void equalsIsConsistent() {
+    Person a = new Person("Alice", 30);
+    Person b = new Person("Alice", 30);
+
+    boolean first = a.equals(b);
+    boolean second = a.equals(b);
+    boolean third = a.equals(b);
+
+    assertEquals(first, second);
+    assertEquals(second, third);
+}
+```
+
+###### 4. Reflexivity
+
+this usually takes care of itself.
+
+Reflexivity means:
+
+```java
+x.equals(x) == true
+```
+
+For a properly written implementation, the first line:
+
+```java
+if (this == o) {
+    return true;
+}
+```
+
+guarantees it.
+
+You can still test it:
+
+```java
+@Test
+void equalsIsReflexive() {
+    Person person = new Person("Alice", 30);
+
+    assertEquals(person, person);
+}
+```
+
+---
+
+###### 5. Non-nullity
+
+The rule is:
+
+```java
+x.equals(null) == false
+```
+
+If you're using:
+
+```java
+if (!(o instanceof Person other)) {
+    return false;
+}
+```
+
+then this is automatically handled because:
+
+```java
+null instanceof Person
+```
+
+is `false`.
+
+You can test it:
+
+```java
+@Test
+void equalsHandlesNull() {
+    Person person = new Person("Alice", 30);
+
+    assertNotNull(person);
+    assertFalse(person.equals(null));
+}
+```
+
+####  A complete equality-contract
+An equals method constructed according to the previous recipe is shown in
+this simplistic `PhoneNumber` class:
+```java
+// Class with a typical equals method
+public final class PhoneNumber {
+    private final short areaCode, prefix, lineNum;
+    
+    public PhoneNumber(int areaCode, int prefix, int lineNum) {
+        this.areaCode = rangeCheck(areaCode, 999, "area code");
+        this.prefix = rangeCheck(prefix, 999, "prefix");
+        this.lineNum = rangeCheck(lineNum, 9999, "line num");
+    }
+
+    private static short rangeCheck(int val, int max, String arg) {
+        if (val < 0 || val > max)
+            throw new IllegalArgumentException(arg + ": " + val);
+        
+        return (short) val;
+    }
+
+    @Override public boolean equals(Object o) {
+        if (o == this)
+            return true;
+        if (!(o instanceof PhoneNumber))
+            return false;
+        
+        PhoneNumber pn = (PhoneNumber)o;
+        
+        return pn.lineNum == lineNum && pn.prefix == prefix
+        && pn.areaCode == areaCode;
+    }
+    ... // Remainder omitted
+}
+```
+### final classes
+
+### Value Objects
+A **Value Object** is an object whose meaning comes from **the values it contains**, not from the object's individual identity.
+
+The simplest way to think about it is: **A value object represents a value, not a thing.**
+
+For example, consider a person's name:
+
+```java
+String name = "Gamal";
+```
+
+Two separate `String` objects containing `"Gamal"` represent the same value.
+
+Similarly, a `Money` object might represent: `100 USD`
+
+Two different `Money` objects representing `100 USD` should normally be considered equal.
+
+#### Object identity vs object value
+
+This is the central idea.
+
+Suppose:
+
+```java
+Person p1 = new Person("Gamal");
+Person p2 = new Person("Gamal");
+```
+
+There are two different objects:
+
+```text
+p1 ───────> Person("Gamal")
+             ↑
+             │
+p2 ───────> Person("Gamal")
+```
+
+Their **object identities** are different:
+
+```java
+p1 == p2
+```
+
+is: `false`, But they might represent the same **value**:
+
+```java
+pequals(p2)
+```
+
+could be: `true`
+
+A value object is designed around the second idea.
+
+```text
+Object
+  │
+  ├── identity-based object
+  │
+  │   "Which particular object is this?"
+  │
+  └── value object
+      │
+      └── "What value does this represent?"
+```
+
+#### Examples of value objects
+
+Common examples include:
+
+```text
+Money
+Currency
+EmailAddress
+PhoneNumber
+URL
+IPAddress
+Date
+Time
+DateRange
+Coordinates
+Color
+Temperature
+Percentage
+Quantity
+```
+
+For example:
+
+```text
+Money(100, USD)
+```
+
+is a value. You don't normally care which particular `Money` object represents it. You care that it represents: `100 USD`
+
+#### A `Money` example
+
+Imagine:
+
+```java
+Money money1 = new Money(100, USD);
+Money money2 = new Money(100, USD);
+```
+
+A value-object design says:
+
+```java
+moneyequals(money2)
+```
+
+should be: `true`
+
+even though:
+
+```java
+money1 == money2
+```
+
+is: `false`
+
+Graphically:
+
+```text
+money1 ────────> Money
+                    │
+                    ├── amount = 100
+                    └── currency = USD
+
+money2 ────────> Money
+                    │
+                    ├── amount = 100
+                    └── currency = USD
+
+                 same value
+                     ↓
+             equals() → true
+```
+
+#### What makes something a value object?
+
+There isn't one Java keyword called `ValueObject`. It's a **design concept**. A well-designed value object commonly has these characteristics:
+
+```text
+Value Object
+    │
+    ├── represents a value
+    ├── value-based equality
+    ├── immutable
+    ├── no meaningful identity
+    ├── self-contained invariants
+    └── interchangeable when equal
+```
+
+Let's examine these.
+
+#### 1 — Value-based equality
+
+This is the defining characteristic.
+
+Suppose:
+
+```java
+Money m1 = new Money(100, USD);
+Money m2 = new Money(100, USD);
+```
+
+The equality is based on their contents:
+
+```java
+mequals(m2) == true
+```
+
+rather than:
+
+```java
+m1 == m2
+```
+
+The implementation might be:
+
+```java
+@Override
+public boolean equals(Object obj) {
+    if (this == obj) {
+        return true;
+    }
+
+    if (obj == null || getClass() != obj.getClass()) {
+        return false;
+    }
+
+    Money other = (Money) obj;
+
+    return amount.equals(other.amount)
+            && currency.equals(other.currency);
+}
+```
+
+So equality is:
+
+```text
+Money
+ │
+ ├── amount
+ └── currency
+       │
+       ▼
+   determine equality
+```
+
+#### 2 — Immutable
+
+Value objects are usually **immutable**.
+
+For example:
+
+```java
+public final class Money {
+
+    private final BigDecimal amount;
+    private final Currency currency;
+
+    public Money(BigDecimal amount, Currency currency) {
+        this.amount = amount;
+        this.currency = currency;
+    }
+}
+```
+
+There are no setters:
+
+```java
+// Don't do this
+money.setAmount(200);
+```
+
+Instead, if you want a different value, create another object:
+
+```java
+Money original = new Money(100, USD);
+
+Money changed = new Money(200, USD);
+```
+
+Think:
+
+```text
+Money(100 USD)
+      │
+      │ cannot mutate
+      ▼
+Money(100 USD)
+
+Need 200 USD?
+      │
+      ▼
+create new Money(200 USD)
+```
+
+This is especially useful because value objects are frequently used as:
+
+* map keys
+* set elements
+* fields of immutable objects
+* cached values
+* parameters
+* results
+
+#### 3 — No meaningful identity
+
+Consider an `Employee`.
+
+Two employees might both have:
+
+```text
+name = "Gamal"
+age = 30
+```
+
+but they are still two different employees.
+
+Their identities matter.
+
+```text
+Employee #123
+Employee #456
+```
+
+Therefore, `Employee` is generally **not** a value object.
+
+Compare that with:
+
+```text
+Money(100 USD)
+Money(100 USD)
+```
+
+There is normally no meaningful distinction between the two values.
+
+```text
+Employee
+   │
+   └── identity matters
+
+Money
+   │
+   └── value matters
+```
+
+#### 4 — Equal values are interchangeable
+
+Suppose a method needs:
+
+```java
+Money price
+```
+
+and you have:
+
+```java
+Money m1 = new Money(100, USD);
+Money m2 = new Money(100, USD);
+```
+
+If:
+
+```java
+mequals(m2)
+```
+
+is `true`, then the two values can normally be substituted for each other.
+
+That's an important characteristic of value objects: **If two value objects are equal, their identity should not matter to the consumer.**
+
+#### 5 — Encapsulate invariants
+
+A very useful property of value objects is that they can protect their own rules.
+
+Consider an email address.
+
+Instead of passing arbitrary strings everywhere:
+
+```java
+String email;
+```
+
+you could create:
+
+```java
+EmailAddress email;
+```
+
+The class can enforce its invariant:
+
+```java
+public final class EmailAddress {
+
+    private final String value;
+
+    public EmailAddress(String value) {
+        if (value == null || !value.contains("@")) {
+            throw new IllegalArgumentException("Invalid email");
+        }
+
+        this.value = value;
+    }
+
+    public String value() {
+        return value;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+
+        EmailAddress other = (EmailAddress) obj;
+
+        return value.equals(other.value);
+    }
+
+    @Override
+    public int hashCode() {
+        return value.hashCode();
+    }
+}
+```
+
+Now the rest of your application can work with:
+
+```java
+EmailAddress email;
+```
+
+instead of constantly checking:
+
+```java
+String email;
+
+if (...) {
+    // Is this actually a valid email?
+}
+```
+
+The value object becomes responsible for maintaining its own validity.
+
+#### Primitive obsession
+
+This leads to another important design concept:
+
+**Primitive obsession**.
+
+Suppose you have:
+
+```java
+void transfer(
+    String sourceAccount,
+    String destinationAccount,
+    double amount
+)
+```
+
+What prevents this?
+
+```java
+transfer(
+    "not-an-account",
+    "also-not-an-account",
+    -5000
+);
+```
+
+The types don't communicate much.
+
+Instead, you can introduce value objects:
+
+```java
+void transfer(
+    AccountId source,
+    AccountId destination,
+    Money amount
+)
+```
+
+Now the domain becomes much clearer:
+
+```text
+String
+  ↓
+AccountId
+
+double
+  ↓
+Money
+```
+
+The types themselves communicate meaning.
+
+#### Value objects make invalid states harder to represent
+
+Suppose:
+
+```java
+Money
+```
+
+doesn't allow a negative amount.
+
+Then:
+
+```java
+new Money(-100, USD)
+```
+
+can be rejected at construction time.
+
+Now every valid `Money` object satisfies:
+
+```text
+amount >= 0
+```
+
+This gives you a useful guarantee:
+
+```text
+Application
+     │
+     ▼
+Money
+     │
+     ├── valid amount
+     └── valid currency
+```
+
+Instead of:
+
+```text
+Application
+     │
+     ├── maybe valid money
+     ├── maybe invalid money
+     ├── maybe null
+     └── maybe wrong currency
+```
+
+This is one of the strongest reasons to introduce value objects.
+
+#### Recommended design
+
+For **value objects**, a very strong design is:
+
+```text
+Value Object
+    │
+    ├── immutable
+    ├── equality based on value
+    ├── equals() overridden
+    ├── hashCode() overridden
+    └── equality fields never change
+```
+
+For example:
+
+```java
+public final class Money {
+    private final BigDecimal amount;
+    private final Currency currency;
+
+    // constructor only
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o)
+            return true;
+
+        if (!(o instanceof Money))
+            return false;
+
+        Money other = (Money) o;
+
+        return amount.equals(other.amount)
+                && currency.equals(other.currency);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(amount, currency);
+    }
+}
+```
+
+This gives you:
+
+```text
+stable state
+     ↓
+stable equals()
+     ↓
+stable hashCode()
+     ↓
+predictable collections
+```
+
+#### Value object vs Entity
+
+This distinction is extremely important, especially in domain-driven design.
+
+##### Entity
+
+An entity has a meaningful identity.
+
+Example:
+
+```text
+Customer
+```
+
+Suppose:
+
+```text
+Customer #1001
+name = Gamal
+```
+
+and:
+
+```text
+Customer #2005
+name = Gamal
+```
+
+They aren't equal merely because their names are equal.
+
+Their identities differ:
+
+```text
+Customer #1001
+       ≠
+Customer #2005
+```
+
+##### Value Object
+
+A value object has no meaningful independent identity.
+
+Example:
+
+```text
+Address
+```
+
+Suppose:
+
+```text
+Address(
+    "10 Main Street",
+    "Giza",
+    "Egypt"
+)
+```
+
+Two address objects containing exactly the same value can normally be equal.
+
+```text
+Address A
+    │
+    └── 10 Main Street, Giza, Egypt
+
+Address B
+    │
+    └── 10 Main Street, Giza, Egypt
+
+         ↓
+
+      same value
+```
+
+#### Entity vs Value Object
+
+A useful comparison:
+
+|                                  | Entity                 | Value Object       |
+| -------------------------------- | ---------------------- | ------------------ |
+| Identity                         | Important              | Usually irrelevant |
+| Equality                         | Usually identity-based | Value-based        |
+| Mutable?                         | Often                  | Usually immutable  |
+| Example                          | `Customer`             | `Money`            |
+| Example                          | `Order`                | `EmailAddress`     |
+| Example                          | `Product`              | `Coordinates`      |
+| Example                          | `Employee`             | `DateRange`        |
+| Can be replaced by equal object? | Not necessarily        | Usually yes        |
+
+Think:
+
+```text
+Entity:
+
+"What particular thing is this?"
+
+          ↓
+
+Customer #123
+
+
+Value Object:
+
+"What value does this represent?"
+
+          ↓
+
+100 USD
+```
+
+#### Value Object vs DTO
+
+These are also different concepts.
+
+A **DTO (Data Transfer Object)** primarily exists to transfer data between boundaries.
+
+For example:
+
+```java
+public record CreateUserRequest(
+    String name,
+    String email
+) {}
+```
+
+Its purpose might simply be:
+
+```text
+HTTP request
+     ↓
+CreateUserRequest
+     ↓
+application layer
+```
+
+A value object, on the other hand, represents a meaningful domain value.
+
+For example:
+
+```java
+EmailAddress
+Money
+AccountId
+Percentage
+```
+
+A record can be used for either purpose.
+
+That's why:
+
+```text
+record ≠ automatically value object
+```
+
+and:
+
+```text
+value object ≠ necessarily record
+```
+
+#### Records and value objects
+
+A record is a **Java language feature**.
+
+A value object is a **design concept**.
+
+So:
+
+```java
+public record Money(
+    BigDecimal amount,
+    Currency currency
+) {}
+```
+
+can be an excellent value object.
+
+The record gives you:
+
+```text
+equals()
+hashCode()
+toString()
+accessors
+immutability of components
+final class semantics
+```
+
+But you can also implement a value object using a normal class:
+
+```java
+public final class Money {
+    ...
+}
+```
+
+So:
+
+```text
+                 Value Object
+                 /           \
+                /             \
+      normal final class      record
+             │                   │
+       manual design       language support
+```
+
+#### A richer value object
+
+Value objects can have behavior.
+
+For example:
+
+```java
+public record Money(
+        BigDecimal amount,
+        Currency currency) {
+
+    public Money {
+        if (amount.signum() < 0) {
+            throw new IllegalArgumentException(
+                    "Amount cannot be negative");
+        }
+    }
+
+    public Money add(Money other) {
+        if (!currency.equals(other.currency)) {
+            throw new IllegalArgumentException(
+                    "Currencies must match");
+        }
+
+        return new Money(
+                amount.add(other.amount),
+                currency
+        );
+    }
+}
+```
+
+Now:
+
+```java
+Money a = new Money(
+    new BigDecimal("100"),
+    USD
+);
+
+Money b = new Money(
+    new BigDecimal("50"),
+    USD
+);
+
+Money total = a.add(b);
+```
+
+The result is:
+
+```text
+100 USD
+   +
+50 USD
+   ↓
+150 USD
+```
+
+Notice that `Money` isn't just storing data.
+
+It knows how to perform a meaningful operation on its value.
+
+#### Why immutability is particularly useful
+
+Imagine this:
+
+```java
+Money price = new Money(100, USD);
+
+Order order = new Order(price);
+```
+
+If `Money` were mutable:
+
+```java
+price.setAmount(1000);
+```
+
+then the order's price might unexpectedly change.
+
+With an immutable value object:
+
+```text
+Order
+  │
+  └── Money(100 USD)
+              │
+              └── cannot change
+```
+
+To get another value:
+
+```java
+Money newPrice = new Money(1000, USD);
+```
+
+This makes behavior much easier to reason about.
+
+#### Value objects and collections
+
+Value objects work naturally with `HashSet` and `HashMap`.
+
+For example:
+
+```java
+Set<EmailAddress> emails = new HashSet<>();
+
+emails.add(new EmailAddress("gamal@example.com"));
+emails.add(new EmailAddress("gamal@example.com"));
+```
+
+If `EmailAddress` correctly implements:
+
+```text
+equals()
+hashCode()
+```
+
+the set contains only one logical value.
+
+```text
+HashSet
+   │
+   └── EmailAddress("gamal@example.com")
+```
+
+This is another reason the `equals()` / `hashCode()` contract is so important for value objects.
+
+#### The connection to `equals()`
+
+You can now see why we discussed `equals()` first.
+
+A value object's fundamental equality model is:
+
+```text
+             Value Object
+                  │
+                  ▼
+          compare its values
+                  │
+                  ▼
+              equals()
+                  │
+                  ▼
+         same logical value?
+```
+
+For example:
+
+```java
+Money(100, USD)
+```
+
+and:
+
+```java
+Money(100, USD)
+```
+
+should generally satisfy:
+
+```java
+mequals(m2) == true
+```
+
+while:
+
+```java
+Money(100, USD)
+```
+
+and:
+
+```java
+Money(200, USD)
+```
+
+should be:
+
+```java
+false
+```
+
+#### The design formula
+
+A good mental model is:
+
+```text
+                    Value Object
+                         │
+       ┌─────────────────┼─────────────────┐
+       │                 │                 │
+    Meaning            Equality         Lifetime
+       │                 │                 │
+   represents a       based on          immutable
+      value            values
+       │                 │                 │
+       └─────────────────┼─────────────────┘
+                         │
+                         ▼
+                 interchangeable
+                 when equal
+```
+
+And the practical design is often:
+
+```text
+Value Object
+     │
+     ├── final / non-subclassable
+     ├── immutable
+     ├── validates invariants
+     ├── value-based equals()
+     ├── matching hashCode()
+     ├── useful domain behavior
+     └── no meaningful identity
+```
+
+### Records
+
+Java records have a useful property here.
+
+For example:
+
+```java
+record Person(String name, int age) {
+}
+```
+
+The compiler automatically provides `equals()` and `hashCode()` based on the record components.
+
+But records are implicitly final, so you cannot create a subclass of:
+
+```java
+record Person(...)
+```
+
+This eliminates the inheritance/equality problem for record types.
+
+```text
+record Person
+      │
+      └── cannot be subclassed
+```
+
+This is one reason records work particularly well for value-like data.
+### canEqual()
+There is another pattern for inheritance called **`canEqual()`**.
+
+It allows a class hierarchy to explicitly decide which classes are allowed to consider each other equal.
+
+For example:
+
+```java
+class Person {
+    protected final String name;
+
+    Person(String name) {
+        this.name = name;
+    }
+
+    protected boolean canEqual(Object other) {
+        return other instanceof Person;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (!(obj instanceof Person other)) {
+            return false;
+        }
+
+        return other.canEqual(this)
+                && Objects.equals(name, other.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name);
+    }
+}
+```
+
+A subclass can then restrict equality:
+
+```java
+class Employee extends Person {
+    private final int employeeId;
+
+    Employee(String name, int employeeId) {
+        super(name);
+        this.employeeId = employeeId;
+    }
+
+    @Override
+    protected boolean canEqual(Object other) {
+        return other instanceof Employee;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!super.equals(obj)) {
+            return false;
+        }
+
+        Employee other = (Employee) obj;
+
+        return employeeId == other.employeeId;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), employeeId);
+    }
+}
+```
+
+The idea is:
+
+```text
+Person.equals(Employee)
+        │
+        ▼
+Employee.canEqual(Person)
+        │
+        ▼
+false
+```
+
+and therefore the superclass won't consider itself equal to an `Employee`.
+
+This pattern is useful in some extensible class hierarchies, although it is more complicated than simply making equality class-specific.
+
+## `equals()` and `hashCode()` 
+
+This is **critical**.
+Whenever you decide:
+
+> "These two different objects should be logically equal."
+
+you immediately have another responsibility:
+
+> **Equal objects must have equal hash codes.**
+
+So:
+
+```java
+@Override
+public boolean equals(Object obj) {
+    // logical equality
+}
+
+@Override
+public int hashCode() {
+    // based on the same equality-relevant state
+}
+```
+The relationship is:
+
+```text
+Logical equality
+      │
+      ├── equals()
+      │
+      └── hashCode()
+```
+
+Not:
+
+```text
+equals() ← independent
+hashCode() ← independent
+```
+
+They form one contract.
+
+If:
+
+```java
+x.equals(y)
+```
+
+returns:
+
+```text
+true
+```
+
+then Java requires:
+
+```java
+x.hashCode() == y.hashCode()
+```
+
+So:
+
+```text
+equals()
+   │
+   │ equal objects
+   ▼
+same hashCode()
+```
+
+But the reverse is **not** necessarily true.
+
+Two objects can have the same hash code without being equal:
+
+```text
+x.hashCode() == y.hashCode()
+
+        does NOT imply
+
+x.equals(y)
+```
+
+This is called a **hash collision**.
+
+---
+
+**Why this matters for `HashSet`**
+
+Consider:
+
+```java
+Set<Person> people = new HashSet<>();
+```
+
+`HashSet` uses `hashCode()` and `equals()` together.
+
+Conceptually:
+
+```text
+             add(person)
+                  │
+                  ▼
+             hashCode()
+                  │
+                  ▼
+             find bucket
+                  │
+                  ▼
+               equals()
+                  │
+             ┌────┴────┐
+             │         │
+          equal      different
+             │         │
+          duplicate    add
+```
+
+Therefore, if you override: `equals()`, you generally need to override: `hashCode()`, as well.
+
+---
+
+Suppose you write:
+
+```java
+class Person {
+    String name;
+    int age;
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof Person other)) {
+            return false;
+        }
+
+        return age == other.age &&
+               Objects.equals(name, other.name);
+    }
+}
+```
+
+but don't override `hashCode()`.
+
+Then you have violated the important relationship between equality and hashing.
+
+You could get surprising behavior:
+
+```java
+Set<Person> people = new HashSet<>();
+
+Person p1 = new Person("Gamal", 30);
+Person p2 = new Person("Gamal", 30);
+
+people.add(p1);
+
+System.out.println(p1.equals(p2)); // true
+System.out.println(people.contains(p2)); // potentially false
+```
+
+The problem is that the objects may have different inherited identity-based hash codes even though `equals()` says they're equal.
+
+The correct implementation is:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(name, age);
+}
+```
+### Practical rule for Java classes
+
+When you override `equals()`, think about inheritance immediately.
+
+##### If the class is `final`
+
+This is easy:
+
+```java
+final class Person {
+}
+```
+
+There are no subclasses that can break your equality assumptions.
+
+You can safely use:
+
+```java
+getClass() == obj.getClass()
+```
+
+for exact-class equality.
+
+##### If the class is designed for inheritance
+
+You need to deliberately decide:
+
+```text
+Can subclasses be equal to superclass instances?
+              │
+       ┌──────┴──────┐
+      No             Yes
+       │              │
+ exact-class      carefully
+ equality         design contract
+```
+
+Don't simply override `equals()` independently in the subclass without considering the superclass's implementation.
+
+## Importance of `equals()`
+`equals()` is important because it defines **what it means for two objects to be logically equal**. Java libraries and collections rely heavily on this definition.
+| Importance                           | Explanation                                                                                                              |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| **Defines logical equality**         | Allows a class to define when two different objects represent the same value or concept.                                 |
+| **Separates identity from value**    | `==` checks whether two references point to the same object; `equals()` can check whether they represent the same value. |
+| **Establishes an equality contract** | Java defines requirements such as reflexivity, symmetry, transitivity, consistency, and non-nullity.                     |
+| **Required for value objects**       | Classes such as `Money`, `EmailAddress`, `Point`, etc. generally need value-based equality.                              |
+| **Affects collections**              | `HashSet`, `HashMap`, `List`, and other APIs use equality when determining whether objects match.                        |
+| **Works with polymorphism**          | Allows objects to be compared through a common reference type such as `Object`, an interface, or superclass.             |
+| **Part of the `Object` contract**    | Every Java class inherits `equals()` from `Object`, making it available to every reference type.                         |
+
+
+## Benefits of overriding `equals()`
+**`equals()` gives a class control over what "these two objects represent the same thing" means, enabling meaningful comparisons and predictable behavior throughout the Java Collections Framework and other APIs.**
+
+| Benefit                                | Example                                                                      |
+| -------------------------------------- | ---------------------------------------------------------------------------- |
+| **Meaningful comparisons**             | `Money(100, USD).equals(Money(100, USD)) → true`                             |
+| **Predictable collection behavior**    | A `HashSet` can recognize logically duplicate values.                        |
+| **Correct `List.contains()` behavior** | A list can determine whether it contains an equivalent object.               |
+| **Correct `List.remove()` behavior**   | `remove()` can locate an object based on logical equality.                   |
+| **Correct `Map` key lookup**           | A logically equivalent key can retrieve an existing value.                   |
+| **Duplicate detection**                | Useful when determining whether two domain objects represent the same value. |
+| **Domain modeling**                    | Lets classes express their domain-specific notion of equality.               |
+| **Testing**                            | Makes assertions about object values easier and more meaningful.             |
+
+The biggest benefit is that `equals()` allows your class to communicate its **equality semantics** to the rest of Java.
+
+For example:
+
+```java
+public final class EmailAddress {
+    private final String value;
+
+    // ...
+    
+    @Override
+    public boolean equals(Object obj) {
+        // Two EmailAddress objects are equal
+        // when their values are equal.
+    }
+
+    @Override
+    public int hashCode() {
+        // Must be consistent with equals().
+    }
+}
+```
+
+Now the rest of Java can understand:
+
+```text
+EmailAddress
+      │
+      ▼
+"gamal@example.com"
+      │
+      ▼
+logical equality
+      │
+      ├── equals()
+      ├── HashSet
+      ├── HashMap
+      ├── List.contains()
+      ├── List.remove()
+      └── testing
+```
+
+
+## Common usage of `equals()`
+
+### A. Comparing value objects
+
+```java
+Money m1 = new Money(100, "USD");
+Money m2 = new Money(100, "USD");
+
+m1.equals(m2);  // true
+```
+
+Instead of:
+
+```java
+m1 == m2;       // false
+```
+
+---
+
+### B. Comparing Strings
+
+```java
+String a = new String("Java");
+String b = new String("Java");
+
+System.out.println(a.equals(b)); // true
+System.out.println(a == b);      // false
+```
+
+This is one of the most important practical examples.
+
+```text
+==       → same object?
+equals() → same logical value?
+```
+
+---
+
+### C. Searching a `List`
+
+```java
+List<String> languages = new ArrayList<>();
+
+languages.add("Java");
+languages.add("Python");
+
+System.out.println(languages.contains("Java")); // true
+```
+
+`contains()` relies on equality to determine whether a matching element exists.
+
+Conceptually:
+
+```text
+contains(x)
+    │
+    └── compare elements using equals()
+```
+
+---
+
+### D. Removing from a `List`
+
+```java
+List<String> languages = new ArrayList<>();
+
+languages.add("Java");
+languages.add("Python");
+
+languages.remove("Java");
+```
+
+The list uses equality to determine which element matches `"Java"`.
+
+---
+
+### E. `HashSet` duplicate detection
+
+```java
+Set<String> names = new HashSet<>();
+
+names.add(new String("Gamal"));
+names.add(new String("Gamal"));
+
+System.out.println(names.size()); // 1
+```
+
+Why only one element?
+
+Because `String` defines logical equality:
+
+```text
+"Gamal".equals("Gamal")
+        ↓
+       true
+```
+
+For hash-based collections, this works together with `hashCode()`:
+
+```text
+             HashSet
+                │
+          ┌─────┴─────┐
+          │           │
+     hashCode()    equals()
+          │           │
+     find bucket   confirm equality
+```
+
+---
+
+### F. `HashMap` key lookup
+
+```java
+Map<String, Integer> scores = new HashMap<>();
+
+scores.put(new String("Java"), 100);
+
+Integer score = scores.get(new String("Java"));
+
+System.out.println(score); // 100
+```
+
+The key used in `get()` is a **different object**, but it is logically equal to the key used in `put()`.
+
+This is one of the most important reasons correct `equals()`/`hashCode()` implementations matter.
+
+---
+
+### G. Testing objects
+
+Suppose:
+
+```java
+User expected = new User(10, "Gamal");
+User actual = service.findUser(10);
+```
+
+You can write:
+
+```java
+assertEquals(expected, actual);
+```
+
+The test can compare the **logical contents** of the objects rather than requiring them to be the exact same instance.
+
+## Design Guidelines
+Use `Object.equals()` by default. Override it only when the class has meaningful logical equality, and when you do, compare exactly the state that defines that equality, preserve the five-part contract, and override `hashCode()` consistently.
+### Rule 1 — Define equality intentionally
+
+Don't automatically override `equals()`.
+
+Ask:
+
+> What does "same value" mean for this class?
+
+---
+
+### Rule 2 — Preserve the five-contract rules
+
+```text
+Reflexive
+Symmetric
+Transitive
+Consistent
+Non-null
+```
+
+---
+
+### Rule 3 — Always override hashCode when you override equals`
+
+```text
+equals() + hashCode()
+```
+
+are a pair.
+
+---
+
+### Rule 4 — Avoid cross-type equality
+
+Don't try to make unrelated classes equal to each other.
+
+```text
+CaseInsensitiveString ↔ String
+```
+
+is a classic mistake.
+
+---
+
+### Rule 5 — Be extremely careful with inheritance
+
+Especially:
+
+```text
+Concrete superclass
+        +
+Subclass adds equality-relevant state
+```
+
+This is where symmetry and transitivity problems appear.
+
+---
+
+### Rule 6 — Prefer composition for value extensions
+
+Instead of:
+
+```java
+ColorPoint extends Point
+```
+
+consider:
+
+```java
+ColorPoint has a Point
+```
+
+---
+
+### Rule 7 — Don't blindly choose `instanceof` or `getClass()`
+
+Choose based on the intended equality model and the class hierarchy.
+
+---
+
+### Rule 8 — Keep equality fields stable
+
+If fields used by `equals()`/`hashCode()` change while an object is in a `HashSet` or used as a `HashMap` key, problems can occur.
+
+Immutable value objects are therefore particularly well suited to equality-based designs.
+
+---
+
+### Rule 9 — Keep equality simple
+Keep equality simple. Compare the object's defined state. Don't try to discover whether two objects ultimately refer to the same underlying thing.
+
+Don't making `equals()` do extra work to discover some deeper notion of equivalence.
+
+**Prefer straightforward, local equality over clever attempts to discover deeper equivalence.**
+
+If you are overly aggressive in searching for
+equivalence, it’s easy to get into trouble. 
+
+Simple equality is usually safer
+
+Suppose:
+
+```java
+public final class User {
+    private final String username;
+    private final int age;
+
+    // ...
+}
+```
+
+If your logical definition is:
+
+```text
+same username
+AND
+same age
+```
+
+then `equals()` should simply compare those fields:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (this == o) {
+        return true;
+    }
+
+    if (!(o instanceof User other)) {
+        return false;
+    }
+
+    return age == other.age
+            && Objects.equals(username, other.username);
+}
+```
+
+That's easy to reason about.
+
+```text
+equals()
+   │
+   ├── same username?
+   └── same age?
+          │
+          ▼
+       equal
+```
+
+Imagine instead that you decide:
+
+> "Two `User` objects should be equal if they ultimately represent the same person, even if their usernames are different."
+
+Now you might start doing:
+
+```text
+username
+   ↓
+database lookup
+   ↓
+find account
+   ↓
+resolve aliases
+   ↓
+compare canonical identity
+```
+
+You've made `equals()` much more complicated.
+
+Now equality depends on things outside the object itself.
+
+That's dangerous.
+
+The same principle applies to files, URLs, paths, network addresses, etc.
+
+---
+
+It is generally a bad idea to take any
+form of aliasing(two different references/names can ultimately refer to the same underlying thing) into account. For example, the File class shouldn’t attempt to
+equate symbolic links referring to the same file. Thankfully, it doesn’t.
+
+Consider:
+
+```text
+/home/gemy/project/config.txt
+```
+
+and:
+
+```text
+/home/gemy/project/current-config.txt
+```
+
+Suppose:
+
+```text
+current-config.txt
+        │
+        ▼
+    symbolic link
+        │
+        ▼
+config.txt
+```
+
+At the filesystem level, both paths may refer to the same underlying file.
+
+You might therefore think:
+
+```text
+File("/home/gemy/project/config.txt")
+       ==
+File("/home/gemy/project/current-config.txt")
+```
+
+because they ultimately identify the same filesystem object.
+
+But `File.equals()` does **not** try to resolve symbolic links and determine whether they point to the same underlying file.
+
+It compares the `File` objects according to their pathname representation.
+
+Conceptually:
+
+```text
+File A
+"/home/gemy/project/config.txt"
+
+File B
+"/home/gemy/project/current-config.txt"
+
+        │
+        ▼
+
+Do not follow symlink
+Do not inspect filesystem
+Do not discover underlying inode
+
+        │
+        ▼
+
+Compare pathname semantics
+```
+
+That's intentional.
+
+**Why shouldn't `equals()` resolve the symlink?**
+
+Because now equality would require **external state**.
+
+Without following the link:
+
+```text
+File.equals()
+     │
+     ▼
+local pathname information
+     │
+     ▼
+deterministic
+```
+
+If it followed symbolic links:
+
+```text
+File.equals()
+     │
+     ▼
+filesystem
+     │
+     ▼
+resolve symlink
+     │
+     ▼
+inspect target
+     │
+     ▼
+compare underlying file
+```
+
+Now the result depends on the filesystem.
+
+For example, somebody could change:
+
+```text
+current-config.txt
+       │
+       ▼
+    config.txt
+```
+
+to:
+
+```text
+current-config.txt
+       │
+       ▼
+other-config.txt
+```
+
+without changing the two `File` objects themselves.
+
+Your `equals()` result could then change because **external state changed**.
+
+That's exactly the kind of problem we discussed with `URL.equals()` and DNS resolution.
+
+---
+
+equals()` should not become an identity-discovery mechanism
+
+This is probably the most important lesson from the paragraph.
+
+Don't turn:
+
+```java
+a.equals(b)
+```
+
+into:
+
+> "Let me investigate whether `a` and `b` ultimately refer to the same real-world resource."
+
+Instead, define a clear equality model:
+
+```text
+equals()
+   │
+   ▼
+Compare the state that this class
+defines as its logical value
+```
+
+For example:
+
+```java
+Money(100, "USD")
+```
+
+can simply compare:
+
+```text
+amount
+currency
+```
+
+It doesn't need to ask a bank:
+
+```text
+"Do these two Money objects represent
+the same actual money?"
+```
+
+---
+
+`URL.equals()` attempts a deeper form of equivalence involving host resolution.
+
+```text
+URL
+ │
+ ├── protocol
+ ├── port
+ ├── path
+ └── host
+       │
+       ▼
+   DNS resolution
+       │
+       ▼
+   IP address
+```
+
+That's more than simply comparing the object's immediately available representation.
+
+And that's why it creates complications such as:
+
+* possible blocking
+* external state
+* DNS changes
+* caching
+* potentially surprising equality semantics
+
+The `File` example makes the opposite design choice:
+
+```text
+File
+ │
+ └── pathname
+       │
+       ▼
+   compare pathname
+       │
+       ✕
+   don't resolve symlinks
+```
+
+---
+
+### Rule 10 — prefer reliable code generation over manually maintaining boilerplate
+Writing and testing equals (and hashCode) methods is tedious, and the resulting code is mundane. so avoid manually writing `equals()` and `hashCode()`**, because these methods are repetitive and easy to get subtly wrong.
+
+**Why writing `equals()` and `hashCode()` is tedious**
+
+For a typical value object, you have to:
+
+1. Identify all equality-relevant fields.
+2. Implement `equals()`.
+3. Handle `this == other`.
+4. Check the type.
+5. Compare every significant field correctly.
+6. Handle `null`.
+7. Implement `hashCode()`.
+8. Make sure `hashCode()` uses the same fields as `equals()`.
+9. Update both methods whenever the class changes.
+10. Test the equality contract.
+
+For example:
+
+```java
+public final class Person {
+    private final String name;
+    private final int age;
+
+    public Person(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+
+        if (!(o instanceof Person other)) {
+            return false;
+        }
+
+        return age == other.age
+                && Objects.equals(name, other.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name, age);
+    }
+}
+```
+
+There is nothing particularly interesting about this code. It is mostly **boilerplate**.
+
+And if later you add:
+
+```java
+private final String email;
+```
+
+you must remember to update **both** `equals()` and `hashCode()`.
+
+---
+
+**AutoValue**
+
+An excellent alternative to writing and testing these methods
+manually is to use Google’s open source AutoValue framework, which automatically generates these methods for you, triggered by a single annotation on the class. In most cases, the methods generated by AutoValue are essentially identical
+to those you’d write yourself.
+
+The idea is:
+
+> Instead of writing `equals()` and `hashCode()` yourself, describe the value object and let a code generator create those methods.
+
+Conceptually:
+
+```text
+Your source code
+      │
+      ▼
+ @AutoValue
+      │
+      ▼
+AutoValue generates
+      │
+      ├── equals()
+      ├── hashCode()
+      ├── constructor
+      └── other boilerplate
+```
+
+So rather than maintaining a large amount of repetitive code yourself, you maintain the **definition of the value object**, and AutoValue generates the implementation.
+
+The important idea is not specifically "use AutoValue."
+
+The broader lesson is:
+
+> **Boilerplate equality code is a good candidate for code generation.**
+
+---
+
+**Why generated `equals()` is useful**
+
+Remember that `equals()` has a surprisingly strict contract:
+
+```text
+equals()
+   │
+   ├── reflexive
+   ├── symmetric
+   ├── transitive
+   ├── consistent
+   └── non-null
+```
+
+And then there is the relationship with `hashCode()`:
+
+```text
+a.equals(b) == true
+        │
+        ▼
+a.hashCode() == b.hashCode()
+```
+
+A human can easily make mistakes.
+
+For example:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (!(o instanceof Person other)) {
+        return false;
+    }
+
+    return age == other.age
+            && Objects.equals(name, other.name);
+}
+```
+
+But then accidentally write:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(name);  // forgot age
+}
+```
+
+Now `equals()` and `hashCode()` don't use the same equality state.
+
+Generated code can eliminate many of these mundane mistakes.
+
+---
+
+**IDE-generated methods**
+
+IDEs, too, have facilities to generate equals and hashCode methods, but the
+resulting source code is more verbose and less readable than code that uses
+AutoValue, does not track changes in the class automatically, and therefore
+requires testing. That said, having IDEs generate equals (and hashCode) methods
+is generally preferable to implementing them manually because IDEs do not make
+careless mistakes, and humans do.
+
+For example, most Java IDEs can generate:
+
+```java
+equals()
+```
+
+and
+
+```java
+hashCode()
+```
+
+based on the fields you select.
+
+This is generally much better than manually typing the methods.
+
+**Why IDE-generated code can still be problematic**
+
+An IDE might generate something like:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+
+    Person person = (Person) o;
+
+    if (age != person.age) return false;
+    return Objects.equals(name, person.name);
+}
+
+@Override
+public int hashCode() {
+    int result = name != null ? name.hashCode() : 0;
+    result = 31 * result + age;
+    return result;
+}
+```
+
+This is perfectly reasonable code.
+
+But it has two disadvantages.
+
+1. **More verbose**
+
+There is more implementation code that you have to read and maintain.
+
+2. **It doesn't automatically track future changes**
+
+Suppose the IDE generated equality using:
+
+```java
+name
+age
+```
+
+Then later you add:
+
+```java
+private final String email;
+```
+
+The IDE doesn't necessarily come back and say:
+
+> "You added a field that might need to participate in equality."
+
+You have to regenerate or manually update the methods.
+
+---
+
+**AutoValue vs IDE generation**
+
+The distinction can be summarized like this:
+
+| Approach      | Boilerplate |   Tracks class changes | Human mistakes |
+| ------------- | ----------: | ---------------------: | -------------: |
+| Manual        |        High |                     No |           High |
+| IDE-generated |      Medium |             Usually no |          Lower |
+| AutoValue     |         Low | Through generated code |          Lower |
+
+The exact behavior depends on the tool and project setup, but this is the general idea behind the Effective Java recommendation.
+
+---
+
+**Why IDE generation is still better than manually writing it**
+
+Even if you don't use AutoValue, let your IDE generate `equals()` and `hashCode()` rather than typing them yourself.
+
+Why? Because the code is mechanical.Humans are good at deciding:
+
+> "These three fields define my object's logical identity."
+
+Humans are much worse at repeatedly typing the same boilerplate correctly.
+
+For example, you might accidentally do this:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (!(o instanceof Person other)) {
+        return false;
+    }
+
+    return Objects.equals(name, other.name)
+            && age == other.age
+            && Objects.equals(email, other.email);
+}
+
+@Override
+public int hashCode() {
+    return Objects.hash(name, age); // email accidentally omitted
+}
+```
+
+The code looks perfectly reasonable at first glance.
+
+But it violates the relationship between `equals()` and `hashCode()`.
+
+---
+
+The recommendation isn't really:
+
+> "Never write `equals()` yourself."
+
+It's:
+
+> **When `equals()` and `hashCode()` are just mechanical field comparisons, prefer reliable code generation over manually maintaining boilerplate.**
+
+So **code generation reduces the amount of code you have to write, but it does not remove the need to understand what equality should mean for your class.**
+
+### Rule 11 - Don't override equals() unless you have to
+In summary, don’t override the equals method unless you have to: in many
+cases, the implementation inherited from Object does exactly what you want.
+
+The default implementation inherited from `Object` is:
+
+```java
+public boolean equals(Object obj) {
+    return this == obj;
+}
+```
+
+So it answers:
+
+> **"Are these the exact same object?"**
+
+For some classes, that's exactly what you want.
+
+**Example: `Thread`**
+
+Two different `Thread` objects represent different thread instances:
+
+```java
+Thread t1 = new Thread();
+Thread t2 = new Thread();
+
+System.out.println(t1.equals(t2)); // false
+System.out.println(t1.equals(t1)); // true
+```
+
+There isn't necessarily a meaningful value-based equality such as:
+
+```text
+Thread A == Thread B because their names are the same
+```
+
+That would be wrong because thread **identity** matters.
+
+So there is no reason to override `equals()`.
+
+## Common `equals()` Pitfalls
+
+Here is the practical checklist.
+
+| Pitfall                                    | Problem                                       |
+| ------------------------------------------ | --------------------------------------------- |
+| Using `==` for object equality             | Tests identity instead of logical equality    |
+| Overriding `equals()` but not `hashCode()` | Breaks `HashMap`/`HashSet` behavior           |
+| Cross-type equality                        | Can violate symmetry                          |
+| Adding value fields in subclasses          | Can violate symmetry/transitivity             |
+| Blindly using `getClass()`                 | Can conflict with substitutability            |
+| Blindly using `instanceof`                 | Can be problematic in inheritance hierarchies |
+| Mutable equality fields                    | Can break hash-based collections              |
+| Ignoring superclass equality requirements  | Can produce inconsistent equality             |
+| Comparing fields inconsistently            | Can violate the contract                      |
+| Overcomplicating `equals()`                | Makes contract violations easier              |
+| Comparing against unrelated classes        | You don't control their `equals()`            |
+| Using floating-point values carelessly     | Can create surprising equality semantics      |
+| Forgetting `null`                          | Can cause incorrect behavior or exceptions    |
+
+### overriding vs overloading
+Don’t substitute another type for Object in the equals declaration. This is a very common Java `equals()` mistake, and the key concept is **overriding vs overloading**.
+
+The rule is:
+
+> **`equals()` must have exactly this parameter type: `Object`.**
+
+```java
+@Override
+public boolean equals(Object o) {
+    ...
+}
+```
+
+Not:
+
+```java
+public boolean equals(MyClass o) {
+    ...
+}
+```
+**Why `Object` is required**
+
+`Object` declares:
+
+```java
+public boolean equals(Object obj)
+```
+
+Every Java class inherits this method.
+
+Therefore, to **override** it, your method must have the same signature:
+
+```text
+Object.equals(Object)
+        │
+        ▼
+MyClass.equals(Object)
+        │
+        └── overrides it
+```
+
+For example:
+
+```java
+public class Person {
+
+    @Override
+    public boolean equals(Object o) {
+        // correct
+        return true;
+    }
+}
+```
+
+Now when Java has:
+
+```java
+Object a = new Person();
+Object b = new Person();
+
+a.equals(b);
+```
+
+the overridden `Person.equals(Object)` is called.
+
+---
+
+The problem is that this method does not override `Object.equals`, whose
+argument is of type `Object`, but overloads it instead! Suppose you write:
+
+```java
+public class Person {
+
+    public boolean equals(Person other) {
+        return this.name.equals(other.name);
+    }
+}
+```
+
+It looks reasonable.
+
+But this does **not** override:
+
+```java
+Object.equals(Object)
+```
+
+Instead, it creates a completely different method:
+
+```text
+Object
+└── equals(Object)
+
+Person
+├── equals(Object)   ← inherited
+└── equals(Person)   ← new overloaded method
+```
+
+That's **overloading**, not overriding.
+
+---
+
+**Why does this cause such a confusing bug?**
+
+Consider:
+
+```java
+Person alice = new Person("Alice");
+Person anotherAlice = new Person("Alice");
+
+System.out.println(alice.equals(anotherAlice));
+```
+
+Because the compile-time type is `Person`, Java can select:
+
+```java
+equals(Person)
+```
+
+So you might get:
+
+```text
+true
+```
+
+and think:
+
+> "My equals method works!"
+
+But now:
+
+```java
+Object a = alice;
+Object b = anotherAlice;
+
+System.out.println(a.equals(b));
+```
+
+The compile-time method is:
+
+```java
+equals(Object)
+```
+
+and since you never overrode it, Java uses:
+
+```java
+Object.equals(Object)
+```
+
+which performs identity comparison.
+
+So you can get:
+
+```text
+true
+```
+
+in one situation and:
+
+```text
+false
+```
+
+in another.
+
+That's extremely confusing.
+
+---
+
+**The difference is compile-time method selection**
+
+This is the important Java concept.
+
+Suppose:
+
+```java
+public boolean equals(Person other)
+```
+
+exists.
+
+Then:
+
+```java
+Person p1 = ...;
+Person p2 = ...;
+
+p1.equals(p2);
+```
+
+can select:
+
+```text
+equals(Person)
+```
+
+But:
+
+```java
+Object p1 = ...;
+Object p2 = ...;
+
+p1.equals(p2);
+```
+
+selects:
+
+```text
+equals(Object)
+```
+
+because the compile-time type of `p1` is `Object`.
+
+And `equals(Object)` is still inherited from `Object`.
+
+---
+
+**`@Override` catches the mistake**
+
+This is one of the best reasons to always use:
+
+```java
+@Override
+```
+Consistent use of the Override annotation, will prevent you from making this mistake (Item 40). This equals method
+won’t compile, and the error message will tell you exactly what is wrong:
+```java
+@Override
+public boolean equals(Person other) {
+    ...
+}
+```
+he compiler says, essentially:
+
+```text
+method does not override or implement a method
+from a supertype
+```
+
+And that's exactly what you want.
+
+The compiler is telling you:
+
+> "`equals(Person)` isn't overriding anything."
+
+You then realize:
+
+```java
+equals(Person)  ❌
+equals(Object)  ✅
+```
+
+---
+
+**Why not provide both?**
+
+You might think:
+
+```java
+@Override
+public boolean equals(Object o) {
+    ...
+}
+
+public boolean equals(Person other) {
+    ...
+}
+```
+
+Why not provide both?
+
+Because this creates unnecessary complexity and can produce misleading behavior.
+
+For example:
+
+```java
+Person p = ...;
+Object o = p;
+```
+
+Depending on the compile-time types of the arguments, different overloads can be selected.
+
+Now you have two equality paths:
+
+```text
+equals(Object)
+      │
+      └── logical equality implementation
+
+equals(Person)
+      │
+      └── another equality implementation
+```
+
+Those implementations could accidentally disagree.
+
+That's particularly dangerous with inheritance.
+
+---
+
+**Why `@Override` is so important**
+
+The safest pattern is:
+
+```java
+@Override
+public boolean equals(Object o) {
+    ...
+}
+```
+
+The annotation isn't just documentation.
+
+It tells the compiler:
+
+> "I expect this method to override a superclass/interface method."
+
+If you accidentally write:
+
+```java
+@Override
+public boolean equals(Person other)
+```
+
+the compiler catches it immediately.
+
+Without `@Override`:
+
+```java
+public boolean equals(Person other)
+```
+
+Java happily accepts it because you're allowed to overload methods.
+
+That's why this bug can survive compilation.
+
+---
+
+---
+
+**In Summary**
+
+> **Never narrow the parameter type when overriding `equals()`: `equals(MyClass)` overloads `equals(Object)`; it does not override it.**
+
+And this is one of the cases where `@Override` is especially valuable: **let the compiler verify that you actually replaced `Object.equals()` rather than accidentally creating another overload.**
+
+## Complete example
+
+```java
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
+
+class Person {
+    private final String name;
+    private final int age;
+
+    Person(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (!(obj instanceof Person other)) {
+            return false;
+        }
+
+        return age == other.age &&
+               Objects.equals(name, other.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name, age);
+    }
+
+    @Override
+    public String toString() {
+        return "Person{name='%s', age=%d}".formatted(name, age);
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Person p1 = new Person("Gamal", 30);
+        Person p2 = new Person("Gamal", 30);
+        Person p3 = new Person("Ali", 25);
+
+        // Different objects
+        System.out.println(p1 == p2);
+
+        // Logically equal
+        System.out.println(p1.equals(p2));
+
+        // Not equal
+        System.out.println(p1.equals(p3));
+
+        // Equal objects must have equal hash codes
+        System.out.println(p1.hashCode() == p2.hashCode());
+
+        // HashSet uses equals() + hashCode()
+        Set<Person> people = new HashSet<>();
+
+        people.add(p1);
+        people.add(p2);
+        people.add(p3);
+
+        System.out.println(people);
+        System.out.println(people.size());
+    }
+}
+```
+
+The important result is:
+
+```text
+false
+true
+false
+true
+...
+2
+```
+
+`p1` and `p2` are different objects:
+
+```text
+p1 != p2
+```
+
+but they are logically equal:
+
+```text
+p1.equals(p2) == true
+```
+
+Therefore, `HashSet` treats them as the same set element.
+
+---
+
+## `equals()` belongs to Object, but its meaning belongs to the class
+
+This is an important conceptual distinction.
+
+`Object` provides the method:
+
+```java
+equals(Object)
+```
+
+But the **subclass decides what logical equality means**.
+
+For example:
+
+| Class       | Typical equality                              |
+| ----------- | --------------------------------------------- |
+| `Object`    | Same object/reference                         |
+| `String`    | Same sequence of characters                   |
+| `Integer`   | Same integer value                            |
+| `LocalDate` | Same date                                     |
+| `Person`    | Whatever equality definition `Person` chooses |
+
+So there isn't one universal definition of "equal."
+
+Instead:
+
+```text
+Object.equals()
+       │
+       ▼
+general equality mechanism
+       │
+       ├── String.equals()
+       ├── Integer.equals()
+       ├── LocalDate.equals()
+       └── Person.equals()
+```
+
+---
+
+
+## Summary
+
+The inheritance problem can be summarized like this:
+
+```text
+                 Object.equals()
+                       │
+                       ▼
+                 superclass
+                       │
+                 equals() definition
+                       │
+                       ▼
+                  subclass
+                       │
+              adds new equality state
+                       │
+                       ▼
+             possible disagreement
+                  /          \
+                 /            \
+           symmetry       transitivity
+             breaks          breaks
+```
+
+So the important principle is:
+
+> **Equality is not just an implementation detail of one class; it is a contract that must remain consistent across the inheritance hierarchy.**
+
+For Java's `Object.equals()`, keep this model in mind:
+
+```text
+                    equals()
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+       Object default       overridden
+             │                   │
+       identity equality    logical equality
+             │                   │
+             └─────────┬─────────┘
+                       │
+                       ▼
+                  hashCode()
+                       │
+                       ▼
+               HashMap / HashSet
+```
+
+And the fundamental contract is:
+
+```text
+x.equals(x)                  → true
+
+x.equals(y) == y.equals(x)   → symmetric
+
+x.equals(y)
+y.equals(z)
+        ↓
+x.equals(z)                  → transitive
+
+x.equals(null)               → false
+
+x.equals(y) == true
+        ↓
+x.hashCode() == y.hashCode()
+```
+
+The **most important thing to understand** is not the particular `equals()` code. It's recognizing that **adding equality-relevant state in a subclass can make it impossible to preserve the `equals()` contract if the superclass already defines equality across the hierarchy**.
+
+```text
+                         equals()
+                            │
+                            ▼
+                  "Are these logically
+                     the same value?"
+                            │
+             ┌──────────────┴──────────────┐
+             │                             │
+       No meaningful                    Meaningful
+         equality                       equality
+             │                             │
+             ▼                             ▼
+       Object.equals()             Define equality
+       may be enough                       │
+                                           ▼
+                                  Follow 5 rules
+                                           │
+              ┌────────────────────────────┼─────────────────┐
+              ▼                            ▼                 ▼
+          Reflexive                   Symmetric          Transitive
+              │                            │                 │
+              │                       Avoid cross-     Be careful with
+              │                       type equality      inheritance
+              │                                              │
+              │                                              ▼
+              │                                    Don't add value
+              │                                    components to an
+              │                                    instantiable
+              │                                    value superclass
+              │                                              │
+              │                                              ▼
+              │                                      Prefer composition
+              │
+              └───────────────┬──────────────────────────────┘
+                              ▼
+                         Consistent
+                              │
+                              ▼
+                           Non-null
+
+                         AND ALWAYS:
+
+                    equals() ↔ hashCode()
+```
+> **`equals()` is not just a method you implement to compare fields. It defines an equality relation for your class, and that relation must remain coherent across the entire type hierarchy and with `hashCode()`.**
+
+And when inheritance makes that difficult, **don't fight the equality contract — redesign the relationship, usually by favoring composition over inheritance.**

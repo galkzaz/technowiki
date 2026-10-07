@@ -1,0 +1,1094 @@
+
+## Clients
+In OAuth 2.0, the **client** is the application that wants to obtain an access token so it can access a protected resource on behalf of a user or, in some cases, on its own behalf.
+
+An OAuth client is an application that requests authorization to access a protected resource.
+
+For example:
+
+```text
+                    OAuth Authorization Server
+                    ┌──────────────────────────┐
+                    │                          │
+                    │  Authorization Server    │
+                    │                          │
+                    └────────────┬─────────────┘
+                                 │
+                         Access Token
+                                 │
+                                 ▼
+┌──────────────┐          ┌──────────────┐
+│     User     │          │ OAuth Client │
+└──────────────┘          └──────┬───────┘
+                                 │
+                          Bearer Access Token
+                                 │
+                                 ▼
+                         ┌──────────────┐
+                         │  Resource    │
+                         │    Server    │
+                         └──────────────┘
+```
+
+For example, suppose you have:
+
+```text
+My Web Application
+       │
+       │ OAuth 2.0
+       ▼
+Authorization Server
+       │
+       │ access_token
+       ▼
+Google API
+```
+
+The **My Web Application** is the OAuth client.
+
+It is important not to confuse:
+
+```text
+OAuth Client
+```
+
+with:
+
+```text
+HTTP client
+```
+
+An OAuth client is an application participating in the OAuth authorization protocol.
+
+The most important distinction is **whether the application can keep credentials confidential**.
+### Client Types
+OAuth 2.0 broadly distinguishes clients according to their ability to protect credentials.
+
+```text
+                 OAuth Client
+                     │
+             ┌───────┴────────┐
+             │                │
+       Confidential          Public
+          Client             Client
+             │                │
+      Can protect        Cannot reliably
+      credentials        protect credentials
+```
+
+The key question is:
+
+> Can this application keep a credential such as a client secret confidential from the application's users or other parties?
+
+---
+
+#### Confidential Clients
+A **confidential client** is capable of keeping its authentication credentials confidential.
+
+Typically, it runs in an environment controlled by the application developer/operator.
+
+Examples:
+
+```text
+Browser
+   │
+   ▼
+Web Server
+   │
+   ├── client_id
+   └── client_secret
+```
+
+The browser does **not** receive the secret.
+
+For example:
+
+```text
+Browser
+   │
+   │ HTTPS
+   ▼
+Spring Boot Server
+   │
+   │ client_secret
+   ▼
+Authorization Server
+```
+
+The secret exists on the server.
+
+##### Example
+
+A Spring Boot backend might have:
+
+```properties
+oauth.client-id=my-application
+oauth.client-secret=very-secret-value
+```
+
+The secret can remain on the server.
+
+Therefore:
+
+```text
+Spring Boot Server
+       │
+       ├── client_id
+       └── client_secret
+```
+
+can authenticate itself to the authorization server.
+
+##### Typical confidential clients
+
+* Server-side web applications
+* Backend applications
+* Web applications with a server component
+* Machine-to-machine applications
+#### Public Clients
+A **public client** cannot reliably keep credentials confidential.
+
+Typical examples are applications where the code and/or execution environment is accessible to the user.
+
+For example:
+
+```text
+SPA
+Mobile App
+Desktop App
+```
+
+Suppose a JavaScript application contains:
+
+```javascript
+const clientSecret = "abc123";
+```
+
+That secret isn't really secret.
+
+The user can inspect:
+
+```text
+JavaScript source
+Browser developer tools
+Network requests
+Application bundle
+```
+
+and potentially recover it.
+
+Therefore, putting a client secret into a SPA does **not** make the SPA a confidential client.
+
+#### Confidential vs Public
+
+The distinction can be summarized as:
+
+|                                 | Confidential        | Public                      |
+| ------------------------------- | ------------------- | --------------------------- |
+| Can protect client credentials? | Yes                 | No                          |
+| Client secret possible?         | Yes                 | Not safely                  |
+| Server-side application         | Usually             | No                          |
+| SPA                             | No                  | Yes                         |
+| Mobile application              | Usually public      | Yes                         |
+| Desktop application             | Usually public      | Yes                         |
+| Secret embedded in application  | Protected on server | Cannot be considered secret |
+
+A critical principle is:
+
+> A client secret is only useful as a secret if the client can actually keep it secret.
+
+### Client Registration
+Before an application can use an OAuth authorization server, it normally needs to be **registered**.
+
+When a developer comes to your website, they will need a way to create a new application and obtain credentials. Typically you will have them create a developer account, or create an account on behalf of their organization, before they can create an application.
+
+Registration establishes the client's identity and configuration.
+
+For example:
+
+```text
+Developer
+   │
+   │ Register application
+   ▼
+Authorization Server
+   │
+   ├── client_id
+   ├── client_secret (if applicable)
+   ├── redirect_uris
+   ├── allowed grant/flow
+   └── other configuration
+```
+
+The authorization server creates a client record.
+
+For example:
+
+```text
+Client Registration
+
+client_id:
+    8f72ab...
+
+client_secret:
+    ********
+
+redirect_uri:
+    https://example.com/oauth/callback
+```
+
+The exact registration process depends on the authorization server.
+
+While the OAuth 2.0 spec doesn’t require you to collect any application information in particular before granting credentials, most services collect basic information about an app, such as the app name and an icon, before issuing the client_id and client_secret. It is, however, important that you require the developer to register one or more redirect URLs for the application for security purposes. This is explained in more detail in Redirect URLs.
+
+Typically services collect information about an application such as:
+
+- Application name
+- An icon for the application
+- URL to the application’s home page
+- A short description of the application
+- A link to the application’s privacy policy
+- A list of redirect URLs
+
+Below is GitHub’s interface for registering an application. In it, they collect the application name, home page URL, the callback URL, and an optional description.
+![Creating a new application on Github](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/github_create_new_application.png)
+
+It is a good idea to specify to your developers whether the information you are collecting from them will be displayed to end users, or whether it is for internal use only.
+
+Foursquare’s application registration page asks for similar information, but they additionally ask for a short tagline and a privacy policy URL. These are displayed to the user in the authorization prompt.
+![Creating a new application on Foursquare](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/foursquare_create_new_application.png)
+
+Due to the security considerations with using the legacy Implicit grant type, some services (such as Instagram) disable this grant type for new applications by default, and require that the developer explicitly enables it in the application’s settings, as shown below.
+![Creating a new application on Instagram](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/instagram_create_new_application.png)
+
+Instagram provides a note instructing developers to not name their applications with words that might make the app appear to be from Instagram. This is also a good place to include a link to the API Terms of Use.
+
+Your service can also make the developer choose the type of application they are creating, (public or confidential), or choose a description of the app platform which may be more relatable to the developer (web app, mobile app, SPA, etc). Your service should only issue a client secret to confidential applications, and disallow use of the Implicit grant for those applications as well.
+![Creating a new application in Okta](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/okta_new_application.png)
+
+As shown in the screenshot above, Okta lets the developer choose which platform the application is for (Native, Single-Page App, Web, or Service) before collecting information about the app. Depending on the value the developer chooses here, that will determine things like which grant types are enabled for the app, and whether the app is issued a client secret.
+
+### Client ID
+
+A **client ID** identifies the OAuth application.
+
+For example:
+
+```text
+client_id = "web-application-123"
+```
+
+The client ID is generally **not a secret**.
+
+It can appear in authorization requests:
+
+```text
+https://auth.example.com/authorize?
+    client_id=web-application-123
+    &response_type=code
+    &redirect_uri=https://example.com/callback
+```
+
+Think of it as:
+
+```text
+client_id
+    ↓
+"What application is making this request?"
+```
+
+### Client Authentication
+**Client authentication** answers:
+
+> How does the authorization server know that this client is really the client it claims to be?
+
+This is different from **user authentication**.
+
+There are two different identities:
+
+```text
+                 Authorization Server
+                         │
+             ┌───────────┴───────────┐
+             │                       │
+       Authenticate             Authenticate
+          User                     Client
+             │                       │
+        "Who are you?"          "Which application
+                                  are you?"
+```
+
+For example:
+
+```text
+User:
+    Alice
+
+Client:
+    My Web Application
+```
+
+The user may authenticate with:
+
+```text
+username + password
+MFA
+passkey
+etc.
+```
+
+while the confidential client may authenticate using:
+
+```text
+client_id + client_secret
+```
+### Client Credentials
+At this point, you’ve built the application registration screen, you’re ready to let the developer register the application. When the developer registers the application, you’ll need to generate a client ID and optionally a secret. When generating these strings, there are some important things to consider in terms of security and aesthetics.
+
+There are several pieces of information associated with an OAuth client.
+
+The most important are:
+
+```text
+client_id
+client_secret
+redirect_uri
+```
+
+But they have different purposes.
+
+#### Client ID
+
+Identifies the application.
+
+```text
+client_id = "abc123"
+```
+
+Usually public.
+
+The client_id is a public identifier for apps. Even though it’s public, it’s best that it isn’t guessable by third parties, so many implementations use something like a 32-character hex string. If the client ID is guessable, it makes it slightly easier to craft phishing attacks against arbitrary applications. It must also be unique across all clients that the authorization server handles.
+
+Here are some examples of client IDs from services that support OAuth 2.0:
+
+- Foursquare: ZYDPLLBWSK3MVQJSIYHB1OR2JXCY0X2C5UJ2QAR2MAAIT5Q
+- Github: 6779ef20e75817b79602
+- Google: 292085223830.apps.googleusercontent.com
+- Instagram: f2a1ed52710d4533bde25be6da03b6e3
+- SoundCloud: 269d98e4922fb3895e9ae2108cbb5064
+- Windows Live: 00000000400ECB04
+- Okta: 0oa2hl2inow5Uqc6c357
+
+
+#### Client Secret
+
+Authenticates a confidential client.
+
+```text
+client_secret = "secret-value"
+```
+
+Must remain confidential.
+
+#### Redirect URI
+
+Specifies where the authorization server can send the user-agent after authorization.
+
+```text
+redirect_uri =
+https://example.com/oauth/callback
+```
+
+### Client Secrets
+A **client secret** is a credential associated with a confidential client.
+
+Example:
+
+```text
+client_id:
+    my-server-app
+
+client_secret:
+    s3cr3t-value
+```
+
+The server might authenticate with:
+
+```text
+client_id
++
+client_secret
+```
+
+to the authorization server.
+
+**Important distinction**
+
+This is safe:
+
+```text
+                 Server
+                   │
+           client_secret
+                   │
+                   ▼
+          Authorization Server
+```
+
+This is not actually secret:
+
+```text
+             Browser
+                │
+        JavaScript bundle
+                │
+          client_secret
+```
+
+because the user can inspect the browser application.
+
+Therefore:
+
+> Do not treat a secret embedded in a public application as a real client secret.
+
+
+If the developer is creating a “public” app (a mobile or single-page app), then you should not issue a client_secret to the app at all. This is the only way to ensure the developer won’t accidentally include it in their application. If it doesn’t exist, it can’t be leaked!
+
+The client_secret is a secret known only to the application and the authorization server. It is essential the application’s own password. It must be sufficiently random to not be guessable, which means you should avoid using common UUID libraries which often take into account the timestamp or MAC address of the server generating it. A great way to generate a secure secret is to use a cryptographically-secure library to generate a 256-bit value and then convert it to a hexadecimal representation.
+
+In PHP, you can use the random_bytes function and convert to a hex string:
+```
+bin2hex(random_bytes(32));
+```
+In Ruby, you can use the SecureRandom library to generate a hex string:
+```
+require 'securerandom'
+
+SecureRandom.hex(32)
+```
+It is critical that developers never include their client_secret in public (mobile or browser-based) clients. To help developers avoid accidentally doing this, it’s best to make the client secret visually different from the ID. This way when developers copy and paste the ID and secret, it is easy to recognize which is which. Usually using a longer string for the secret is a good way to indicate this, or prefixing the secret with “secret” or “private”.
+
+Because of this, it’s usually a good idea to ask the developer what type of application they are creating when they start. You can present the following options to them, and only issue a secret for “web server” or “service” apps.
+
+- Web-server app
+- Single-page app
+- Mobile or native app
+- Service app
+
+Of course there’s nothing stopping the developer from choosing the wrong option, but by taking the initiative of asking the developer what kind of app the credentials will be used by, you can help reduce the likelihood of leaked secrets.
+
+#### Storing and Displaying the Client ID and Secret
+
+For each registered application, you’ll need to store the public client_id and the private client_secret. Because these are essentially equivalent to a username and password, you should not store the secret in plain text, instead only store an encrypted or hashed version, to help reduce the likelihood of the secret leaking.
+
+When you issue the client ID and secret, you will need to display them to the developer. Most services provide a way for developers to retrieve the secret of an existing application, although some will only display the secret one time and require the developer store it themselves immediately. If you display the secret only one time, you can store a hashed version of it to avoid storing the plaintext secret at all.
+
+If you store the secret in a way that can be displayed later to developers, you should take extra precautions when revealing the secret. A common way to protect the secret is to insert a “re-authorization” prompt before the developer can view the secret.
+![GitHub asks to confirm your password when making sensitive changes](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/github_confirm_password.png)
+
+The service asks the developer to confirm their password before it will reveal the secret. This is commonly seen in Amazon or GitHub’s websites when you attempt to view or update sensitive information.
+![Dropbox hides the secret until it is clicked](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/dropbox_show_secret.png)
+
+Additionally, obscuring the secret on the application detail page until the developer clicks “show” is a good way to prevent accidental leakage of the secret
+
+### Redirect URIs
+A **redirect URI** is the location where the authorization server redirects the user-agent after the authorization process.
+
+Suppose:
+
+```text
+Application:
+https://example.com
+```
+
+The application registers:
+
+```text
+https://example.com/oauth/callback
+```
+
+The OAuth flow might look like:
+
+```text
+User
+ │
+ │ 1. Start login
+ ▼
+Application
+ │
+ │ 2. Authorization request
+ ▼
+Authorization Server
+ │
+ │ 3. Authenticate/authorize user
+ │
+ │ 4. Redirect
+ ▼
+https://example.com/oauth/callback
+ │
+ │ authorization code
+ ▼
+Application
+```
+
+For Authorization Code Flow:
+
+```text
+https://example.com/oauth/callback?code=abc123
+```
+
+The application receives the authorization code.
+
+**Why Redirect URIs Matter**
+
+The authorization server should not blindly redirect to arbitrary URLs supplied by the client.
+
+Imagine an attacker attempts:
+
+```text
+redirect_uri=https://attacker.example/callback
+```
+
+If the authorization server accepted arbitrary redirect URIs, an authorization response could potentially be sent to an attacker-controlled location.
+
+Therefore, the client normally registers allowed redirect URIs.
+
+For example:
+
+```text
+Registered:
+
+https://example.com/oauth/callback
+```
+
+Then the authorization server only permits the configured redirect URI according to its validation rules.
+
+This is one of the important protections in OAuth.
+
+### Application Types
+A useful mental model is:
+
+```text
+                         OAuth Clients
+                              │
+              ┌───────────────┴───────────────┐
+              │                               │
+        Confidential                       Public
+              │                               │
+      ┌───────┴────────┐             ┌────────┼─────────┐
+      │                │             │        │         │
+ Server-side       Backend       SPA     Native      Browser
+ Web App         Application             App       Application
+```
+There is some overlap here because these are **different classification dimensions**.
+
+For example:
+
+```text
+Browser-based
+```
+
+describes where the application runs.
+
+While:
+
+```text
+Public
+```
+
+describes whether it can keep credentials confidential.
+
+So don't think of them as identical concepts.
+
+#### Server-Side Applications
+Server-side apps are the most common type of application encountered when dealing with OAuth servers. These apps run on a web server where the source code of the application is not available to the public, so they can maintain the confidentiality of their client secret.
+
+For example:
+
+```text
+              Browser
+                 │
+                 ▼
+        ┌─────────────────┐
+        │ Spring Boot     │
+        │ Server          │
+        │                 │
+        │ client_secret   │
+        └────────┬────────┘
+                 │
+                 ▼
+        Authorization Server
+```
+
+The browser does not receive the secret.
+
+Therefore, a server-side application can generally be a:
+
+```text
+Confidential Client
+```
+
+For example:
+
+```text
+Angular
+   │
+   ▼
+Spring Boot
+   │
+   ▼
+Authorization Server
+```
+
+The Angular frontend should not be given the Spring Boot application's secret.
+
+The diagram below illustrates a typical example where the user interacts with their browser which is communicating with the client. The client and the API server have a separate secure communications channel between them. The user’s browser never makes a request directly to the API server, everything goes through the client first.
+
+![The app’s server communicates with the API](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/user_browser_client_server.png)
+
+Server-side apps use the authorization_code grant type. In this flow, after the user authorizes the application, the application receives an “authorization code” which it can then exchange for an access token.
+
+#### Native Applications
+A **native application** runs directly on a user's device.
+
+Examples:
+
+```text
+Android application
+iOS application
+Desktop application
+```
+
+Architecture:
+
+```text
+┌───────────────────────┐
+│       Device          │
+│                       │
+│  ┌─────────────────┐  │
+│  │ Native OAuth    │  │
+│  │ Application     │  │
+│  └─────────────────┘  │
+│                       │
+└───────────────────────┘
+```
+
+The application is distributed to users.
+
+Therefore, it generally cannot safely keep a static client secret.
+
+For example:
+
+```text
+Mobile App
+   │
+   ├── client_id       ← okay
+   │
+   └── client_secret   ← cannot be treated as secret
+```
+
+Native applications are therefore generally **public clients**.
+
+They commonly use:
+
+```text
+Authorization Code
++
+PKCE
+```
+
+rather than relying on a client secret.
+
+#### Browser-Based Applications
+A browser-based application executes in a web browser.
+
+For example:
+
+```text
+Browser
+   │
+   ├── HTML
+   ├── CSS
+   └── JavaScript
+```
+
+The application code is delivered to the user.
+
+Therefore:
+
+```text
+Browser-based application
+        ↓
+Public client
+```
+
+is generally the important security model.
+
+A browser application should not contain:
+
+```text
+client_secret
+```
+
+that is expected to remain confidential.
+
+#### Single-Page Applications
+A **Single-Page Application (SPA)** is a specific type of browser-based application.
+
+Single-page apps (also known as browser-based apps) run entirely in the browser after loading the JavaScript and HTML source code from a web page. 
+
+Examples include applications built with:
+
+```text
+React
+Angular
+Vue
+```
+
+The browser loads the application and JavaScript handles much of the interaction without traditional full-page navigation.
+
+Architecture:
+
+```text
+                Browser
+┌──────────────────────────────────┐
+│                                  │
+│          Angular / React         │
+│                                  │
+│          SPA Application         │
+│                                  │
+└───────────────┬──────────────────┘
+                │
+                │ OAuth
+                ▼
+       Authorization Server
+```
+
+The JavaScript is delivered to the browser, so users can inspect it.
+
+Therefore:
+
+```text
+SPA
+ ↓
+Public Client
+```
+
+Since the entire source is available to the browser, they cannot maintain the confidentiality of a client secret, so a secret is not used for these apps. Because they can’t use a client secret, the best option is to use the PKCE extension to protect the authorization code in the redirect. This is similar to the solution for mobile apps which also can’t use a client secret.
+
+A modern SPA commonly uses:
+
+```text
+Authorization Code Flow
++
+PKCE
+```
+
+rather than depending on a client secret.
+
+:::note
+
+Deprecation Notice
+
+A common historical pattern for single-page apps was to use the Implicit flow to receive an access token in the redirect without the intermediate authorization code exchange step. This has a number of security issues as described Implicit Flow and should no longer be used. Please see https://oauth.net/2/browser-based-apps/ for more details.
+:::
+
+
+#### SPA vs Server-Side Web App
+
+Consider two architectures.
+
+**SPA**
+
+```text
+Browser
+  │
+  ├── React
+  ├── client_id
+  └── OAuth requests
+```
+
+The browser contains the application.
+
+Therefore:
+
+```text
+Public Client
+```
+
+**Server-side application**
+
+```text
+Browser
+   │
+   ▼
+Web Server
+   │
+   ├── client_id
+   └── client_secret
+   │
+   ▼
+Authorization Server
+```
+
+The secret stays on the server.
+
+Therefore:
+
+```text
+Confidential Client
+```
+
+### Client Type vs Application Type
+
+This distinction is especially important.
+
+1. **Client type**
+
+Answers:
+
+> Can the client keep its credentials confidential?
+
+```text
+Confidential
+Public
+```
+
+2. **Application type**
+
+Answers:
+
+> Where/how does the application execute?
+
+```text
+Server-side
+Browser-based
+SPA
+Native
+```
+
+Therefore:
+
+| Application                 | Typical OAuth client type |
+| --------------------------- | ------------------------- |
+| Server-side web application | Confidential              |
+| Backend service             | Confidential              |
+| SPA                         | Public                    |
+| Mobile application          | Public                    |
+| Desktop application         | Public                    |
+| Browser-based application   | Public                    |
+
+"Typical" is important because OAuth architecture can be more nuanced than simply mapping an application label to a client type.
+
+### Complete OAuth Client Picture
+Think of the concepts in this order:
+
+```text
+1. Client
+      │
+      │ What application is requesting OAuth?
+      ▼
+2. Client Registration
+      │
+      ├── client_id
+      ├── redirect_uris
+      └── authentication configuration
+      │
+      ▼
+3. Client Type
+      │
+      ├── Confidential
+      │      └── can protect credentials
+      │
+      └── Public
+             └── cannot protect credentials
+      │
+      ▼
+4. Client Authentication
+      │
+      └── How does the authorization server
+          authenticate the client?
+      │
+      ▼
+5. OAuth Flow
+      │
+      └── Authorization Code + PKCE, etc.
+```
+
+And the application categories fit around the client type:
+
+```text
+                    OAuth Client
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+       Confidential               Public
+              │                     │
+       Server-side             ┌─────┴─────────┐
+       applications             │               │
+       backend services         SPA          Native
+                               Browser       applications
+```
+
+The **central security principle** is:
+
+> **Public clients cannot safely rely on a client secret. Confidential clients can, because their credentials can remain in a controlled server environment.**
+
+Putting everything together:
+
+```text
+                         OAuth Client
+                              │
+             ┌────────────────┴───────────────┐
+             │                                │
+        Client Type                      Application Type
+             │                                │
+       ┌─────┴─────┐                ┌─────────┼──────────┐─────────┐
+       │           │                │         │          │         │     
+ Confidential   Public          Server     Native     Browser     SPA
+                                Side       App        Based
+```
+
+The client is registered with the authorization server:
+
+```text
+                    Client Registration
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+      client_id       redirect_uris    client auth
+                                             │
+                                      ┌──────┴──────┐
+                                      │             │
+                                client_secret     PKCE/
+                                (confidential)   other method
+```
+### Examples
+#### Example: Spring Boot Web Application
+
+Suppose you have:
+
+```text
+Angular
+   │
+   ▼
+Spring Boot
+   │
+   ▼
+Authorization Server
+```
+
+The Spring Boot application is registered:
+
+```text
+client_id:
+    product-web
+
+client_secret:
+    ********
+
+redirect_uri:
+    https://example.com/login/oauth2/code/product
+```
+
+Flow:
+
+```text
+1. User
+      │
+      ▼
+2. Angular / Browser
+      │
+      ▼
+3. Spring Boot
+      │
+      │ authorization request
+      ▼
+4. Authorization Server
+      │
+      │ user authenticates
+      │
+      │ authorization code
+      ▼
+5. Spring Boot callback
+      │
+      │ client authentication
+      │ client_id + client_secret
+      │
+      ▼
+6. Authorization Server
+      │
+      │ access token
+      ▼
+7. Spring Boot
+```
+
+The critical security property is:
+
+```text
+Browser
+   X
+   │
+   │ does NOT receive client_secret
+   │
+   ▼
+Spring Boot
+   │
+   └── client_secret
+```
+
+---
+
+#### Example: SPA
+
+Now consider:
+
+```text
+Angular SPA
+     │
+     ▼
+Authorization Server
+     │
+     ▼
+Resource Server
+```
+
+The Angular application cannot safely store:
+
+```text
+client_secret
+```
+
+because the code runs in the user's browser.
+
+Instead:
+
+```text
+Angular
+   │
+   ├── client_id
+   │
+   ├── redirect_uri
+   │
+   └── PKCE
+   │
+   ▼
+Authorization Server
+```
+
+The important mechanism here is **PKCE**, which protects the authorization-code exchange without requiring the SPA to possess a secret that it cannot actually keep secret.
+
+### Deleting Applications and Revoking Secrets 
+Developers will need a way to delete (or at least deactivate) their applications. It is also a good idea to provide a way for the developer to revoke and generate a new client secret for their apps.
+#### Deleting Applications
+
+When the developer deletes an application, the service should inform the developer about the consequences of deleting the application. For example, GitHub tells the developer that all access tokens will be revoked, and how many users will be affected.
+![GitHub asks to confirm deleting an application](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/github_delete_application.png)
+
+Deleting an application should immediately revoke all access tokens and other credentials that were issued to the application such as pending authorization codes and refresh tokens.
+#### Revoking Secrets
+
+The service should provide the developer with a way to reset the client secret. In the case when the secret is accidentally exposed, the developer needs a way to ensure the old secret can be revoked. Revoking the secret should not necessarily invalidate users’ access tokens, since the developer could always delete the application if they wanted to also invalidate all user tokens.
+![GitHub asks to confirm resetting an application’s secret](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/github_reset_client_secret.png)
+
+Resetting the secret should keep all existing access tokens active. However this does mean that any deployed applications using the old secret will be unable to refresh the access token using the old secret. The deployed applications will need to update their secrets before they will be able to use a refresh token.

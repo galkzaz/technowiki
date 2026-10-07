@@ -1,0 +1,1738 @@
+---
+id: software-engineering-design-architecture-security-labs-native-app-loopback-url-cli
+title: OAuth Native App with Loopback URLs
+sidebar_position: 7
+---
+
+Absolutely. Let’s build the **same OAuth Native App lab**, but this time as a **Node.js CLI application using a loopback redirect URI**.
+
+The lab will use **Keycloak + Node.js CLI + system browser + Authorization Code Flow + PKCE**.
+
+The important difference from your previous custom-scheme lab is that there is **no custom URL scheme**. The Node.js application temporarily starts an HTTP server on `127.0.0.1` and uses that as the OAuth callback.
+
+### Lab architecture
+
+```text
+┌──────────────────────┐
+│   Node.js CLI App    │
+│                      │
+│  Local HTTP Server   │
+│  127.0.0.1:random    │
+└──────────┬───────────┘
+           │
+           │ Open browser
+           ▼
+┌──────────────────────┐
+│    System Browser    │
+└──────────┬───────────┘
+           │
+           │ Authorization Request
+           ▼
+┌──────────────────────┐
+│       Keycloak       │
+│   Authorization      │
+│       Server         │
+└──────────┬───────────┘
+           │
+           │ Redirect
+           │
+           ▼
+ http://127.0.0.1:49152/callback
+           │
+           ▼
+┌──────────────────────┐
+│   Node.js CLI App    │
+│                      │
+│ receives code+state  │
+└──────────┬───────────┘
+           │
+           │ POST /token
+           │ + code_verifier
+           ▼
+┌──────────────────────┐
+│       Keycloak       │
+└──────────┬───────────┘
+           │
+           ▼
+     Access Token
+```
+
+---
+
+# 1. What we are going to build
+
+We will create:
+
+```text
+shopping-cli/
+├── package.json
+├── .env
+└── src/
+    └── index.js
+```
+
+The CLI will support:
+
+```bash
+npm start
+```
+
+which will:
+
+1. Start a local HTTP server.
+2. Ask the OS for an available port.
+3. Generate `state`.
+4. Generate a PKCE `code_verifier`.
+5. Generate the PKCE `code_challenge`.
+6. Construct the loopback redirect URI.
+7. Open the system browser.
+8. Send the user to Keycloak.
+9. Receive the authorization code on `127.0.0.1`.
+10. Verify `state`.
+11. Exchange the authorization code for tokens.
+12. Display the access token.
+
+---
+
+# 2. Prerequisites
+
+You need:
+
+```text
+Node.js
+npm
+Docker
+A browser
+```
+
+Check Node:
+
+```bash
+node --version
+npm --version
+```
+
+We'll use modern Node.js APIs, so a recent Node version is recommended.
+
+---
+
+# 3. Start Keycloak
+
+Create a directory:
+
+```bash
+mkdir oauth-loopback-lab
+cd oauth-loopback-lab
+```
+
+Start Keycloak:
+
+```bash
+docker run \
+  --name keycloak \
+  -p 8080:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+  -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+  quay.io/keycloak/keycloak:26.8.0 \
+  start-dev
+```
+
+Keycloak will be available at:
+
+```text
+http://localhost:8080
+```
+
+Open the Keycloak administration console and log in:
+
+```text
+Username: admin
+Password: admin
+```
+
+---
+
+# 4. Create the `shop` realm
+
+Create a realm:
+
+```text
+shop
+```
+
+So our issuer will be:
+
+```text
+http://localhost:8080/realms/shop
+```
+
+The OpenID Connect discovery document is:
+
+```text
+http://localhost:8080/realms/shop/.well-known/openid-configuration
+```
+
+---
+
+# 5. Create a user
+
+Create a user:
+
+```text
+Username: alice
+Password: alice123
+```
+
+Make sure the password is **not temporary**.
+
+We'll use this user to perform the browser login.
+
+---
+
+# 6. Create the OAuth client
+
+Create a client:
+
+```text
+Client ID:
+shopping-cli
+```
+
+The important part is that this is a **public client**.
+
+Why?
+
+Our application is installed on the user's machine:
+
+```text
+User's computer
+    │
+    └── shopping-cli
+```
+
+We cannot safely put a client secret inside the application.
+
+So:
+
+```text
+Client type = Public
+```
+
+---
+
+# 7. Configure the loopback redirect
+
+This is the most important configuration in the lab.
+
+We don't know the port yet.
+
+The application will dynamically choose one.
+
+For example:
+
+```text
+http://127.0.0.1:49152/callback
+```
+
+or:
+
+```text
+http://127.0.0.1:53127/callback
+```
+
+Therefore the authorization server needs to support the loopback pattern.
+
+Conceptually, we want:
+
+```text
+http://127.0.0.1:<random-port>/callback
+```
+
+For a production authorization server, follow its documented loopback redirect registration rules rather than blindly registering a wildcard.
+
+For our Keycloak lab, configure the client to permit the loopback redirect pattern supported by your Keycloak version/configuration.
+
+We will use:
+
+```text
+http://127.0.0.1:*/*
+```
+
+as the conceptual pattern for the lab.
+
+The important security idea is:
+
+```text
+127.0.0.1
+   +
+dynamic port
+   +
+application-controlled callback
+```
+
+---
+
+# 8. Why don't we know the redirect URI beforehand?
+
+This is fundamentally different from our previous custom URL scheme lab.
+
+Previously:
+
+```text
+shoppingapp://oauth/callback
+```
+
+was fixed.
+
+Now:
+
+```text
+http://127.0.0.1:<PORT>/callback
+```
+
+contains a dynamic port.
+
+For example:
+
+```text
+Application starts
+       │
+       ▼
+OS chooses port
+       │
+       ▼
+49152
+       │
+       ▼
+http://127.0.0.1:49152/callback
+```
+
+The application uses that exact URI in the authorization request.
+
+---
+
+# 9. Create the Node.js application
+
+Create the project:
+
+```bash
+mkdir shopping-cli
+cd shopping-cli
+```
+
+Initialize npm:
+
+```bash
+npm init -y
+```
+
+We only need one external package:
+
+```bash
+npm install open
+```
+
+The `open` package allows Node.js to launch the user's default browser.
+
+Our OAuth implementation itself will use Node's built-in APIs.
+
+---
+
+# 10. package.json
+
+Change the package to use ES modules:
+
+```json
+{
+  "name": "shopping-cli",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "open": "^10.1.0"
+  }
+}
+```
+
+---
+
+# 11. Create the application
+
+Create:
+
+```bash
+mkdir src
+touch src/index.js
+```
+
+The application will contain several logical pieces:
+
+```text
+index.js
+│
+├── generateState()
+├── generateCodeVerifier()
+├── generateCodeChallenge()
+├── startLoopbackServer()
+├── buildAuthorizationUrl()
+├── openBrowser()
+├── receiveAuthorizationResponse()
+└── exchangeCodeForTokens()
+```
+
+---
+
+# 12. Complete Node.js implementation
+
+```javascript
+import http from "node:http";
+import crypto from "node:crypto";
+import { URL } from "node:url";
+import open from "open";
+
+const AUTHORIZATION_SERVER =
+  "http://localhost:8080/realms/shop";
+
+const AUTHORIZATION_ENDPOINT =
+  `${AUTHORIZATION_SERVER}/protocol/openid-connect/auth`;
+
+const TOKEN_ENDPOINT =
+  `${AUTHORIZATION_SERVER}/protocol/openid-connect/token`;
+
+const CLIENT_ID = "shopping-cli";
+
+const SCOPES = [
+  "openid",
+  "profile"
+];
+
+const CALLBACK_PATH = "/callback";
+
+async function main() {
+  console.log("Starting Shopping CLI OAuth login...\n");
+
+  /*
+   * 1. Generate OAuth state
+   */
+  const state = generateRandomString(32);
+
+  /*
+   * 2. Generate PKCE verifier
+   */
+  const codeVerifier = generateCodeVerifier();
+
+  /*
+   * 3. Generate PKCE challenge
+   */
+  const codeChallenge =
+    generateCodeChallenge(codeVerifier);
+
+  /*
+   * 4. Start local HTTP server.
+   *
+   * Passing port 0 tells the operating system:
+   *
+   * "Give me any available port."
+   */
+  const server = await startLoopbackServer();
+
+  const address = server.address();
+
+  if (!address || typeof address === "string") {
+    throw new Error("Could not determine server address");
+  }
+
+  const port = address.port;
+
+  /*
+   * 5. Construct the loopback redirect URI.
+   */
+  const redirectUri =
+    `http://127.0.0.1:${port}${CALLBACK_PATH}`;
+
+  console.log("Local callback server started:");
+  console.log(`  ${redirectUri}\n`);
+
+  /*
+   * 6. Construct authorization URL.
+   */
+  const authorizationUrl =
+    buildAuthorizationUrl({
+      redirectUri,
+      state,
+      codeChallenge
+    });
+
+  console.log("Opening browser...\n");
+
+  /*
+   * 7. Open the system browser.
+   */
+  await open(authorizationUrl);
+
+  /*
+   * 8. Wait for the browser to redirect
+   *    back to our local server.
+   */
+  const authorizationResponse =
+    await waitForAuthorizationResponse(server);
+
+  /*
+   * 9. Close the local HTTP server.
+   */
+  await closeServer(server);
+
+  /*
+   * 10. Validate state.
+   */
+  if (authorizationResponse.state !== state) {
+    throw new Error(
+      "Invalid state parameter"
+    );
+  }
+
+  /*
+   * 11. Check for authorization errors.
+   */
+  if (authorizationResponse.error) {
+    throw new Error(
+      `Authorization failed: ${authorizationResponse.error}`
+    );
+  }
+
+  const code =
+    authorizationResponse.code;
+
+  if (!code) {
+    throw new Error(
+      "Authorization code was not returned"
+    );
+  }
+
+  console.log("Authorization code received.");
+  console.log("State validation successful.\n");
+
+  /*
+   * 12. Exchange authorization code
+   *     for tokens.
+   */
+  const tokens =
+    await exchangeCodeForTokens({
+      code,
+      codeVerifier,
+      redirectUri
+    });
+
+  console.log("Login successful!\n");
+
+  console.log("Access Token:");
+  console.log(tokens.access_token);
+
+  if (tokens.refresh_token) {
+    console.log("\nRefresh Token:");
+    console.log(tokens.refresh_token);
+  }
+
+  if (tokens.id_token) {
+    console.log("\nID Token:");
+    console.log(tokens.id_token);
+  }
+}
+
+
+/*
+ * -------------------------------------------------------
+ * Random value
+ * -------------------------------------------------------
+ */
+
+function generateRandomString(byteLength) {
+  return crypto
+    .randomBytes(byteLength)
+    .toString("base64url");
+}
+
+
+/*
+ * -------------------------------------------------------
+ * OAuth state
+ * -------------------------------------------------------
+ */
+
+function generateState() {
+  return generateRandomString(32);
+}
+
+
+/*
+ * -------------------------------------------------------
+ * PKCE
+ * -------------------------------------------------------
+ */
+
+function generateCodeVerifier() {
+  /*
+   * PKCE code verifier:
+   *
+   * high-entropy random value
+   */
+  return generateRandomString(32);
+}
+
+
+function generateCodeChallenge(codeVerifier) {
+  /*
+   * challenge =
+   *
+   * BASE64URL(
+   *     SHA256(code_verifier)
+   * )
+   */
+
+  return crypto
+    .createHash("sha256")
+    .update(codeVerifier)
+    .digest("base64url");
+}
+
+
+/*
+ * -------------------------------------------------------
+ * Loopback HTTP server
+ * -------------------------------------------------------
+ */
+
+function startLoopbackServer() {
+  return new Promise((resolve, reject) => {
+
+    const server = http.createServer();
+
+    server.on("error", reject);
+
+    /*
+     * Important:
+     *
+     * Bind specifically to 127.0.0.1.
+     *
+     * This prevents the server from listening
+     * on the machine's external network interfaces.
+     */
+    server.listen(
+      {
+        host: "127.0.0.1",
+
+        /*
+         * Port 0 means:
+         *
+         * "OS, choose an available port."
+         */
+        port: 0
+      },
+      () => {
+        resolve(server);
+      }
+    );
+  });
+}
+
+
+/*
+ * -------------------------------------------------------
+ * Authorization URL
+ * -------------------------------------------------------
+ */
+
+function buildAuthorizationUrl({
+  redirectUri,
+  state,
+  codeChallenge
+}) {
+
+  const url =
+    new URL(AUTHORIZATION_ENDPOINT);
+
+  url.searchParams.set(
+    "client_id",
+    CLIENT_ID
+  );
+
+  url.searchParams.set(
+    "response_type",
+    "code"
+  );
+
+  url.searchParams.set(
+    "redirect_uri",
+    redirectUri
+  );
+
+  url.searchParams.set(
+    "scope",
+    SCOPES.join(" ")
+  );
+
+  url.searchParams.set(
+    "state",
+    state
+  );
+
+  url.searchParams.set(
+    "code_challenge",
+    codeChallenge
+  );
+
+  url.searchParams.set(
+    "code_challenge_method",
+    "S256"
+  );
+
+  return url.toString();
+}
+
+
+/*
+ * -------------------------------------------------------
+ * Receive authorization response
+ * -------------------------------------------------------
+ */
+
+function waitForAuthorizationResponse(server) {
+
+  return new Promise((resolve, reject) => {
+
+    server.on("request", (req, res) => {
+
+      try {
+
+        /*
+         * Construct absolute URL from
+         * Host header + request path.
+         */
+        const requestUrl =
+          new URL(
+            req.url,
+            `http://127.0.0.1:${server.address().port}`
+          );
+
+        /*
+         * Only accept our expected callback path.
+         */
+        if (
+          requestUrl.pathname !==
+          CALLBACK_PATH
+        ) {
+
+          res.writeHead(404);
+
+          res.end("Not Found");
+
+          return;
+        }
+
+        const code =
+          requestUrl.searchParams.get("code");
+
+        const state =
+          requestUrl.searchParams.get("state");
+
+        const error =
+          requestUrl.searchParams.get("error");
+
+        /*
+         * Send a simple response to the browser.
+         *
+         * The browser doesn't need to display
+         * the OAuth tokens.
+         */
+        res.writeHead(200, {
+          "Content-Type": "text/html"
+        });
+
+        res.end(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Login Complete</title>
+            </head>
+            <body>
+              <h1>Login successful</h1>
+              <p>You can return to the CLI.</p>
+            </body>
+          </html>
+        `);
+
+        resolve({
+          code,
+          state,
+          error
+        });
+
+      } catch (error) {
+
+        reject(error);
+      }
+    });
+  });
+}
+
+
+/*
+ * -------------------------------------------------------
+ * Close local server
+ * -------------------------------------------------------
+ */
+
+function closeServer(server) {
+
+  return new Promise((resolve, reject) => {
+
+    server.close(error => {
+
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+
+/*
+ * -------------------------------------------------------
+ * Token request
+ * -------------------------------------------------------
+ */
+
+async function exchangeCodeForTokens({
+  code,
+  codeVerifier,
+  redirectUri
+}) {
+
+  const body =
+    new URLSearchParams();
+
+  body.set(
+    "grant_type",
+    "authorization_code"
+  );
+
+  body.set(
+    "client_id",
+    CLIENT_ID
+  );
+
+  body.set(
+    "code",
+    code
+  );
+
+  body.set(
+    "redirect_uri",
+    redirectUri
+  );
+
+  body.set(
+    "code_verifier",
+    codeVerifier
+  );
+
+  const response =
+    await fetch(
+      TOKEN_ENDPOINT,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded"
+        },
+
+        body
+      }
+    );
+
+  if (!response.ok) {
+
+    const text =
+      await response.text();
+
+    throw new Error(
+      `Token request failed: ${response.status}\n${text}`
+    );
+  }
+
+  return response.json();
+}
+
+
+/*
+ * -------------------------------------------------------
+ * Start
+ * -------------------------------------------------------
+ */
+
+main().catch(error => {
+
+  console.error(
+    "\nOAuth login failed:"
+  );
+
+  console.error(
+    error.message
+  );
+
+  process.exit(1);
+});
+```
+
+There is one small cleanup opportunity in that code: `generateState()` is defined but the main flow directly calls `generateRandomString(32)`. You can simplify it to:
+
+```javascript
+const state = generateState();
+```
+
+and keep the dedicated function.
+
+---
+
+# 13. Run the application
+
+From:
+
+```text
+shopping-cli/
+```
+
+run:
+
+```bash
+npm start
+```
+
+You should see something similar to:
+
+```text
+Starting Shopping CLI OAuth login...
+
+Local callback server started:
+  http://127.0.0.1:49152/callback
+
+Opening browser...
+```
+
+The port will probably be different each time.
+
+For example:
+
+```text
+http://127.0.0.1:53417/callback
+```
+
+---
+
+# 14. What happens in the browser?
+
+The application constructs something similar to:
+
+```text
+http://localhost:8080/realms/shop/protocol/openid-connect/auth
+    ?client_id=shopping-cli
+    &response_type=code
+    &redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Fcallback
+    &scope=openid+profile
+    &state=abc123
+    &code_challenge=xyz789
+    &code_challenge_method=S256
+```
+
+The browser opens Keycloak.
+
+The user sees:
+
+```text
+┌─────────────────────────────┐
+│          Keycloak           │
+│                             │
+│ Username: [____________]    │
+│ Password: [____________]    │
+│                             │
+│          [ Sign In ]        │
+└─────────────────────────────┘
+```
+
+The user enters:
+
+```text
+alice
+alice123
+```
+
+---
+
+# 15. Keycloak redirects the browser
+
+After successful authentication, Keycloak returns:
+
+```http
+HTTP/1.1 302 Found
+
+Location:
+http://127.0.0.1:49152/callback
+    ?code=abc123
+    &state=xyz456
+```
+
+The browser follows that URL.
+
+Notice what happens now.
+
+It doesn't go to Keycloak:
+
+```text
+Browser
+   │
+   │
+   ▼
+127.0.0.1:49152
+```
+
+The request goes directly to the Node.js process.
+
+---
+
+# 16. Node.js receives the request
+
+Our Node server receives:
+
+```http
+GET /callback?code=abc123&state=xyz456
+```
+
+Our code extracts:
+
+```javascript
+const code =
+  requestUrl.searchParams.get("code");
+
+const state =
+  requestUrl.searchParams.get("state");
+```
+
+So we get:
+
+```text
+code  = abc123
+state = xyz456
+```
+
+---
+
+# 17. Verify `state`
+
+Remember that before opening the browser we generated:
+
+```text
+state = xyz456
+```
+
+The returned value must equal it:
+
+```text
+Original state
+     │
+     │
+     ▼
+  xyz456
+     ▲
+     │
+     │
+Returned state
+```
+
+If:
+
+```text
+returned state !== original state
+```
+
+we reject the response.
+
+This protects the OAuth authorization response from being associated with the wrong authorization request.
+
+---
+
+# 18. PKCE verification
+
+We also generated:
+
+```text
+code_verifier
+```
+
+For example:
+
+```text
+dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+```
+
+Then:
+
+```text
+SHA-256(code_verifier)
+          │
+          ▼
+    code_challenge
+```
+
+The challenge was sent to Keycloak during the authorization request:
+
+```text
+code_challenge=...
+code_challenge_method=S256
+```
+
+But the verifier stays in the Node.js application.
+
+When we exchange the authorization code:
+
+```http
+POST /token
+
+grant_type=authorization_code
+client_id=shopping-cli
+code=abc123
+redirect_uri=http://127.0.0.1:49152/callback
+code_verifier=...
+```
+
+Keycloak verifies:
+
+```text
+SHA256(received code_verifier)
+              =
+original code_challenge
+```
+
+If they match:
+
+```text
+✓ Authorization code can be redeemed
+```
+
+---
+
+# 19. Complete request flow
+
+This is the most important part of the lab.
+
+```text
+                 Node.js CLI
+                     │
+                     │
+             1. Generate state
+             2. Generate PKCE
+                     │
+                     ▼
+             Start HTTP server
+             127.0.0.1:49152
+                     │
+                     │
+             3. Open browser
+                     │
+                     ▼
+              System Browser
+                     │
+                     │
+                     │ Authorization Request
+                     ▼
+                Keycloak
+                     │
+                     │
+               Login / Consent
+                     │
+                     ▼
+                Keycloak
+                     │
+                     │ 302 Redirect
+                     ▼
+       http://127.0.0.1:49152/callback
+                     │
+                     ▼
+             Node.js CLI
+                     │
+              code + state
+                     │
+                     ▼
+               Verify state
+                     │
+                     ▼
+          POST /token + verifier
+                     │
+                     ▼
+                Keycloak
+                     │
+                     │
+                     ▼
+             Access Token
+             Refresh Token
+             ID Token
+                     │
+                     ▼
+             Node.js CLI
+```
+
+---
+
+# 20. Why does the local server bind to `127.0.0.1`?
+
+Notice this code:
+
+```javascript
+server.listen({
+  host: "127.0.0.1",
+  port: 0
+});
+```
+
+The important part is:
+
+```text
+host = 127.0.0.1
+```
+
+We don't want:
+
+```text
+0.0.0.0
+```
+
+because that could make the server reachable through the machine's network interfaces.
+
+Conceptually:
+
+```text
+127.0.0.1
+    │
+    └── this machine only
+```
+
+while:
+
+```text
+0.0.0.0
+    │
+    ├── localhost
+    ├── LAN
+    └── potentially other interfaces
+```
+
+For an OAuth loopback callback, we want the former.
+
+---
+
+# 21. Why does the server use port `0`?
+
+This is a particularly useful Node.js feature.
+
+We write:
+
+```javascript
+server.listen({
+    host: "127.0.0.1",
+    port: 0
+});
+```
+
+Port `0` doesn't mean that we're actually going to use TCP port zero.
+
+It means:
+
+> **Ask the operating system to select an available ephemeral port.**
+
+After the server starts:
+
+```javascript
+const address = server.address();
+
+const port = address.port;
+```
+
+might return:
+
+```text
+49152
+```
+
+Then:
+
+```javascript
+const redirectUri =
+    `http://127.0.0.1:${port}/callback`;
+```
+
+becomes:
+
+```text
+http://127.0.0.1:49152/callback
+```
+
+---
+
+# 22. Testing the loopback server independently
+
+Before testing OAuth, it's useful to verify the Node.js loopback mechanism itself.
+
+Temporarily add:
+
+```javascript
+server.on("request", (req, res) => {
+
+    console.log(
+        "Received request:",
+        req.url
+    );
+
+    res.end("Hello from OAuth CLI");
+});
+```
+
+Then start the application.
+
+Suppose Node reports:
+
+```text
+http://127.0.0.1:49152/callback
+```
+
+Open:
+
+```text
+http://127.0.0.1:49152/callback
+```
+
+in your browser.
+
+The Node process should print:
+
+```text
+Received request: /callback
+```
+
+and the browser should display:
+
+```text
+Hello from OAuth CLI
+```
+
+This proves:
+
+```text
+Browser
+   │
+   ▼
+127.0.0.1:49152
+   │
+   ▼
+Node.js
+```
+
+is working.
+
+---
+
+# 23. Testing the OAuth callback manually
+
+You can also simulate Keycloak.
+
+Suppose the CLI is listening on:
+
+```text
+127.0.0.1:49152
+```
+
+Open:
+
+```text
+http://127.0.0.1:49152/callback?code=TEST_CODE&state=TEST_STATE
+```
+
+The application should receive:
+
+```text
+code  = TEST_CODE
+state = TEST_STATE
+```
+
+However, the real OAuth flow will use a state generated by the application, so a manually fabricated state will normally fail validation.
+
+That is intentional.
+
+---
+
+# 24. What happens if another application tries to intercept?
+
+This is one of the reasons loopback redirects are interesting.
+
+With a custom scheme:
+
+```text
+shoppingapp://oauth/callback
+```
+
+another application can potentially register the same scheme.
+
+You could conceptually have:
+
+```text
+shoppingapp://oauth/callback
+              │
+       ┌──────┴──────┐
+       ▼             ▼
+ ShoppingApp    MaliciousApp
+```
+
+With loopback:
+
+```text
+http://127.0.0.1:49152/callback
+```
+
+the application creates the listener:
+
+```text
+127.0.0.1:49152
+       │
+       ▼
+ Node.js application
+```
+
+Another local application cannot simply bind the **same address and port** at the same time.
+
+The operating system's socket binding rules matter here.
+
+---
+
+# 25. But why do we still need PKCE?
+
+Because an attacker may still attempt to interfere with the authorization flow.
+
+PKCE gives us an additional binding:
+
+```text
+Authorization Request
+       │
+       │ code_challenge
+       ▼
+Authorization Code
+       │
+       │ must be redeemed with
+       │ matching verifier
+       ▼
+Token Endpoint
+```
+
+Only the application that possesses:
+
+```text
+code_verifier
+```
+
+can successfully redeem the code.
+
+So the security model is:
+
+```text
+Loopback
+   +
+state
+   +
+PKCE
+```
+
+rather than:
+
+```text
+Loopback alone
+```
+
+---
+
+# 26. Loopback vs Custom Scheme
+
+Now compare this lab with your previous Android lab.
+
+### Custom scheme
+
+```text
+shoppingapp://oauth/callback
+```
+
+The operating system performs URL-handler matching:
+
+```text
+Browser
+   │
+   ▼
+Android OS
+   │
+   ▼
+Application
+```
+
+Potential issue:
+
+```text
+Multiple apps can claim
+the same custom scheme
+```
+
+---
+
+### Loopback
+
+```text
+http://127.0.0.1:49152/callback
+```
+
+The application owns the listening socket:
+
+```text
+Browser
+   │
+   ▼
+127.0.0.1:49152
+   │
+   ▼
+Node.js
+```
+
+There is no Android/iOS application URL association mechanism involved.
+
+---
+
+# 27. Loopback vs HTTPS App Links
+
+The three techniques can now be visualized like this:
+
+```text
+                   Native Application
+                           │
+                 OAuth Redirect URI
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+          ▼                ▼                ▼
+    Custom Scheme       Loopback       HTTPS URL
+          │                │                │
+          │                │                │
+shoppingapp://       127.0.0.1        example.com
+oauth/callback       :49152/callback   /oauth/callback
+          │                │                │
+          ▼                ▼                ▼
+       OS URL          Local socket     Domain/App
+       matching                         association
+```
+
+And the typical platforms are:
+
+```text
+Mobile
+ ├── Custom URL Scheme
+ └── HTTPS App Links / Universal Links
+
+Desktop / CLI
+ └── Loopback
+```
+
+---
+
+# 28. One subtle point about `localhost`
+
+The lab uses:
+
+```text
+http://127.0.0.1:49152/callback
+```
+
+rather than:
+
+```text
+http://localhost:49152/callback
+```
+
+That's deliberate.
+
+`127.0.0.1` explicitly identifies the IPv4 loopback interface.
+
+You may also encounter:
+
+```text
+http://localhost:49152/callback
+```
+
+and IPv6:
+
+```text
+http://[::1]:49152/callback
+```
+
+The IPv6 syntax requires brackets:
+
+```text
+http://[::1]:49152/callback
+```
+
+not:
+
+```text
+http://::1:49152/callback
+```
+
+---
+
+# 29. The most important difference from your Ionic lab
+
+Your previous application was:
+
+```text
+Ionic
+   │
+   ▼
+Android
+   │
+   ▼
+Custom URL Scheme
+```
+
+The new application is:
+
+```text
+Node.js CLI
+   │
+   ▼
+Desktop OS
+   │
+   ▼
+Local HTTP server
+   │
+   ▼
+127.0.0.1:<random-port>
+```
+
+There is **no need for Android Intent filters**, because this isn't an Android URL-handling mechanism.
+
+There is also no:
+
+```text
+assetlinks.json
+```
+
+because we're not using Android App Links.
+
+And there is no:
+
+```text
+shoppingapp://
+```
+
+custom scheme.
+
+Instead:
+
+```text
+http://127.0.0.1:<random-port>/callback
+```
+
+is the redirect URI.
+
+---
+
+# 30. Final lab structure
+
+Your finished project can look like:
+
+```text
+oauth-loopback-lab/
+│
+├── keycloak/
+│   └── ...
+│
+└── shopping-cli/
+    │
+    ├── package.json
+    ├── package-lock.json
+    │
+    └── src/
+        └── index.js
+```
+
+The actual OAuth sequence is:
+
+```text
+┌───────────────────────────┐
+│       Node.js CLI         │
+│                           │
+│ generate state             │
+│ generate code_verifier     │
+│ generate code_challenge    │
+└─────────────┬─────────────┘
+              │
+              │ Start
+              ▼
+    ┌─────────────────────┐
+    │ Local HTTP Server   │
+    │ 127.0.0.1:<random>  │
+    └──────────┬──────────┘
+               │
+               │ Open browser
+               ▼
+       ┌───────────────┐
+       │ System        │
+       │ Browser       │
+       └───────┬───────┘
+               │
+               │ Authorization Request
+               ▼
+       ┌───────────────┐
+       │   Keycloak    │
+       │ Authorization │
+       │    Server     │
+       └───────┬───────┘
+               │
+               │ Login
+               │ Consent
+               │
+               │ 302
+               ▼
+ http://127.0.0.1:<random>/callback
+               │
+               ▼
+       ┌─────────────────┐
+       │   Node.js CLI   │
+       │                 │
+       │ code + state    │
+       └────────┬────────┘
+                │
+                │ Verify state
+                │
+                │ POST /token
+                │ + code_verifier
+                ▼
+       ┌─────────────────┐
+       │    Keycloak     │
+       └────────┬────────┘
+                │
+                ▼
+        Access Token
+        Refresh Token
+        ID Token
+```
+
+The core idea to remember is:
+
+> **A loopback OAuth redirect makes the desktop/CLI application temporarily listen on `127.0.0.1` on an OS-assigned port. The system browser performs authentication, and the authorization server redirects the browser back to that local server, allowing the application to receive the authorization code without requiring a custom URL scheme.**

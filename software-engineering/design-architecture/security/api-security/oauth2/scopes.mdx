@@ -1,0 +1,848 @@
+
+In OAuth 2.0, a **scope** represents a level or category of access that a client is requesting from a resource server on behalf of a resource owner.
+
+For example, instead of giving an application unrestricted access to a user's Google Drive, an authorization server might issue a token with:
+
+```text
+scope = drive.read
+```
+Scope is a mechanism to let an application request limited access to a user’s data.
+
+The client can then access resources covered by `drive.read`, but not resources requiring `drive.write`.
+
+Scope is a way to limit an app’s access to a user’s data. Rather than granting complete access to a user’s account, it is often useful to give apps a way to request a more limited scope of what they are allowed to do on behalf of a user.
+
+Some apps only use OAuth in order to identify the user, so they only need access to a user ID and basic profile information. Other apps may need to know more sensitive information such as the user’s birthday, or they may need the ability to post content on behalf of the user, or modify profile data. Users will be more willing to authorize an application if they know exactly what the application can and cannot do with their account. Scope is a way to control access and help the user identify the permissions they are granting to the application.
+
+It’s important to remember that scope is not the same as the internal permissions system of an API. Scope is a way to limit what an application can do within the context of what a user can do. For example, if you have a user in the “customer” group, and the application is requesting the “admin” scope, the OAuth server is not going to create an access token with the “admin” scope, because that user is not allowed to use that scope themselves.
+
+Scope should be thought of as the application requesting permission from the user who’s using the app.
+
+A useful way to understand scopes is:
+
+```text
+Client
+  │
+  │ "I need these permissions"
+  ▼
+Authorization Request
+  │
+  │ scope=profile email
+  ▼
+Authorization Server
+  │
+  │ User grants/denies requested access
+  ▼
+Access Token
+  │
+  │ scopes = profile email
+  ▼
+Resource Server
+  │
+  │ checks scope before allowing operation
+  ▼
+Protected Resource
+```
+
+## Scope Model
+
+The **scope model** defines how an OAuth system represents permissions and how those permissions are associated with access tokens.
+
+### Scope as a Permission
+
+A scope is essentially a named permission.
+
+For example:
+
+```text
+profile
+email
+orders.read
+orders.write
+payments.read
+```
+
+The meaning of each scope is defined by the API or authorization server. OAuth itself does not define what `orders.read` or `payments.read` means.
+
+For example:
+
+```text
+scope = orders.read
+```
+
+could mean: The client may read the user's orders.
+
+### Scope as a Space-Delimited List
+
+OAuth represents scopes as a space-delimited string.
+
+For example:
+
+```text
+scope=profile email orders.read
+```
+
+This represents three requested scopes:
+
+```text
+profile
+email
+orders.read
+```
+
+It is not:
+
+```text
+"profile email orders.read"
+```
+
+as one permission. It is three individual scope values.
+
+### Requested vs Granted Scopes
+
+An important distinction is:
+
+```text
+Requested scopes
+        ↓
+Authorization Server
+        ↓
+Granted scopes
+```
+
+The client might request:
+
+```text
+profile email orders.read orders.write
+```
+
+but the authorization server may grant only:
+
+```text
+profile email orders.read
+```
+
+The client therefore **must not assume that every requested scope was granted**.
+
+The actual granted scope is associated with the authorization result/access token.
+
+### Scope and Access Tokens
+
+An access token represents delegated authorization.
+
+Conceptually:
+
+```text
+Access Token
+├── client
+├── resource owner
+├── expiration
+├── audience
+└── scopes
+      ├── profile
+      ├── email
+      └── orders.read
+```
+
+The resource server uses the token's granted scopes when deciding whether an operation is permitted.
+
+## Scope Design
+
+**Scope design** is the process of deciding what permissions your OAuth system should expose.
+
+A good scope model should correspond to meaningful API capabilities.
+
+For example, an e-commerce API might define:
+
+```text
+products.read
+orders.read
+orders.write
+profile.read
+```
+
+Rather than one extremely broad scope:
+
+```text
+everything
+```
+
+The challenge when defining scopes for your service is to not get carried away with defining too many scopes. Users need to be able to understand what level of access they are granting to the application, and this will be presented to the user in some sort of list. When presented to the user, they need to actually understand what is going on and not get overwhelmed with information. If you over-complicate it for users, they will just click “ok” until the app works, and ignore any warnings.
+
+### Resource-Based Scopes
+
+Scopes can represent access to a particular resource.
+
+```text
+users.read
+users.write
+
+orders.read
+orders.write
+
+products.read
+products.write
+```
+
+This provides a clear separation between resources.
+
+### Operation-Based Scopes
+
+Scopes can also distinguish operations:
+
+```text
+orders.read
+orders.create
+orders.update
+orders.delete
+```
+
+This gives more control than simply:
+
+```text
+orders
+```
+
+because different clients can receive different capabilities.
+
+### Read vs. Write
+
+Read vs write access is a good place to start when defining scopes for a service. Typically read access to a user’s private profile information is treated with separate access control from apps wanting to update the profile information.
+
+Apps that need to be able to create content on behalf of a user (for example, third-party Twitter apps that post tweets to a user’s timeline) need a different level of access from apps that only need to read a user’s public data.
+
+### Avoid Overly Broad Scopes
+
+Consider:
+
+```text
+api.full_access
+```
+
+This may provide too much authority.
+
+Instead:
+
+```text
+profile.read
+orders.read
+orders.write
+```
+
+allows the client to receive only the capabilities it needs.
+
+This follows the principle of **least privilege**.
+
+### Avoid Excessively Fine Scopes
+
+There is also a danger in going too far:
+
+```text
+order.123.read
+order.124.read
+order.125.read
+...
+```
+
+This can make authorization difficult to manage.
+
+Scope design therefore involves finding an appropriate level of granularity.
+
+### Restricting Access to Sensitive Information
+
+Often a service will have various aspects of a user account that have different levels of security. For example, GitHub has a separate scope that allows applications to have access to private repos. By default, applications don’t have access to private repos unless they ask for that scope, so users can feel comfortable knowing that only apps they choose can access their private repos belonging to their organization.
+
+GitHub provides a separate scope that allows applications to delete repos, so users can rest assured that random applications can’t go around deleting their repos.
+
+Dropbox provides a way for applications to restrict themselves to only be able to edit files in a single folder. This provides a way that users can try out apps that use Dropbox as a storage or syncing mechanism without worrying about the application potentially having the ability to read all their files.
+
+### Selectively Enabling Access by Functionality
+
+A great use of scope is to selectively enable access to a user’s account based on the functionality needed. For example, Google offers a set of scopes for their various services such as Google Drive, Gmail, YouTube, etc. This means applications that need to access the YouTube API won’t necessarily also be able to access the user’s Gmail account.
+
+Google’s API is a great example of effectively using scope. For a full list of the scopes that the Google OAuth API supports, visit their OAuth 2.0 Playground at https://developers.google.com/oauthplayground/
+
+### Limiting Access to Billable Resources
+
+If your service provides an API that may cause the user to incur charges, scope is a great way to protect against applications abusing this.
+
+Let’s use an example of a service that provides advanced capabilities that use licensed content, in this case one that provides an API that aggregates demographic data for a given area. The user racks up charges as the service is used, and the cost is based on the size of the area being queried. A user signing in to an app that uses a completely different part of the API would want to ensure this app is not able to use the demographics API, since that would cause that user to incur charges. The service should in this case define a special scope, say, “demographics”. The demographics API should only respond to API requests from tokens that contain this scope.
+
+In this example, the demographics API could use the token introspection endpoint to look up the list of scopes that are valid for this token. If the response does not include “demographics” in the list of scopes, the endpoint would reject the request with an HTTP 403 response.
+
+## Scope Request
+
+A client requests scopes through the OAuth authorization request.
+
+For example:
+
+```http
+GET /authorize?
+    response_type=code
+    &client_id=my-client
+    &redirect_uri=https://client.example.com/callback
+    &scope=profile%20email%20orders.read
+    &state=xyz
+```
+
+The important part is:
+
+```text
+scope=profile email orders.read
+```
+
+The client is saying: I am requesting these permissions.
+
+### Scope Request Does Not Mean Scope Grant
+
+This distinction is fundamental:
+
+```text
+scope=requested
+```
+
+does **not** mean:
+
+```text
+scope=granted
+```
+
+The authorization server makes the final authorization decision.
+
+For example:
+
+```text
+Client requests:
+
+profile
+email
+orders.read
+orders.write
+```
+
+The authorization server might grant:
+
+```text
+profile
+email
+orders.read
+```
+
+### Incremental Scope Requests
+
+A client may initially request:
+
+```text
+profile
+email
+```
+
+Later, when the user wants to perform an operation requiring additional permission, the client can request:
+
+```text
+orders.write
+```
+
+This is commonly called **incremental authorization**. It avoids asking for every possible permission at the beginning.
+
+## Scope Consent
+
+**Scope consent** is where the resource owner is given an opportunity to approve the requested access.
+
+For example, an authorization interface might display:
+
+```text
+My Application wants access to:
+
+☑ View your profile
+☑ View your email address
+☑ Read your orders
+
+Cancel       Allow
+```
+
+The authorization server determines what the user is actually granting.
+
+Conceptually:
+
+```text
+Client
+   │
+   │ requests scopes
+   ▼
+Authorization Server
+   │
+   │ displays requested access
+   ▼
+User
+   │
+   │ approves / denies
+   ▼
+Authorization Server
+   │
+   │ issues authorization result
+   ▼
+Access Token
+```
+
+### Consent Is About Delegation
+
+OAuth scopes describe the access being delegated.
+
+For example:
+
+```text
+scope = calendar.read
+```
+
+can be presented to the user as: View your calendar events. The technical scope name and the human-readable consent description do not necessarily have to be identical.
+
+For example:
+
+```text
+Technical scope:
+calendar.read
+
+Consent text:
+View your calendar events
+```
+
+### Previously Granted Consent
+
+An authorization server may remember that a user previously granted certain scopes to a particular client.
+
+For example:
+
+```text
+Previous:
+profile
+email
+
+New request:
+profile
+email
+calendar.read
+```
+
+The authorization server may only need to ask about the additional permission:
+
+```text
+calendar.read
+```
+
+The exact consent behavior is determined by the authorization server and its policies.
+
+### User Interface
+The interface that the user sees when authorizing an app needs to clearly display the list of scopes that are being requested by the application. The user may not be aware of all of the possibilities of scopes that the service provides, so it’s best to make this text as clear and straightforward as possible, avoiding jargon and abbreviations.
+
+If the request grants the application full access to a user’s account, or access to a substantial part of their account such as being able to do everything except change their password, the service should make it abundantly clear.
+
+For example, the first sentence on the Dropbox authorization UI is “Example OAuth App would like access to the files and folders in your Dropbox” with a “Learn More” link that links to a help page describing exactly what access the application will have.
+
+![](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/dropbox.png)
+
+The Flickr authorization interface shows three things the user is granting to the app when I sign in, and clearly shows permission the app will not have. The benefit of showing this is the user can be reassured the app they’re authorizing won’t be able to do potentially destructive operations.
+
+![](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/flickr.png)
+
+GitHub has done a great job of providing detailed information about the scopes a user is granting. Each scope requested gets a section on the page with the name, an icon, a short description highlighting whether this is read-only or read-write, and a dropdown to see a more detailed explanation.
+
+![](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/github.png)
+
+Google has a single authorization endpoint for all of their services including the Gmail API, Google Drive, Youtube, etc. Their authorization interface displays each scope in a list, and includes an “information” icon you can click to get more information about the particular scope.
+
+![](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/google.png)
+
+Clicking the information icon presents an overlay that describes in detail what this scope allows.
+
+![](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/google-scope-popup.png)
+
+You can see there are a number of ways you can provide the user with information about the scope of the OAuth grant, and various services have taken quite different approaches. Be sure to consider the privacy and security requirements of your application when deciding what level of detail you will include about the scope.
+
+#### Choosing which scopes are granted 
+allowing users to edit the scopes
+
+While seemingly an underused feature, the OAuth 2.0 spec explicitly allows the authorization server to grant an access token with less scope than the application requests. This leaves room for some interesting possibilities.
+
+FitBit’s authorization screen, shown below allows the user to selectively grant or deny access to each particular scope that the application is requesting.
+![](/docs/assets/software-engineering/design-architecture/security/api-security/oauth2/fitbit-authorize.png)
+Giving your users the ability to choose which scopes are granted is a great way to make people feel more comfortable with using third party apps. A checkbox next to each scope is sufficient, or you can move the controls to a separate screen like Facebook. You’ll need to ensure that when you send the access token response, it includes the list of scopes granted if it’s different from what the application requested. See Access Token Response for more details.
+## Scope Validation
+
+**Scope validation** happens at multiple points in the OAuth system.
+
+The basic question is: Is this scope valid and is the client allowed to request/use it?
+
+---
+
+### Validate Requested Scopes
+
+Suppose a client requests:
+
+```text
+profile email admin.delete.users
+```
+
+but the authorization server does not define:
+
+```text
+admin.delete.users
+```
+
+The authorization server must not blindly treat arbitrary strings as valid permissions. It should validate the requested scopes according to its configured scope model and client policies.
+
+### Validate Client Permissions
+
+Different clients may be permitted to request different scopes.
+
+For example:
+
+```text
+Mobile App
+    profile
+    email
+
+Administration Service
+    profile
+    email
+    users.read
+    users.write
+```
+
+A client requesting a scope outside its permitted set may be rejected or have that scope excluded from the grant, depending on the authorization server's behavior.
+
+### Validate Granted Scopes at the Resource Server
+
+The resource server should check the token's actual granted scopes.
+
+Suppose:
+
+```text
+Access Token
+
+scope:
+    profile
+    orders.read
+```
+
+The client calls:
+
+```http
+DELETE /orders/123
+```
+
+The API might require:
+
+```text
+orders.delete
+```
+
+The token does not contain that scope.
+
+Therefore:
+
+```text
+orders.delete
+       ↓
+not present
+       ↓
+access denied
+```
+
+This is an important security boundary.
+
+## Fine-Grained Scopes
+
+**Fine-grained scopes** divide permissions into smaller, more specific capabilities.
+
+Instead of:
+
+```text
+orders
+```
+
+you could define:
+
+```text
+orders.read
+orders.create
+orders.update
+orders.delete
+```
+
+This gives clients more precisely controlled access.
+
+### Example
+
+Suppose you have:
+
+```text
+orders.read
+orders.create
+orders.update
+orders.delete
+```
+
+A reporting application might receive:
+
+```text
+orders.read
+```
+
+while an order-management application might receive:
+
+```text
+orders.read
+orders.create
+orders.update
+```
+
+Neither necessarily receives:
+
+```text
+orders.delete
+```
+
+### Hierarchical Scope Naming
+
+Scopes are often organized using naming conventions:
+
+```text
+users.read
+users.write
+
+orders.read
+orders.write
+
+payments.read
+payments.write
+```
+
+The `.` is simply part of the scope name. OAuth does not inherently interpret this as a hierarchy.
+
+So:
+
+```text
+orders.write
+```
+
+does not automatically imply:
+
+```text
+orders.read
+```
+
+unless your authorization server/API explicitly defines that relationship.
+
+### Scope Granularity
+
+You can think of scope granularity as:
+
+```text
+Broad
+  │
+  ▼
+orders
+  │
+  ▼
+orders.write
+  │
+  ▼
+orders.update
+  │
+  ▼
+orders.update.address
+  │
+  ▼
+Very fine-grained
+```
+
+More granularity can provide more precise authorization, but it also increases configuration and management complexity.
+
+## Scope-Based Authorization
+
+**Scope-based authorization** is the enforcement of permissions represented by scopes.
+
+The resource server examines the access token and determines whether the token contains the scope required for the requested operation.
+
+For example:
+
+```text
+GET /orders
+        │
+        ▼
+Required scope:
+orders.read
+        │
+        ▼
+Access Token
+        │
+        ├── profile
+        ├── email
+        └── orders.read
+                │
+                ▼
+             ALLOW
+```
+
+But:
+
+```text
+DELETE /orders/123
+        │
+        ▼
+Required scope:
+orders.delete
+        │
+        ▼
+Access Token
+        │
+        ├── profile
+        ├── email
+        └── orders.read
+                │
+                ▼
+              DENY
+```
+
+### Scope Enforcement
+
+A typical API might define:
+
+| API operation         | Required scope  |
+| --------------------- | --------------- |
+| `GET /profile`        | `profile.read`  |
+| `GET /orders`         | `orders.read`   |
+| `POST /orders`        | `orders.create` |
+| `PUT /orders/{id}`    | `orders.update` |
+| `DELETE /orders/{id}` | `orders.delete` |
+
+The authorization flow becomes:
+
+```text
+HTTP Request
+     │
+     ▼
+Access Token
+     │
+     ▼
+Validate Token
+     │
+     ├── valid? ── No ──> 401 Unauthorized
+     │
+     ▼
+Extract Scopes
+     │
+     ▼
+Check Required Scope
+     │
+     ├── missing ──> 403 Forbidden
+     │
+     ▼
+Execute Operation
+```
+
+The exact error behavior depends on the API's authentication/authorization implementation, but the important distinction is that **authentication of the token** and **authorization for a particular operation** are separate concerns.
+
+## Scopes vs Roles
+
+Scopes and roles are related but serve different purposes.
+
+#### OAuth scope
+
+Usually represents **delegated permissions granted to a client**.
+
+```text
+orders.read
+orders.write
+```
+
+#### Role
+
+Usually represents a **user/service identity classification**.
+
+```text
+ADMIN
+MANAGER
+CUSTOMER
+```
+
+For example:
+
+```text
+User
+  │
+  └── Role: MANAGER
+          │
+          ▼
+Authorization Server
+          │
+          └── grants client:
+                orders.read
+                orders.write
+```
+
+The API can then enforce the scopes contained in the access token.
+
+A role may therefore influence what scopes can be granted, but **OAuth does not require scopes and roles to be implemented in any particular way**.
+
+## Complete Scope Lifecycle
+
+Putting the whole concept together:
+
+```text
+                 Scope Definition
+                       │
+                       ▼
+                 Scope Design
+                       │
+                       ▼
+Client ────────> Scope Request
+                       │
+                       ▼
+               Scope Validation
+                       │
+                       ▼
+                User Consent
+                       │
+                       ▼
+                Scope Grant
+                       │
+                       ▼
+                 Access Token
+                       │
+                contains scopes
+                       │
+                       ▼
+                 Resource Server
+                       │
+                       ▼
+                Scope Validation
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+        Required scope       Missing scope
+             │                   │
+             ▼                   ▼
+          ALLOW                 DENY
+```
+
+**The key distinction**
+
+The most important concepts to keep separate are:
+
+| Concept                       | Question                                                          |
+| ----------------------------- | ----------------------------------------------------------------- |
+| **Scope Model**               | How are permissions represented?                                  |
+| **Scope Design**              | What permissions should exist?                                    |
+| **Scope Request**             | What access is the client asking for?                             |
+| **Scope Consent**             | What access does the user authorize?                              |
+| **Scope Validation**          | Are the requested/granted scopes valid and permitted?             |
+| **Fine-Grained Scopes**       | How precisely are permissions divided?                            |
+| **Scope-Based Authorization** | Does the token have the permission required by the API operation? |
+
+So the overall mental model is:
+
+> **The client requests scopes → the authorization server validates and obtains authorization → the resulting access token carries the granted scopes → the resource server uses those scopes to enforce access to protected resources.**
+
+## Example
