@@ -1,0 +1,2000 @@
+## C
+We'll implement an AVL tree in C that supports the operations from our previous list: searching, insertion, deletion, rotations, traversals, minimum/maximum, predecessor/successor, floor/ceiling, range searches, rank/select, and advanced tree join/split operations.
+
+The implementation uses an ordinary BST for navigation and adds automatic balancing through node heights and balance factors.
+
+Each node stores four pieces of information:
+
+```
++----------------------+
+| key                  |
+| height               |
+| subtree_size         |
++----------------------+
+| left  ---------> node|
+| right ---------> node|
++----------------------+
+```
+
+* `key`: the value stored in the node.
+* `height`: the node's height, with leaf height `0` and empty subtree height `-1`.
+* `subtree_size`: number of nodes in the subtree rooted at this node.
+* `left` and `right`: pointers to child nodes.
+
+The `subtree_size` field allows us to implement `rank()` and `select()` efficiently.
+
+We'll use `int` keys and ignore duplicate keys, so every key appears at most once.
+
+
+```C
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <limits.h>
+
+/* =========================================================
+ * 1. Node structure and basic helpers
+ * ========================================================= */
+
+typedef struct AVLNode {
+    int key;
+    int height;                 // Leaf = 0, empty subtree = -1
+    size_t subtree_size;        // Number of nodes in this subtree
+    struct AVLNode *left;
+    struct AVLNode *right;
+} AVLNode;
+
+/* Return the height of a subtree. */
+static int height(const AVLNode *node) {
+    return node ? node->height : -1;
+}
+
+/* Return the number of nodes in a subtree. */
+static size_t node_size(const AVLNode *node) {
+    return node ? node->subtree_size : 0;
+}
+
+/* Calculate the balance factor: left height - right height. */
+static int balance_factor(const AVLNode *node) {
+    return node ? height(node->left) - height(node->right) : 0;
+}
+
+/*
+ * Update all metadata after changing a node's children.
+ * This must be called bottom-up.
+ */
+static void update_node(AVLNode *node) {
+    if (!node) return;
+
+    int lh = height(node->left);
+    int rh = height(node->right);
+
+    node->height = 1 + (lh > rh ? lh : rh);
+    node->subtree_size =
+        1 + node_size(node->left) + node_size(node->right);
+}
+
+/* Allocate and initialize a new leaf node. */
+static AVLNode *new_node(int key) {
+    AVLNode *node = malloc(sizeof(*node));
+
+    if (!node) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+
+    node->key = key;
+    node->height = 0;
+    node->subtree_size = 1;
+    node->left = NULL;
+    node->right = NULL;
+
+    return node;
+}
+
+/* =========================================================
+ * 2. Rotations and rebalancing
+ * ========================================================= */
+
+/*
+ * Right rotation:
+ *
+ *          y                 x
+ *         / \               / \
+ *        x   C     -->     A   y
+ *       / \                   / \
+ *      A   B                 B   C
+ */
+static AVLNode *rotate_right(AVLNode *y) {
+    AVLNode *x = y->left;
+    AVLNode *B = x->right;
+
+    x->right = y;
+    y->left = B;
+
+    /* Update the lower node before the new subtree root. */
+    update_node(y);
+    update_node(x);
+
+    return x;
+}
+
+/*
+ * Left rotation:
+ *
+ *      x                       y
+ *     / \                     / \
+ *    A   y        -->        x   C
+ *       / \                 / \
+ *      B   C               A   B
+ */
+static AVLNode *rotate_left(AVLNode *x) {
+    AVLNode *y = x->right;
+    AVLNode *B = y->left;
+
+    y->left = x;
+    x->right = B;
+
+    update_node(x);
+    update_node(y);
+
+    return y;
+}
+
+/*
+ * Restore the AVL invariant at one node.
+ * The caller must update its children before calling this.
+ */
+static AVLNode *rebalance(AVLNode *node) {
+    if (!node) return NULL;
+
+    update_node(node);
+
+    int bf = balance_factor(node);
+
+    /* Left-heavy: LL or LR. */
+    if (bf > 1) {
+        /* LR: rotate the left child first. */
+        if (balance_factor(node->left) < 0)
+            node->left = rotate_left(node->left);
+
+        /* LL, or the second half of LR. */
+        return rotate_right(node);
+    }
+
+    /* Right-heavy: RR or RL. */
+    if (bf < -1) {
+        /* RL: rotate the right child first. */
+        if (balance_factor(node->right) > 0)
+            node->right = rotate_right(node->right);
+
+        /* RR, or the second half of RL. */
+        return rotate_left(node);
+    }
+
+    return node;
+}
+
+/* =========================================================
+ * 3. Search, insertion, and deletion
+ * ========================================================= */
+
+/* Search iteratively. Return NULL if the key does not exist. */
+AVLNode *avl_search(AVLNode *root, int key) {
+    while (root) {
+        if (key == root->key)
+            return root;
+
+        root = (key < root->key) ? root->left : root->right;
+    }
+
+    return NULL;
+}
+
+/*
+ * Insert a key.
+ * Duplicate keys are ignored.
+ * Always assign the returned pointer to the subtree root.
+ */
+AVLNode *avl_insert(AVLNode *root, int key) {
+    if (!root)
+        return new_node(key);
+
+    if (key < root->key) {
+        root->left = avl_insert(root->left, key);
+    } else if (key > root->key) {
+        root->right = avl_insert(root->right, key);
+    } else {
+        return root;  // No duplicates
+    }
+
+    return rebalance(root);
+}
+
+/* Return the node with the smallest key in a subtree. */
+AVLNode *avl_min_node(AVLNode *root) {
+    if (!root) return NULL;
+
+    while (root->left)
+        root = root->left;
+
+    return root;
+}
+
+/* Return the node with the largest key in a subtree. */
+AVLNode *avl_max_node(AVLNode *root) {
+    if (!root) return NULL;
+
+    while (root->right)
+        root = root->right;
+
+    return root;
+}
+
+/*
+ * Delete a key if it exists.
+ *
+ * Leaf: remove it.
+ * One child: replace it with that child.
+ * Two children: copy the inorder successor's key,
+ * then delete the successor from the right subtree.
+ */
+AVLNode *avl_delete(AVLNode *root, int key) {
+    if (!root) return NULL;
+
+    if (key < root->key) {
+        root->left = avl_delete(root->left, key);
+    } else if (key > root->key) {
+        root->right = avl_delete(root->right, key);
+    } else {
+        if (!root->left || !root->right) {
+            AVLNode *child = root->left ? root->left : root->right;
+            free(root);
+            return child;
+        }
+
+        /* Two children: use the smallest key in the right subtree. */
+        AVLNode *successor = avl_min_node(root->right);
+        root->key = successor->key;
+        root->right = avl_delete(root->right, successor->key);
+    }
+
+    return rebalance(root);
+}
+
+/* =========================================================
+ * 4. Predecessor, successor, floor, and ceiling
+ * ========================================================= */
+
+/* Largest key strictly smaller than key, or NULL if none exists. */
+AVLNode *avl_predecessor(AVLNode *root, int key) {
+    AVLNode *candidate = NULL;
+
+    while (root) {
+        if (root->key < key) {
+            candidate = root;
+            root = root->right;
+        } else {
+            root = root->left;
+        }
+    }
+
+    return candidate;
+}
+
+/* Smallest key strictly greater than key, or NULL if none exists. */
+AVLNode *avl_successor(AVLNode *root, int key) {
+    AVLNode *candidate = NULL;
+
+    while (root) {
+        if (root->key > key) {
+            candidate = root;
+            root = root->left;
+        } else {
+            root = root->right;
+        }
+    }
+
+    return candidate;
+}
+
+/* Largest key <= key. */
+AVLNode *avl_floor(AVLNode *root, int key) {
+    AVLNode *candidate = NULL;
+
+    while (root) {
+        if (root->key == key)
+            return root;
+
+        if (root->key < key) {
+            candidate = root;
+            root = root->right;
+        } else {
+            root = root->left;
+        }
+    }
+
+    return candidate;
+}
+
+/* Smallest key >= key. */
+AVLNode *avl_ceiling(AVLNode *root, int key) {
+    AVLNode *candidate = NULL;
+
+    while (root) {
+        if (root->key == key)
+            return root;
+
+        if (root->key > key) {
+            candidate = root;
+            root = root->left;
+        } else {
+            root = root->right;
+        }
+    }
+
+    return candidate;
+}
+
+/* =========================================================
+ * 5. Tree metadata and order statistics
+ * ========================================================= */
+
+int avl_height(const AVLNode *root) {
+    return height(root);
+}
+
+size_t avl_size(const AVLNode *root) {
+    return node_size(root);
+}
+
+bool avl_is_empty(const AVLNode *root) {
+    return root == NULL;
+}
+
+/*
+ * rank(key): number of stored keys strictly smaller than key.
+ * Does not require key to exist.
+ */
+size_t avl_rank(const AVLNode *root, int key) {
+    size_t count = 0;
+
+    while (root) {
+        if (key <= root->key) {
+            root = root->left;
+        } else {
+            count += 1 + node_size(root->left);
+            root = root->right;
+        }
+    }
+
+    return count;
+}
+
+/*
+ * select(k): return the k-th smallest key, using zero-based indexing.
+ * select(0) returns the smallest key.
+ * Return NULL if k >= the number of nodes.
+ */
+AVLNode *avl_select(AVLNode *root, size_t k) {
+    while (root) {
+        size_t left_count = node_size(root->left);
+
+        if (k < left_count) {
+            root = root->left;
+        } else if (k == left_count) {
+            return root;
+        } else {
+            k -= left_count + 1;
+            root = root->right;
+        }
+    }
+
+    return NULL;
+}
+
+/* =========================================================
+ * 6. Tree traversals
+ * ========================================================= */
+
+void avl_inorder(const AVLNode *root) {
+    if (!root) return;
+
+    avl_inorder(root->left);
+    printf("%d ", root->key);
+    avl_inorder(root->right);
+}
+
+void avl_preorder(const AVLNode *root) {
+    if (!root) return;
+
+    printf("%d ", root->key);
+    avl_preorder(root->left);
+    avl_preorder(root->right);
+}
+
+void avl_postorder(const AVLNode *root) {
+    if (!root) return;
+
+    avl_postorder(root->left);
+    avl_postorder(root->right);
+    printf("%d ", root->key);
+}
+
+/* Level-order traversal using a queue. */
+void avl_level_order(const AVLNode *root) {
+    if (!root) {
+        printf("(empty)");
+        return;
+    }
+
+    size_t capacity = node_size(root);
+    const AVLNode **queue = malloc(capacity * sizeof(*queue));
+
+    if (!queue) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+
+    size_t front = 0, rear = 0;
+    queue[rear++] = root;
+
+    while (front < rear) {
+        const AVLNode *node = queue[front++];
+        printf("%d ", node->key);
+
+        if (node->left)
+            queue[rear++] = node->left;
+
+        if (node->right)
+            queue[rear++] = node->right;
+    }
+
+    free(queue);
+}
+
+/* Print every key in the inclusive range [low, high], in sorted order. */
+void avl_range_search(const AVLNode *root, int low, int high) {
+    if (!root || low > high) return;
+
+    if (root->key > low)
+        avl_range_search(root->left, low, high);
+
+    if (root->key >= low && root->key <= high)
+        printf("%d ", root->key);
+
+    if (root->key < high)
+        avl_range_search(root->right, low, high);
+}
+
+/* =========================================================
+ * 7. Clear / destroy
+ * ========================================================= */
+
+void avl_clear(AVLNode *root) {
+    if (!root) return;
+
+    avl_clear(root->left);
+    avl_clear(root->right);
+    free(root);
+}
+
+/*
+ * Use as:
+ *     avl_clear(root);
+ *     root = NULL;
+ *
+ * C passes pointers by value, so avl_clear cannot reset the
+ * caller's root variable itself.
+ */
+
+/* =========================================================
+ * 8. Advanced operations: join and split
+ * ========================================================= */
+
+/*
+ * Join three ordered parts:
+ *   all keys in left < key < all keys in right.
+ *
+ * Recursively descend the taller tree until subtree heights
+ * are close enough, then create the pivot node and rebalance.
+ *
+ * This function consumes the left and right subtrees.
+ */
+static AVLNode *join_with_root(AVLNode *left, int key, AVLNode *right) {
+    if (height(left) > height(right) + 1) {
+        left->right = join_with_root(left->right, key, right);
+        return rebalance(left);
+    }
+
+    if (height(right) > height(left) + 1) {
+        right->left = join_with_root(left, key, right->left);
+        return rebalance(right);
+    }
+
+    AVLNode *pivot = new_node(key);
+    pivot->left = left;
+    pivot->right = right;
+    update_node(pivot);
+
+    return pivot;
+}
+
+/*
+ * Remove and return the maximum node's key.
+ * Update *root to the remaining balanced tree.
+ */
+static int extract_max(AVLNode **root) {
+    AVLNode *node = *root;
+
+    if (node->right) {
+        int key = extract_max(&node->right);
+        *root = rebalance(node);
+        return key;
+    }
+
+    int key = node->key;
+    *root = node->left;
+    free(node);
+
+    return key;
+}
+
+/*
+ * Join two AVL trees into one.
+ * PRECONDITION: every key in left is less than every key in right.
+ * OWNERSHIP: consumes both trees; use only the returned root.
+ */
+AVLNode *avl_join(AVLNode *left, AVLNode *right) {
+    if (!left) return right;
+    if (!right) return left;
+
+    int pivot_key = extract_max(&left);
+    return join_with_root(left, pivot_key, right);
+}
+
+/*
+ * Split the tree into:
+ *   *less        : keys < key
+ *   *greater_eq  : keys >= key
+ *
+ * OWNERSHIP: consumes the original tree and returns two new roots.
+ * The key does not need to exist in the tree.
+ */
+void avl_split(AVLNode *root, int key,
+               AVLNode **less, AVLNode **greater_eq) {
+    if (!root) {
+        *less = NULL;
+        *greater_eq = NULL;
+        return;
+    }
+
+    AVLNode *left = root->left;
+    AVLNode *right = root->right;
+    int root_key = root->key;
+
+    /* Detach children before freeing the original root. */
+    free(root);
+
+    if (root_key < key) {
+        AVLNode *middle;
+        avl_split(right, key, &middle, greater_eq);
+
+        *less = join_with_root(left, root_key, middle);
+    } else {
+        AVLNode *middle;
+        avl_split(left, key, less, &middle);
+
+        *greater_eq = join_with_root(middle, root_key, right);
+    }
+}
+
+/* =========================================================
+ * 9. Demonstration and tests
+ * ========================================================= */
+
+static void print_key_or_none(const char *label, const AVLNode *node) {
+    if (node)
+        printf("%s: %d\n", label, node->key);
+    else
+        printf("%s: not found\n", label);
+}
+
+int main(void) {
+    AVLNode *root = NULL;
+
+    int values[] = {10, 20, 30, 40, 50, 25};
+    size_t n = sizeof(values) / sizeof(values[0]);
+
+    printf("=== Insertion ===\n");
+
+    for (size_t i = 0; i < n; i++) {
+        root = avl_insert(root, values[i]);
+        printf("After inserting %d: ", values[i]);
+        avl_level_order(root);
+        printf("\n");
+    }
+
+    printf("\n=== Traversals ===\n");
+    printf("Inorder:   ");
+    avl_inorder(root);
+    printf("\nPreorder:  ");
+    avl_preorder(root);
+    printf("\nPostorder: ");
+    avl_postorder(root);
+    printf("\nLevel order: ");
+    avl_level_order(root);
+    printf("\n");
+
+    printf("\n=== Search and metadata ===\n");
+    print_key_or_none("Search 25", avl_search(root, 25));
+    print_key_or_none("Search 99", avl_search(root, 99));
+    print_key_or_none("Minimum", avl_min_node(root));
+    print_key_or_none("Maximum", avl_max_node(root));
+
+    printf("Height: %d\n", avl_height(root));
+    printf("Size: %zu\n", avl_size(root));
+    printf("Empty: %s\n", avl_is_empty(root) ? "yes" : "no");
+
+    printf("\n=== Ordered queries ===\n");
+    print_key_or_none("Predecessor of 30", avl_predecessor(root, 30));
+    print_key_or_none("Successor of 30", avl_successor(root, 30));
+    print_key_or_none("Floor of 26", avl_floor(root, 26));
+    print_key_or_none("Ceiling of 26", avl_ceiling(root, 26));
+
+    printf("\n=== Rank and select ===\n");
+    printf("Rank of 30: %zu\n", avl_rank(root, 30));
+
+    for (size_t k = 0; k < avl_size(root); k++) {
+        printf("select(%zu): ", k);
+        print_key_or_none("", avl_select(root, k));
+    }
+
+    printf("\n=== Range search [20, 40] ===\n");
+    avl_range_search(root, 20, 40);
+    printf("\n");
+
+    printf("\n=== Deletion ===\n");
+    root = avl_delete(root, 10);
+    printf("After deleting 10: ");
+    avl_level_order(root);
+    printf("\n");
+
+    root = avl_delete(root, 30);
+    printf("After deleting 30: ");
+    avl_level_order(root);
+    printf("\n");
+
+    printf("\n=== Split ===\n");
+    AVLNode *less = NULL;
+    AVLNode *greater_eq = NULL;
+
+    avl_split(root, 40, &less, &greater_eq);
+    root = NULL;  // The original tree was consumed by split.
+
+    printf("Keys < 40: ");
+    avl_inorder(less);
+    printf("\nKeys >= 40: ");
+    avl_inorder(greater_eq);
+    printf("\n");
+
+    printf("\n=== Join ===\n");
+    root = avl_join(less, greater_eq);
+    less = greater_eq = NULL;  // The trees were consumed by join.
+
+    printf("Joined tree: ");
+    avl_inorder(root);
+    printf("\n");
+
+    printf("\n=== Clear ===\n");
+    avl_clear(root);
+    root = NULL;
+    printf("Tree cleared. Empty: %s\n",
+           avl_is_empty(root) ? "yes" : "no");
+
+    return 0;
+}
+```
+
+### Compile and run
+
+On Linux, compile with GCC:
+
+Bash
+
+```
+gcc -std=c11 -Wall -Wextra -pedantic avl_tree.c -o avl_tree
+./avl_tree
+```
+
+The program prints the tree in level-order form after each insertion, followed by traversal results, search queries, ordered queries, rank/select, range search, deletion, split, join, and cleanup.
+
+For the insertion sequence `10, 20, 30, 40, 50, 25`, the final tree should be:
+
+```
+          30
+         /  \
+       20    40
+      / \      \
+     10 25      50
+```
+
+After deleting `10` and then `30`, the remaining keys are `20, 25, 40, 50`. Splitting at `40` produces two trees:
+
+```
+Keys < 40:       Keys >= 40:
+
+    20               40
+      \                \
+       25               50
+```
+
+Joining those trees restores a single AVL tree containing all four keys in sorted order.
+
+### Important implementation details
+
+#### Why do rotations update metadata?
+
+Consider a left rotation:
+
+```
+     10                 20
+       \               /  \
+        20     ->     10   30
+          \
+           30
+```
+
+The heights and subtree sizes change because the nodes now have different children. Therefore, `rotate_left()` updates the former root (`10`) first and then the new root (`20`).
+
+Updating in the opposite order could calculate the new root's metadata using stale information.
+
+#### Why must insertion and deletion return a node?
+
+A rotation can change the root of a subtree. That's why you must write:
+
+C
+
+```
+root = avl_insert(root, 30);
+root = avl_delete(root, 20);
+```
+
+And recursive operations must reconnect their results:
+
+C
+
+```
+root->left = avl_insert(root->left, key);
+```
+
+Ignoring the returned root can lose part of the tree or leave the caller pointing to an obsolete subtree root.
+
+#### Why are rank and select efficient?
+
+The `subtree_size` field lets us skip entire subtrees instead of visiting every node.
+
+For example:
+
+```
+          30
+         /  \
+       20    40
+      / \      \
+     10 25      50
+```
+
+The left subtree of `30` contains three nodes: `10`, `20`, and `25`.
+
+Consequently:
+
+* `avl_rank(root, 30)` returns `3`.
+
+* `avl_select(root, 0)` returns `10`.
+
+* `avl_select(root, 2)` returns `25`.
+
+* `avl_select(root, 3)` returns `30`.
+
+The index used by `select()` is zero-based.
+
+#### Ownership rules for join and split
+
+The advanced operations have an important memory-management requirement:
+
+* `avl_split()` consumes the original tree and produces two trees.
+
+* `avl_join()` consumes both input trees and produces one tree.
+
+* After calling either operation, do not continue using the old root pointers as if they still represented independent trees.
+
+The join operation also requires that every key in the left tree be smaller than every key in the right tree. The caller must ensure this precondition is satisfied.
+
+### 5. Complexity summary
+
+| Operation                       | Worst-case time                                                     |
+| ------------------------------- | ------------------------------------------------------------------- |
+| Search                          | O(log⁡n)O(\log n)O(logn)                                            |
+| Insert                          | O(log⁡n)O(\log n)O(logn)                                            |
+| Delete                          | O(log⁡n)O(\log n)O(logn)                                            |
+| Minimum / maximum               | O(log⁡n)O(\log n)O(logn)                                            |
+| Predecessor / successor         | O(log⁡n)O(\log n)O(logn)                                            |
+| Floor / ceiling                 | O(log⁡n)O(\log n)O(logn)                                            |
+| Height / size / empty check     | O(1)O(1)O(1)                                                        |
+| Rank / select                   | O(log⁡n)O(\log n)O(logn)                                            |
+| Single rotation                 | O(1)O(1)O(1)                                                        |
+| Inorder / preorder / postorder  | O(n)O(n)O(n)                                                        |
+| Level-order traversal           | O(n)O(n)O(n)                                                        |
+| Range search returning kkk keys | O(log⁡n+k)O(\log n+k)O(logn+k)                                      |
+| Clear                           | O(n)O(n)O(n)                                                        |
+| Join / split                    | O(log⁡n)O(\log n)O(logn) with the height-aware algorithms used here |
+
+The tree requires O(n)O(n)O(n) space. The implementation uses recursion for insertion, deletion, traversals, and balancing; AVL height guarantees keep those recursion paths logarithmic, except traversals and cleanup, which visit the whole tree.
+
+Recommended next step: Study `rotate_left()`, `rotate_right()`, `rebalance()`, and `avl_insert()` first. Once you understand those four pieces, the deletion and advanced operations become much easier to follow.
+
+## Python
+Here is the complete Python implementation of the AVL tree. It includes insertion, height calculation, balance-factor calculation, all four rotations, searching, traversals, and a test in `main`.
+
+Important: This implementation follows the recursive insertion approach from your examples. It supports duplicate values by inserting them into the left subtree when the values are equal. Search returns a matching node, but does not promise to find every duplicate.
+
+The code includes assertions that check both the stored heights and the AVL balance property after insertion.
+
+```Python
+
+class BinaryNode:
+    def __init__(self, value=None):
+        """Create a node in the AVL tree."""
+        self.value = value
+        self.left = None
+        self.right = None
+        self.height = 0  # A leaf node has height 0.
+
+    def computeHeight(self):
+        """Compute this node's height from its children."""
+        left_height = self.left.height if self.left else -1
+        right_height = self.right.height if self.right else -1
+
+        self.height = 1 + max(left_height, right_height)
+
+    def heightDifference(self):
+        """Return the balance factor: left height - right height."""
+        left_height = self.left.height if self.left else -1
+        right_height = self.right.height if self.right else -1
+
+        return left_height - right_height
+
+    def addToSubTree(self, parent, val):
+        """
+        Insert val into a subtree.
+
+        Return its root because a rotation might change that root.
+        """
+        if parent is None:
+            return BinaryNode(val)
+
+        return parent.add(val)
+
+    def add(self, val):
+        """Insert a value and rebalance this subtree when necessary."""
+        newRoot = self
+
+        # Step 1: Insert using the BST property.
+        if val <= self.value:
+            self.left = self.addToSubTree(self.left, val)
+
+            # Step 2: Check whether the node is left-heavy.
+            if self.heightDifference() == 2:
+                if val <= self.left.value:
+                    # Left-Left (LL): single right rotation.
+                    newRoot = self.rotateRight()
+                else:
+                    # Left-Right (LR): double rotation.
+                    newRoot = self.rotateLeftRight()
+
+        else:
+            self.right = self.addToSubTree(self.right, val)
+
+            # Step 2: Check whether the node is right-heavy.
+            if self.heightDifference() == -2:
+                if val > self.right.value:
+                    # Right-Right (RR): single left rotation.
+                    newRoot = self.rotateLeft()
+                else:
+                    # Right-Left (RL): double rotation.
+                    newRoot = self.rotateRightLeft()
+
+        # Step 3: Update the resulting subtree root's height.
+        newRoot.computeHeight()
+
+        # The caller must use this returned root.
+        return newRoot
+
+    def rotateRight(self):
+        """Perform a right rotation (LL case)."""
+        newRoot = self.left
+        grandson = newRoot.right
+
+        # Move the middle subtree.
+        self.left = grandson
+
+        # Make the old root the new root's right child.
+        newRoot.right = self
+
+        # Update the old root before returning.
+        self.computeHeight()
+
+        return newRoot
+
+    def rotateLeft(self):
+        """Perform a left rotation (RR case)."""
+        newRoot = self.right
+        grandson = newRoot.left
+
+        # Move the middle subtree.
+        self.right = grandson
+
+        # Make the old root the new root's left child.
+        newRoot.left = self
+
+        # Update the old root before returning.
+        self.computeHeight()
+
+        return newRoot
+
+    def rotateLeftRight(self):
+        """Perform left rotation followed by right rotation (LR)."""
+        child = self.left
+        newRoot = child.right
+
+        # Save the two subtrees below the new root.
+        grand1 = newRoot.left
+        grand2 = newRoot.right
+
+        # Reconnect the old child and old root.
+        child.right = grand1
+        self.left = grand2
+
+        # Place both old nodes below the new root.
+        newRoot.left = child
+        newRoot.right = self
+
+        # Update heights from the bottom upward.
+        child.computeHeight()
+        self.computeHeight()
+        newRoot.computeHeight()
+
+        return newRoot
+
+    def rotateRightLeft(self):
+        """Perform right rotation followed by left rotation (RL)."""
+        child = self.right
+        newRoot = child.left
+
+        # Save the two subtrees below the new root.
+        grand1 = newRoot.left
+        grand2 = newRoot.right
+
+        # Reconnect the old child and old root.
+        child.left = grand2
+        self.right = grand1
+
+        # Place both old nodes below the new root.
+        newRoot.left = self
+        newRoot.right = child
+
+        # Update heights from the bottom upward.
+        child.computeHeight()
+        self.computeHeight()
+        newRoot.computeHeight()
+
+        return newRoot
+
+    def search(self, val):
+        """Return the node containing val, or None if absent."""
+        if val == self.value:
+            return self
+
+        if val < self.value:
+            if self.left:
+                return self.left.search(val)
+        else:
+            if self.right:
+                return self.right.search(val)
+
+        return None
+
+    def inorder(self):
+        """Return values in sorted order."""
+        result = []
+
+        if self.left:
+            result.extend(self.left.inorder())
+
+        result.append(self.value)
+
+        if self.right:
+            result.extend(self.right.inorder())
+
+        return result
+
+    def preorder(self):
+        """Return values in root-left-right order."""
+        result = [self.value]
+
+        if self.left:
+            result.extend(self.left.preorder())
+
+        if self.right:
+            result.extend(self.right.preorder())
+
+        return result
+
+    def postorder(self):
+        """Return values in left-right-root order."""
+        result = []
+
+        if self.left:
+            result.extend(self.left.postorder())
+
+        if self.right:
+            result.extend(self.right.postorder())
+
+        result.append(self.value)
+
+        return result
+           
+    def removeFromParent (self, parent, val):
+        """Helper method for remove. Ensures proper behavior when removing node that 
+        has children."""
+        if parent:
+            return parent.remove(val)
+        return None
+
+    def remove (self, val):
+        """
+         Remove val from BinaryTree. Works in conjunction with remove
+         method in BinaryTree.
+        """
+        newRoot = self
+        rc = self.compareTo(val)
+        if rc == 0:
+            if self.left is None:
+                return self.right
+
+            child = self.left
+            while child.right:
+                child = child.right
+            
+            childKey = child.value;
+            self.left = self.removeFromParent(self.left, childKey)
+            self.value = childKey;
+
+            if self.heightDifference() == -2:
+                if self.right.heightDifference() <= 0:
+                    newRoot = self.rotateLeft()
+                else:
+                    newRoot = self.rotateRightLeft()
+        elif rc > 0:
+            self.left = self.removeFromParent(self.left, val)
+            if self.heightDifference() == -2:
+                if self.right.heightDifference() <= 0:
+                    newRoot = self.rotateLeft()
+                else:
+                    newRoot = self.rotateRightLeft()
+        else:
+            self.right = self.removeFromParent(self.right, val)
+            if self.heightDifference() == 2:
+                if self.left.heightDifference() >= 0:
+                    newRoot = self.rotateRight()
+                else:
+                    newRoot = self.rotateLeftRight()
+
+        newRoot.computeHeight()
+        return newRoot
+
+class BinaryTree:
+    def __init__(self):
+        """Create an empty AVL tree."""
+        self.root = None
+
+    def add(self, value):
+        """Insert a value into the AVL tree."""
+        if self.root is None:
+            self.root = BinaryNode(value)
+        else:
+            # The root may change after a rotation.
+            self.root = self.root.add(value)
+
+    def search(self, value):
+        """Search for a value and return its node, or None."""
+        if self.root is None:
+            return None
+
+        return self.root.search(value)
+
+    def inorder(self):
+        """Return all values in sorted order."""
+        if self.root is None:
+            return []
+
+        return self.root.inorder()
+
+    def preorder(self):
+        """Return root-left-right traversal."""
+        if self.root is None:
+            return []
+
+        return self.root.preorder()
+
+    def postorder(self):
+        """Return left-right-root traversal."""
+        if self.root is None:
+            return []
+
+        return self.root.postorder()
+
+    def height(self):
+        """Return the tree height; an empty tree has height -1."""
+        return self.root.height if self.root else -1
+
+    def isEmpty(self):
+        """Return True if the tree has no nodes."""
+        return self.root is None
+
+    def printTree(self):
+        """Print the tree sideways, with the right subtree on top."""
+        def display(node, indent=""):
+            if node is None:
+                return
+
+            display(node.right, indent + "    ")
+            print(
+                f"{indent}{node.value} "
+                f"(h={node.height}, BF={node.heightDifference()})"
+            )
+            display(node.left, indent + "    ")
+
+        if self.root is None:
+            print("(empty tree)")
+        else:
+            display(self.root)
+
+
+def main():
+    """Test AVL insertion, rotations, searching, and traversals."""
+    tree = BinaryTree()
+
+    # This sequence triggers rotations as values are inserted.
+    values = [30, 20, 10, 25, 28, 27, 40, 50, 45]
+
+    for value in values:
+        print(f"\nInserting {value}:")
+        tree.add(value)
+        tree.printTree()
+
+    print("\nInorder traversal:", tree.inorder())
+    print("Preorder traversal:", tree.preorder())
+    print("Postorder traversal:", tree.postorder())
+    print("Tree height:", tree.height())
+
+    # Search tests.
+    for value in [25, 100]:
+        node = tree.search(value)
+
+        if node:
+            print(f"{value} found in the tree.")
+        else:
+            print(f"{value} not found in the tree.")
+
+    # Verify that inorder traversal is sorted.
+    assert tree.inorder() == sorted(values)
+
+    # Verify that every node satisfies the AVL balance property.
+    def check_avl(node):
+        if node is None:
+            return -1
+
+        left_height = check_avl(node.left)
+        right_height = check_avl(node.right)
+
+        assert abs(left_height - right_height) <= 1
+        assert node.height == 1 + max(left_height, right_height)
+
+        return node.height
+
+    check_avl(tree.root)
+    print("AVL validation passed!")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### Operations included
+
+| Operation           | Method          | Complexity      |
+| ------------------- | --------------- | --------------- |
+| Insert              | `add(value)`    | \\(O(\log n)\\) |
+| Search              | `search(value)` | \\(O(\log n)\\) |
+| Inorder traversal   | `inorder()`     | \\(O(n)\\)      |
+| Preorder traversal  | `preorder()`    | \\(O(n)\\)      |
+| Postorder traversal | `postorder()`   | \\(O(n)\\)      |
+| Get tree height     | `height()`      | \\(O(1)\\)      |
+| Print tree          | `printTree()`   | \\(O(n)\\)      |
+
+### Understanding node height and balance factor
+
+The code represents an empty subtree with height `-1` and a leaf node with height `0`.
+
+```
+self.height = 0
+```
+
+The height of a non-empty node is:
+
+$$
+h(v)=1+\max(h(v.left),h(v.right))
+$$
+
+For an empty child, the height is `-1`.
+
+The balance factor is:
+
+$$
+BF(v)=h(v.left)-h(v.right)
+$$
+
+| Balance factor | Meaning                           |
+| -------------- | --------------------------------- |
+| `0`            | Both subtrees have equal height   |
+| `+1`           | Left subtree is one level taller  |
+| `-1`           | Right subtree is one level taller |
+| `+2`           | Too heavy on the left; rebalance  |
+| `-2`           | Too heavy on the right; rebalance |
+
+For example:
+
+```
+       30
+      /  \
+    20    40
+   /
+  10
+```
+
+Using the code's height convention:
+
+- `height(10) = 0`
+- `height(20) = 1`
+- `height(40) = 0`
+- `height(30) = 2`
+
+Therefore:
+
+$$
+BF(30)=1-0=1
+$$
+
+The tree is still balanced.
+
+### The overall insertion process
+
+An AVL tree must maintain two properties:
+
+1. BST property: values in the left subtree are less than or equal to the node's value, and values in the right subtree are greater.
+2. AVL property: the height difference between the left and right subtrees of every node must be between `-1` and `+1`.
+
+The algorithm follows these steps:
+
+1. Find the insertion position
+
+Recursively move left or right using the BST property.
+
+2. Insert a leaf node
+
+When an empty subtree is reached, create a new node.
+
+3. Return through recursion
+
+Update child references and calculate balance factors.
+
+4. Rotate if necessary
+
+Correct an imbalance and return the new subtree root.
+
+### Understanding `BinaryNode.add()`
+The BinaryNode add operation adds the
+new value to the BST rooted at that node and returns a BinaryNode object, which is
+to become the new root of that BST. This happens because a rotation operation
+moves a new node to be the root of that BST. 
+
+```
+class BinaryTree:    def add(self, value):        """Insert value into the tree."""        if self.root is None:            self.root = BinaryNode(value)        else:            self.root = self.root.add(value)
+```
+
+The important statement is:
+
+```
+self.root = self.root.add(value)
+```
+
+Why assign the returned value back to `self.root`?
+
+Because the original root might change after a rotation.
+
+For example, inserting `10`, `20`, and `30` creates this unbalanced tree before rotation:
+
+```
+10
+  \
+   20
+     \
+      30
+```
+
+After a left rotation:
+
+```
+    20
+   /  \
+  10   30
+```
+
+The root has changed from `10` to `20`. If `BinaryTree.add()` did not update `self.root`, the tree would keep an incorrect root reference.
+
+The same principle applies to every subtree, not just the whole tree.
+
+### Understanding `BinaryTree.add()`
+The recursive add operation has the same structure as
+BST add operation(link to code)  and the difference is that it may need to rebalance the tree once the
+value is inserted as a newly added leaf node.
+
+Consider the left-side insertion:
+
+```
+if val <= self.value:    
+    self.left = self.addToSubTree(self.left, val)
+```
+
+Suppose the current node is `30` and we insert `10`.
+
+```
+    30
+   /
+  20
+```
+
+The insertion descends into the left subtree. If a rotation changes the root of that subtree, the assignment updates the reference:
+
+```
+self.left = ...
+```
+
+For example, the left subtree might change from:
+
+```
+Before:
+
+      30
+     /
+    20
+   /
+  10
+```
+
+to:
+
+```
+After right rotation:
+
+      30
+     /
+    20
+   /
+  10
+```
+
+This particular illustration has not yet rotated the whole subtree correctly; the actual rotation must be performed at the unbalanced node. Let's see that process precisely in the next section.
+
+The right-side case follows the same principle:
+
+```
+else:    self.right = self.addToSubTree(self.right, val)
+```
+
+After the recursive insertion, the method checks the balance factor and selects the appropriate rotation.
+
+The compact implementation of `add` has an elegant behavior: a form of recursion that makes a choice between two possible recursive functions at each iteration. The method recursively traverses the tree, heading left or
+right as circumstances require, until `addToSubTree` eventually is asked to add `val` to
+an empty subtree (i.e., when parent is None). This terminates the recursion and
+ensures the newly added value is always a leaf node in the BST. Once this action is
+completed, each subsequent recursive call ends and add determines whether any
+rotation is needed to maintain the AVL property. These rotations start deep in the
+tree (i.e., nearest to the leaves) and work their way back to the root. Because the tree
+is balanced, the number of rotations is bounded by $O(log n)$. Each rotation method
+has a fixed number of steps to perform; thus the extra cost for maintaining the
+AVL property is bounded by O(log n). 
+
+### Understanding `addToSubTree()`
+
+```
+def addToSubTree(self, parent, val):    """Insert into a subtree and return its possibly new root."""    if parent is None:        return BinaryNode(val)    parent = parent.add(val)    return parent
+```
+
+This method handles two cases.
+
+#### Case A: The subtree is empty
+
+```
+if parent is None:    return BinaryNode(val)
+```
+
+A new leaf is created.
+
+For example, inserting `10`:
+
+```
+Before:
+
+  None
+
+After:
+
+   10
+```
+
+#### Case B: The subtree already exists
+
+```
+parent = parent.add(val)return parent
+```
+
+The insertion continues recursively.
+
+Notice that `parent.add(val)` might return a different node from `parent`, because the subtree might need rotation.
+
+That is why the returned reference matters.
+
+### How does `add()` choose a rotation?
+
+The decision logic is the heart of the implementation.
+
+```
+if val <= self.value:    self.left = self.addToSubTree(self.left, val)    if self.heightDifference() == 2:        if val <= self.left.value:            newRoot = self.rotateRight()        else:            newRoot = self.rotateLeftRight()
+```
+
+If the tree is left-heavy (`+2`):
+
+- The value was inserted into the left child's left subtree → LL → right rotation.
+- The value was inserted into the left child's right subtree → LR → left-right rotation.
+
+For the right side:
+
+```
+else:    self.right = self.addToSubTree(self.right, val)    if self.heightDifference() == -2:        if val > self.right.value:            newRoot = self.rotateLeft()        else:            newRoot = self.rotateRightLeft()
+```
+
+If the tree is right-heavy (`-2`):
+
+- The value was inserted into the right child's right subtree → RR → left rotation.
+- The value was inserted into the right child's left subtree → RL → right-left rotation.
+
+The complete method ends with:
+
+```
+newRoot.computeHeight()return newRoot
+```
+
+This recalculates the height of the subtree root and returns it to the caller.
+
+### Why do rotations happen while recursion returns?
+
+Consider inserting `10` into this tree:
+
+```
+        40
+       /
+      30
+     /
+    20
+   /
+  10
+```
+
+The recursive calls first reach the empty position where `10` is inserted.
+
+Then execution returns upward:
+
+```
+1. Insert 10 as a leaf.
+
+2. Return to node 20.
+   Its balance factor is +1.
+   No rotation.
+
+3. Return to node 30.
+   Its balance factor is +2.
+   Perform a right rotation.
+
+4. Return to node 40.
+   Update its left-child reference.
+   Check its balance factor and height.
+
+5. Return the resulting root to BinaryTree.add().
+```
+
+The important point is that each recursive call is responsible for rebalancing its own subtree. The deepest imbalance is considered first, and the returned root is passed to the parent.
+
+### Rotation Methods
+The provided code determines the rotation type by comparing the inserted value (`val`) with a child node's value. This works for ordinary insertion paths, including the duplicate-value convention used here, but implementations that support more complex changes may instead examine the child's balance factor.
+
+Also, height updates must follow the dependency order: update the old root before the new root when both heights need recomputation. The single rotations in the examples update the old root, and the double rotations update both affected nodes. The returned root's height is then recomputed by `add()`.
+
+The insertion algorithm detects one of four patterns.
+
+#### Case 1: Left-Left (LL) — `rotateRight()`
+
+Insert `10`, `20`, then `30` in the order `30`, `20`, `10`.
+
+Before rebalancing:
+
+```
+      30
+     /
+    20
+   /
+  10
+```
+
+The balance factor of `30` becomes `+2`. The new value was inserted into the left subtree of the left child.
+
+A single right rotation fixes the imbalance:
+
+```
+      20
+     /  \
+    10   30
+```
+
+Code:
+
+```
+def rotateRight(self):    """Perform a right rotation around this node."""    newRoot = self.left    grandson = newRoot.right    self.left = grandson    newRoot.right = self    self.computeHeight()    return newRoot
+```
+
+What happens?
+
+1. `newRoot` is the left child (`20`).
+2. Save `20`'s right subtree.
+3. Make that saved subtree the left child of `30`.
+4. Make `30` the right child of `20`.
+5. Recompute the height of the old root (`30`).
+6. Return the new root (`20`).
+
+#### Case 2: Right-Right (RR) — `rotateLeft()`
+
+Insert `10`, `20`, then `30`.
+
+Before rebalancing:
+
+```
+  10
+    \
+     20
+       \
+        30
+```
+
+The balance factor of `10` becomes `-2`. The insertion occurred in the right subtree of the right child.
+
+A left rotation produces:
+
+```
+      20
+     /  \
+    10   30
+```
+
+Code:
+
+```
+def rotateLeft(self):    """Perform a left rotation around this node."""    newRoot = self.right    grandson = newRoot.left    self.right = grandson    newRoot.left = self    self.computeHeight()    return newRoot
+```
+
+The process is the mirror image of a right rotation.
+
+#### Case 3: Left-Right (LR) — `rotateLeftRight()`
+
+Insert `30`, `10`, then `20`.
+
+Before rebalancing:
+
+```
+      30
+     /
+    10
+      \
+       20
+```
+
+The insertion occurred in the right subtree of the left child.
+
+This requires two rotations.
+
+First, rotate left at `10`:
+
+```
+      30
+     /
+    20
+   /
+  10
+```
+
+Then, rotate right at `30`:
+
+```
+      20
+     /  \
+    10   30
+```
+
+Code:
+
+```
+def rotateLeftRight(self):    """Perform a left rotation, then a right rotation."""    child = self.left    newRoot = child.right    grand1 = newRoot.left    grand2 = newRoot.right    child.right = grand1    self.left = grand2    newRoot.left = child    newRoot.right = self    child.computeHeight()    self.computeHeight()    return newRoot
+```
+
+Here:
+
+- `child` is the old left child.
+- `newRoot` is the right child of that left child.
+- `grand1` and `grand2` preserve the middle subtrees while links change.
+
+The method updates the heights of both old child and old root, then returns the new root.
+
+#### Case 4: Right-Left (RL) — `rotateRightLeft()`
+
+Insert `10`, `30`, then `20`.
+
+Before rebalancing:
+
+```
+  10
+    \
+     30
+    /
+   20
+```
+
+First, rotate right at `30`:
+
+```
+  10
+    \
+     20
+       \
+        30
+```
+
+Then, rotate left at `10`:
+
+```
+      20
+     /  \
+    10   30
+```
+
+Code:
+
+```
+def rotateRightLeft(self):    """Perform a right rotation, then a left rotation."""    child = self.right    newRoot = child.left    grand1 = newRoot.left    grand2 = newRoot.right    child.left = grand2    self.right = grand1    newRoot.left = self    newRoot.right = child    child.computeHeight()    self.computeHeight()    return newRoot
+```
+
+This is the mirror image of the left-right case.
+
+
+
+## PHP
+Implementing balanced binary trees is more difficult than just implementing binary search trees. Here’s an example in PHP.
+```php
+class Node
+{
+	protected   $_parent = null;
+	protected   $_left = null;
+	protected   $_right = null;
+	protected   $_key;
+    protected   $_data = null;
+ 
+    /**
+     * @param int $key
+     * @param mixed $data 
+     */
+	public function __construct($key, $data)
+	{
+		$this->_key = $key;
+        $this->_data = $data;
+	}
+ 
+    /**
+     * Empty the node by keeping up the key, but
+     * setting up the data to NULL 
+     */
+    public function doEmpty() 
+    {
+        $this->_data = null;
+    }
+ 
+    /**
+     * Print the key
+     * 
+     * @return string
+     */
+	public function __toString()
+	{
+		return 'First name: ' . $this->_data['f_name']
+                . '<br />'
+                . 'Last name: ' . $this->_data['l_name']
+                . '<br />' 
+                . 'Birthday: ' . $this->_data['b_day'];
+	}
+ 
+    public function &getParent() { return $this->_parent; }
+    public function setParent($parent) { $this->_parent = $parent; }
+ 
+    public function &getLeft() { return $this->_left; }
+    public function setLeft($left) { $this->_left = $left; }
+ 
+    public function &getRight() { return $this->_right; }
+    public function setRight($right) { $this->_right = $right; }
+ 
+    public function &getKey() { return $this->_key; }
+    public function setKey($key) { $this->_key = $key; }
+ 
+    public function &getData() { return $this->_data; }
+    public function setData($data) { $this->_data = $data; }
+}
+ 
+class BalancedBinaryTree
+{
+    /**
+     * Reference to the root tree
+     * 
+     * @var Node 
+     */
+	protected $_root = null;
+ 
+    /**
+     * @param type $new
+     * @param type $node
+     * @return type 
+     */
+	protected function _insert($new, &$root)
+	{
+        // in case the tree is empty
+        // make the new node the root of
+        // the tree
+		if ($root == null) {
+			$root = $new;
+			return;
+		}
+ 
+		if ($new->getKey() <= $root->getKey()) {
+			if ($root->getLeft() == null) {
+				$root->setLeft($new);
+				$new->setParent($root);
+			} else {
+				$this->_insert($new, $root->getLeft());
+			}
+		} else {
+			if ($root->getRight() == null) {
+				$root->setRight($new);
+				$new->setParent($root);
+			} else {
+				$this->_insert($new, $root->getRight());
+			}
+		}		
+	}
+ 
+    /**
+     * FALSE on not found
+     * 
+     * @param string $firstName
+     * @param BalancedBinaryTree $tree
+     * @return boolean 
+     */
+	protected function _search($firstName, &$tree)
+	{
+        if ($tree == null) {
+            return FALSE;
+        }
+ 
+        $data = $tree->getData();
+ 
+        if ($firstName == $data['f_name']) {
+			return $tree;
+		}
+ 
+        // search the left sub-tree
+        return $this->_search($firstName, $tree->getLeft())
+                . $this->_search($firstName, $tree->getRight());
+	}
+ 
+    /**
+     *
+     * @param int $key
+     * @param Node $tree
+     * @return FALSE or Node 
+     */
+    protected function _searchByKey($key, &$tree)
+    {
+        if ($tree == null) {
+            return FALSE;
+        }
+ 
+        if ($tree->getKey() == $key) {
+            return $tree;
+        } else if ($tree->getKey() > $key) {
+            return $this->_searchByKey($key, $tree->getLeft());
+        } else {
+            return $this->_searchByKey($key, $tree->getRight());
+        }
+    }
+ 
+    /**
+     * Returns a list out of the tree by emptying the tree. 
+     * In other way the tree and the list will allocate memory
+     * 
+     * @param BalancedBinaryTree $tree 
+     */
+    protected function _leftRootRight($tree)
+    {
+        if ($tree == null) {
+            return array();
+        }
+ 
+        return array_merge(
+                $this->_leftRootRight($tree->getLeft()),
+                array(array('key' => $tree->getKey(), 'data' => $tree->getData())),
+                $this->_leftRootRight($tree->getRight()));
+    }
+ 
+    public function _balance($list)
+    {
+        if (empty($list)) {
+            return;
+        }
+ 
+        // split the list
+        $chunks = array_chunk($list, ceil(count($list) / 2));
+        $mid = array_pop($chunks[0]);
+ 
+        $node = new Node($mid['key'], $mid['data']);
+        $this->insert($node);
+ 
+        $this->_balance($chunks[0]);
+        if (isset($chunks[1]))
+            $this->_balance($chunks[1]);
+    }
+ 
+    /**
+     * Balance a binary search tree 
+     */
+    public function balance()
+    {
+        $list = array();
+        // make a list out of the tree
+        $list = $this->_leftRootRight($this->_root);
+ 
+        // find the medium! Because the list is ordered
+        // we can find the middle element in various ways
+        $chunks = array_chunk($list, ceil(count($list) / 2));
+        $mid = array_pop($chunks[0]);
+ 
+        // empty the tree
+        $this->_root = null;
+ 
+        // inser the root
+        $node = new Node($mid['key'], $mid['data']);
+        $this->insert($node);
+ 
+        $this->_balance($chunks[0]);
+        $this->_balance($chunks[1]);
+    }
+ 
+    /**
+     * Insert a new item into the tree
+     * 
+     * @param type $node 
+     */
+	public function insert($newNode)
+	{
+		$this->_insert($newNode, $this->_root);
+	}
+ 
+    /**
+     * Search by item key
+     * 
+     * @param int $key
+     * @return Node or FALSE
+     */
+    public function searchByKey($key)
+    {
+        return $this->_searchByKey($key, $this->_root);
+    }
+ 
+    /**
+     * @param BalancedBinary $tree
+     * @return string 
+     */
+    protected function _print($tree)
+    {
+        if ($tree == null) { return ''; }
+ 
+        return $this->_print($tree->getLeft()) . ' ' 
+                . $tree->getKey() . ' ' 
+                . $this->_print($tree->getRight());
+    }
+ 
+    /**
+     * Print the tree from left through the root and the right 
+     */
+    public function __toString()
+    {
+        if ($this->_root == null) {
+            return 'The tree is empty!';
+        }
+ 
+        return $this->_print($this->_root->getLeft()) . ' '
+                . $this->_root->getKey() . ' '
+                . $this->_print($this->_root->getRight());
+    }
+}
+ 
+$a = new Node(90, array(
+    'f_name' => 'W.A.',
+    'l_name' => 'Mozart',
+    'b_day' => '1756-01-27',
+));
+ 
+$b = new Node(100, array(
+    'f_name' => 'John',
+    'l_name' => 'Smith',
+    'b_day' => '23.05.2039',
+));
+ 
+$c = new Node(80, array(
+    'f_name' => 'Sarah',
+    'l_name' => 'Johnnes',
+    'b_day' => 'tomorrow',
+));
+ 
+$d = new Node(60, array(
+    'f_name' => 'Ludwig Van',
+    'l_name' => 'Beethoven',
+    'b_day' => '1770-12-17',
+));
+ 
+$e = new Node(70, array(
+    'f_name' => 'Barbara',
+    'l_name' => 'Stefanel',
+    'b_day' => 'today',
+));
+ 
+$t = new BalancedBinaryTree();
+ 
+$t->insert($a);
+$t->insert($b);
+$t->insert($c);
+$t->insert($d);
+$t->insert($e);
+ 
+echo $t;
+ 
+echo $t->searchByKey(70);
+ 
+$t->balance();
+ 
+echo $t->searchByKey(70);
+```

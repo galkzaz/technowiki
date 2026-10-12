@@ -1,0 +1,1170 @@
+An AVL tree is a self-balancing Binary Search Tree (BST). It stores values in sorted order while automatically keeping the tree balanced as values are inserted or removed.
+
+The main goal is to prevent the tree from becoming too tall, so searching, insertion, and deletion remain efficient.
+
+## What is an AVL tree?
+
+AVL trees (named after their inventors, Adelson-Velskii and Landis) were the first self-balancing BST, invented in 1962.
+
+An AVL tree follows two rules:
+
+1. BST property: For every node, values in its left subtree are smaller, and values in its right subtree are larger, assuming distinct keys.
+
+2. Balance property: For every node, the heights of its left and right subtrees differ by at most one.
+
+Consider this balanced tree:
+
+```
+          30
+         /  \
+       20    40
+      / \    / \
+     10 25  35 50
+```
+
+Every node satisfies the BST property, and every node is balanced.
+
+Now consider an ordinary BST after inserting `10, 20, 30, 40, 50` in that order:
+
+```
+10
+  \
+   20
+     \
+      30
+        \
+         40
+           \
+            50
+```
+
+This tree behaves almost like a linked list. Searching for `50` may require visiting every node.
+
+An AVL tree detects the imbalance and rearranges the nodes:
+
+```
+          20
+         /  \
+       10    40
+            /  \
+           30   50
+```
+
+The values and their sorted order remain unchanged, but the tree becomes shorter.
+
+The key idea: An AVL tree maintains balance automatically rather than relying on the insertion order to produce a good shape.
+## Structure and Properties
+To understand how an AVL tree works, you need two concepts: height and balance factor.
+### BST property
+### Node structure
+A typical AVL node stores:
+
+* A key or value.
+
+* A reference to its left child.
+
+* A reference to its right child.
+
+* Its height, so the implementation can efficiently calculate balance factors.
+
+An ASCII representation:
+
+```
++-------------------+
+| value = 30        |
+| height = 2        |
++-------------------+
+| left  -----------> left child
+| right -----------> right child
++-------------------+
+```
+
+The balance factor does not have to be stored separately; it can be calculated from the children's heights.
+
+The tree itself normally maintains a reference to its root:
+
+```
+AVLTree
+   |
+   v
+  root
+   |
+   v
+  [30]
+  /  \
+[20] [40]
+```
+
+Rotations may change the root of a subtree. The implementation must reconnect the rotated subtree to its parent, or update the overall root when the rotation occurs at the root.
+### Node height
+The height of a node is the number of edges on the longest path from that node down to a leaf.
+
+Using the convention that a leaf has height `0` and an empty subtree has height `-1`:
+
+```
+          30          height = 2
+         /  \
+       20    40       height = 1
+      / \
+     10 25             height = 0
+```
+
+More precisely:
+
+* Nodes `10`, `25`, and `40` are leaves with height `0`.
+
+* Node `20` has height `1`.
+
+* Node `30` has height `2`.
+
+The height of any node is calculated as:
+
+$$
+h(v)=1+\max(h(v.left),h(v.right))
+$$
+
+With our convention, an empty child has height −1-1−1.
+
+When calculating a parent's balance factor, use the heights of its two children—not the height of the parent itself.
+
+> Some implementations define a leaf's height as `1` and an empty tree's height as `0`. Either convention works as long as it is used consistently.
+
+### Balance factor
+
+The balance factor (BF) tells us whether a node is leaning too far to one side.
+
+$$
+BF(v)=h(v.left)-h(v.right)
+$$
+
+For an AVL tree, every node must satisfy:
+$$
+BF(v)\in\{-1,0,+1\}}
+$$
+
+Interpretation:
+
+| Balance factor | Meaning                                  |
+| -------------- | ---------------------------------------- |
+| `+1`           | Left subtree is one level taller         |
+| `0`            | Both subtrees have equal height          |
+| `-1`           | Right subtree is one level taller        |
+| `+2` or `-2`   | Node is unbalanced and needs rebalancing |
+
+An AVL tree guarantees the AVL property at every node, namely, that the height difference for any node is `–1`, `0`, or `1`.
+
+The height difference is defined as height(left) – height(right)—that is, the height of the left subtree minus the height of the right subtree. 
+
+An AVL tree must enforce this property whenever a value is inserted or removed from the tree. Doing so requires two helper methods: computeHeight to compute the height of a node and heightDifference to compute the height difference. Each node in the AVL tree stores its height value, which increases the overall storage requirements.
+
+For example:
+
+```
+          30
+         /  \
+       20    40
+      /
+     10
+```
+
+At node `30`:
+
+* Left subtree height = `1`
+
+* Right subtree height = `0`
+
+Therefore:
+
+BF(30)=1−0=+1BF(30)=1-0=+1BF(30)=1−0=+1
+
+Node `30` is still balanced.
+
+Now consider:
+
+```
+          30
+         /
+       20
+      /
+     10
+```
+
+At node `30`:
+
+* Left subtree height = `1`
+
+* Right subtree height = `-1`
+
+Therefore:
+
+$$
+BF(30)=1-(-1)=+2
+$$
+
+Node `30` is unbalanced. The AVL tree must perform a rotation.
+## Rotations: how an AVL tree restores balance
+
+A rotation is a local rearrangement of nodes that restores balance without breaking the BST ordering.
+
+There are four imbalance cases:
+
+* LL — Left-Left
+
+* RR — Right-Right
+
+* LR — Left-Right
+
+* RL — Right-Left
+
+The names describe the path from the unbalanced node to the newly inserted node.
+
+### 1. LL case — Right rotation
+
+This happens when insertion makes the left subtree's left branch too tall.
+
+Insert `30`, `20`, then `10` into a BST in that order.
+
+Before rebalancing:
+
+The resulting tree no longer satisfies the AVL property because the height of the root’s left subtree is `1` while the height of its non-existing right subtree is `–1`, resulting in a height difference of `2`.
+```
+     (Hieght 2) 30  <- unbalanced
+                /
+   (Hieght 1) 20
+              /
+(Hieght 0) 10
+```
+
+The balance factor of `30` is `+2`.
+
+Perform a right rotation around `30`:
+
+Imagine “grabbing” the 20 node in the original tree and rotating the tree to the right (or clockwise), and pivoting around the 20 node to make 20 the root, thereby creating a balanced tree. In doing so, only the height of the 30 node has changed
+(dropping from 2 to 0) and the AVL property is restored.
+
+```
+   (Hieght 1) 20
+             /  \
+(Hieght 0) 10   30
+```
+
+What changed?
+
+1. Node `20` becomes the new root of this subtree.
+
+2. Node `10` remains the left child of `20`.
+
+3. Node `30` becomes the right child of `20`.
+
+The BST ordering is preserved: `10 < 20 < 30`.
+
+This rotate right operation alters the structure of a subtree within an unbalanced BST;
+
+**Example**
+
+```text
+       50
+      /  \
+     30  (50R)
+    /  \
+   10  (30R)
+  /  \
+(10L)(30L)
+
+```
+a standard right rotation can be performed on the root `50` to fully balance the AVL tree.
+
+```
+           30      
+          /  \     
+       10     50     
+      /  \   /  \    
+   10L  30L 30R 50R  
+```
+Here is the complete progression shown side-by-side in a single ASCII text diagram, illustrating the initial  case, and the final balanced tree after rotating right on root 50:   
+```text
+[ 1. Initial LL Case ]      [ 2. Rotate Right on 50 ]
+           50                        30         
+         /  \                       /  \        
+        30  (50R)                 10     50       
+       /  \                      /  \   /  \      
+      10  (30R)               10L  30L 30R 50R    
+     /  \                                      
+  (10L)(30L)                                  
+
+```
+The modified BST still guarantees the binary search property. All of the key values in
+the subtree `30R` are greater than or equal to `30`. The other subtrees have not
+changed positions relative to each other, so they continue to guarantee the binary
+search property. Finally, the value 30 is smaller than 50, so the new root node
+is valid.
+### 2. RR case — Left rotation
+
+This is the mirror image of LL. The right subtree's right branch becomes too tall.
+
+Insert `10`, `20`, then `30`.
+
+Before rebalancing:
+
+```
+    10  <- unbalanced
+      \
+       20
+         \
+          30
+```
+
+Perform a left rotation around `10`:
+
+```
+        20
+       /  \
+      10   30
+```
+
+Node `20` becomes the root of the subtree.
+
+### 3. LR case — Left-Right rotation
+
+This happens when the new node is inserted into the right subtree of the unbalanced node's left child.
+
+Insert `30`, `10`, then `20`.
+
+Before rebalancing:
+
+```
+        30
+       /
+      10
+        \
+         20
+```
+
+A single rotation is not sufficient to fix this shape. Use two rotations.
+
+Step 1: Left rotation around `10`.
+
+```
+        30
+       /
+      20
+     /
+    10
+```
+
+Step 2: Right rotation around `30`.
+
+```
+        20
+       /  \
+      10   30
+```
+
+**Example**
+
+In this configuration, node `50` has a left child `10`, which has a right child `30`. A single right rotation around `50` cannot be performed directly because node `10` is smaller than both `30` and `50`.
+
+```text
+       50
+      /  \
+     10  (50R)
+    /  \
+ (10L)  30
+       /  \
+    (30L) (30R)
+
+```
+1. First Step: Rotate Left on Child Node (10)
+
+To resolve the issue, a left rotation is performed on the child node `10`. This elevates node `30` above node `10`.
+
+```text
+       50
+      /  \
+     30  (50R)
+    /  \
+   10  (30R)
+  /  \
+(10L)(30L)
+
+```
+2. Second Step: rotate right on the root `50` 
+
+After the left rotation on node `10`, the tree is successfully converted into a standard **Left-Left case**. From here, a standard right rotation can be performed on the root `50` to fully balance the AVL tree.
+
+```
+           30      
+          /  \     
+       10     50     
+      /  \   /  \    
+   10L  30L 30R 50R  
+```
+Here is the complete progression shown side-by-side in a single ASCII text diagram, illustrating the initial Left-Right case, the intermediate Left-Left case after rotating left on node 10, and the final balanced tree after rotating right on root 50:   
+```text
+[ 1. Initial LR Case ]        [ 2. Rotate Left on 10 ]      [ 3. Rotate Right on 50 ]
+
+          50                            50                            30         
+         /  \                          /  \                          /  \        
+        10  (50R)                     30  (50R)                 10     50       
+       /  \                          /  \                      /  \   /  \      
+    (10L)  30                       10  (30R)               10L  30L 30R 50R    
+          /  \                     /  \                                      
+       (30L) (30R)              (10L)(30L)                                  
+
+```
+### 4. RL case — Right-Left rotation
+
+This is the mirror image of LR. The new node is inserted into the left subtree of the unbalanced node's right child.
+
+Insert `10`, `30`, then `20`.
+
+Before rebalancing:
+
+```
+    10
+      \
+       30
+      /
+     20
+```
+
+Step 1: Right rotation around `30`.
+
+```
+    10
+      \
+       20
+         \
+          30
+```
+
+Step 2: Left rotation around `10`.
+
+```
+        20
+       /  \
+      10   30
+```
+
+### Rotation summary
+Consider adding three values to an empty AVL tree; Figure  shows the four different insert orders that result in an unbalanced tree. In the Left-Left case you perform a rotate right operation to rebalance the tree; similarly, in the Right-Right case
+you perform a rotate left operation. However, in the Left-Right case, you cannot
+simply rotate right because the “middle” node, 10, cannot become the root of the
+tree; its value is smaller than both of the other two values
+```
+(Hieght 2)      50      50          10          10
+                /       /            \          \
+(Hieght 1)     30      10           50          30
+              /         \           /            \   
+(Hieght 0)  10          30         30            50
+            LL         LR           RL           RR
+```
+### LL
+
+Left-Left
+
+```
+    z
+   /
+  y
+ /
+x
+```
+
+### RR
+
+Right-Right
+
+```
+z
+ \
+  y
+   \
+    x
+```
+
+### LR
+
+Left-Right
+
+```
+    z
+   /
+  y
+   \
+    x
+```
+
+### RL
+
+Right-Left
+
+```
+z
+ \
+  y
+ /
+x
+```
+
+Correction rule
+
+* LL → single right rotation.
+
+* RR → single left rotation.
+
+* LR → left rotation, then right rotation.
+
+* RL → right rotation, then left rotation.
+
+Here, `z` represents the unbalanced node, `y` its heavy child, and `x` the node in the heavy grandchild direction.
+
+## AVL Tree Operations
+
+An AVL tree supports the standard Binary Search Tree (BST) operations, plus balancing operations that maintain its height.
+
+The most important operations to implement first are `search`, `insert`, `delete`, `updateHeight`, `getBalanceFactor`, `rotateLeft`, `rotateRight`, and the four-case rebalancing logic. These form the foundation of a working AVL tree.
+
+### Core operations
+
+| Operation              | Description                                      | Worst-case time                                                                                                           |
+| ---------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `search(key)`          | Find a node with the given key                   | $O(\logn)                                                                                                  |
+| `insert(key)`          | Add a new key while maintaining balance          | $O(\log n)                                                                                                  |
+| `delete(key)`          | Remove a key and restore balance                 | $O(\log n)                                                                                                  |
+| `findMin()`            | Find the smallest key                            | $O(\log n)                                                                                                  |
+| `findMax()`            | Find the largest key                             | $O(\log n)                                                                                                  |
+| `findPredecessor(key)` | Find the largest key smaller than the given key  | $O(\log n)                                                                                                  |
+| `findSuccessor(key)`   | Find the smallest key greater than the given key | $O(\log n)                                                                                                  |
+| `getHeight()`          | Return the height of the tree                    | $O(1) if maintained                                                                                                |
+| `isEmpty()`            | Check whether the tree is empty                  | $O(1)                                                                                                              |
+| `size()`               | Return the number of stored nodes                | $O(1) if a counter is maintained                                                                                   |
+| `clear()`              | Remove all nodes                                 | $O(⁡n)$ for explicit node-by-node cleanup; $O(1) to discard the root reference when memory management permits |
+
+Here, n is the number of nodes.
+
+### Traversal operations
+
+These visit nodes in a particular order.
+
+| Operation               | Visiting order      | Time         |
+| ----------------------- | ------------------- | ------------ |
+| `inorderTraversal()`    | Left → Root → Right | $O(⁡n)$ |
+| `preorderTraversal()`   | Root → Left → Right | $O(⁡n)$ |
+| `postorderTraversal()`  | Left → Right → Root | $O(⁡n)$ |
+| `levelOrderTraversal()` | Level by level      | $O(⁡n)$ |
+
+For an AVL tree, inorder traversal returns the keys in sorted order.
+
+Example:
+
+```
+          30
+         /  \
+       20    40
+      / \
+     10 25
+```
+
+Inorder traversal:
+
+```
+10 → 20 → 25 → 30 → 40
+```
+
+### Balancing operations
+
+These are the operations that distinguish an AVL tree from an ordinary BST.
+
+| Operation                | Purpose                                                         | Time                                                                     |
+| ------------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `getBalanceFactor(node)` | Calculate the difference between left and right subtree heights | $O(1) if child heights are maintained                             |
+| `updateHeight(node)`     | Recalculate a node's height                                     | $O(1)                                                             |
+| `rotateLeft(node)`       | Correct a right-right imbalance                                 | $O(1)                                                             |
+| `rotateRight(node)`      | Correct a left-left imbalance                                   | $O(1)                                                             |
+| `rebalance(node)`        | Detect an imbalance and apply the appropriate rotation(s)       | $O(1) for a single node's local repair, excluding traversal to it |
+
+The four rotation cases are:
+
+```
+LL → Right rotation
+RR → Left rotation
+LR → Left rotation, then right rotation
+RL → Right rotation, then left rotation
+```
+
+Rotations are local operations, but insertion and deletion may need to update and rebalance multiple ancestors.
+
+### Additional useful operations
+
+| Operation                | Description                                                  | Worst-case time                                          |
+| ------------------------ | ------------------------------------------------------------ | -------------------------------------------------------- |
+| `contains(key)`          | Return whether a key exists                                  | $O(\log n)                                 |
+| `floor(key)`             | Find the largest key less than or equal to the given key     | $O(\log n)                                 |
+| `ceiling(key)`           | Find the smallest key greater than or equal to the given key | $O(\log n)                                 |
+| `rangeSearch(low, high)` | Find keys within a specified range                           | O(log⁡n+k)O(\log n+k)O(logn+k) for reporting kkk results |
+| `rank(key)`              | Count keys smaller than a key                                | $O(\log n) if subtree sizes are maintained |
+| `select(k)`              | Find the kkk-th smallest key                                 | $O(\log n) if subtree sizes are maintained |
+
+The last two operations require additional metadata, such as the number of nodes in each subtree. They are not automatically supported efficiently by a basic AVL implementation.
+
+## Search Operations
+### Search
+Searching in an AVL tree uses the same algorithm as searching in an ordinary BST. No rotations are needed during a normal search.
+
+Suppose we want to find `25`:
+
+```
+          30
+         /  \
+       20    40
+      / \
+     10 25
+```
+
+The search proceeds as follows:
+
+| Step | Current node | Comparison | Action   |
+| ---- | ------------ | ---------- | -------- |
+| 1    | `30`         | `25 < 30`  | Go left  |
+| 2    | `20`         | `25 > 20`  | Go right |
+| 3    | `25`         | `25 == 25` | Found    |
+
+The search visits three nodes.
+
+If the key does not exist, the search continues until it reaches an empty child and reports that the key is absent.
+
+Because an AVL tree keeps its height logarithmic, searching takes $O(\log n)$ time in the worst case.
+### Minimum and maximum
+### Predecessor and successor
+### Floor and ceiling
+## Insertion
+AVL insertion begins exactly like ordinary BST insertion. The difference is that, after inserting a new node, the tree updates heights and checks balance while moving back toward the root.
+
+The general process is:
+
+1. Find the correct position using BST comparisons.
+
+2. Insert the new node as a leaf.
+
+3. Update the heights of its ancestors.
+
+4. Calculate their balance factors.
+
+5. Perform the appropriate rotation if a node becomes unbalanced.
+
+This pseudocode shows the central mechanism without tying it to a particular programming language.
+
+```
+insert(node, key):
+    if node is null:
+        return new Node(key)
+
+    if key < node.key:
+        node.left = insert(node.left, key)
+    else if key > node.key:
+        node.right = insert(node.right, key)
+    else:
+        return node  // Duplicate key
+
+    updateHeight(node)
+
+    balance = height(node.left) - height(node.right)
+
+    if balance > 1:
+        if key < node.left.key:
+            return rotateRight(node)              // LL
+        else:
+            node.left = rotateLeft(node.left)
+            return rotateRight(node)              // LR
+
+    if balance < -1:
+        if key > node.right.key:
+            return rotateLeft(node)               // RR
+        else:
+            node.right = rotateRight(node.right)
+            return rotateLeft(node)               // RL
+
+    return node
+```
+
+The helper operations have these responsibilities:
+
+* `updateHeight(node)` recalculates the node's height from its children.
+
+* `rotateLeft(node)` performs a left rotation and updates affected heights.
+
+* `rotateRight(node)` performs a right rotation and updates affected heights.
+
+* The returned node is the new root of the modified subtree.
+
+Notice that every recursive call assigns its returned node back to `node.left` or `node.right`. This is how changes to subtree roots propagate back toward the overall tree root.
+
+This simplified insertion assumes unique keys and uses the height convention defined earlier. Deletion requires a related procedure, but its rotation cases are determined by the balance factors of the child subtrees rather than by the key being inserted.
+### BST insertion
+### Height updates
+### LL rotation
+### RR rotation
+### LR rotation
+### RL rotation
+### Example
+Let's follow a complete example.
+
+Insert these values in order:
+
+`10, 20, 30, 40, 50, 25`
+
+1. Step 1: Insert `10`, `20`, and `30`
+
+  After inserting `10` and `20`:
+
+  ```
+      10
+        \
+        20
+  ```
+
+  Insert `30`:
+
+  ```
+      10
+        \
+        20
+          \
+            30
+  ```
+
+  Node `10` becomes unbalanced, with balance factor `-2`. This is an RR case, so perform a left rotation.
+
+  ```
+          20
+        /  \
+        10   30
+  ```
+
+2. Step 2: Insert `40`
+
+  ```
+          20
+        /  \
+        10   30
+              \
+                40
+  ```
+
+  The balance factors are still within the allowed range. No rotation is needed.
+
+3. Step 3: Insert `50`
+
+  The ordinary BST insertion produces:
+
+  ```
+          20
+        /  \
+        10   30
+              \
+                40
+                  \
+                  50
+  ```
+
+  Node `30` becomes unbalanced. This is an RR case at `30`.
+
+  After a left rotation around `30`:
+
+  ```
+          20
+        /  \
+        10   40
+            /  \
+          30   50
+  ```
+
+4. Step 4: Insert `25`
+
+  BST insertion places `25` to the left of `30`:
+
+  ```
+          20
+        /  \
+        10   40
+            /  \
+          30   50
+          /
+        25
+  ```
+
+  Now node `20` is unbalanced, and its right child `40` is left-heavy. 
+
+  * Left subtree height = `0` (node `10`).
+
+  * Right subtree height = `2` (the subtree rooted at `40`).
+
+  * Balance factor of `20` = 0−2=−20-2=-20−2=−2.
+
+  This is an RL (Right-Left, ) case because the heavy path goes right from `20`, then left from `40`, An RL rotation is a two-step operation: first rotate right around the heavy child (`40`), then rotate left around the unbalanced node (`20`)..
+
+  Right rotation around `40`
+
+  The subtree rooted at `40` is:
+    ```
+          40
+        /  \
+        30   50
+      /
+      25
+    ```
+
+    Perform a right rotation around `40`. Node `30` moves up, and `40` becomes its right child.
+
+    The resulting whole tree is:
+
+    ```
+            20
+          /  \
+        10    30
+              /  \
+            25   40
+                    \
+                    50
+    ```
+
+    At this point, the rotation has changed the shape of the right subtree, but node `20` is still unbalanced.
+  
+    Left rotation around `20`
+
+    Now rotate left around `20`.
+    
+    During the rotation:
+
+    * `30` becomes the new root of this subtree.
+
+    * `20` becomes the left child of `30`.
+
+    * `25`, which was the left child of `30`, becomes the right child of `20`.
+
+    After:
+
+    ```
+              30
+            /  \
+          20    40
+          / \     \
+        10 25     50
+    ```
+5. the final tree is:
+
+  ```
+            30
+          /  \
+        20    40
+        / \     \
+      10 25     50
+  ```
+
+  All nodes satisfy the AVL balance condition.
+
+  Important observation: The AVL tree does not sort the entire collection again. It changes only a small portion of the tree, using rotations to preserve the existing sorted order.
+
+## Deletion
+Deletion also begins with the standard BST deletion algorithm. However, removing a node can make one or more ancestors unbalanced, so the tree must check and restore balance on the way back up.
+
+1. Step 1: Find the node
+
+Search for the value to delete.
+
+2. Step 2: Delete it using BST rules
+
+There are three cases:
+
+* Leaf node: Remove it directly.
+
+* One child: Replace the node with its child.
+
+* Two children: Replace its value with its inorder successor (the smallest value in its right subtree), then delete that successor from its original position.
+
+3. Step 3: Restore balance
+
+Update heights and examine balance factors from the affected node toward the root. Perform the necessary single or double rotations.
+
+Consider this example:
+
+```
+          30
+         /  \
+       20    40
+      / \      \
+     10 25      50
+```
+
+Delete `10`. The resulting tree is:
+
+```
+          30
+         /  \
+       20    40
+         \     \
+          25    50
+```
+
+The tree is still balanced, so no rotation is needed.
+
+In other cases, deletion can create an imbalance. For example, if a node becomes left-heavy, the algorithm examines its left child's balance factor to determine whether a right rotation or a double rotation is necessary.
+
+Unlike insertion, deletion may require rebalancing at multiple ancestors, all the way to the root.
+### Leaf deletion
+### One-child deletion
+### Two-child deletion
+### Rebalancing ancestors
+## Traversals
+### Inorder
+### Preorder
+### Postorder
+### Level order
+## Implementation Helpers
+### Update height
+### Calculate balance factor
+### Rotate left
+### Rotate right
+### Rebalance
+## Advanced Operations
+### Range search
+### Rank and select
+### Join and split
+## Complexity and Applications
+### Time complexity
+Let n be the number of nodes.
+
+| Operation                  | Worst-case time | Explanation                                     |
+| -------------------------- | --------------- | ----------------------------------------------- |
+| Search                     | $O(\log n)$     | The tree height is logarithmic                  |
+| Insert                     | $O(\log n)$     | Search for the position and rebalance ancestors |
+| Delete                     | $O(\log n)$     | Find the node and rebalance ancestors           |
+| Find minimum/maximum       | $O(\log n)$     | Follow the leftmost/rightmost path              |
+| Find predecessor/successor | $O(\log n)$     | Navigate the tree using BST ordering            |
+| Inorder traversal          | $O(n)$          | Visit every node                                |
+| Space for stored nodes     | $O(n)$          | Each node stores a value and links              |
+| Recursive call stack       | $O(\log n)$     | Recursion follows the balanced tree's height    |
+
+The important guarantee is that AVL trees maintain a height of $O(\log n)$, even when values arrive in sorted order.
+
+For example, with roughly one million nodes, a balanced search tree needs only about 20 levels of descent, rather than potentially hundreds of thousands of comparisons in a severely skewed ordinary BST.
+
+#### Search
+The average-case performance of search in a balanced AVL tree is the same as a
+Binary Search (i.e., $O(log n)$).
+An AVL tree is a Binary Search Tree that maintains its height at \\(O(\log n)\\).
+
+Consider this tree:
+
+```
+          30
+         /  \
+       20    40
+      / \      \
+     10 25      50
+```
+
+Suppose we search for `25`:
+
+```
+Step 1: Compare with 30 → go left
+
+          30
+         /
+       20
+
+Step 2: Compare with 20 → go right
+
+       20
+         \
+          25
+
+Step 3: Found 25
+```
+
+We visit only a path from the root to the target. Since the height is logarithmic, the worst-case search time is \\(O(\log n)\\).
+
+One small correction to the passage: binary search and AVL search have the same asymptotic time complexity, but they are different algorithms. Binary search typically operates on sorted arrays, while AVL search follows child pointers in a tree.
+
+---
+
+Note that no rotations ever occur during a search. Searching does not modify the tree.
+
+During a search, the algorithm only:
+
+1. Compares the target with the current node.
+2. Moves left or right.
+3. Stops when it finds the key or reaches an empty subtree.
+
+The tree's shape, node heights, and balance factors remain unchanged.
+
+Rotations are needed when an insertion or deletion changes the tree's structure and causes an imbalance.
+
+#### Insert and remove
+Self-balancing binary trees require more complicated code to insert and remove
+than simple binary search trees. If you review the rotation methods, you will see that
+they each have a fixed number of operations, so these can be treated as behaving in
+constant time. 
+
+**Why does a rotation take \\(O(1)\\) time?**
+
+A rotation changes only a fixed number of pointers and updates the metadata of a fixed number of nodes.
+
+For example, a right rotation:
+
+Before
+
+```
+        30
+       /
+      20
+     /  \
+    10   25
+```
+
+After
+
+```
+        20
+       /  \
+      10   30
+          /
+         25
+```
+
+The operation involves a constant number of pointer assignments and height updates. It does not traverse the entire tree.
+
+Therefore:
+$$
+T\_\{\text{rotation}}=O(1)
+$$
+
+A double rotation also takes $(O(1)$, because it consists of two single rotations.
+
+--- 
+
+**Why are insertion and deletion $O(\log n)$?**
+
+The reasoning has two parts.
+
+1. Part A: Finding the affected node
+
+An AVL tree has height $O(\log n)$, so following a root-to-leaf path takes $O(\log n)$ time.
+
+Insertion searches for a suitable empty position. Deletion searches for the node to remove.
+
+2. Part B: Updating and rebalancing ancestors
+
+After modifying the tree, the algorithm travels back up the affected path to update heights and restore balance.
+
+```
+          40          ← update height / check balance
+         /
+       20             ← update height / check balance
+      /
+     10               ← inserted node
+```
+
+There are at most $O(\log n)$ ancestors on this path, and processing each ancestor takes constant time, including any local rotations.
+
+Thus:
+
+$$
+T(n)=O(\log n)+O(\log n)\cdot O(1)
+$$
+
+Therefore:
+
+$$
+T(n)=O(\log n)
+$$
+
+An important nuance: insertion into an AVL tree requires at most a constant number of rotations (at most one single rotation or one double rotation at the first unbalanced ancestor in the usual insertion algorithm). Deletion can require rebalancing at multiple ancestors, giving $O(\log n)$ rotations in the worst case.
+
+The passage's overall conclusion is correct, although its statement about the number of rotations is a general upper bound rather than a tight bound for insertion.
+### Space complexity
+An ordinary BST node might store:
+
+```c
+typedef struct BSTNode {
+    int key;
+    struct BSTNode *left;
+    struct BSTNode *right;
+} BSTNode;
+```
+
+An AVL node additionally stores its height:
+
+```c
+typedef struct AVLNode {
+    int key;
+    int height;
+    struct AVLNode *left;
+    struct AVLNode *right;
+} AVLNode;
+```
+
+The height field allows the implementation to calculate balance factors efficiently without repeatedly traversing entire subtrees.
+
+If we also support efficient `rank()` and `select()`, we can store a subtree-size field:
+
+```c
+typedef struct AVLNode {
+    int key;
+    int height;
+    size_t subtree_size;
+    struct AVLNode *left;
+    struct AVLNode *right;
+} AVLNode;
+```
+
+This uses more memory per node than a basic BST, but it provides additional information that helps maintain balance and support order-statistic operations.
+
+The key takeaway: AVL trees spend extra memory and computational effort maintaining balance so that searches, insertions, and deletions all have guaranteed logarithmic worst-case time.
+## Advantages and disadvantages
+
+Advantages
+
+* Predictable logarithmic worst-case search time.
+
+* Prevents a sorted insertion sequence from creating a linked-list-shaped tree.
+
+* Maintains values in sorted order.
+
+* Supports efficient minimum, maximum, predecessor, and successor operations.
+
+* Useful when lookups are frequent and predictable search performance matters.
+
+Disadvantages
+
+* Insertion and deletion require additional height and balance maintenance.
+
+* Rotations make the implementation more complicated than an ordinary BST.
+
+* A node must store extra metadata, such as its height.
+
+* Strict balancing may require more rebalancing work than a less strictly balanced tree.
+## AVL vs. ordinary BST
+AVL trees are one of several ways to maintain a balanced search tree.
+
+| Property                      | Ordinary BST               | AVL tree               | Red-Black tree                     |
+| ----------------------------- | -------------------------- | ---------------------- | ---------------------------------- |
+| Automatically balances itself | No                         | Yes                    | Yes                                |
+| Worst-case search             | $O(⁡n)$               | $O(\log n)$            | $O(\log n)$                        |
+| Worst-case insertion          | $O(⁡n)$               | $O(\log n)$            | $O(\log n)$                        |
+| Worst-case deletion           | $O(⁡n)$               | $O(\log n)$            | $O(\log n)$                        |
+| Balance mechanism             | None                       | Heights and rotations  | Node colors and rotations          |
+| Typical search behavior       | Depends on shape           | More tightly balanced  | Allows more variation              |
+| Best suited for               | Simple or controlled cases | Search-heavy workloads | Workloads needing balanced updates |
+
+AVL trees generally enforce a stricter balance condition than Red-Black trees. This often makes AVL trees attractive when searches are frequent, while Red-Black trees can be attractive when insertions and deletions are frequent.
+
+Neither is universally faster: actual performance depends on the workload, implementation, and memory behavior.
+## AVL vs. Red-Black tree
+
+
+## Summary 
+An AVL tree is both a data structure and a particular kind of self-balancing BST. Its search algorithm uses the BST property, while its insertion and deletion algorithms additionally maintain the AVL balance invariant.
+
+The most important concepts to master are the height calculation, balance factor, four rotation cases, and the way rotations preserve BST ordering.

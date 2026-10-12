@@ -1,0 +1,6758 @@
+`hashCode()` belongs to the Java `java.lang.Object` API.
+
+
+## What is `hashCode()`?
+
+Every Java object inherits:
+
+```java
+public int hashCode()
+```
+
+from `java.lang.Object`.
+
+Conceptually:
+
+```text
+Object
+  │
+  ├── equals(Object)
+  │
+  └── hashCode()
+```
+
+The method returns an `int`:
+
+```java
+int hash = object.hashCode();
+```
+
+For example:
+
+```java
+String s = "hello";
+
+System.out.println(s.hashCode());
+```
+
+The exact number isn't usually important to application code.
+
+What matters is that the number can be used by data structures such as:
+
+```java
+HashMap
+HashSet
+Hashtable
+ConcurrentHashMap
+```
+
+to locate objects efficiently.
+
+---
+
+### Why `hashCode()` returns `int`
+
+The signature is:
+
+```java
+public int hashCode()
+```
+
+because hash tables need a compact numeric representation that can be transformed into an array index.
+
+Conceptually:
+
+```text
+object
+  │
+  ▼
+32-bit hash
+  │
+  ▼
+bucket calculation
+  │
+  ▼
+array index
+```
+
+The hash code itself isn't necessarily the bucket index.
+
+A collection may further transform it.
+
+Conceptually:
+
+```text
+hashCode()
+    ↓
+hash spreading / mixing
+    ↓
+bucket calculation
+    ↓
+table[index]
+```
+
+This is why you shouldn't assume:
+
+```java
+hashCode() == bucketIndex
+```
+
+---
+
+
+## Purpose
+
+### What problem does `hashCode()` solve?
+
+`hashCode()` provides a numerical representation of an object that can be used by **hash-based data structures** to locate objects efficiently.
+
+Every Java object has:
+
+```java
+public int hashCode()
+```
+
+because it is defined in:
+
+```java
+java.lang.Object
+```
+
+For example:
+
+```java
+String name = "Gamal";
+
+int hash = name.hashCode();
+
+System.out.println(hash);
+```
+
+The returned value is an `int`. But don't think of it as a unique ID. It is better to think of it as:
+
+> **A number used to quickly narrow down where an object might be found.**
+
+### Hashing as a routing mechanism
+
+Imagine a `HashMap` containing 1,000,000 entries.
+
+Without hashing, searching might require examining many entries:
+
+```text
+key
+ │
+ ▼
+entry 1
+entry 2
+entry 3
+...
+entry 1,000,000
+```
+
+That's essentially a linear search: $O(n)$
+
+A hash-based collection tries to avoid examining everything. With hashing:
+
+```text
+key
+ │
+ ▼
+hashCode()
+ │
+ ▼
+hash value
+ │
+ ▼
+bucket
+ │
+ ▼
+small number of candidates
+ │
+ ▼
+equals()
+```
+
+So:
+
+```text
+hashCode() → Where should I look?
+
+equals()   → Is this actually the object/value I'm looking for?
+```
+
+So `hashCode()` is primarily a **routing mechanism**.
+
+This distinction is fundamental.
+
+## `Object.hashCode()`
+
+The method comes from `Object`:
+
+```java
+public class Object {
+
+    public native int hashCode();
+
+    ...
+}
+```
+
+You normally don't care about the implementation details of `Object.hashCode()`.
+
+What matters is its contract.
+
+If your class does **not** override `hashCode()`:
+
+```java
+class Person {
+    private String name;
+}
+```
+
+then:
+
+```java
+Person p = new Person("Gamal");
+
+p.hashCode();
+```
+
+uses the implementation inherited from `Object`.
+
+### Relationship with `Object.equals()`
+
+If you don't override either method, you get the default `Object` behavior:
+
+```text
+Object
+├── equals()
+│   └── identity-based
+│
+└── hashCode()
+    └── consistent with that identity-based equality
+```
+
+For example:
+
+```java
+Person p1 = new Person("Gamal");
+Person p2 = new Person("Gamal");
+```
+
+Without overriding `equals()`:
+
+```java
+p1.equals(p2)
+```
+
+is false because:
+
+```java
+p1 != p2
+```
+
+They are two different objects.
+
+Therefore, if your class is intended to have **identity semantics**, you can often leave both methods inherited.
+
+## `hashCode()` contract
+
+The `hashCode()` contract has several important parts.
+
+### Rule 1: Consistency
+
+If nothing relevant to equality changes, repeated calls should produce the same value during one execution.
+
+If an object has not changed in a way that affects `equals()`, repeated calls should consistently return the same hash code during that execution.
+
+from the Object specification :
+
+> When the hashCode method is invoked on an object repeatedly during an
+execution of an application, it must consistently return the same value,
+provided no information used in equals comparisons is modified. This value
+need not remain consistent from one execution of an application to another
+For example:
+
+```java
+Person p = new Person("Gamal");
+
+int h1 = p.hashCode();
+int h2 = p.hashCode();
+int h3 = p.hashCode();
+```
+
+You expect:
+
+```text
+h1 == h2 == h3
+```
+
+provided the object hasn't changed in a way that affects equality.
+
+This does **not** mean the hash code must be permanently identical across different program executions.
+
+---
+
+**Hash codes are not required to be stable across executions**
+
+Don't write code such as:
+
+```java
+if (object.hashCode() == 123456)
+```
+
+and expect the number to remain stable forever.
+
+Java does not require:
+
+```text
+Program execution #1
+    object.hashCode() = X
+
+Program execution #2
+    object.hashCode() = X
+```
+
+The requirement is primarily about consistency **within an execution**, assuming the relevant object state hasn't changed.
+
+---
+
+### Rule 2: Equal objects MUST have equal hash codes
+
+This is the most important rule.
+
+If:
+
+```java
+a.equals(b) == true
+```
+
+then:
+
+```java
+a.hashCode() == b.hashCode()
+```
+
+must also be true.
+
+from the Object specification :
+
+> If two objects are equal according to the equals(Object) method, then calling hashCode on the two objects must produce the same integer result.
+
+Visually:
+
+```text
+       equals()
+   ┌───────────────┐
+   │               │
+   ▼               ▼
+  a == b       logically equal
+   │
+   │ requires
+   ▼
+a.hashCode() == b.hashCode()
+```
+
+In mathematical notation:
+
+```text
+a.equals(b)
+     ↓
+hashCode(a) == hashCode(b)
+```
+
+For example:
+
+```java
+String a = new String("Java");
+String b = new String("Java");
+```
+
+Although:
+
+```java
+a != b
+```
+
+they are logically equal:
+
+```java
+a.equals(b) == true
+```
+
+Therefore:
+
+```java
+a.hashCode() == b.hashCode()
+```
+
+must be true.
+
+This is a **one-way requirement**.
+
+1. Required
+
+```text
+equals → same hash
+```
+
+2. Not required
+
+```text
+same hash → equals
+```
+
+For example:
+
+```java
+a.equals(b) == false
+
+a.hashCode() == b.hashCode()
+```
+
+is perfectly legal.
+
+That's called a **hash collision**.
+
+---
+
+**Why is this relationship necessary?**
+
+Consider a `HashSet`.
+
+```java
+Set<Person> people = new HashSet<>();
+```
+
+Suppose:
+
+```java
+Person p1 = new Person("Gamal", 30);
+Person p2 = new Person("Gamal", 30);
+```
+
+Suppose:
+
+```java
+p1.equals(p2)
+```
+
+is: $true$
+
+Now imagine their hash codes are different:
+
+```text
+p1.hashCode() = 100
+p2.hashCode() = 200
+```
+
+The hash set might put them into different buckets:
+
+```text
+bucket 100
+   └── p1
+
+bucket 200
+   └── p2
+```
+
+The collection could therefore fail to recognize that they represent the same logical object.
+
+That violates the intended behavior of hash-based collections.
+
+So:
+
+```text
+equals() equality
+       ↓
+must produce
+       ↓
+same hash code
+       ↓
+same hash bucket region
+```
+
+---
+
+### Rule 3: Unequal objects may have equal hash codes
+from the Object specification
+
+> If two objects are unequal according to the equals(Object) method, it is not
+required that calling hashCode on each of the objects must produce distinct
+results. However, the programmer should be aware that producing distinct
+results for unequal objects may improve the performance of hash tables.
+
+This is where many beginners make a mistake. It is **not** required that:
+
+```text
+a.hashCode() != b.hashCode()
+```
+
+when:
+
+```text
+a.equals(b) == false
+```
+
+Instead, this is perfectly legal:
+
+```text
+a.equals(b) == false
+a.hashCode() == b.hashCode()
+```
+
+That's called a **collision**. A good hash function tries to minimize collisions, but it cannot eliminate them in general because:
+
+```text
+number of possible objects >> number of possible int values
+```
+
+An `int` has only: $2^{32}$, possible bit patterns. There can be vastly more possible Java objects.
+
+For example, Java's `String` class has known strings that produce the same hash code:
+
+```java
+String a = "Aa";
+String b = "BB";
+
+System.out.println(a.equals(b));       // false
+System.out.println(a.hashCode());
+System.out.println(b.hashCode());
+```
+
+Conceptually:
+
+```text
+Aa
+ │
+ ├── equals() ──────── false
+ │
+ └── hashCode() ────── same as BB
+
+BB
+ │
+ ├── equals() ──────── false
+ │
+ └── hashCode() ────── same as Aa
+```
+
+The hash values can be identical while the strings are different.
+
+---
+
+### The complete relationship
+
+Remember this diagram:
+
+```text
+             equals()
+                │
+                │ true
+                ▼
+        same hashCode()
+```
+
+But:
+
+```text
+        same hashCode()
+                │
+                │
+                X
+                │
+                ▼
+          not necessarily
+            equals()
+```
+
+Therefore: **`equals()` determines equality; `hashCode()` helps locate candidates.**
+
+
+## Hash values and collisions
+
+### What is a hash value?
+
+The result of:
+
+```java
+object.hashCode()
+```
+
+is the object's hash value.
+
+Example:
+
+```java
+String name = "Gamal";
+
+int h = name.hashCode();
+```
+
+Conceptually:
+
+```text
+"Gamal"
+   │
+   ▼
+hashCode()
+   │
+   ▼
+12345678
+```
+
+The actual value isn't important to your application.
+
+---
+
+### What is a collision?
+
+A collision occurs when two unequal objects have the same hash value.
+
+```text
+Object A
+   │
+   └── hashCode() → 100
+
+Object B
+   │
+   └── hashCode() → 100
+```
+
+while:
+
+```text
+A.equals(B) == false
+```
+This is not a bug.
+
+This is unavoidable in general. Why? Because:
+
+```text
+Possible objects
+       >>>
+Possible int hash values
+```
+
+`hashCode()` returns an `int`, which has 32 bits:
+
+```text
+2^32
+```
+
+possible bit patterns. But Java can represent vastly more than `2^32` distinct objects/values. So multiple objects **must** share hash values.
+
+---
+
+### Why isn't a collision a problem?
+
+Hash-based collections are designed to handle collisions.
+
+Consider:
+
+```text
+Hash table
+────────────────────
+bucket 0
+bucket 1
+bucket 2
+bucket 3
+bucket 4
+...
+```
+
+Suppose:
+
+```text
+Object A → hash 100
+Object B → hash 100
+```
+
+Both may end up in the same bucket:
+
+```text
+bucket 100
+    │
+    ├── A
+    └── B
+```
+
+Now the collection uses `equals()` to distinguish them.
+
+Conceptually:
+
+```text
+hashCode()
+    │
+    ▼
+find bucket
+    │
+    ▼
+candidate A
+    │
+    ├── equals()? → false
+    │
+    ▼
+candidate B
+    │
+    ├── equals()? → true
+    │
+    ▼
+MATCH
+```
+
+Therefore:
+
+```text
+hashCode() → coarse filtering
+equals()   → exact comparison
+```
+The hash code narrows the search.
+
+`equals()` performs the final identity/equality decision.
+
+## Hash quality vs correctness
+
+This distinction is important.
+
+A bad hash function can still be **correct**.
+
+For example:
+
+```java
+@Override
+public int hashCode() {
+    return 1;
+}
+```
+
+This technically satisfies the fundamental requirement if equal objects return the same value.
+
+But:
+
+```text
+everything → bucket 1
+```
+
+means a hash table loses most of its performance advantage.
+
+So there are two separate goals:
+
+1. Correctness
+
+```text
+equals(a, b) → same hash
+```
+
+2. Good distribution
+
+```text
+different objects
+       ↓
+preferably distributed across many hash values
+```
+
+---
+
+here are two different goals when implementing `hashCode()`:
+
+1.Goal 1 — Correctness
+
+    You **must** satisfy:
+
+    ```java
+    a.equals(b) == true
+            ↓
+    a.hashCode() == b.hashCode()
+    ```
+
+2. Goal 2 — Good distribution
+
+    You **want**:
+
+    ```text
+    different objects
+        ↓
+    different hash values
+        ↓
+    different buckets
+        ↓
+    fewer equals() comparisons
+        ↓
+    better performance
+    ```
+
+    The first is mandatory.
+
+    The second is what makes your hash function **good**.
+
+## Hash-based collections
+
+The most important Java collections that depend on `hashCode()` are:
+
+```text
+HashMap
+HashSet
+Hashtable
+ConcurrentHashMap
+```
+
+The two most important for learning are:
+
+```text
+HashMap
+HashSet
+```
+
+---
+
+### `HashMap`
+
+Consider:
+
+```java
+Map<String, Integer> ages = new HashMap<>();
+
+ages.put("Gamal", 30);
+```
+
+Later:
+
+```java
+ages.get("Gamal");
+```
+
+Conceptually:
+
+```text
+"Gamal"
+   │
+   ▼
+hashCode()
+   │
+   ▼
+hash
+   │
+   ▼
+bucket
+   │
+   ▼
+candidate key(s)
+   │
+   ▼
+equals()
+   │
+   ▼
+matching key
+   │
+   ▼
+  30
+```
+
+The important point is that `HashMap` doesn't simply say:
+
+```text
+hashCode == equality
+```
+
+It uses hashing to narrow the search and equality to establish the actual match.
+
+---
+
+### `HashSet`
+
+`HashSet` uses hashing to determine where elements belong.
+
+```java
+Set<String> names = new HashSet<>();
+
+names.add("Gamal");
+names.add("Ahmed");
+names.add("Gamal");
+```
+
+The second `"Gamal"` is considered a duplicate because the collection's equality semantics recognize it as equal to the existing value.
+
+Conceptually:
+
+```text
+"Gamal"
+   │
+   ▼
+hashCode()
+   │
+   ▼
+bucket
+   │
+   ▼
+equals()
+   │
+   ▼
+already exists?
+   │
+   └── yes → don't add
+```
+
+### The two-stage lookup
+
+This is the most useful mental model for `HashMap` and `HashSet`.
+
+Suppose:
+
+```java
+map.get(key);
+```
+
+Conceptually:
+
+1. Stage 1 — Hashing
+
+```text
+key
+ │
+ ▼
+hashCode()
+ │
+ ▼
+hash
+ │
+ ▼
+bucket
+```
+
+2. Stage 2 — Equality
+
+Inside the relevant bucket:
+
+```text
+candidate key 1
+candidate key 2
+candidate key 3
+       │
+       ▼
+   equals(key)
+```
+
+So:
+
+```text
+hashCode() → WHERE should I look?
+
+equals()   → IS this the object/value I'm looking for?
+```
+
+That's an extremely useful way to remember their roles.
+
+---
+
+### Example with `HashMap`
+
+Consider:
+
+```java
+Map<String, Integer> ages = new HashMap<>();
+
+ages.put("Gamal", 30);
+```
+
+Later:
+
+```java
+Integer age = ages.get("Gamal");
+```
+
+The new `"Gamal"` object doesn't have to be the exact same object instance.
+
+Instead, Java uses the key's hashing/equality behavior to locate the mapping.
+
+Conceptually:
+
+```text
+"Gam..." key
+     │
+     ▼
+hashCode()
+     │
+     ▼
+bucket
+     │
+     ▼
+compare candidate keys
+     │
+     ▼
+equals()
+     │
+     ▼
+"Gamal" matches
+     │
+     ▼
+return 30
+```
+
+This is why `equals()` and `hashCode()` must agree.
+
+---
+
+### Why both `hashCode()` and `equals()` matter
+
+Suppose:
+
+```java
+class Person {
+    String name;
+}
+```
+
+You override:
+
+```java
+equals()
+```
+
+but forget:
+
+```java
+hashCode()
+```
+
+Therefore `Person` inherits:
+
+```java
+Object.hashCode()
+```
+
+which generally produces different hash values for different object instances.
+
+You could end up with:
+
+```text
+p1.equals(p2)       → true
+
+p1.hashCode()       → 12345
+p2.hashCode()       → 67890
+```
+
+Now the objects are equal but appear to belong to different hash locations.
+
+That's a contract violation.
+
+## Implementing `hashCode()`
+
+*Once I know I must override `hashCode()`, how do I actually write a good one?**
+
+The key idea is that a good `hashCode()` must satisfy **two goals at the same time**:
+
+1. **Correctness:** equal objects must have equal hash codes.
+2. **Good distribution:** unequal objects should ideally produce different hash codes often enough to distribute them across buckets.
+
+The fundamental rule is:
+
+> **Use the same logical state that determines equality.**
+
+Suppose:
+
+```java
+class Person {
+    private final String name;
+    private final int age;
+}
+```
+
+and your `equals()` says:
+
+```java
+return age == other.age
+    && Objects.equals(name, other.name);
+```
+
+Then `hashCode()` should use:
+
+```text
+name
+age
+```
+
+as well.
+
+For example:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(name, age);
+}
+```
+
+Complete class:
+
+```java
+import java.util.Objects;
+
+public class Person {
+
+    private final String name;
+    private final int age;
+
+    public Person(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (!(obj instanceof Person other)) {
+            return false;
+        }
+
+        return age == other.age
+                && Objects.equals(name, other.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name, age);
+    }
+}
+```
+
+Now:
+
+```java
+Person p1 = new Person("Gamal", 30);
+Person p2 = new Person("Gamal", 30);
+
+System.out.println(p1.equals(p2)); 
+// true
+
+System.out.println(p1.hashCode() == p2.hashCode());
+// true
+```
+
+---
+
+### Which fields should `hashCode()` use?
+
+The easiest rule:
+
+```text
+Fields used by equals()
+          ↓
+Should appropriately contribute to hashCode()
+```
+
+For example:
+
+```java
+equals():
+    name
+    age
+    email
+```
+
+then:
+
+```java
+hashCode():
+    name
+    age
+    email
+```
+
+This gives:
+
+```text
+          Person
+             │
+       ┌─────┴─────┐
+       │           │
+   equals()    hashCode()
+       │           │
+ name, age,    name, age,
+ email         email
+```
+
+---
+
+### Does `hashCode()` have to use every equality field?
+
+Strictly speaking, no.
+
+For example:
+
+```java
+@Override
+public int hashCode() {
+    return age;
+}
+```
+
+could still satisfy the contract if `equals()` uses:
+
+```text
+name + age
+```
+
+because two equal people must have the same age. But it might create many collisions.
+
+Therefore:
+
+```text
+Correctness:
+    same equality state → same hash
+
+Quality:
+    distribute unequal objects well
+```
+
+A good hash function tries to achieve both.
+
+### What makes a good hash function?
+
+Suppose we have:
+
+```java
+PhoneNumber p1 = new PhoneNumber(707, 867, 5309);
+PhoneNumber p2 = new PhoneNumber(212, 555, 1234);
+PhoneNumber p3 = new PhoneNumber(415, 867, 5309);
+```
+
+These objects are unequal:
+
+```java
+p1.equals(p2) // false
+p1.equals(p3) // false
+p2.equals(p3) // false
+```
+
+A poor hash function might produce:
+
+```text
+p1 → 42
+p2 → 42
+p3 → 42
+```
+
+That's legal, but terrible.
+
+A better function might produce:
+
+```text
+p1 → 1837462
+p2 → 9283711
+p3 → 4729183
+```
+
+Now the objects are more likely to be distributed across different buckets.
+
+So there are two levels:
+
+```text
+                 hashCode()
+                     │
+          ┌──────────┴──────────┐
+          ▼                     ▼
+     Correctness             Distribution
+          │                     │
+          ▼                     ▼
+equal → same hash        unequal → preferably
+                         different hashes
+```
+
+The first is mandatory.
+
+The second is about performance.
+
+### recipe for writing hash function
+The recipe is essentially:
+
+```java
+result = hash(firstField);
+
+for each remaining field:
+    c = hash(field);
+    result = 31 * result + c;
+
+return result;
+```
+
+Let's break that down.
+
+1. Step 1 — Start with the first significant field
+
+Declare an int variable named result, and initialize it to the hash code c for
+the first significant field in your object
+
+A **significant field** is a field that participates in `equals()`.
+
+Suppose:
+
+```java
+class PhoneNumber {
+    private final short areaCode;
+    private final short prefix;
+    private final short lineNum;
+}
+```
+
+And: `equals()`, compares: `areaCode`, `prefix`, `lineNum`, Then all three are significant fields.
+
+Start with:
+
+```java
+int result = Short.hashCode(areaCode);
+```
+
+For example:
+
+```text
+areaCode = 707
+
+Short.hashCode(707)
+       ↓
+      707
+```
+
+So:
+
+```text
+result = 707
+```
+2. Step 2 — Process every remaining significant field
+
+Now process:
+
+```text
+prefix
+lineNum
+```
+
+For each field we calculate a hash value `c`.
+
+Then:
+
+```java
+result = 31 * result + c;
+```
+
+This is the heart of the recipe.
+
+For every remaining significant field f in your object, do the following:
+- Compute an int hash code c for the field:
+    - If the field is of a primitive type, compute `Type.hashCode(f)`, where
+    Type is the boxed primitive class corresponding to f’s type.
+
+    For example:
+
+    | Field type | Hash function           |
+    | ---------- | ----------------------- |
+    | `int`      | `Integer.hashCode(x)`   |
+    | `long`     | `Long.hashCode(x)`      |
+    | `short`    | `Short.hashCode(x)`     |
+    | `byte`     | `Byte.hashCode(x)`      |
+    | `char`     | `Character.hashCode(x)` |
+    | `boolean`  | `Boolean.hashCode(x)`   |
+    | `float`    | `Float.hashCode(x)`     |
+    | `double`   | `Double.hashCode(x)`    |
+
+    For example:
+
+    ```java
+    int age = 25;
+
+    int c = Integer.hashCode(age);
+    ```
+
+    Or:
+
+    ```java
+    long id = 123456789L;
+
+    int c = Long.hashCode(id);
+    ```
+
+    This is preferable to inventing your own conversion.
+
+    - If the field is an object reference and this class’s equals method
+compares the field by recursively invoking `equals`, recursively
+invoke `hashCode` on the field. 
+
+    Suppose your class contains:
+
+    ```java
+    private String name;
+    ```
+
+    and `equals()` does:
+
+    ```java
+    name.equals(other.name)
+    ```
+
+    Then `hashCode()` should use:
+
+    ```java
+    name.hashCode()
+    ```
+
+    because `String` already defines equality and hashing consistently.
+
+    For example:
+
+    ```java
+    @Override
+    public int hashCode() {
+        int result = Integer.hashCode(id);
+        result = 31 * result + name.hashCode();
+        return result;
+    }
+    ```
+    - If a more complex comparison is
+required, compute a “canonical representation” for this field and
+invoke `hashCode` on the canonical representation. 
+    - If the value of the field is null, use 0 (or some other constant, but 0 is traditional).
+
+    ```java
+    name == null
+    ```
+
+    would cause:
+
+    ```text
+    NullPointerException
+    ```
+
+    So we normally use:
+
+    ```java
+    Objects.hashCode(name)
+    ```
+
+    which safely handles `null`:
+
+    ```java
+    @Override
+    public int hashCode() {
+        int result = Integer.hashCode(id);
+        result = 31 * result + Objects.hashCode(name);
+        return result;
+    }
+    ```
+
+    Conceptually:
+
+    ```text
+    name != null
+        → name.hashCode()
+
+    name == null
+        → 0
+    ```
+    - If the field is an array, treat it as if each significant element were a separate field. That is, compute a hash code for each significant element by applying these rules recursively, and combine the values.
+
+    Suppose:
+
+    ```java
+    class Team {
+        private final String[] members;
+    }
+    ```
+
+    If equality compares the **contents** of the array, then you can't simply do:
+
+    ```java
+    members.hashCode()
+    ```
+
+    because arrays inherit `Object.hashCode()`.
+
+    Instead, use:
+
+    ```java
+    Arrays.hashCode(members)
+    ```
+
+    For example:
+
+    ```java
+    @Override
+    public int hashCode() {
+        return Arrays.hashCode(members);
+    }
+    ```
+
+    This calculates a hash based on the array elements. 
+    - If the array has no significant elements, use a constant,
+preferably not 0. if an array exists, but none of its elements participate in equals(), then the array contributes a fixed value to hashCode() rather than hashing its contents.
+
+    Suppose:
+
+    ```java
+    class Person {
+        String name;
+        int[] scores;
+    }
+    ```
+
+    Imagine `equals()` only compares `name`:
+
+    ```java
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof Person other))
+            return false;
+
+        return Objects.equals(name, other.name);
+    }
+    ```
+
+    The `scores` array doesn't participate in equality at all.
+
+    Therefore:
+
+    ```text
+    name        → significant
+    scores      → not significant
+    scores[0]   → not significant
+    scores[1]   → not significant
+    scores[2]   → not significant
+    ```
+
+    Consequently, **the contents of `scores` must not affect the hash code**.
+
+    **Why can't we hash the array anyway?**
+
+    Suppose we did:
+
+    ```java
+    @Override
+    public int hashCode() {
+        int result = Objects.hashCode(name);
+        result = 31 * result + Arrays.hashCode(scores);
+        return result;
+    }
+    ```
+
+    Now consider:
+
+    ```java
+    Person p1 = new Person("Gemy", new int[] {10, 20});
+    Person p2 = new Person("Gemy", new int[] {90, 80});
+    ```
+
+    According to `equals()`:
+
+    ```java
+    p1.equals(p2) == true
+    ```
+
+    because both have:
+
+    ```text
+    name = "Gemy"
+    ```
+
+    But their arrays are different:
+
+    ```text
+    p1.scores = [10, 20]
+    p2.scores = [90, 80]
+    ```
+
+    So:
+
+    ```java
+    Arrays.hashCode(p1.scores)
+    !=
+    Arrays.hashCode(p2.scores)
+    ```
+
+    which could produce:
+
+    ```text
+    p1.hashCode() → 12345
+    p2.hashCode() → 98765
+    ```
+
+    Now:
+
+    ```text
+    p1.equals(p2) == true
+    p1.hashCode() != p2.hashCode()
+    ```
+
+    💥 **Contract violation.**, So use a constant
+
+    If the array has **no significant elements**, you simply don't let its contents affect the hash.
+
+    Conceptually:
+
+    ```java
+    int arrayHash = 1;  // any fixed constant
+    ```
+
+    Then:
+
+    ```java
+    result = 31 * result + arrayHash;
+    ```
+
+    For example:
+
+    ```java
+    @Override
+    public int hashCode() {
+        int result = Objects.hashCode(name);
+
+        // scores has no significant elements
+        result = 31 * result + 1;
+
+        return result;
+    }
+    ```
+
+    The important property is:
+
+    ```text
+    scores = [10, 20]     → contribution = 1
+    scores = [90, 80]     → contribution = 1
+    scores = [1, 2, 3]    → contribution = 1
+    scores = null         → contribution = 1
+    ```
+    **Why "preferably not 0"?**
+    
+    this is mainly a **hash-quality** consideration.
+
+    Suppose you use:
+
+    ```java
+    int arrayHash = 0;
+    ```
+
+    Then the combination becomes:
+
+    ```java
+    result = 31 * result + 0;
+    ```
+
+    which is simply:
+
+    ```java
+    result = 31 * result;
+    ```
+
+    A nonzero constant gives the array field a little more influence in the overall hash computation.
+
+    For example:
+
+    ```java
+    result = 31 * result + 1;
+    ```
+
+    is preferable to:
+
+    ```java
+    result = 31 * result + 0;
+    ```
+
+    It's not a correctness requirement. **Zero is legal.**
+
+    The important requirement is:
+
+    > The value must be constant and must not depend on the array's contents.
+
+    - If all elements are significant, use `Arrays.hashCode`.
+
+- Combine the hash code `c` computed in step above into result as follows:
+    result = 31 * result + c;
+    ```java
+    @Override
+    public int hashCode() {
+        int result = Short.hashCode(areaCode);
+
+        result = 31 * result + Short.hashCode(prefix);
+
+        result = 31 * result + Short.hashCode(lineNum);
+
+        return result;
+    }
+    ```
+    **Why multiply by 31?**
+
+    This is probably the most interesting part of the recipe.
+
+    The combination is:
+
+    ```java
+    result = 31 * result + c;
+    ```
+
+    Why not simply:
+
+    ```java
+    result = result + c;
+    ```
+
+    ?
+
+    Because addition alone doesn't adequately distinguish field order.
+
+    Consider two strings:
+
+    ```text
+    "ab"
+    "ba"
+    ```
+
+    If we simply add the character hashes:
+
+    ```text
+    hash("a") + hash("b")
+    ```
+
+    both produce the same result.
+
+    So:
+
+    ```text
+    "ab" → same
+    "ba" → same
+    ```
+
+    All anagrams would collide.
+
+    **Multiplication makes order matter**
+
+    With:
+
+    ```java
+    result = 31 * result + c;
+    ```
+
+    the order of the fields matters.
+
+    Conceptually:
+
+    ```text
+    hash(a, b)
+
+    = 31 * hash(a) + hash(b)
+    ```
+
+    while:
+
+    ```text
+    hash(b, a)
+
+    = 31 * hash(b) + hash(a)
+    ```
+
+    These will generally be different.
+
+    So:
+
+    ```text
+    (a, b)
+    ↓
+    different
+
+    (b, a)
+    ↓
+    different
+    ```
+
+    This gives us much better distribution.
+
+    **Why specifically 31?**
+
+    The book gives several reasons.
+
+    `31` is:
+
+    * odd
+    * prime
+    * traditionally used in Java hash functions
+    * easy for JVMs/compilers to optimize
+
+    The interesting optimization is:
+
+    ```text
+    31 * i
+    ```
+
+    can be written as:
+
+    ```text
+    (i << 5) - i
+    ```
+
+    because:
+
+    ```text
+    i << 5
+    ```
+
+    means:
+
+    ```text
+    i × 32
+    ```
+
+    Therefore:
+
+    ```text
+    (i × 32) - i
+    = i × 31
+    ```
+
+    So:
+
+    ```text
+    31 * i
+    ```
+
+    equals:
+
+    ```text
+    (i << 5) - i
+    ```
+
+    Modern JVMs can perform such optimizations themselves, so **you don't need to manually write the shift expression**.
+
+    Just use:
+
+    ```java
+    31 * result
+    ```
+
+**Let's calculate the PhoneNumber hash**
+
+```java
+@Override
+public int hashCode() {
+    int result = Short.hashCode(areaCode);
+    result = 31 * result + Short.hashCode(prefix);
+    result = 31 * result + Short.hashCode(lineNum);
+    return result;
+}
+```
+
+Suppose:
+
+```text
+areaCode = 707
+prefix   = 867
+lineNum  = 5309
+```
+
+Start:
+
+```text
+result = 707
+```
+
+Then:
+
+```text
+result = 31 × 707 + 867
+```
+
+which gives:
+
+```text
+22784
+```
+
+Then:
+
+```text
+result = 31 × 22784 + 5309
+```
+
+which gives:
+
+```text
+711213
+```
+
+So:
+
+```text
+PhoneNumber(707, 867, 5309)
+        ↓
+hashCode()
+        ↓
+711213
+```
+
+Now consider another equal object:
+
+```java
+PhoneNumber p2 =
+    new PhoneNumber(707, 867, 5309);
+```
+
+It performs exactly the same deterministic computation:
+
+```text
+707
+ ↓
+31 × 707 + 867
+ ↓
+22784
+ ↓
+31 × 22784 + 5309
+ ↓
+711213
+```
+
+Therefore:
+
+```java
+p1.equals(p2)          // true
+p1.hashCode() == p2.hashCode() // true
+```
+
+That's exactly what we need.
+
+### Caching a computed `hashCode()
+If an object is immutable, its hash code never changes, so there's no reason to recalculate it every time.
+
+Normally, every call does the calculation again:
+
+```java
+@Override
+public int hashCode() {
+    int result = Short.hashCode(areaCode);
+    result = 31 * result + Short.hashCode(prefix);
+    result = 31 * result + Short.hashCode(lineNum);
+    return result;
+}
+```
+
+If we do:
+
+```java
+p.hashCode();
+p.hashCode();
+p.hashCode();
+p.hashCode();
+```
+
+the calculation happens four times.
+
+For `PhoneNumber`, that's extremely cheap:
+
+```text
+3 fields
+×
+a few integer operations
+```
+
+So caching isn't worthwhile.
+
+But imagine an immutable object containing:
+
+```text
+large strings
+large arrays
+many nested objects
+complex data structures
+```
+
+and computing the hash requires traversing all of them.
+
+Then:
+
+```text
+hashCode()
+    ↓
+expensive calculation
+```
+
+could become significant if called thousands of times.
+
+Caching changes this to:
+
+```text
+First call
+    ↓
+calculate
+    ↓
+store result
+
+Later calls
+    ↓
+return stored result
+```
+
+---
+
+**Why must the class be immutable?**
+
+This is extremely important.
+
+Suppose:
+
+```java
+class Person {
+    String name;
+    int age;
+}
+```
+
+and:
+
+```java
+hashCode()
+```
+
+depends on:
+
+```text
+name + age
+```
+
+If the object is mutable:
+
+```java
+person.name = "Alice";
+```
+
+then its hash code might change.
+
+You can't safely cache the old value:
+
+```text
+Before:
+name = "Gemy"
+hashCode = 12345
+
+After:
+name = "Alice"
+hashCode should = 98765
+```
+
+A cached `12345` would now be incorrect.
+
+With an immutable object:
+
+```text
+Object created
+     │
+     ▼
+fields never change
+     │
+     ▼
+hashCode never changes
+     │
+     ▼
+safe to cache
+```
+
+#### Caching Strategies
+##### Strategy A — Calculate during construction
+
+If you expect most objects to be used as hash keys:
+
+```text
+constructor
+    ↓
+calculate hash
+    ↓
+store hash
+```
+
+For example:
+
+```java
+private final int hashCode;
+
+public MyClass(...) {
+    // initialize fields
+
+    this.hashCode = calculateHashCode();
+}
+
+@Override
+public int hashCode() {
+    return hashCode;
+}
+```
+
+Then every later call is extremely cheap:
+
+```java
+@Override
+public int hashCode() {
+    return hashCode;
+}
+```
+
+**Advantage**
+
+No calculation is needed when `hashCode()` is first called.
+
+**Disadvantage**
+
+You calculate the hash even if the object is **never used in a hash-based collection**.
+
+##### Strategy B — Lazy initialization
+
+The book's example uses this approach.
+
+Initially:
+
+```java
+private int hashCode;
+```
+
+Since it's an instance `int` field, Java automatically initializes it to:
+
+```text
+0
+```
+
+Then:
+
+```java
+@Override
+public int hashCode() {
+    int result = hashCode;
+
+    if (result == 0) {
+        result = Short.hashCode(areaCode);
+        result = 31 * result + Short.hashCode(prefix);
+        result = 31 * result + Short.hashCode(lineNum);
+
+        hashCode = result;
+    }
+
+    return result;
+}
+```
+
+The behavior is:
+
+```text
+First hashCode() call
+        │
+        ▼
+    hashCode = 0
+        │
+        ▼
+ calculate hash
+        │
+        ▼
+ store hash
+        │
+        ▼
+   return hash
+```
+
+Then:
+
+```text
+Second hashCode() call
+        │
+        ▼
+ hashCode != 0
+        │
+        ▼
+ return cached value
+```
+
+So:
+
+```text
+First call:     expensive
+Second call:    cheap
+Third call:     cheap
+Fourth call:    cheap
+...
+```
+
+--
+
+**Why is `0` used as the "not calculated" marker?**
+
+The code needs some way to distinguish:
+
+```text
+hash has not been calculated
+```
+
+from:
+
+```text
+hash has been calculated
+```
+
+It uses:
+
+```text
+0
+```
+
+as the special marker.
+
+So:
+
+```text
+hashCode field == 0
+        ↓
+not calculated yet
+```
+
+and:
+
+```text
+hashCode field != 0
+        ↓
+already calculated
+```
+
+But this creates a subtle problem.
+
+What if the **real hash code happens to be 0**?
+
+Then:
+
+```text
+actual hash = 0
+```
+
+would look exactly like:
+
+```text
+not calculated
+```
+
+and the method would recalculate it every time.
+
+So, the
+initial value for the hashCode field (in this case, 0) should not be the hash code of
+a commonly created instance, to make the sentinel collision unlikely in practice.
+
+---
+
+**Is using `0` actually safe?**
+
+Yes, from a correctness perspective.
+
+Suppose the actual hash is:
+
+```text
+0
+```
+
+The code might calculate it every time:
+
+```text
+call 1 → calculate → 0
+call 2 → calculate → 0
+call 3 → calculate → 0
+```
+
+That's inefficient, but not incorrect.
+
+The problem is performance, not correctness.
+
+For a more sophisticated implementation, you could use a separate boolean:
+
+```java
+private int hashCode;
+private boolean hashCodeComputed;
+```
+
+Then:
+
+```java
+@Override
+public int hashCode() {
+    if (!hashCodeComputed) {
+        hashCode = calculateHashCode();
+        hashCodeComputed = true;
+    }
+
+    return hashCode;
+}
+```
+
+Now `0` can be a legitimate cached hash.
+
+##### Eager vs lazy caching
+
+The distinction is worth remembering:
+
+| Approach          | When hash is calculated | Good when                          |
+| ----------------- | ----------------------- | ---------------------------------- |
+| **No caching**    | Every call              | Hash is cheap                      |
+| **Eager caching** | Object construction     | Most instances will need hash      |
+| **Lazy caching**  | First `hashCode()` call | Many instances may never need hash |
+
+1. Eager
+
+    ```text
+    new Object()
+        ↓
+    calculate hash immediately
+        ↓
+    store hash
+    ```
+
+2. Lazy
+
+    ```text
+    new Object()
+        ↓
+    don't calculate
+        ↓
+    ...
+    hashCode() called
+        ↓
+    calculate + store
+        ↓
+    ...
+    hashCode() called again
+        ↓
+    return cached value
+    ```
+#### immutable vs mutable
+his is another reason immutable objects are particularly good hash keys.
+
+```text
+Immutable object
+      │
+      ├── equals result doesn't change
+      │
+      ├── hashCode doesn't change
+      │
+      └── hashCode can safely be cached
+```
+
+Whereas:
+
+```text
+Mutable object
+      │
+      ├── equals may change
+      │
+      ├── hashCode may change
+      │
+      └── cached hash can become stale
+```
+
+This connects directly to the **mutable-key problem** we discussed earlier.
+
+For example, this is dangerous:
+
+```java
+Map<Person, String> map = new HashMap<>();
+
+Person p = new Person("Gemy");
+
+map.put(p, "Developer");
+
+// Change a field used by equals/hashCode
+p.setName("Alice");
+
+// Now the object's hash may no longer correspond
+// to the bucket where it was originally stored.
+```
+
+Caching doesn't solve this problem.
+
+In fact, for a mutable object, caching can make it even worse because the cached hash may no longer represent the current equality state.
+
+#### Thread Safety
+Some care is required to ensure that the class remains thread-safe
+in the presence of a lazily initialized field.
+
+Because multiple threads could call `hashCode()` simultaneously.
+
+Imagine:
+
+```text
+Thread A                     Thread B
+   │                            │
+   ▼                            ▼
+hashCode()                   hashCode()
+   │                            │
+   ▼                            ▼
+sees 0                       sees 0
+   │                            │
+   ▼                            ▼
+calculates                   calculates
+   │                            │
+   ▼                            ▼
+stores                        stores
+```
+
+Both threads might calculate the hash.
+
+For this particular deterministic computation, calculating the same value twice isn't necessarily a correctness problem.
+
+But **lazy initialization in general can have visibility and race-condition concerns**, especially if the cached state involves multiple fields or more complex initialization.
+
+For a simple immutable object, there are techniques such as:
+
+```java
+private volatile int hashCode;
+```
+
+or safe publication/construction strategies, depending on the design.
+
+But don't add `volatile` automatically to every cached hash field. The appropriate design depends on the class and its concurrency guarantees.
+
+---
+
+`PhoneNumber` example in this case doesn't need caching, Because:
+
+```java
+result = Short.hashCode(areaCode);
+result = 31 * result + Short.hashCode(prefix);
+result = 31 * result + Short.hashCode(lineNum);
+```
+
+is extremely cheap.
+
+Caching adds:
+
+```text
+extra field
++
+extra memory
++
+initialization logic
++
+potential concurrency concerns
+```
+
+to save a tiny amount of computation.
+
+That's not worth it.
+
+So normally just write:
+
+```java
+@Override
+public int hashCode() {
+    int result = Short.hashCode(areaCode);
+    result = 31 * result + Short.hashCode(prefix);
+    result = 31 * result + Short.hashCode(lineNum);
+    return result;
+}
+```
+
+#### Importance of caching
+Consider an immutable object containing a huge amount of data:
+
+```java
+final class Document {
+    private final String content;
+    private final List<String> words;
+    // ...
+}
+```
+
+Suppose equality and hashing depend on all of that content.
+
+Computing:
+
+```java
+document.hashCode()
+```
+
+might require traversing a large amount of data.
+
+If the document is used as a `HashMap` key:
+
+```java
+Map<Document, Metadata> map = new HashMap<>();
+```
+
+then `hashCode()` may be called repeatedly.
+
+Caching can turn:
+
+```text
+Every lookup
+     ↓
+traverse entire document
+     ↓
+calculate hash
+```
+
+into:
+
+```text
+First lookup
+     ↓
+calculate hash
+     ↓
+cache
+
+All later lookups
+     ↓
+return cached hash
+```
+
+That's a much more compelling optimization.
+#### Summary
+```text
+                 Is hashCode expensive?
+                         │
+                ┌────────┴────────┐
+                │                 │
+               No                Yes
+                │                 │
+                ▼                 ▼
+          Calculate each      Is object immutable?
+          time normally             │
+                              ┌─────┴─────┐
+                              │           │
+                             No          Yes
+                              │           │
+                              ▼           ▼
+                         Don't cache   Consider caching
+                                          │
+                                  ┌───────┴────────┐
+                                  │                │
+                            Most objects      Many objects
+                            need hash?        don't need hash?
+                                  │                │
+                                  ▼                ▼
+                               Eager            Lazy
+                              caching          caching
+```
+**Caching `hashCode()` is an optimization, not part of the `equals()`/`hashCode()` contract.**
+
+The contract still remains:
+
+```java
+a.equals(b) == true
+    ⇒
+a.hashCode() == b.hashCode()
+```
+
+Caching simply changes **how the hash is obtained**:
+
+```text
+Without caching:
+
+hashCode()
+   ↓
+calculate
+   ↓
+return
+
+
+With lazy caching:
+
+hashCode()
+   ↓
+already cached?
+   ├── yes → return cached value
+   │
+   └── no → calculate → cache → return
+```
+
+And because the object is immutable, the cached value remains valid for the object's entire lifetime.
+
+### The complete `PhoneNumber` example
+
+Putting everything together:
+
+```java
+import java.util.Objects;
+
+public final class PhoneNumber {
+
+    private final short areaCode;
+    private final short prefix;
+    private final short lineNum;
+
+    public PhoneNumber(
+            short areaCode,
+            short prefix,
+            short lineNum) {
+
+        this.areaCode = areaCode;
+        this.prefix = prefix;
+        this.lineNum = lineNum;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof PhoneNumber other)) {
+            return false;
+        }
+
+        return areaCode == other.areaCode
+                && prefix == other.prefix
+                && lineNum == other.lineNum;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Short.hashCode(areaCode);
+        result = 31 * result + Short.hashCode(prefix);
+        result = 31 * result + Short.hashCode(lineNum);
+        return result;
+    }
+
+    public static void main(String[] args) {
+        PhoneNumber p1 =
+            new PhoneNumber((short) 707, (short) 867, (short) 5309);
+
+        PhoneNumber p2 =
+            new PhoneNumber((short) 707, (short) 867, (short) 5309);
+
+        PhoneNumber p3 =
+            new PhoneNumber((short) 212, (short) 555, (short) 1234);
+
+        System.out.println(p1.equals(p2)); // true
+        System.out.println(p1.equals(p3)); // false
+
+        System.out.println(
+            p1.hashCode() == p2.hashCode()
+        ); // true
+
+        System.out.println(
+            p1.hashCode() == p3.hashCode()
+        ); // may be true or false
+    }
+}
+```
+
+The final line is important: **we don't assert that `p1` and `p3` must have different hashes.**
+## `Objects.hash()`
+
+The `Objects` class has a static method that takes an arbitrary number of
+objects and returns a hash code for them. This method, named `hash`, lets you write
+one-line `hashCode` methods whose quality is comparable to those written according to the recipe in this item. Unfortunately, they run more slowly because they
+entail array creation to pass a variable number of arguments, as well as boxing and
+unboxing if any of the arguments are of primitive type. This style of hash function
+is recommended for use only in situations where performance is not critical.
+
+Java provides:
+
+```java
+java.util.Objects.hash(...)
+```
+
+to conveniently combine multiple values.
+
+Instead of manually writing:
+
+```java
+@Override
+public int hashCode() {
+    int result = Short.hashCode(areaCode);
+    result = 31 * result + Short.hashCode(prefix);
+    result = 31 * result + Short.hashCode(lineNum);
+    return result;
+}
+```
+
+you can write:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(areaCode, prefix, lineNum);
+}
+```
+This is much easier to maintain.
+
+For example, if you later add:
+
+```java
+private final String countryCode;
+```
+
+you can update:
+
+```java
+return Objects.hash(
+    areaCode,
+    prefix,
+    lineNum,
+    countryCode
+);
+```
+
+The tradeoff is that `Objects.hash()` has some overhead compared with a carefully written primitive-only implementation.
+
+For most application classes, however, it is perfectly reasonable.
+
+the method combines the values into a single `int`. This is particularly convenient when a class has several fields.
+
+For a single field:
+
+```java
+return Objects.hash(name);
+```
+
+works, but:
+
+```java
+return name.hashCode();
+```
+
+is generally simpler and avoids the extra varargs/array machinery.
+
+For primitive fields you can also use appropriate primitive hashing methods when useful.
+
+---
+
+### Null handling
+
+`Objects.hash()` can handle null values.
+
+For example:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(name, email, age);
+}
+```
+
+If:
+
+```java
+email == null
+```
+
+the method can still calculate a hash.
+
+This pairs nicely with:
+
+```java
+Objects.equals(name, other.name)
+```
+
+in `equals()`.
+
+## `Objects.hashCode()`
+
+There is another method:
+
+```java
+Objects.hashCode(value)
+```
+
+It is different from:
+
+```java
+Objects.hash(value)
+```
+
+`Objects.hashCode()` is essentially a null-safe call:
+
+```java
+Objects.hashCode(value)
+```
+
+conceptually behaves like:
+
+```java
+value == null ? 0 : value.hashCode()
+```
+
+So:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hashCode(name);
+}
+```
+
+is convenient when there is one potentially-null object field.
+
+## `hashCode()` and Records
+Java records automatically provide appropriate `equals()` and `hashCode()` implementations based on their components.
+
+For example:
+
+```java
+public record UserId(String value) {
+}
+```
+
+Then:
+
+```java
+UserId a = new UserId("123");
+UserId b = new UserId("123");
+```
+
+gives:
+
+```java
+a.equals(b) == true
+```
+
+and:
+
+```java
+a.hashCode() == b.hashCode()
+```
+
+This is one reason records are convenient for value objects.
+
+## `hashCode()` and inheritance
+
+Inheritance makes `equals()`/`hashCode()` especially important.
+
+Suppose:
+
+```java
+class Person {
+    String name;
+}
+```
+
+and:
+
+```java
+class Employee extends Person {
+    int employeeId;
+}
+```
+
+If equality considers:
+
+```text
+name + employeeId
+```
+
+then `hashCode()` must represent the same equality-relevant state.
+
+The general rule is:
+
+> Every field that participates in equality must participate appropriately in the hash code.
+
+But the reverse isn't necessarily required for every implementation detail.
+
+The crucial condition is:
+
+```text
+equals() true
+       ↓
+same hashCode()
+```
+
+## `String.hashCode()` as a concrete example
+
+`String` overrides both:
+
+```java
+equals()
+hashCode()
+```
+
+because strings have value semantics.
+
+For example:
+
+```java
+String a = new String("Java");
+String b = new String("Java");
+```
+
+We have:
+
+```text
+a == b             false
+a.equals(b)        true
+a.hashCode()==...  true
+```
+
+This is exactly the behavior required for a value type used as a hash key.
+
+## `Arrays.hashCode()`
+
+Arrays require special treatment.
+
+Consider:
+
+```java
+int[] values = {10, 20, 30};
+```
+
+You might want the array contents to determine equality. But Java arrays inherit identity-based `equals()` and `hashCode()` behavior.
+
+Therefore:
+
+```java
+int[] a = {1, 2, 3};
+int[] b = {1, 2, 3};
+
+System.out.println(a.equals(b));
+```
+
+prints: `false`, even though their contents are identical.
+
+because:
+
+```text
+a != b
+```
+For arrays, use:
+
+```java
+Arrays.equals(a, b)
+```
+
+and:
+
+```java
+Arrays.hashCode(a)
+```
+
+when content-based semantics are desired.
+
+For nested arrays:
+
+```java
+Arrays.deepEquals(...)
+Arrays.deepHashCode(...)
+```
+
+### Content-based array equality
+
+Java provides:
+
+```java
+Arrays.equals(a, b)
+```
+
+for content comparison.
+
+And:
+
+```java
+Arrays.hashCode(a)
+```
+
+for a hash based on the contents.
+
+Example:
+
+```java
+int[] a = {1, 2, 3};
+int[] b = {1, 2, 3};
+
+System.out.println(Arrays.equals(a, b));
+// true
+
+System.out.println(Arrays.hashCode(a) == Arrays.hashCode(b));
+// true
+```
+
+This gives the same important relationship:
+
+```text
+Arrays.equals(a, b)
+        ↓
+Arrays.hashCode(a) == Arrays.hashCode(b)
+```
+
+---
+
+### `Arrays.hashCode()` vs `Objects.hash()`
+
+This distinction is useful.
+
+1. Multiple ordinary fields
+
+    For object fields:
+    ```java
+    @Override
+    public int hashCode() {
+        return Objects.hash(name, age);
+    }
+    ```
+
+2. Array contents
+
+    For object fields:
+    ```java
+    @Override
+    public int hashCode() {
+        return Arrays.hashCode(values);
+    }
+    ```
+
+3. For multidimensional/nested arrays:
+
+    ```java
+    Arrays.deepHashCode(values)
+    ```
+
+    and corresponding equality:
+
+    ```java
+    Arrays.deepEquals(a, b)
+    ```
+
+---
+
+## `equals()` `hashCode()` relationship
+This is the point where `equals()` and `hashCode()` should stop being studied as two separate `Object` methods and be understood as **one design contract**.
+
+`hashCode()` should **not** be treated as an isolated hashing algorithm. In Java, its most important meaning comes from its relationship with `equals()` and hash-based collections.
+
+'The key idea is:
+
+> **`equals()` answers “Are these two objects logically equal?”**
+> **`hashCode()` answers “Which hash bucket should this object belong to?”**
+
+And Java imposes a strict relationship between them.
+
+```text
+equals() + hashCode()
+        │
+        ├── Value equality
+        │       │
+        │       ▼
+        │   What does "same value" mean?
+        │
+        ├── Hash-based lookup
+        │       │
+        │       ▼
+        │   How are equal values found efficiently?
+        │
+        ├── Mutable keys
+        │       │
+        │       ▼
+        │   What happens if equality state changes?
+        │
+        └── Testing the contract
+                │
+                ▼
+          How do we prove the relationship works?
+```
+
+---
+
+**`hashCode()` does NOT determine equality**
+
+This is one of the most important points.
+
+It is tempting to think:
+
+```text
+same hashCode → objects are equal
+```
+
+That is **wrong**.
+
+The actual relationship is:
+
+```text
+equals() == true
+        ↓
+hashCode() must be equal
+```
+
+but:
+
+```text
+hashCode() equal
+        ↓
+equals() may be true OR false
+```
+
+For example:
+
+```java
+String a = "Aa";
+String b = "BB";
+
+System.out.println(a.hashCode());
+System.out.println(b.hashCode());
+```
+
+Both have the same hash code.
+
+But:
+
+```java
+System.out.println(a.equals(b));
+```
+
+returns: $false$
+
+This is called a **hash collision**.
+
+---
+
+The most important rule is:
+
+> If two objects are equal according to `equals()`, they must have the same hash code.
+
+Formally:
+
+```text
+a.equals(b) == true
+        ⇒
+a.hashCode() == b.hashCode()
+```
+
+The reverse is **not required**:
+
+```text
+a.hashCode() == b.hashCode()
+        ⇏
+a.equals(b) == true
+```
+
+This gives us:
+
+```text
+             equals()
+        ┌───────────────┐
+        │               │
+        ▼               │
+   logically equal      │
+        │               │
+        ▼               │
+ same hashCode()        │
+                        │
+                        │
+same hashCode() ────────┘
+does NOT imply equality
+```
+
+### Value equality
+
+##### Identity vs value
+
+Start with two different concepts.
+
+Suppose:
+
+```java
+Person p1 = new Person("Gamal");
+Person p2 = new Person("Gamal");
+```
+
+There are two possible meanings of "equal."
+
+###### Identity equality
+
+Are these literally the same object?
+
+```java
+p1 == p2
+```
+
+Answer: $false$
+
+because they are two different object instances.
+
+###### Value equality
+
+Do these objects represent the same logical value?
+
+```java
+p1.equals(p2)
+```
+
+could be: $true$
+
+if `Person` defines equality based on `name`.
+
+So:
+
+```text
+        p1                         p2
+        │                          │
+        ▼                          ▼
+   Person("Gamal")           Person("Gamal")
+        │                          │
+        └──────── equals() ────────┘
+                    │
+                    ▼
+                  true
+```
+
+This is called **value equality**.
+
+---
+
+#### Always override hashCode when you override equals
+You must override `hashCode` in every class that overrides `equals`. If you fail to
+do so, your class will violate the general contract for `hashCode`, which will
+prevent it from functioning properly in collections such as `HashMap` and `HashSet`.
+
+Suppose:
+
+```java
+class Person {
+
+    private final String name;
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof Person other)) {
+            return false;
+        }
+
+        return Objects.equals(name, other.name);
+    }
+}
+```
+
+You've defined:
+
+```text
+Person("Gamal")
+        =
+Person("Gamal")
+```
+
+as a logical value relationship.
+
+Therefore you must also define:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hashCode(name);
+}
+```
+
+Now:
+
+```text
+equals()
+   │
+   │ defines
+   ▼
+value equality
+   │
+   │ must be compatible with
+   ▼
+hashCode()
+```
+
+The fundamental rule is:
+
+```text
+a.equals(b) == true
+        ↓
+a.hashCode() == b.hashCode()
+```
+
+---
+
+**Why must `hashCode()` be overridden?**
+
+Suppose we have a `PhoneNumber` class:
+
+```java
+PhoneNumber p1 = new PhoneNumber(707, 867, 5309);
+PhoneNumber p2 = new PhoneNumber(707, 867, 5309);
+```
+
+Assume `PhoneNumber.equals()` compares the three fields:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (!(o instanceof PhoneNumber other))
+        return false;
+
+    return areaCode == other.areaCode
+        && prefix == other.prefix
+        && lineNumber == other.lineNumber;
+}
+```
+
+Then:
+
+```java
+p1.equals(p2)
+```
+
+returns: $true$
+
+because they represent the same phone number.
+
+So we have:
+
+```text
+p1 ──────────────┐
+                 │
+                 │ equals()
+                 ▼
+              logically
+               equal
+                 ▲
+                 │
+p2 ──────────────┘
+```
+
+But if we **don't override `hashCode()`**, both objects inherit:
+
+```java
+Object.hashCode()
+```
+
+The JVM is then free to give the two objects different hash values.
+
+Conceptually:
+
+```text
+p1.hashCode() → 12345678
+p2.hashCode() → 87654321
+```
+
+Now we have:
+
+```java
+p1.equals(p2) == true
+
+p1.hashCode() != p2.hashCode()
+```
+
+That violates the `hashCode()` contract.
+
+---
+
+**The HashMap example**
+
+```java
+Map<PhoneNumber, String> m = new HashMap<>();
+
+m.put(
+    new PhoneNumber(707, 867, 5309),
+    "Jenny"
+);
+```
+
+Let's call the object used for insertion `p1`:
+
+```java
+PhoneNumber p1 =
+    new PhoneNumber(707, 867, 5309);
+
+m.put(p1, "Jenny");
+```
+
+Later we create another object:
+
+```java
+PhoneNumber p2 =
+    new PhoneNumber(707, 867, 5309);
+```
+
+Because `equals()` compares the values:
+
+```java
+p1.equals(p2)
+```
+
+is: $true$
+
+So you naturally expect:
+
+```java
+m.get(p2)
+```
+
+to return:
+
+```text
+Jenny
+```
+
+But without a proper `hashCode()` implementation, it may return:
+
+```text
+null
+```
+
+Why?
+
+---
+
+**How HashMap lookup works**
+
+Think of a `HashMap` as having buckets:
+
+```text
+HashMap
+│
+├── bucket 0
+├── bucket 1
+├── bucket 2
+├── bucket 3
+├── ...
+└── bucket N
+```
+
+When you do:
+
+```java
+m.put(p1, "Jenny");
+```
+
+the map calculates a hash derived from:
+
+```java
+p1.hashCode()
+```
+
+and uses it to determine where to search/store the entry.
+
+Conceptually:
+
+```text
+p1
+ │
+ │ hashCode()
+ ▼
+123456
+ │
+ │ bucket calculation
+ ▼
+bucket 7
+ │
+ ▼
+[p1 → "Jenny"]
+```
+
+Now you perform:
+
+```java
+m.get(p2)
+```
+
+The map doesn't search every bucket.
+
+It first calculates:
+
+```java
+p2.hashCode()
+```
+
+Suppose:
+
+```text
+p1.hashCode() → 123456
+
+p2.hashCode() → 987654
+```
+
+Then the map can end up looking in:
+
+```text
+p1 → bucket 7
+p2 → bucket 19
+```
+
+But the entry is in bucket 7.
+
+The lookup is therefore directed to the wrong place.
+
+---
+
+**Why doesn't HashMap simply call `equals()` everywhere?**
+
+Because that would destroy the purpose of hashing.
+
+Without hashing, finding an object might require:
+
+```text
+compare against object 1
+compare against object 2
+compare against object 3
+compare against object 4
+...
+```
+
+That's potentially: $O(n)$
+
+Hashing gives us:
+
+```text
+hashCode()
+    ↓
+find likely bucket
+    ↓
+check only candidates
+    ↓
+equals()
+```
+
+So the overall idea is:
+
+```text
+             HashMap.get(key)
+                    │
+                    ▼
+             key.hashCode()
+                    │
+                    ▼
+             select bucket
+                    │
+                    ▼
+          compare candidate hashes
+                    │
+                    ▼
+               equals()
+                    │
+             ┌──────┴──────┐
+             │             │
+           true          false
+             │             │
+             ▼             ▼
+          found         not found
+```
+
+This is why `equals()` and `hashCode()` have to cooperate.
+
+---
+
+**Why equal objects must hash equally**
+
+Suppose:
+
+```java
+p1.equals(p2) == true
+```
+
+Then the HashMap needs:
+
+```text
+p1
+ │
+ └── hash → bucket X
+
+p2
+ │
+ └── hash → bucket X
+```
+
+Now when searching using `p2`, the map reaches the same bucket where `p1` was stored.
+
+Then it can finally use:
+
+```java
+p1.equals(p2)
+```
+
+to confirm:
+
+```text
+Yes, this is the key we're looking for.
+```
+
+So the two methods have different jobs:
+
+| Method       | Job                                                          |
+| ------------ | ------------------------------------------------------------ |
+| `equals()`   | Determine logical equality                                   |
+| `hashCode()` | Determine where an object should participate in a hash table |
+| `HashMap`    | Uses both                                                    |
+
+#### Why must they use the same logical state?
+
+Suppose equality is based on:
+
+```text
+name
+age
+```
+
+Then:
+
+```java
+@Override
+public boolean equals(Object obj) {
+    if (!(obj instanceof Person other)) {
+        return false;
+    }
+
+    return Objects.equals(name, other.name)
+            && age == other.age;
+}
+```
+
+The corresponding hash should normally use:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(name, age);
+}
+```
+
+Think of it as:
+
+```text
+             Person
+                │
+       ┌────────┴────────┐
+       │                 │
+    equals()          hashCode()
+       │                 │
+       ▼                 ▼
+   name + age        name + age
+       │                 │
+       └────────┬────────┘
+                │
+                ▼
+       same equality model
+```
+
+That's the core design principle.
+
+---
+
+**What happens if you override `equals()` but not `hashCode()`?**
+
+Suppose:
+
+```java
+class PhoneNumber {
+    private final int areaCode;
+    private final int prefix;
+    private final int lineNumber;
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof PhoneNumber other))
+            return false;
+
+        return areaCode == other.areaCode
+            && prefix == other.prefix
+            && lineNumber == other.lineNumber;
+    }
+}
+```
+
+Notice that we have overridden:
+
+```java
+equals()
+```
+
+but not:
+
+```java
+hashCode()
+```
+
+Therefore Java inherits:
+
+```java
+Object.hashCode()
+```
+
+The class effectively has:
+
+```text
+PhoneNumber.equals()
+        ↓
+value-based equality
+
+PhoneNumber.hashCode()
+        ↓
+Object.hashCode()
+        ↓
+identity-oriented behavior
+```
+
+That's the mismatch.
+
+---
+
+### `equals()` without `hashCode()` — broken
+
+This is a classic error:
+
+```java
+class Person {
+    String name;
+
+    @Override
+    public boolean equals(Object o) {
+        ...
+    }
+
+    // hashCode not overridden
+}
+```
+
+You can have:
+
+```text
+p1.equals(p2) == true
+
+p1.hashCode() != p2.hashCode()
+```
+
+This violates the contract.
+
+Result:
+
+```java
+HashSet
+HashMap
+Hashtable
+```
+
+may behave incorrectly.
+
+---
+
+### `hashCode()` without `equals()` — usually not useful
+
+You could override:
+
+```java
+hashCode()
+```
+
+but leave:
+
+```java
+equals()
+```
+
+as identity equality.
+
+That's technically possible.
+
+For example:
+
+```java
+@Override
+public int hashCode() {
+    return name.hashCode();
+}
+```
+
+while `equals()` remains identity-based.
+
+This doesn't violate the basic contract because two different objects don't need to have different hash codes.
+
+But it may produce unnecessary collisions.
+
+Usually, if you're defining value-based equality, you should implement both methods together.
+
+---
+
+### Hash-based lookup
+
+Now we can see **why** the relationship exists.
+
+Consider:
+
+```java
+Map<Person, String> people = new HashMap<>();
+
+Person p1 = new Person("Gamal");
+
+people.put(p1, "Developer");
+```
+
+Later we construct another object:
+
+```java
+Person p2 = new Person("Gamal");
+```
+
+and ask:
+
+```java
+people.get(p2);
+```
+
+We expect:
+
+```text
+"Developer"
+```
+
+if:
+
+```java
+p1.equals(p2)
+```
+
+is true.
+
+How can `HashMap` find `p1` without scanning every key?
+
+It uses `hashCode()` first.
+
+---
+
+#### Lookup process
+
+Conceptually:
+
+```text
+                 p2
+                 │
+                 ▼
+            hashCode()
+                 │
+                 ▼
+              hash
+                 │
+                 ▼
+             bucket
+                 │
+                 ▼
+          candidate keys
+                 │
+                 ▼
+             equals()
+                 │
+                 ▼
+              match
+                 │
+                 ▼
+           "Developer"
+```
+
+So the two methods have different jobs:
+
+- `hashCode()`: **Where should I look?**
+
+- `equals()`: **Is this actually the key I'm looking for?**
+
+---
+
+#### Why hash code alone isn't enough
+
+Suppose two objects have:
+
+```text
+hashCode() == 100
+```
+
+but:
+
+```text
+equals() == false
+```
+
+That's legal.
+
+For example:
+
+```text
+             hash = 100
+                 │
+          ┌──────┴──────┐
+          ▼             ▼
+       Person A      Person B
+          │             │
+       equals()      equals()
+          │             │
+        false         false
+```
+
+They're both candidates in the same hash region.
+
+`HashMap` must then use `equals()` to determine which one actually matches.
+
+Therefore:
+
+```text
+hashCode() → candidate selection
+equals()   → exact equality
+```
+
+---
+
+#### Why equal objects must have equal hashes
+
+Now consider the reverse.
+
+Suppose:
+
+```text
+p1.equals(p2) == true
+```
+
+but:
+
+```text
+p1.hashCode() = 100
+p2.hashCode() = 200
+```
+
+Then:
+
+```text
+p1
+ │
+ └── hash 100 → bucket 100
+
+
+p2
+ │
+ └── hash 200 → bucket 200
+```
+
+The map might store `p1` in bucket 100.
+
+When looking up `p2`, it searches bucket 200.
+
+It may never even examine `p1`.
+
+So the collection cannot discover the equality relationship.
+
+This is why:
+
+> **Equal objects must produce equal hash codes.**
+
+---
+
+#### `HashSet` shows the same idea
+
+Consider:
+
+```java
+Set<Person> people = new HashSet<>();
+
+people.add(new Person("Gamal"));
+people.add(new Person("Gamal"));
+```
+
+If the two objects are equal:
+
+```text
+p1.equals(p2) → true
+```
+
+the set should contain only one logical value.
+
+Conceptually:
+
+```text
+add(p1)
+   │
+   ▼
+hashCode()
+   │
+   ▼
+bucket
+   │
+   ▼
+store p1
+```
+
+Then:
+
+```text
+add(p2)
+   │
+   ▼
+hashCode()
+   │
+   ▼
+same bucket
+   │
+   ▼
+equals(p1, p2)
+   │
+   ▼
+true
+   │
+   ▼
+already exists
+```
+
+Therefore `p2` isn't added as a separate value.
+
+---
+
+### Mutable keys
+
+Now we reach one of the most important consequences of the relationship.
+
+Suppose equality depends on:
+
+```text
+username
+```
+
+and hashing also depends on:
+
+```text
+username
+```
+
+That's good—until the username changes.
+
+Consider:
+
+```java
+class User {
+
+    private String username;
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof User other)) {
+            return false;
+        }
+
+        return Objects.equals(username, other.username);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(username);
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+}
+```
+#### Mutable `HashSet` keys
+Now:
+
+```java
+User user = new User("gamal");
+
+Set<User> users = new HashSet<>();
+
+users.add(user);
+```
+
+At this moment:
+
+```text
+username = "gamal"
+       │
+       ▼
+hashCode()
+       │
+       ▼
+    H1
+       │
+       ▼
+ bucket H1
+       │
+       ▼
+    user
+```
+
+Everything is correct.
+
+**Now mutate the key**
+
+Suppose:
+
+```java
+user.setUsername("ahmed");
+```
+
+Now:
+
+```text
+username = "ahmed"
+       │
+       ▼
+hashCode()
+       │
+       ▼
+    H2
+```
+
+But the `HashSet` does not automatically move the object. Physically, it is still sitting in:
+
+```text
+bucket H1
+```
+
+while the object's current hash says:
+
+```text
+H2
+```
+
+So:
+
+```java
+users.contains(user)
+```
+
+can fail.
+
+Conceptually:
+
+```text
+BEFORE MUTATION
+
+user
+ │
+ ▼
+hash = H1
+ │
+ ▼
+bucket H1
+ │
+ └── user
+
+
+AFTER MUTATION
+
+user
+ │
+ ▼
+hash = H2
+
+but:
+
+bucket H1
+ │
+ └── user
+```
+
+Lookup goes to:
+
+```text
+bucket H2
+```
+
+and doesn't find it.
+
+---
+
+**The surprising part**
+
+You can even get:
+
+```java
+users.contains(user)
+```
+
+returning: $false$
+
+while:
+
+```java
+users
+```
+
+still physically contains that same object.
+
+This is not because `HashSet` is broken.
+
+You changed the object's identity **as far as the hash table is concerned** after it had already been positioned.
+
+---
+
+#### Mutable `HashMap` keys
+
+The same thing happens with:
+
+```java
+Map<User, String> users = new HashMap<>();
+
+users.put(user, "Developer");
+```
+
+Then:
+
+```java
+user.setUsername("ahmed");
+```
+
+Now:
+
+```java
+users.get(user)
+```
+
+may return:
+
+```text
+null
+```
+
+can fail to find the mapping., even though the mapping is still inside the map.
+
+This is one of the main reasons keys in hash-based collections should be **immutable with respect to the fields used by `equals()` and `hashCode()`**.
+
+The sequence is:
+
+```text
+PUT
+ │
+ ▼
+hash H1
+ │
+ ▼
+bucket H1
+ │
+ ▼
+entry
+
+
+MUTATE KEY
+ │
+ ▼
+hash becomes H2
+
+
+GET
+ │
+ ▼
+hash H2
+ │
+ ▼
+bucket H2
+ │
+ ▼
+entry isn't there
+```
+
+---
+
+#### The rule for hash keys
+
+This leads to an important design rule:
+
+> **Don't change the state used by `equals()` and `hashCode()` while the object is being used as a key in a hash-based collection.**
+
+The safest approach is to use **immutable keys**.
+
+For example:
+
+```java
+public final class UserId {
+
+    private final String value;
+
+    public UserId(String value) {
+        this.value = value;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof UserId other)) {
+            return false;
+        }
+
+        return Objects.equals(value, other.value);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(value);
+    }
+}
+```
+
+Once created:
+
+```text
+UserId("123")
+     │
+     ├── equality state = "123"
+     └── hash state     = "123"
+```
+
+Neither changes.
+
+This makes it an excellent hash key.
+
+---
+
+
+---
+
+**Good key**
+
+This is good:
+
+```java
+public final class UserId {
+
+    private final String value;
+
+    public UserId(String value) {
+        this.value = value;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        ...
+    }
+
+    @Override
+    public int hashCode() {
+        return value.hashCode();
+    }
+}
+```
+
+Once created:
+
+```text
+UserId("123")
+     │
+     ├── equals state → 123
+     └── hash state   → 123
+```
+
+The equality-relevant state doesn't change.
+
+---
+
+**Why `String` is an excellent hash-map key**
+
+`String` is immutable.
+
+For:
+
+```java
+Map<String, User> users;
+```
+
+the key's equality-relevant contents cannot change after insertion.
+
+That's exactly what we want.
+
+Similarly, immutable value objects make excellent keys.
+
+---
+
+**Bad key**
+
+This is dangerous:
+
+```java
+class User {
+    private String username;
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    @Override
+    public int hashCode() {
+        return username.hashCode();
+    }
+}
+```
+
+when used as:
+
+```java
+Map<User, String> map;
+```
+
+because:
+
+```text
+username
+   │
+   ├── equals()
+   └── hashCode()
+```
+
+can change after insertion.
+
+### Testing the contract
+
+The fourth part is testing.
+
+When you implement `equals()` and `hashCode()`, don't test them as two unrelated methods. You should test them as a pair.
+
+Test their **relationship**.
+
+---
+
+#### Test equal objects
+
+Start with:
+
+```java
+Person p1 = new Person("Gamal", 30);
+Person p2 = new Person("Gamal", 30);
+```
+
+If the class defines those fields as equality-significant:
+
+```java
+assert p1.equals(p2);
+```
+
+Then immediately test:
+
+```java
+assert p1.hashCode() == p2.hashCode();
+```
+
+Together:
+
+```java
+assert p1.equals(p2);
+assert p1.hashCode() == p2.hashCode();
+```
+
+This is the most important test.
+
+---
+
+#### Test unequal objects
+
+For example:
+
+```java
+Person p1 = new Person("Gamal", 30);
+Person p2 = new Person("Ahmed", 30);
+```
+
+Then:
+
+```java
+assert !p1.equals(p2);
+```
+
+But **don't** require:
+
+```java
+assert p1.hashCode() != p2.hashCode();
+```
+
+because collisions are legal.
+
+So this is valid:
+
+```text
+equals()       → false
+hashCode()     → same
+```
+
+Testing that hashes must differ would be testing the wrong contract.
+
+---
+
+**The correct test relationship**
+
+The strongest useful test is:
+
+```text
+if equals == true
+    then hashCode must be equal
+```
+
+Not:
+
+```text
+if hashCode == true
+    then equals must be true
+```
+
+In Java terms:
+
+```java
+if (a.equals(b)) {
+    assert a.hashCode() == b.hashCode();
+}
+```
+
+but this is not valid:
+
+```java
+if (a.hashCode() == b.hashCode()) {
+    assert a.equals(b);   // WRONG
+}
+```
+
+#### Test consistency
+
+If the object's equality state hasn't changed:
+
+```java
+Person p = new Person("Gamal", 30);
+
+int h1 = p.hashCode();
+int h2 = p.hashCode();
+int h3 = p.hashCode();
+
+assert h1 == h2;
+assert h2 == h3;
+```
+
+You expect consistent results during the execution.
+
+---
+
+#### Test `HashSet`
+
+This is a very useful integration test.
+
+```java
+Person p1 = new Person("Gamal", 30);
+Person p2 = new Person("Gamal", 30);
+
+Set<Person> people = new HashSet<>();
+
+people.add(p1);
+
+assert people.contains(p2);
+```
+
+This tests the whole chain:
+
+```text
+p2
+ │
+ ▼
+hashCode()
+ │
+ ▼
+correct bucket
+ │
+ ▼
+equals(p1, p2)
+ │
+ ▼
+true
+ │
+ ▼
+contains() == true
+```
+
+---
+
+#### Test `HashMap`
+
+Likewise:
+
+```java
+Person p1 = new Person("Gamal", 30);
+Person p2 = new Person("Gamal", 30);
+
+Map<Person, String> people = new HashMap<>();
+
+people.put(p1, "Developer");
+
+assert "Developer".equals(people.get(p2));
+```
+
+This is an excellent test because it proves that the equality/hash relationship works in an actual hash-based data structure.
+
+---
+
+#### Test the mutable-key problem
+
+For educational purposes, you can explicitly demonstrate the problem:
+
+```java
+User user = new User("gamal");
+
+Set<User> users = new HashSet<>();
+users.add(user);
+
+assert users.contains(user);
+
+user.setUsername("ahmed");
+
+// This can now fail.
+System.out.println(users.contains(user));
+```
+
+This demonstrates why equality state should not be mutated while an object is acting as a hash key.
+
+---
+
+### A complete example
+
+Let's put everything together.
+
+```java
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+
+public final class UserId {
+
+    private final String value;
+
+    public UserId(String value) {
+        this.value = Objects.requireNonNull(value);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (!(obj instanceof UserId other)) {
+            return false;
+        }
+
+        return value.equals(other.value);
+    }
+
+    @Override
+    public int hashCode() {
+        return value.hashCode();
+    }
+
+    public static void main(String[] args) {
+
+        UserId id1 = new UserId("123");
+        UserId id2 = new UserId("123");
+
+        // Value equality
+        System.out.println(id1.equals(id2));
+        // true
+
+        // Equal objects must have equal hashes
+        System.out.println(
+            id1.hashCode() == id2.hashCode()
+        );
+        // true
+
+        // Hash-based lookup
+        Map<UserId, String> users = new HashMap<>();
+
+        users.put(id1, "Gamal");
+
+        System.out.println(users.get(id2));
+        // Gamal
+    }
+}
+```
+
+Notice something important:
+
+`id1` and `id2` are **different objects**:
+
+```text
+id1 == id2
+```
+
+is: $false$
+
+but they represent the same value:
+
+```text
+id1.equals(id2)
+```
+
+is: $true$
+
+Therefore:
+
+```text
+id1.hashCode() == id2.hashCode()
+```
+
+must be: $true$
+
+And that allows:
+
+```java
+users.get(id2)
+```
+
+to find the value stored using `id1`.
+
+---
+
+### The entire relationship
+
+You can now connect the four topics into one chain:
+
+```text
+                    VALUE EQUALITY
+                         │
+                         │
+              equals() defines
+              logical sameness
+                         │
+                         ▼
+              equal objects must
+              have equal hash codes
+                         │
+                         ▼
+                 HASH-BASED LOOKUP
+                         │
+                  ┌──────┴──────┐
+                  │             │
+             hashCode()      equals()
+                  │             │
+             find bucket     confirm match
+                  │             │
+                  └──────┬──────┘
+                         │
+                         ▼
+                  HashMap/HashSet
+                         │
+                         │
+                         ▼
+                  MUTABLE KEYS
+                         │
+              equality/hash state
+                  must not change
+                         │
+                         ▼
+                Prefer immutable keys
+                         │
+                         ▼
+                 TEST THE CONTRACT
+                         │
+              ┌──────────┼──────────┐
+              │          │          │
+           equals     same hash   HashMap/
+           tests      for equals   HashSet tests
+```
+
+---
+
+| Topic                 | Question                                | Role of `equals()`       | Role of `hashCode()`                      |
+| --------------------- | --------------------------------------- | ------------------------ | ----------------------------------------- |
+| **Value equality**    | What does "same value" mean?            | Defines logical equality | Must represent that equality consistently |
+| **Hash-based lookup** | How can we find values efficiently?     | Confirms exact match     | Locates candidate bucket                  |
+| **Mutable keys**      | What if equality state changes?         | Changes logical identity | Changes lookup location                   |
+| **Testing contract**  | Does the implementation obey the rules? | Test equality semantics  | Test equal objects produce equal hashes   |
+
+---
+
+#### The core mental model
+
+The best way to remember all of this is:
+
+```text
+equals()
+    │
+    │ "Are these logically the same?"
+    ▼
+Value equality
+    │
+    │ must be compatible with
+    ▼
+hashCode()
+    │
+    │ "Where should I search?"
+    ▼
+Hash-based collection
+    │
+    ├── HashMap
+    └── HashSet
+```
+
+And the dangerous case is:
+
+```text
+mutable equality state
+        │
+        ▼
+hashCode changes
+        │
+        ▼
+object's bucket no longer matches
+        │
+        ▼
+HashMap / HashSet lookup can fail
+```
+
+Finally, the contract you should be able to write from memory is:
+
+```java
+if (a.equals(b)) {
+    assert a.hashCode() == b.hashCode();
+}
+```
+
+**That one implication is the bridge connecting value equality, hash-based lookup, mutable keys, and testing.**
+
+## Common `hashCode()` pitfalls
+
+Most `hashCode()` bugs are not about the hashing algorithm itself. They come from breaking the relationship between `equals()` and `hashCode()`, or from changing the state on which hashing depends.
+
+### 1. Overriding `equals()` but not `hashCode()`
+
+This is probably the most common mistake.
+
+Suppose you define value equality:
+
+```java
+class Person {
+    private final String name;
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof Person other)) {
+            return false;
+        }
+
+        return name.equals(other.name);
+    }
+}
+```
+
+You have said:
+
+```text
+Person("Gamal") == Person("Gamal")
+```
+
+in terms of logical equality.
+
+But you haven't overridden `hashCode()`.
+
+Therefore the class inherits:
+
+```java
+Object.hashCode()
+```
+
+You can end up with:
+
+```text
+p1.equals(p2)          → true
+
+p1.hashCode()          → 12345
+p2.hashCode()          → 67890
+```
+
+That violates the contract.
+
+##### Result
+
+Hash-based collections can behave incorrectly:
+
+```java
+Set<Person> people = new HashSet<>();
+
+people.add(p1);
+
+System.out.println(people.contains(p2));
+```
+
+You expect: $true$
+
+because:
+
+```java
+p1.equals(p2)
+```
+
+is true.
+
+But because the hash codes differ, the collection can search a different bucket.
+
+##### Correct
+
+```java
+@Override
+public int hashCode() {
+    return name.hashCode();
+}
+```
+
+---
+
+### 2. Implementing `hashCode()` inconsistently with `equals()`
+
+This is subtler.
+
+Suppose:
+
+```java
+class Person {
+    private final String name;
+    private final int age;
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof Person other)) {
+            return false;
+        }
+
+        return name.equals(other.name)
+                && age == other.age;
+    }
+
+    @Override
+    public int hashCode() {
+        return name.hashCode();
+    }
+}
+```
+
+Is this technically valid?
+
+Yes.
+
+If two objects are equal:
+
+```text
+same name
+same age
+```
+
+then they necessarily have the same `name.hashCode()`.
+
+So the contract isn't violated.
+
+But it may produce many collisions.
+
+For example:
+
+```text
+Gamal, 20
+Gamal, 21
+Gamal, 22
+Gamal, 23
+```
+
+all get their hash from:
+
+```text
+"Gamal"
+```
+
+So:
+
+```text
+hash(Gamal, 20)
+hash(Gamal, 21)
+hash(Gamal, 22)
+hash(Gamal, 23)
+        ↓
+     same hash
+```
+
+A better implementation is:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(name, age);
+}
+```
+
+##### Rule
+
+Use the equality-significant fields when practical:
+
+```text
+equals() fields
+      ↓
+hashCode() fields
+```
+
+---
+
+### 3. Using different equality fields accidentally
+
+Consider:
+
+```java
+class User {
+    private final String username;
+    private final String email;
+}
+```
+
+Suppose `equals()` uses both:
+
+```java
+@Override
+public boolean equals(Object obj) {
+    if (!(obj instanceof User other)) {
+        return false;
+    }
+
+    return Objects.equals(username, other.username)
+            && Objects.equals(email, other.email);
+}
+```
+
+But you write:
+
+```java
+@Override
+public int hashCode() {
+    return username.hashCode();
+}
+```
+
+Again, this isn't necessarily a contract violation.
+
+But it can result in poor distribution.
+
+A better implementation is:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(username, email);
+}
+```
+
+The general principle is:
+
+> If a field distinguishes unequal objects, allowing it to contribute to the hash usually improves distribution.
+
+---
+
+### 4. Assuming equal hash codes mean equal objects
+
+This is one of the biggest conceptual mistakes.
+
+Incorrect:
+
+```java
+if (a.hashCode() == b.hashCode()) {
+    // a and b are equal
+}
+```
+
+This is false.
+
+Hash collisions are allowed:
+
+```text
+a.equals(b)       → false
+a.hashCode()      → 100
+b.hashCode()      → 100
+```
+
+So:
+
+```text
+same hash
+   ≠
+same object/value
+```
+
+The correct relationship is:
+
+```text
+equals() == true
+       ↓
+same hash
+```
+
+not:
+
+```text
+same hash
+       ↓
+equals() == true
+```
+
+---
+
+### 5. Trying to make `hashCode()` unique
+
+Another common mistake is thinking:
+
+> "Every object should have a unique hash code."
+
+No.
+
+`hashCode()` is **not an object ID**.
+
+This is wrong thinking:
+
+```text
+object A → 100
+object B → 101
+object C → 102
+...
+```
+
+and trying to guarantee uniqueness.
+
+There are only `2^32` possible `int` values, while Java can have vastly more objects and values.
+
+Therefore collisions are inevitable.
+
+The goal is:
+
+```text
+good distribution
+```
+
+not:
+
+```text
+guaranteed uniqueness
+```
+
+---
+
+### 6. Using mutable fields in `hashCode()`
+
+This is one of the most dangerous practical problems.
+
+Suppose:
+
+```java
+class User {
+    private String username;
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof User other)) {
+            return false;
+        }
+
+        return Objects.equals(username, other.username);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(username);
+    }
+}
+```
+
+Then:
+
+```java
+User user = new User("gamal");
+
+Set<User> users = new HashSet<>();
+
+users.add(user);
+```
+
+At insertion:
+
+```text
+username = "gamal"
+       ↓
+hashCode()
+       ↓
+H1
+       ↓
+bucket H1
+```
+
+Now mutate it:
+
+```java
+user.setUsername("ahmed");
+```
+
+The hash changes:
+
+```text
+"ahmed"
+   ↓
+hashCode()
+   ↓
+H2
+```
+
+But the set does not move the object from bucket `H1` to `H2`.
+
+So:
+
+```java
+users.contains(user)
+```
+
+can return: $false$
+
+even though the object is physically inside the set.
+
+---
+
+### 7. Mutating a `HashMap` key
+
+The same problem occurs with `HashMap`.
+
+```java
+Map<User, String> users = new HashMap<>();
+
+User user = new User("gamal");
+
+users.put(user, "Developer");
+```
+
+Then:
+
+```java
+user.setUsername("ahmed");
+```
+
+Now:
+
+```java
+users.get(user)
+```
+
+may return:
+
+```text
+null
+```
+
+even though you just inserted that key.
+
+The underlying problem is:
+
+```text
+PUT
+
+key
+ ↓
+hash H1
+ ↓
+bucket H1
+ ↓
+entry
+
+
+MUTATE KEY
+
+key
+ ↓
+hash H2
+
+GET
+
+key
+ ↓
+hash H2
+ ↓
+bucket H2
+ ↓
+entry not found
+```
+
+##### Best practice
+
+Don't mutate equality/hash-code state while an object is being used as a key.
+
+Prefer immutable keys:
+
+```java
+public final class UserId {
+
+    private final String value;
+
+    // no setter
+
+    @Override
+    public boolean equals(Object obj) {
+        // ...
+    }
+
+    @Override
+    public int hashCode() {
+        return value.hashCode();
+    }
+}
+```
+
+---
+
+### 8. Poor hash distribution
+
+Consider this:
+
+```java
+@Override
+public int hashCode() {
+    return 1;
+}
+```
+
+Technically, this can satisfy the contract.
+
+For equal objects:
+
+```text
+same hash = 1
+```
+
+Fine.
+
+But every object goes into essentially the same hash region:
+
+```text
+        Hash table
+             │
+             ▼
+        bucket 1
+       /   |   |   \
+      A    B   C    D
+           ...
+```
+
+The collection has to compare many objects using `equals()`.
+
+The whole point of hashing is largely defeated.
+
+##### So there are two levels:
+
+**Correctness:**
+
+```text
+equal → same hash
+```
+
+**Performance:**
+
+```text
+unequal objects → preferably well distributed
+```
+
+A good `hashCode()` should satisfy both.
+
+---
+
+### 9. Accidentally using identity semantics
+
+Suppose your class has value semantics:
+
+```java
+class UserId {
+    private final String value;
+}
+```
+
+You want:
+
+```java
+new UserId("123")
+```
+
+to equal:
+
+```java
+new UserId("123")
+```
+
+But if you use identity-based behavior, you'll get:
+
+```text
+object A ≠ object B
+```
+
+even though their values are the same.
+
+For example, don't accidentally design:
+
+```java
+@Override
+public int hashCode() {
+    return System.identityHashCode(this);
+}
+```
+
+if `equals()` represents value equality.
+
+`System.identityHashCode()` is specifically about object identity, not your class's logical value.
+
+For a value object:
+
+```text
+equals()
+    ↓
+value semantics
+
+hashCode()
+    ↓
+same value semantics
+```
+
+---
+
+### 10. Mishandling arrays
+
+Arrays are a classic Java trap.
+
+Consider:
+
+```java
+class Data {
+    private final int[] values;
+}
+```
+
+You might write:
+
+```java
+@Override
+public boolean equals(Object obj) {
+    if (!(obj instanceof Data other)) {
+        return false;
+    }
+
+    return Arrays.equals(values, other.values);
+}
+```
+
+This means:
+
+```text
+[1, 2, 3]
+```
+
+equals:
+
+```text
+[1, 2, 3]
+```
+
+by content.
+
+But then you accidentally write:
+
+```java
+@Override
+public int hashCode() {
+    return values.hashCode();
+}
+```
+
+That's wrong for your chosen equality semantics.
+
+`values.hashCode()` uses the array object's identity-based behavior.
+
+Instead:
+
+```java
+@Override
+public int hashCode() {
+    return Arrays.hashCode(values);
+}
+```
+
+Now:
+
+```text
+Arrays.equals(a, b)
+       ↓
+Arrays.hashCode(a) == Arrays.hashCode(b)
+```
+
+---
+
+### 11. Mishandling `null`
+
+This can cause:
+
+```java
+@Override
+public int hashCode() {
+    return name.hashCode();
+}
+```
+
+to throw:
+
+```text
+NullPointerException
+```
+
+if:
+
+```java
+name == null
+```
+
+You can use:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hashCode(name);
+}
+```
+
+or:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(name, age);
+}
+```
+
+when appropriate.
+
+For example:
+
+```java
+Objects.hashCode(null)
+```
+
+returns:
+
+```text
+0
+```
+
+---
+
+### 12. Confusing `Objects.hash()` with `Objects.hashCode()`
+
+These look almost identical:
+
+```java
+Objects.hash(...)
+```
+
+and:
+
+```java
+Objects.hashCode(...)
+```
+
+but they have different purposes.
+
+##### `Objects.hashCode(value)`
+
+One object, null-safe:
+
+```java
+Objects.hashCode(name)
+```
+
+Conceptually:
+
+```java
+name == null ? 0 : name.hashCode()
+```
+
+##### `Objects.hash(a, b, c)`
+
+Combines multiple values:
+
+```java
+Objects.hash(name, age, email)
+```
+
+A common mistake is using the wrong one without understanding the difference.
+
+---
+
+### 13. Overengineering `hashCode()`
+
+You usually don't need to invent a complicated hashing algorithm.
+
+For a normal Java value object:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(field1, field2, field3);
+}
+```
+
+is often perfectly reasonable.
+
+For a single field:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hashCode(value);
+}
+```
+
+or directly:
+
+```java
+@Override
+public int hashCode() {
+    return value.hashCode();
+}
+```
+
+when null isn't possible.
+
+Don't turn every ordinary domain class into a custom hashing research project.
+
+---
+
+### 14. Forgetting that `hashCode()` is part of the class's equality semantics
+
+A common design mistake is thinking:
+
+```text
+equals()
+    → object-oriented design
+
+hashCode()
+    → collection implementation detail
+```
+
+They're actually connected.
+
+If your class defines:
+
+```text
+logical equality
+```
+
+then it is also defining the behavior needed when that class participates in:
+
+```text
+HashMap
+HashSet
+Hashtable
+ConcurrentHashMap
+```
+
+So when designing a value object, think:
+
+```text
+            Value Object
+                 │
+          ┌──────┴──────┐
+          │             │
+       equals()      hashCode()
+          │             │
+          └──────┬──────┘
+                 │
+                 ▼
+          Hash collections
+```
+
+---
+
+### 15. Inheritance can complicate things
+
+Suppose:
+
+```java
+class Person {
+    String name;
+}
+```
+
+and:
+
+```java
+class Employee extends Person {
+    int employeeId;
+}
+```
+
+Now you must carefully decide what equality means.
+
+For example:
+
+```text
+Person equality:
+    name
+
+Employee equality:
+    name + employeeId
+```
+
+This can create difficult equality relationships.
+
+If `equals()` changes meaning across the inheritance hierarchy, `hashCode()` must remain compatible with whatever equality contract you've chosen.
+
+This is one reason **composition and immutable value types** can be easier to reason about than inheritance-heavy equality designs.
+
+---
+
+### 16. Including fields that `equals()` ignores
+
+Suppose:
+
+```java
+class User {
+    String username;
+    String displayName;
+}
+```
+
+And equality is:
+
+```java
+username only
+```
+
+but you write:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(username, displayName);
+}
+```
+
+This is potentially **wrong**.
+
+Imagine:
+
+```text
+User A:
+username = "gamal"
+displayName = "Gamal Alkzaz"
+
+User B:
+username = "gamal"
+displayName = "Gamal"
+```
+
+If:
+
+```java
+A.equals(B)
+```
+
+is true because equality only considers `username`, their hash codes must be equal.
+
+But because the hash includes `displayName`, they could differ.
+
+That violates the contract.
+
+This gives us a very important rule:
+
+> **Every field that affects `equals()` should appropriately affect `hashCode()`, but don't include fields in `hashCode()` that can cause equal objects to produce different hashes.**
+
+This is why matching the equality fields is the safest approach.
+
+---
+
+### Excluding significant fields from the hash code computation to improve performance
+
+Do not deliberately leave out fields that participate in `equals()` just because hashing them is expensive.
+
+You can technically create a valid `hashCode()` that uses only some of the significant fields, but if you ignore too much information, you can create **many hash collisions**, which can destroy the performance advantage of a hash table.
+
+While the resulting hash function may run
+faster, its poor quality may degrade hash tables’ performance to the point where
+they become unusable. 
+
+Suppose we have:
+
+```java
+class Person {
+    String country;
+    String city;
+    String street;
+    String houseNumber;
+
+    @Override
+    public boolean equals(Object o) {
+        // compares all four fields
+    }
+
+    @Override
+    public int hashCode() {
+        return country.hashCode();
+    }
+}
+```
+
+This is technically compatible with the basic `hashCode()` contract:
+
+```text
+if a.equals(b)
+    → a.hashCode() == b.hashCode()
+```
+
+But it is a **terrible hash function**.
+
+Why?
+
+Because we're saying:
+
+```text
+Person
+  ├── country       ← used
+  ├── city          ← ignored
+  ├── street        ← ignored
+  └── houseNumber   ← ignored
+```
+
+Imagine we have 1 million people in Egypt.
+
+If the hash code depends only on `country`, then potentially:
+
+```text
+Ahmed → hash("Egypt")
+Mohamed → hash("Egypt")
+Ali → hash("Egypt")
+Omar → hash("Egypt")
+...
+```
+
+Millions of different objects can end up with the same hash.
+
+In particular, the hash function may be confronted with a large collection of instances that differ mainly in regions you’ve chosen to ignore.
+
+If this happens, the hash function will map all these instances to a few hash codes,
+and programs that should run in linear time will instead run in quadratic time.
+
+Suppose your objects are:
+
+```text
+URL 1:
+https://example.com/products/100
+
+URL 2:
+https://example.com/products/101
+
+URL 3:
+https://example.com/products/102
+
+URL 4:
+https://example.com/products/103
+```
+
+If your hash function pays attention mostly to the beginning:
+
+```text
+https://example.com/products/...
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      same for everybody
+```
+
+then all these URLs may produce similar or identical hashes.
+
+But the part that distinguishes them is:
+
+```text
+100
+101
+102
+103
+```
+
+If your hash function ignores that region, you've created a pathological situation.
+
+
+---
+
+Suppose we insert `n` objects and, because of a poor hash function, they all end up in essentially one bucket.
+
+Conceptually:
+
+```text
+Bucket
+  │
+  ├── Object 1
+  ├── Object 2
+  ├── Object 3
+  ├── Object 4
+  ├── ...
+  └── Object n
+```
+
+When looking for an object, the collection may have to compare against many candidates using `equals()`.
+
+For example:
+
+```text
+search 1 → 1 comparison
+search 2 → 2 comparisons
+search 3 → 3 comparisons
+...
+search n → n comparisons
+```
+
+Total work is approximately:
+
+```text
+1 + 2 + 3 + ... + n
+```
+
+which is:
+
+```text
+n(n + 1) / 2
+```
+
+and therefore:
+
+```text
+O(n²)
+```
+
+So the whole point of a hash table being approximately:
+
+```text
+O(1) average lookup
+```
+
+can be lost.
+
+---
+
+**But aren't we allowed to ignore fields?**
+
+This is an important distinction.
+
+Suppose:
+
+```java
+equals()
+```
+
+uses:
+
+```text
+name
+age
+address
+phone
+```
+
+Your `hashCode()` could technically use only:
+
+```text
+name
+```
+
+and still satisfy:
+
+```text
+equal → same hash
+```
+
+So:
+
+```java
+@Override
+public int hashCode() {
+    return name.hashCode();
+}
+```
+
+is not necessarily **incorrect**.
+
+But it may be a **very poor hash function**.
+
+The Effective Java recommendation is therefore:
+
+> Don't intentionally sacrifice significant fields merely to make `hashCode()` faster.
+
+Instead, normally hash the same significant fields that `equals()` uses.
+
+```java
+@Override
+public int hashCode() {
+    int result = name.hashCode();
+    result = 31 * result + Integer.hashCode(age);
+    result = 31 * result + address.hashCode();
+    result = 31 * result + phone.hashCode();
+    return result;
+}
+```
+
+---
+
+**Real life example**
+
+Prior to Java 2, the String hash function used at most sixteen characters evenly spaced throughout the string, starting
+with the first character. For large collections of hierarchical names, such as URLs,
+this function displayed exactly the pathological behavior described earlier.
+
+Older Java versions used a strategy that sampled **at most 16 characters**, evenly spaced through the string, starting from the beginning.
+```java
+public static int oldStringHash(String s) {
+    int hash = 0;
+    int n = s.length();
+
+    if (n <= 16) {
+        // Hash every character
+        for (int i = 0; i < n; i++) {
+            hash = 31 * hash + s.charAt(i);
+        }
+    } else {
+        // Sample 16 characters, evenly spaced
+        int skip = n / 16;
+
+        for (int i = 0; i < n; i += skip) {
+            hash = 31 * hash + s.charAt(i);
+        }
+    }
+
+    return hash;
+}
+```
+The motivation was understandable:
+
+```text
+Long String
+     │
+     ▼
+Don't process every character
+     │
+     ▼
+Hash faster
+```
+
+That sounds like a good optimization.
+
+But there was a problem.
+
+Consider hierarchical names such as URLs:
+
+```text
+http://example.com/products/...
+http://example.com/products/...
+http://example.com/products/...
+http://example.com/products/...
+```
+
+A large collection of URLs often shares long prefixes:
+
+```text
+http://example.com/
+^^^^^^^^^^^^^^^^^^^
+      same
+```
+
+The characters that actually distinguish the URLs may occur later:
+
+```text
+http://example.com/products/customer/1001
+http://example.com/products/customer/1002
+http://example.com/products/customer/1003
+                                      ^^^^
+                                   different
+```
+
+If the hash function doesn't adequately consider those differing portions, many strings can receive the same hash.
+
+### A particularly dangerous misconception
+
+Some developers think:
+
+> "I'll put more fields into `hashCode()` to make collisions less likely."
+
+That is only safe if those fields are compatible with equality.
+
+Suppose:
+
+```java
+equals() → id
+hashCode() → id + name + email
+```
+
+If two objects have the same `id` but different names:
+
+```text
+equals() → true
+```
+
+but potentially:
+
+```text
+hashCode() → different
+```
+
+That's a **contract violation**.
+
+So don't optimize hash distribution by blindly adding fields.
+
+First preserve:
+
+```text
+equals(a,b) == true
+        ↓
+hashCode(a) == hashCode(b)
+```
+
+---
+
+### 18. Using mutable collections inside `hashCode()`
+
+Suppose:
+
+```java
+class Team {
+    private List<String> members;
+}
+```
+
+and:
+
+```java
+@Override
+public int hashCode() {
+    return members.hashCode();
+}
+```
+
+If `members` changes:
+
+```java
+members.add("Ahmed");
+```
+
+then the team's hash code may change.
+
+If the `Team` is being used as a `HashMap` key:
+
+```java
+Map<Team, String> map;
+```
+
+you can get the same mutable-key problem.
+
+This is especially easy to miss because the field itself may be `final`:
+
+```java
+private final List<String> members;
+```
+
+`final` means the reference can't be replaced; it does **not** mean the list itself is immutable.
+
+So:
+
+```text
+final reference
+      ≠
+immutable object
+```
+
+---
+
+### Providing a detailed specification for the value returned by hashCode
+Don’t provide a detailed specification for the value returned by hashCode,
+so clients can’t reasonably depend on it; this gives you the flexibility to
+change it. 
+
+The main idea is:
+
+> **If you write a class, guarantee the `hashCode()` contract, but don't usually guarantee the exact integer value.**
+
+This  is about **API design** rather than how to calculate a hash code.
+
+Suppose you create:
+
+```java
+class Person {
+    private final String name;
+    private final int age;
+
+    @Override
+    public int hashCode() {
+        int result = name.hashCode();
+        result = 31 * result + Integer.hashCode(age);
+        return result;
+    }
+}
+```
+
+You should document something like:
+
+```text
+Equal Person objects must have equal hash codes.
+```
+
+But you generally **shouldn't document**:
+
+```text
+hashCode() = 31 * name.hashCode() + age
+```
+
+because that makes the particular algorithm part of your public API.
+
+{/* Why is that important? */}
+
+Imagine version 1 of your library uses:
+
+```java
+@Override
+public int hashCode() {
+    int result = name.hashCode();
+    result = 31 * result + Integer.hashCode(age);
+    return result;
+}
+```
+
+Then later you discover that your objects produce too many collisions.
+
+You might want to change it to:
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(name, age);
+}
+```
+
+Or perhaps a completely different hashing algorithm.
+
+If you never promised the exact hash values, you can simply release the improvement:
+
+```text
+Version 1
+Person("Alice", 30)
+        ↓
+hashCode() → 123456
+
+Version 2
+Person("Alice", 30)
+        ↓
+hashCode() → 987654
+```
+
+That's completely fine.
+
+The important invariant remains:
+
+```text
+equals() == true
+       ↓
+same hashCode()
+```
+
+----
+
+**What happens if you specify the exact hash?**
+
+Suppose your documentation says:
+
+```java
+/**
+ * Returns 31 * name.hashCode() + age.
+ */
+@Override
+public int hashCode() {
+    return 31 * name.hashCode() + age;
+}
+```
+
+Now users can reasonably write code like:
+
+```java
+int hash = person.hashCode();
+
+if (hash == 123456789) {
+    // ...
+}
+```
+
+Or even:
+
+```java
+switch (person.hashCode()) {
+    case 123456789:
+        // ...
+        break;
+}
+```
+
+Your hash algorithm has effectively become part of your API contract.
+
+Changing it later could break client code.
+
+---
+
+But `hashCode()` is not supposed to be persistent identity, A hash code should **not** normally be treated as:
+
+```text
+database ID
+```
+
+or:
+
+```text
+unique ID
+```
+
+or:
+
+```text
+persistent identifier
+```
+
+or:
+
+```text
+serialized representation
+```
+
+For example:
+
+```java
+Person p = new Person("Alice", 30);
+
+System.out.println(p.hashCode());
+```
+
+If today it prints:
+
+```text
+123456
+```
+
+you should generally **not assume it will always print `123456` in every future version of the library/JDK**.
+
+The contract is about relationships between objects, not a permanent number assigned to an object.
+
+For example, Java's `String` contract specifies its hash based on the characters:
+
+```text
+s[0] * 31^(n-1)
++ s[1] * 31^(n-2)
++ ...
++ s[n-1]
+```
+
+which corresponds to:
+
+```java
+int hash = 0;
+
+for (int i = 0; i < s.length(); i++) {
+    hash = 31 * hash + s.charAt(i);
+}
+```
+
+Because this behavior is specified, Java cannot simply replace it with an arbitrary new algorithm without potentially breaking programs that have come to depend on those exact values.
+
+Imagine someone has persisted hash codes:
+
+```java
+Map<Integer, String> data = ...;
+
+data.put("Alice".hashCode(), "some data");
+```
+
+Or perhaps an external system expects a particular hash value.
+
+If Java changed:
+
+```text
+"Alice".hashCode()
+```
+
+from:
+
+```text
+63350368
+```
+
+to some new value, that external dependency could break.
+
+This is exactly the kind of coupling Effective Java is warning about.
+
+#### What should YOUR class guarantee?
+
+For most classes, guarantee the **contract**, not the implementation.
+
+1. Good API contract
+
+    ```text
+    Two objects that are equal according to equals()
+    must have the same hash code.
+    ```
+
+2. Bad API contract
+
+    ```text
+    hashCode() is calculated as:
+
+    31 * field1.hashCode()
+    + field2.hashCode()
+    + ...
+    ```
+
+The first gives you freedom.
+
+The second locks you into an implementation.
+
+#### Real life case
+Many classes in the Java libraries, such as String and Integer, specify
+the exact value returned by their hashCode method as a function of the instance
+value. 
+
+---
+
+You can think about `hashCode()` as having two layers:
+
+```text
+                 hashCode()
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+       Contract             Implementation
+          │                     │
+          ▼                     ▼
+ equal → same hash        31 * result + field
+                         Objects.hash(...)
+                         custom algorithm
+                         cached value
+                         etc.
+```
+
+The **contract** should remain stable.
+
+The **implementation** should remain replaceable.
+
+For example:
+
+1. Version 1
+
+```java
+@Override
+public int hashCode() {
+    int result = name.hashCode();
+    result = 31 * result + age;
+    return result;
+}
+```
+
+2. Version 2
+
+```java
+@Override
+public int hashCode() {
+    return Objects.hash(name, age);
+}
+```
+
+3. Version 3
+
+```java
+@Override
+public int hashCode() {
+    // Some improved implementation
+    ...
+}
+```
+
+As long as:
+
+```java
+a.equals(b) == true
+```
+
+still implies:
+
+```java
+a.hashCode() == b.hashCode()
+```
+
+the implementation can change.
+
+---
+
+This is really an **encapsulation** principle.
+
+Don't expose implementation details unnecessarily.
+
+Instead of saying:
+
+```text
+"My hash function is exactly this algorithm."
+```
+
+say:
+
+```text
+"My objects obey the hashCode contract."
+```
+
+Then you retain the freedom to:
+
+```text
+fix bugs
+   ↓
+improve distribution
+   ↓
+reduce collisions
+   ↓
+improve performance
+   ↓
+change the algorithm
+```
+
+without breaking your API.
+
+**So the rule is:** expose the **behavior clients need**, not the **algorithm you currently happen to use**.
+
+```text
+                 hashCode()
+                     │
+                     ▼
+             ┌───────────────┐
+             │ Public API    │
+             │               │
+             │ Equal objects │
+             │ → equal hash  │
+             └───────┬───────┘
+                     │
+                  stable
+                     │
+                     ▼
+             ┌───────────────┐
+             │ Implementation│
+             │               │
+             │ 31 * result   │
+             │ Objects.hash  │
+             │ custom hash   │
+             │ cached hash   │
+             └───────────────┘
+                     │
+                  changeable
+```
+
+### 19. A good mental checklist
+
+Whenever you implement `hashCode()`, ask:
+
+##### Question 1
+
+What does `equals()` consider significant?
+
+```text
+equals()
+   ↓
+field1
+field2
+field3
+```
+
+##### Question 2
+
+Does `hashCode()` use compatible state?
+
+```text
+hashCode()
+   ↓
+field1
+field2
+field3
+```
+
+##### Question 3
+
+Can those fields change while the object is used as a hash key?
+
+```text
+mutable?
+   │
+   ├── yes → dangerous
+   └── no  → good
+```
+
+##### Question 4
+
+Does the hash distribute values reasonably?
+
+```text
+many different objects
+        ↓
+many hash values
+```
+
+rather than:
+
+```text
+everything → 1
+```
+
+##### Question 5
+
+Am I treating hash equality as object equality?
+
+Never:
+
+```java
+a.hashCode() == b.hashCode()
+```
+
+as proof that:
+
+```java
+a.equals(b)
+```
+
+---
+
+### 20. The most important pitfalls summarized
+
+| Pitfall                                     | Problem                                 | Correct approach                        |
+| ------------------------------------------- | --------------------------------------- | --------------------------------------- |
+| Override `equals()` only                    | Equal objects may have different hashes | Override both                           |
+| Different fields in `equals()`/`hashCode()` | Can violate contract                    | Use compatible equality fields          |
+| Assume same hash = equal                    | Collisions are allowed                  | Use `equals()` for final comparison     |
+| Try to make hashes unique                   | Impossible in general                   | Aim for good distribution               |
+| Constant hash                               | Correct but poor performance            | Distribute values well                  |
+| Mutable hash fields                         | Key can become unreachable              | Use immutable keys                      |
+| Mutate `HashMap` key                        | Lookup may fail                         | Don't mutate equality state             |
+| Array `.hashCode()`                         | Identity-based behavior                 | `Arrays.hashCode()`                     |
+| Nullable field `.hashCode()`                | Possible NPE                            | `Objects.hashCode()` / `Objects.hash()` |
+| Add extra fields to hash                    | May violate contract                    | Don't hash fields ignored by equality   |
+| Identity hash for value object              | Wrong semantics                         | Use value-based hash                    |
+| Mutable collection in hash                  | Hash can change unexpectedly            | Prefer immutable state                  |
+
+---
+
+### 21. The core rule behind almost every pitfall
+
+Everything comes back to one implication:
+
+```text
+                 equals()
+                    │
+                    │ true
+                    ▼
+              same hashCode()
+```
+
+So when reviewing an implementation, don't start by asking:
+
+> "Is this a good hashing algorithm?"
+
+Start by asking:
+
+> **"Can two objects that `equals()` considers equal ever produce different hash codes?"**
+
+If the answer is **yes**, the implementation is broken.
+
+Then ask:
+
+> **"For unequal objects, does the implementation distribute hashes reasonably well?"**
+
+That determines the **performance quality** of the implementation.
+
+So the hierarchy is:
+
+```text
+                hashCode()
+                    │
+          ┌─────────┴─────────┐
+          │                   │
+     Correctness           Performance
+          │                   │
+          ▼                   ▼
+ equal objects          good distribution
+ must have              reduces collisions
+ same hash
+```
+
+**Correctness comes first; distribution comes second.**
+
+## Summary
+In summary, you must override hashCode every time you override equals, or
+your program will not run correctly. Your hashCode method must obey the general
+contract specified in Object and must do a reasonable job assigning unequal hash
+codes to unequal instances. This is easy to achieve, if slightly tedious, using the
+recipe above.
+
+
+The complete picture is:
+
+```text
+                         hashCode()
+                             │
+                             ▼
+                    numeric hash value
+                             │
+                             ▼
+                     hash-based lookup
+                             │
+                 ┌───────────┴───────────┐
+                 │                       │
+              HashMap                 HashSet
+                 │                       │
+                 └───────────┬───────────┘
+                             │
+                             ▼
+                          bucket
+                             │
+                             ▼
+                     candidate objects
+                             │
+                             ▼
+                          equals()
+                             │
+                       ┌─────┴─────┐
+                       │           │
+                     false        true
+                       │           │
+                  next candidate   match
+```
+
+And the implementation side is:
+
+```text
+equals()
+   │
+   ├── determines logical equality
+   │
+   └── identifies significant fields
+                 │
+                 ▼
+            hashCode()
+                 │
+                 ├── must produce same hash
+                 │   for equal objects
+                 │
+                 └── should distribute
+                     unequal objects well
+```
+**The `equals()` / `hashCode()` contract together**
+
+You can summarize the entire relationship as:
+
+| Situation                         | `equals()` |           `hashCode()` |
+| --------------------------------- | ---------: | ---------------------: |
+| Same object                       |     `true` |                   Same |
+| Equal value objects               |     `true` |       **Must be same** |
+| Unequal objects                   |    `false` |            May be same |
+| Hash collision                    |    `false` |                   Same |
+| Different hash                    |    `false` |              Different |
+| Equal objects with different hash |     `true` | **Contract violation** |
+
+The critical implication is:
+
+```text
+equals(a, b)
+      │
+      │ true
+      ▼
+hashCode(a) == hashCode(b)
+```
+
+But not:
+
+```text
+hashCode(a) == hashCode(b)
+      │
+      ✗
+      ▼
+equals(a, b)
+```
+
+---
+
+from a Java design perspective:
+
+> **`equals()` defines what it means for two objects to represent the same value; `hashCode()` provides a compatible numeric representation that allows hash-based collections to find those values efficiently.**
+
+That is why **`equals()` and `hashCode()` should be studied as one `Object` API topic**, rather than as two unrelated methods.
+
+
+The AutoValue framework provides a
+fine alternative to writing equals and hashCode methods manually, and IDEs also
+provide some of this functionality.

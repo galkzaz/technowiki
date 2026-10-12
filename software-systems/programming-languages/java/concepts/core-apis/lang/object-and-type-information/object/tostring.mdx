@@ -1,0 +1,2651 @@
+
+In Java, `toString()` is a method defined in the `java.lang.Object` class. It returns a string representation of an object.
+
+Because every Java class directly or indirectly extends `Object`, every Java object inherits this method.
+
+The method is declared as:
+
+```
+public String toString()
+```
+
+## What does `toString()` do?
+
+Imagine you have a `Product` object in an online shop.
+
+```
+class Product {
+    int id;
+    String name;
+    double price;
+
+    Product(int id, String name, double price) {
+        this.id = id;
+        this.name = name;
+        this.price = price;
+    }
+}
+```
+
+You create an object:
+
+```
+Product product = new Product(101, "Laptop", 1200.0);
+
+System.out.println(product);
+```
+
+You might expect this output:
+
+```
+Product{id=101, name='Laptop', price=1200.0}
+```
+
+But you will get something similar to:
+
+```
+Product@5acf9800
+```
+
+Why? Because you haven't overridden `toString()`. Java is using the implementation inherited from `Object`.
+
+The default implementation produces a string containing the class name, an `@` separator, and a hexadecimal representation derived from the object's hash code.
+
+```Java
+    public String toString() {
+        return getClass().getName() + "@" + Integer.toHexString(hashCode());
+    }
+```
+```Java
+    public static String toHexString(int i) {
+        return toUnsignedString0(i, 4);
+    }
+    private static String toUnsignedString0(int val, int shift) {
+        // assert shift > 0 && shift <=5 : "Illegal shift value";
+        int mag = Integer.SIZE - Integer.numberOfLeadingZeros(val);
+        int chars = Math.max(((mag + (shift - 1)) / shift), 1);
+        byte[] buf = new byte[chars];
+        formatUnsignedInt(val, shift, buf, chars);
+        return String.newStringWithLatin1Bytes(buf);
+    }
+    public static int numberOfLeadingZeros(int i) {
+        // HD, Count leading 0's
+        if (i <= 0)
+            return i == 0 ? 32 : 0;
+        int n = 31;
+        if (i >= 1 << 16) { n -= 16; i >>>= 16; }
+        if (i >= 1 <<  8) { n -=  8; i >>>=  8; }
+        if (i >= 1 <<  4) { n -=  4; i >>>=  4; }
+        if (i >= 1 <<  2) { n -=  2; i >>>=  2; }
+        return n - (i >>> 1);
+    }
+    private static void formatUnsignedInt(int val, int shift, byte[] buf, int len) {
+        int charPos = len;
+        int radix = 1 << shift;
+        int mask = radix - 1;
+        do {
+            buf[--charPos] = Integer.digits[val & mask];
+            val >>>= shift;
+        } while (charPos > 0);
+    }
+```
+Important: The default output is not a unique object identifier, and the hexadecimal part is not necessarily the object's memory address.
+
+## Why override `toString()`?
+
+The default implementation usually isn't useful to developers because it doesn't explain the object's data.
+
+While it isn’t as critical as obeying the `equals` and `hashCode` contracts, **providing a good `toString` implementation makes your class much more pleasant to use and makes systems using the class easier to debug**.
+
+Override `toString()` when a meaningful textual representation would help with debugging, logging, or inspecting objects.
+
+Here's the improved `Product` class:
+
+```Java
+class Product {
+    private final int id;
+    private final String name;
+    private final double price;
+
+    Product(int id, String name, double price) {
+        this.id = id;
+        this.name = name;
+        this.price = price;
+    }
+
+    @Override
+    public String toString() {
+        return "Product{" +
+                "id=" + id +
+                ", name='" + name + '\'' +
+                ", price=" + price +
+                '}';
+    }
+}
+```
+
+Now:
+
+```Java
+public class Main {
+    public static void main(String[] args) {
+        Product product = new Product(101, "Laptop", 1200.0);
+
+        System.out.println(product);
+        System.out.println(product.toString());
+    }
+}
+```
+
+Output:
+
+```
+Product{id=101, name='Laptop', price=1200.0}
+Product{id=101, name='Laptop', price=1200.0}
+```
+
+Both statements produce the same output.
+
+you should override `toString()` because Java and other code may call it automatically, even when you don't explicitly call it yourself. The `toString` method is automatically invoked when an object is passed to `println`, `printf`, the string concatenation operator, or `assert`, or is printed by a debugger. Even if you never call `toString` on an object, others may. For example,
+a component that has a reference to your object may include the string representation of the object in a logged error message. If you fail to override toString, the message may be all but useless.
+
+If you’ve provided a good toString method for PhoneNumber, generating a
+useful diagnostic message is as easy as this:
+```Java
+System.out.println("Failed to connect to " + phoneNumber);
+```
+Programmers will generate diagnostic messages in this fashion whether or not
+you override toString, but the messages won’t be useful unless you do.
+### Passing an object to `println()`
+
+Suppose you have this class:
+
+```Java
+class Product {
+    int id = 101;
+    String name = "Laptop";
+}
+```
+
+You create an object and print it:
+
+```Java
+Product product = new Product();
+
+System.out.println(product);
+```
+
+Output (similar to):
+
+```
+Product@2f92e0f4
+```
+
+Why? Because `Product` inherits the default `toString()` implementation from `Object`. The output doesn't tell you the product's ID or name, so it's not very useful for debugging.
+
+Now override `toString()`:
+
+```Java
+class Product {
+    int id = 101;
+    String name = "Laptop";
+
+    @Override
+    public String toString() {
+        return "Product{id=" + id + ", name='" + name + "'}";
+    }
+}
+```
+
+Printing the same object now produces:
+
+```
+Product{id=101, name='Laptop'}
+```
+
+This is much more useful.
+
+### Using `printf()`
+
+You can also print an object's string representation using `%s`.
+
+```Java
+Product product = new Product();
+
+System.out.printf("Product: %s%n", product);
+```
+
+Output:
+
+```
+Product: Product{id=101, name='Laptop'}
+```
+
+For an ordinary non-null object, `%s` uses its string representation. For a `null` argument, `%s` prints `null`.
+
+### Using the string concatenation operator (`+`)
+
+Consider this statement:
+
+```Java
+Product product = new Product();
+
+String message = "Selected product: " + product;
+
+System.out.println(message);
+```
+
+Output:
+
+```
+Selected product: Product{id=101, name='Laptop'}
+```
+
+When Java concatenates a string with a non-null object, it converts that object to a string.
+
+Conceptually, this:
+
+```
+"Selected product: " + product
+```
+
+behaves like:
+
+```
+"Selected product: " + String.valueOf(product)
+```
+
+For a non-null object, `String.valueOf(product)` calls `product.toString()`.
+
+Important: If `product` is `null`, concatenation produces `"Selected product: null"` rather than throwing a `NullPointerException`.
+
+### Using `assert`
+
+An assertion checks whether a condition is true. If the condition is false, Java throws an `AssertionError`.
+
+For example:
+
+```Java
+Product product = new Product();
+
+assert product.id == 999 : product;
+```
+
+If assertions are enabled, the condition fails because `product.id` is `101`.
+
+The object after the colon is the assertion's detail expression. Java converts it to a string when constructing the error, so the error message can include:
+
+```
+java.lang.AssertionError: Product{id=101, name='Laptop'}
+```
+
+Without a useful `toString()` implementation, you might see only something like:
+
+```
+java.lang.AssertionError: Product@2f92e0f4
+```
+
+One detail: Java assertions are disabled by default unless enabled with the `-ea` JVM option.
+
+### When another component logs your object
+
+Imagine your application passes a `Product` object to a service:
+
+```Java
+class ProductService {
+    void process(Product product) {
+        // Imagine processing fails here.
+        System.err.println("Failed to process: " + product);
+    }
+}
+```
+
+You might never call `product.toString()` directly. Nevertheless, `ProductService` uses string concatenation, which triggers the conversion.
+
+With a useful override, the log says:
+
+```
+Failed to process: Product{id=101, name='Laptop'}
+```
+
+Without it:
+
+```
+Failed to process: Product@2f92e0f4
+```
+
+Now imagine you're investigating a production error involving hundreds of different products. The first message helps you identify the problematic product; the second usually doesn't.
+
+This can happen in logging frameworks, exception messages, debugging tools, and third-party libraries.
+
+### Printed by debuggers?
+
+When inspecting an object in an IDE, a debugger may display its fields directly, or it may use `toString()` to provide a compact textual representation.
+
+For example, instead of seeing a generic object label, you might see:
+
+```
+Product{id=101, name='Laptop'}
+```
+
+The exact behavior depends on the debugger and its configuration.
+
+### In Collections
+The benefits of providing a good `toString` method extend beyond instances of the class to
+objects containing references to these instances, especially collections. Which
+would you rather see when printing a map, `{Jenny=PhoneNumber@163b91}` or
+`{Jenny=707-867-5309}`?
+
+overriding `toString()` improves not only the output of your own objects, but also the output of collections and other objects that contain them.
+
+**The problem: objects inside a collection**
+
+Suppose you're building a phone directory using a `Map`.
+
+```Java
+import java.util.HashMap;
+import java.util.Map;
+
+class PhoneNumber {
+    private final String number;
+
+    public PhoneNumber(String number) {
+        this.number = number;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Map<String, PhoneNumber> phoneBook = new HashMap<>();
+
+        phoneBook.put("Jenny", new PhoneNumber("707-867-5309"));
+
+        System.out.println(phoneBook);
+    }
+}
+```
+
+Output (the hexadecimal portion will vary):
+
+```
+{Jenny=PhoneNumber@163b91}
+```
+
+Why does this happen?
+
+- `phoneBook` is a `HashMap`.
+- The map contains a key, `"Jenny"`, and a value, a `PhoneNumber` object.
+- When the map is converted to a string, it formats its entries using the string representations of their keys and values.
+- `String` already provides a useful `toString()` implementation, so the key appears as `Jenny`.
+- `PhoneNumber` inherits the default `Object.toString()`, so the value appears as something like `PhoneNumber@163b91`.
+
+The map itself is working correctly. The problem is that the value's textual representation isn't informative.
+
+**The solution: override `toString()`
+**
+Modify `PhoneNumber` to provide a readable representation.
+
+```Java
+class PhoneNumber {
+    private final String number;
+
+    public PhoneNumber(String number) {
+        this.number = number;
+    }
+
+    @Override
+    public String toString() {
+        return number;
+    }
+}
+```
+
+Now run the same code:
+
+```
+System.out.println(phoneBook);
+```
+
+Output:
+
+```
+{Jenny=707-867-5309}
+```
+
+Much better! You can immediately understand the contents of the map.
+
+Without overriding `toString()`
+```
+{Jenny=PhoneNumber\@163b91}
+```
+The value's actual meaning is hidden.
+
+With an overridden `toString()`
+```
+{Jenny=707-867-5309}
+```
+The value is immediately understandable.
+
+**Why do collections benefit automatically?**
+
+Java's collections commonly implement their own `toString()` methods by using the string representations of their contents.
+
+For example:
+
+```
+List<PhoneNumber> numbers = List.of(
+    new PhoneNumber("707-867-5309"),
+    new PhoneNumber("212-555-0100")
+);
+
+System.out.println(numbers);
+```
+
+With our overridden `PhoneNumber.toString()`, the output is:
+
+```
+[707-867-5309, 212-555-0100]
+```
+
+Without the override, it would look similar to:
+
+```
+[PhoneNumber@1a2b3c, PhoneNumber@4d5e6f]
+```
+
+The exact hexadecimal values are implementation-dependent.
+
+The same principle applies to:
+
+- `List` — lists of objects.
+- `Set` — sets of objects.
+- `Map` — keys and values.
+- Nested collections — collections containing other collections.
+- Custom objects — objects containing references to other objects.
+
+For example, if an `Order` contains a `Customer` and a list of `Product` objects, a useful `toString()` implementation for each class can make the entire order much easier to inspect.
+
+
+### Summary
+
+| Situation            | Example                            | Why `toString()` matters                         |
+| -------------------- | ---------------------------------- | ------------------------------------------------ |
+| Printing             | `System.out.println(product)`      | Displays readable object information             |
+| Formatted output     | `System.out.printf("%s", product)` | Converts the object for `%s`                     |
+| String concatenation | `"Product: " + product`            | Includes the object's representation in a string |
+| Assertions           | `assert condition : product`       | Helps explain a failed assertion                 |
+| Logging              | `"Failed: " + product`             | Makes error messages more informative            |
+| Debugging            | Inspecting an object               | May provide a readable summary                   |
+
+The practical lesson: Override `toString()` when a useful textual representation will help people understand your objects. You cannot control every place where your object might be printed, logged, or inspected, so a good implementation makes your code easier to debug even when someone else uses it.
+
+## How does `System.out.println(product)` call `toString()`?
+
+This is an important Java behavior.
+
+When you write:
+
+```
+System.out.println(product);
+```
+
+Java selects the `println(Object)` overload because `product` is a `Product` reference.
+
+Conceptually, that overload converts the object into a string before printing it, using `String.valueOf(Object)`.
+
+PrintStream.java
+```Java
+    public void println(Object x) {
+        String s = String.valueOf(x);
+        if (getClass() == PrintStream.class) {
+            // need to apply String.valueOf again since first invocation
+            // might return null
+            writeln(String.valueOf(s));
+        } else {
+            synchronized (this) {
+                print(s);
+                newLine();
+            }
+        }
+    }
+```
+For a non-null object, `String.valueOf(Object)` calls:
+
+```
+product.toString()
+```
+
+String.java
+```Java
+    public static String valueOf(Object obj) {
+        return (obj == null) ? "null" : obj.toString();
+    }
+```
+
+The flow is:
+
+`System.out.println(product)`
+
+`println(Object)` converts the object to text
+
+`String.valueOf(product)`
+
+`product.toString()`
+
+The resulting string is printed
+
+**What if the object is `null`?**
+
+```Java
+Product product = null;
+
+System.out.println(product);
+```
+
+Output:
+
+```
+null
+```
+
+No `toString()` method is called on the null reference.
+
+However, this will throw a `NullPointerException`:
+
+```Java
+System.out.println(product.toString());
+```
+
+That's because you're trying to invoke a method on `null`.
+
+## The `toString()` Contract
+
+The `Object.toString()` documentation describes the general form of its result as:
+
+```Java
+getClass().getName() + '@' + Integer.toHexString(hashCode())
+```
+
+This describes the default implementation's conventional representation. 
+
+The general contract for toString says that the returned string should be “a concise but informative representation that is easy for a person to read.” While it could be argued that `PhoneNumber@163b91` is concise and easy to read, it isn’t very informative when compared to `707-867-5309`. The toString contract goes on to say, “It is recommended that all subclasses override this method
+
+It is not a requirement that every overridden implementation follow this format.
+
+For example, you can return:
+
+```Java
+@Override
+public String toString() {
+    return name;
+}
+```
+
+Or a more descriptive representation:
+
+```Java
+@Override
+public String toString() {
+    return "Product[id=" + id +
+            ", name=" + name +
+            ", price=" + price + "]";
+}
+```
+
+The general contract requires a string representation. It does not require you to include every field or use a particular format.
+
+In practice, a good `toString()` method should be:
+
+- Readable: Developers can understand the object's state.
+- Useful: Include fields that matter when debugging.
+- Consistent: Prefer a stable, predictable format where practical.
+- Safe: Avoid exposing passwords, access tokens, personal information, or other secrets.
+
+
+
+### Readable
+### Useful
+how much information a good `toString()` method should return? When practical, the `toString` method should return all of the interesting information contained in the object.
+
+The main rule is: return all interesting information when practical. If that's impractical, return a clear summary that helps someone understand the object.
+
+Suppose you're implementing a phone number class.
+
+```Java
+class PhoneNumber {
+    private final String countryCode;
+    private final String areaCode;
+    private final String number;
+
+    PhoneNumber(String countryCode, String areaCode, String number) {
+        this.countryCode = countryCode;
+        this.areaCode = areaCode;
+        this.number = number;
+    }
+
+    @Override
+    public String toString() {
+        return "+" + countryCode + " " + areaCode + " " + number;
+    }
+}
+```
+
+Example:
+
+```Java
+PhoneNumber phone = new PhoneNumber("20", "2", "12345678");
+
+System.out.println(phone);
+```
+
+Output:
+
+```
++20 2 12345678
+```
+
+This is useful because the string communicates the important information about the object.
+
+Compare that with an implementation that returns only the country code:
+
+```Java
+@Override
+public String toString() {
+    return "+" + countryCode;
+}
+```
+
+Output:
+
+```
++20
+```
+
+The output omits the area code and the actual number. It is therefore a poor representation if the purpose is to inspect the complete phone number.
+
+The goal isn't necessarily to print every field. It's to include the information that makes the object understandable.
+
+---
+
+**When returning everything is impractical**
+
+Some objects contain too much information to print completely like if the object is large or if it contains state that is not conducive to
+string representation.
+
+Imagine a phone directory containing 1,487,536 residential listings. Returning every listing from `toString()` would create an enormous string that is difficult to read and potentially expensive to generate.
+
+Instead, return a summary:
+
+```Java
+@Override
+public String toString() {
+    return "Manhattan residential phone directory (1487536 listings)";
+}
+```
+
+Output:
+
+```
+Manhattan residential phone directory (1487536 listings)
+```
+
+This tells you what the object represents and gives you a useful idea of its size without printing its entire contents.
+
+Other examples include:
+
+| Object                   | Useful representation                           |
+| ------------------------ | ----------------------------------------------- |
+| Large collection         | `Customer collection (250000 entries)`          |
+| Database connection pool | `ConnectionPool[active=8, idle=12]`             |
+| File-processing job      | `ImportJob[file=customers.csv, status=RUNNING]` |
+| Network server           | `Server[host=localhost, port=8080]`             |
+
+These are illustrative examples; the exact format is up to the class designer.
+
+---
+
+Ideally, the string should be self-explanatory. Consider the `Thread` class:
+```
+Thread[main,5,main]
+```
+
+This is a conventional representation of a Java thread. It includes the thread name, priority, and thread group.
+
+However, a reader unfamiliar with the format might not know what the three values mean.
+
+A more descriptive representation might look like:
+
+```
+Thread[name=main, priority=5, group=main]
+```
+
+The second representation explains the meaning of each value through its labels.
+
+The lesson is to prefer meaningful descriptions over compact strings that require someone to memorize their format.
+
+---
+
+why an incomplete representation can make debugging and testing difficult? Why can a poor `toString()` cause confusing test failures? Suppose you're testing a class that represents a set of values:
+
+```Java
+Set<String> expected = Set.of("abc", "123");
+Set<String> actual = getResult();
+
+assertEquals(expected, actual);
+```
+
+Imagine that the assertion fails, but the test framework prints:
+
+```
+Assertion failure: expected {abc, 123}, but was {abc, 123}.
+```
+
+At first glance, the two sets appear identical. So why did the test fail?
+
+One possibility is that the elements are objects whose `toString()` representations omit information that matters to equality.
+
+For example, consider this class:
+
+```Java
+import java.util.Objects;
+
+class User {
+    private final String username;
+    private final int id;
+
+    User(String username, int id) {
+        this.username = username;
+        this.id = id;
+    }
+
+    @Override
+    public String toString() {
+        return username;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (!(obj instanceof User other)) {
+            return false;
+        }
+
+        return id == other.id
+                && Objects.equals(username, other.username);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(username, id);
+    }
+}
+```
+
+Now create two users:
+
+```Java
+User expected = new User("abc", 123);
+User actual = new User("abc", 456);
+
+System.out.println(expected);
+System.out.println(actual);
+System.out.println(expected.equals(actual));
+```
+
+Output:
+
+```
+abc
+abc
+false
+```
+
+Both users print as `abc`, but their IDs differ, so they are not equal.
+
+A test failure report that shows only their string representations could conceal the actual difference.
+
+A better `toString()` would be:
+
+```Java
+@Override
+public String toString() {
+    return "User{username='" + username + "', id=" + id + "}";
+}
+```
+
+Now the outputs are:
+
+```
+User{username='abc', id=123}
+User{username='abc', id=456}
+```
+
+The cause of the failure becomes immediately apparent.
+
+### Consistent
+### Safe
+One practical caution: avoid including passwords, access tokens, or other sensitive information in the returned string, because collections and logging frameworks may expose it unintentionally.
+## `toString()` And Inheritance
+
+Because `toString()` is an instance method, Java uses normal method overriding and dynamic dispatch.
+
+Consider this example:
+
+```Java
+class Animal {
+    @Override
+    public String toString() {
+        return "Animal";
+    }
+}
+
+class Dog extends Animal {
+    @Override
+    public String toString() {
+        return "Dog";
+    }
+}
+```
+
+Now:
+
+```Java
+Animal animal = new Dog();
+
+System.out.println(animal);
+```
+
+Output:
+
+```
+Dog
+```
+
+Although the reference type is `Animal`, the actual object is a `Dog`, so Java calls `Dog.toString()`.
+
+This is the same polymorphic behavior you encounter with other overridden instance methods.
+
+**What if the subclass doesn't override `toString()`?**
+
+```Java
+class Animal {
+    @Override
+    public String toString() {
+        return "Animal";
+    }
+}
+
+class Dog extends Animal {
+}
+```
+
+Then:
+
+```Java
+Animal animal = new Dog();
+System.out.println(animal);
+```
+
+Output:
+
+```
+Animal
+```
+
+`Dog` inherits the implementation from `Animal`.
+
+## Should `toString()` include all fields?
+
+Not necessarily.
+
+Suppose an `Account` class has these fields:
+
+```Java
+class Account {
+    private String username;
+    private String password;
+    private double balance;
+}
+```
+
+A poor implementation would be:
+
+```Java
+@Override
+public String toString() {
+    return "Account{" +
+            "username='" + username + '\'' +
+            ", password='" + password + '\'' +
+            ", balance=" + balance +
+            '}';
+}
+```
+
+This could expose the password in logs.
+
+A safer version is:
+
+```Java
+@Override
+public String toString() {
+    return "Account{" +
+            "username='" + username + '\'' +
+            ", balance=" + balance +
+            '}';
+}
+```
+
+Choose fields according to the purpose of the representation, and avoid including sensitive values.
+
+## `toString()` versus `equals()` and `hashCode()`
+
+These three methods are all inherited from `Object`, but they serve different purposes.
+
+| Method           | Purpose                     | Example                                                         |
+| ---------------- | --------------------------- | --------------------------------------------------------------- |
+| `toString()`     | Textual representation      | `"Product[id=101]"`                                             |
+| `equals(Object)` | Determines logical equality | Are two products equal according to the class's equality rules? |
+| `hashCode()`     | Supplies a hash value       | Used by hash-based collections such as `HashMap`                |
+
+They are independent in purpose, but there are important connections:
+
+- Overriding `toString()` does not change object equality.
+- Overriding `toString()` does not change `hashCode()`.
+- Two objects can have identical `toString()` results and still not be equal.
+- If two objects are equal according to `equals()`, they must have the same `hashCode()`, but their `toString()` results do not have to match.
+
+Overriding `toString()` changes how an object is represented as text. It does not change the object's actual data or equality behavior.
+
+For example:
+
+```Java
+PhoneNumber first = new PhoneNumber("707-867-5309");
+PhoneNumber second = new PhoneNumber("707-867-5309");
+
+System.out.println(first);          // 707-867-5309
+System.out.println(second);         // 707-867-5309
+System.out.println(first.equals(second)); // false
+```
+
+The two objects print identically, but `equals()` still returns `false` because `PhoneNumber` has not overridden `equals()`. The default implementation inherited from `Object` compares object identity.
+
+This illustrates why `toString()`, `equals()`, and `hashCode()` must be understood as separate methods..
+
+This distinction is especially important when studying the `Object` class's equality and hashing contracts.
+
+## `toString()` and Java records
+
+Java records automatically provide a useful `toString()` implementation.
+
+```Java
+record Product(int id, String name, double price) {}
+
+public class Main {
+    public static void main(String[] args) {
+        Product product = new Product(101, "Laptop", 1200.0);
+
+        System.out.println(product);
+    }
+}
+```
+
+Output:
+
+```
+Product[id=101, name=Laptop, price=1200.0]
+```
+
+You generally don't need to implement `toString()` manually for a record unless you want a different representation.
+
+Ordinary classes, in contrast, inherit `Object.toString()` unless a superclass provides an override.
+
+## When should you override `toString()`?
+
+Use this checklist:
+
+- Override it when the default class-name-and-hash representation isn't informative.
+- Include fields that make the object easy to identify and inspect.
+- Don't expose secrets or sensitive data.
+- Don't assume the output is a serialization format suitable for saving and restoring objects.
+- Don't rely on the default hexadecimal suffix as an object ID.
+- Remember that overriding `toString()` doesn't implement `equals()` or `hashCode()`.
+
+The key idea: `toString()` is primarily a human-readable representation of an object's state. It makes debugging and logging easier, but it does not define what the object is, whether it is equal to another object, or how it behaves in hash-based collections.
+
+It makes no sense to write a toString method in a static utility class (Item 4).
+Nor should you write a toString method in most enum types (Item 34) because
+Java provides a perfectly good one for you. You should, however, write a
+toString method in any abstract class whose subclasses share a common string
+representation. For example, the toString methods on most collection implementations are inherited from the abstract collection classes.
+1. Static utility classes — don't implement `toString()`.
+2. Most enum types — usually don't need to implement `toString()`.
+3. Abstract classes — consider implementing `toString()` when subclasses share a common representation.
+
+
+### Static utility classes: don't implement `toString()`
+
+A static utility class groups related operations. It typically has no instances and is not intended to represent an object.
+
+For example:
+
+```Java
+public final class MathUtils {
+
+    private MathUtils() {
+        // Prevent instantiation.
+    }
+
+    public static int square(int number) {
+        return number * number;
+    }
+
+    public static int cube(int number) {
+        return number * number * number;
+    }
+}
+```
+
+You use the class like this:
+
+```Java
+System.out.println(MathUtils.square(5)); // 25
+System.out.println(MathUtils.cube(3));   // 27
+```
+
+You don't normally create a `MathUtils` object:
+
+```Java
+// Not allowed because the constructor is private.
+// MathUtils utils = new MathUtils();
+```
+
+So, what would a `toString()` method describe?
+
+There is no meaningful utility-class instance whose state needs to be represented. Adding an instance method like this would not help:
+
+```Java
+@Override
+public String toString() {
+    return "MathUtils";
+}
+```
+
+The method would be irrelevant to the class's intended use.
+
+The principle: `toString()` is useful when an object has a meaningful textual representation. A static utility class generally has no such objects.
+
+### Enum types: Java already provides `toString()`
+
+An enum represents a fixed set of named constants.
+
+For example:
+
+```Java
+enum OrderStatus {
+    PENDING,
+    PAID,
+    SHIPPED,
+    CANCELLED
+}
+```
+
+Java already provides a useful `toString()` implementation for enums.
+
+```Java
+OrderStatus status = OrderStatus.SHIPPED;
+
+System.out.println(status);
+System.out.println(status.toString());
+System.out.println(status.name());
+```
+
+Output:
+
+```
+SHIPPED
+SHIPPED
+SHIPPED
+```
+
+For an enum constant that hasn't overridden `toString()`, the default implementation returns its declared name.
+
+So you generally don't need to write:
+
+```Java
+@Override
+public String toString() {
+    return name();
+}
+```
+
+It would simply duplicate the existing behavior.
+
+---
+
+**When should you override an enum's `toString()`?**
+
+Sometimes the internal constant name isn't the desired display text.
+
+```Java
+enum OrderStatus {
+    PENDING("Awaiting payment"),
+    PAID("Payment received"),
+    SHIPPED("On its way"),
+    CANCELLED("Order cancelled");
+
+    private final String description;
+
+    OrderStatus(String description) {
+        this.description = description;
+    }
+
+    @Override
+    public String toString() {
+        return description;
+    }
+}
+```
+
+Now:
+
+```Java
+OrderStatus status = OrderStatus.SHIPPED;
+
+System.out.println(status);      // On its way
+System.out.println(status.name()); // SHIPPED
+```
+
+Here, overriding `toString()` makes sense because you want a human-readable description.
+
+Notice that `name()` still returns the declared constant name. Also, don't use a customized `toString()` as a stable identifier for persistence unless you've deliberately designed and documented it for that purpose.
+
+### Abstract classes: provide a common `toString()` implementation
+
+An abstract class cannot be instantiated directly, but it can provide behavior inherited by its subclasses.
+
+Suppose several collection implementations share the same textual representation.
+
+You might want a list to print like this:
+
+```
+[Apple, Banana, Orange]
+```
+
+And a set to print like this:
+
+```
+[10, 20, 30]
+```
+
+The collection types differ internally, but they can share a common way to represent their elements as text.
+
+Java uses this design in its collection framework.
+
+**Example: a common abstract collection**
+
+Consider a simplified example:
+
+```Java
+import java.util.Iterator;
+
+abstract class AbstractNames {
+    public abstract Iterator<String> iterator();
+
+    public abstract int size();
+
+    @Override
+    public String toString() {
+        Iterator<String> iterator = iterator();
+        StringBuilder result = new StringBuilder("[");
+
+        while (iterator.hasNext()) {
+            result.append(iterator.next());
+
+            if (iterator.hasNext()) {
+                result.append(", ");
+            }
+        }
+
+        return result.append("]").toString();
+    }
+}
+```
+
+A subclass only needs to provide iteration and size-related behavior as required by its contract.
+
+```Java
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+
+class NameList extends AbstractNames {
+    private final List<String> names;
+
+    NameList(String... names) {
+        this.names = Arrays.asList(names);
+    }
+
+    @Override
+    public Iterator<String> iterator() {
+        return names.iterator();
+    }
+
+    @Override
+    public int size() {
+        return names.size();
+    }
+}
+```
+
+Usage:
+
+```Java
+NameList names = new NameList("Apple", "Banana", "Orange");
+
+System.out.println(names);
+```
+
+Output:
+
+```
+[Apple, Banana, Orange]
+```
+
+The `NameList` class doesn't need to implement `toString()` itself. It inherits the implementation from `AbstractNames`.
+
+If you create another subclass, it can reuse the same representation automatically.
+
+---
+
+Java's collection framework follows this pattern:
+
+- `AbstractCollection` provides a general `toString()` implementation.
+- `AbstractList` and `AbstractSet` inherit that implementation through their class hierarchy.
+- Many concrete collection classes therefore get a useful representation without implementing `toString()` themselves.
+
+AbstractCollection.java
+```Java
+    public String toString() {
+        Iterator<E> it = iterator();
+        if (! it.hasNext())
+            return "[]";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append('[');
+        for (;;) {
+            E e = it.next();
+            sb.append(e == this ? "(this Collection)" : e);
+            if (! it.hasNext())
+                return sb.append(']').toString();
+            sb.append(',').append(' ');
+        }
+    }
+
+}
+```
+For example:
+
+```Java
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+public class Main {
+    public static void main(String[] args) {
+        List<String> fruits =
+                new ArrayList<>(List.of("Apple", "Banana", "Orange"));
+
+        Set<Integer> numbers =
+                new HashSet<>(Set.of(10, 20, 30));
+
+        System.out.println(fruits);
+        System.out.println(numbers);
+    }
+}
+```
+
+Output for the list:
+
+```
+[Apple, Banana, Orange]
+```
+
+The set's output contains the same elements in a bracketed, comma-separated form, but its order is not guaranteed by `HashSet`.
+
+This is a practical benefit of placing shared behavior in an abstract base class: concrete implementations inherit the behavior instead of duplicating it.
+
+**Summary**
+
+| Type                      | Should you implement `toString()`? | Reason                                                                |
+| ------------------------- | ---------------------------------- | --------------------------------------------------------------------- |
+| Static utility class      | Usually no                         | It isn't intended to have meaningful instances.                       |
+| Enum                      | Usually no                         | Java already returns the constant's name.                             |
+| Abstract class            | Often yes, if appropriate          | Subclasses can inherit a common representation.                       |
+| Ordinary value class      | Usually worth considering          | A readable representation helps with debugging and logging.           |
+| Collection implementation | Often unnecessary                  | An inherited implementation may already provide the desired behavior. |
+
+The main lesson: Before overriding `toString()`, check whether the class represents a meaningful object and whether a suitable implementation is already inherited. Write a new implementation when it adds value, and place shared behavior in an abstract superclass when multiple subclasses can benefit from it.
+
+## Advantages and benefits
+
+| Advantage                      | Benefit                                     | Example                                            |
+| ------------------------------ | ------------------------------------------- | -------------------------------------------------- |
+| Readability                    | Makes object output understandable          | `Product{id=101, name='Laptop'}`                   |
+| Easier debugging               | Helps identify incorrect object state       | Inspect a product with an unexpected price         |
+| Better logging                 | Makes log messages more informative         | `logger.debug("Loaded {}", product)`               |
+| Easier testing                 | Makes test failures easier to diagnose      | Expected and actual objects show meaningful values |
+| Improved diagnostics           | Helps developers trace application behavior | Inspect an order containing multiple line items    |
+| Easier inspection              | Helps when using a debugger or console      | Inspect an object in a collection                  |
+| Domain clarity                 | Can represent a value in a familiar format  | `2026-10-11` or `(212) 555-1234`                   |
+| Less repetitive debugging code | Avoids manually printing every field        | `System.out.println(product)`                      |
+
+### testing
+
+Suppose two products have the same name but different IDs. A test failure showing only the name can hide the actual difference.
+
+A useful `toString()` might show:
+
+```
+Expected: Product{id=101, name='Laptop', price=999.99}
+Actual:   Product{id=102, name='Laptop', price=999.99}
+```
+
+This immediately reveals the ID mismatch.
+
+Important: `toString()` improves diagnostic output; it does not make an assertion more correct. Equality should still be tested using the appropriate assertion and the class's equality semantics.
+
+# Importance of overriding `toString()`
+
+Java uses string conversion in several common situations.
+
+| Situation            | Example                               | Why `toString()` matters                                         |
+| -------------------- | ------------------------------------- | ---------------------------------------------------------------- |
+| Printing             | `System.out.println(product)`         | Displays a readable representation                               |
+| String concatenation | `"Product: " + product`               | Includes the object's string representation                      |
+| Logging              | `logger.info("Product: {}", product)` | Makes object-related messages useful                             |
+| Debugging            | Inspecting an object in an IDE        | Helps reveal field values                                        |
+| Assertions           | Failure messages involving objects    | Can make differences easier to understand                        |
+| Collections          | `System.out.println(products)`        | Collection output usually includes each element's representation |
+
+For example:
+
+```
+Product product = new Product(101, "Laptop", 999.99);
+
+System.out.println(product);
+System.out.println("Loaded: " + product);
+```
+
+Both statements use the overridden representation.
+
+However, be careful with logging: some logging frameworks support parameterized messages and lazy formatting, while string concatenation constructs the message before the logger decides whether to emit it.
+
+
+## Design guidelines
+
+These are the main recommendations to follow when implementing `toString()`.
+
+### Guideline 1: Provide useful information
+
+Include the fields that help someone understand the object's state.
+
+```
+@Override
+public String toString() {
+    return "Product{id=" + id
+            + ", name='" + name + '\''
+            + ", price=" + price
+            + '}';
+}
+```
+
+Avoid output that is technically descriptive but practically useless.
+
+```
+@Override
+public String toString() {
+    return "Product";
+}
+```
+
+This identifies the type but doesn't distinguish one product from another.
+
+### Guideline 2: Include enough information, but not everything
+
+For small value objects, including all significant fields is often appropriate.
+
+For large objects, a concise summary is usually better.
+
+For example, an `Order` might contain hundreds of items. Printing every item could create enormous log messages.
+
+A summary might be:
+
+```
+Order{id=5001, itemCount=120, total=2450.00}
+```
+
+This provides useful context without dumping the entire object graph.
+
+### Guideline 3: Match the representation to the class's meaning
+
+An automatically generated method is suitable when the fields describe the object adequately.
+
+For example:
+
+```
+Potion{name='Healing', color='Red', strength=50}
+```
+
+A class with a conventional representation may need a custom method:
+
+```
+(212) 555-1234
+```
+
+Rule: Prefer a field-based representation when it is meaningful; prefer a domain-specific representation when the domain has a natural format.
+
+### Guideline 4: Keep the method predictable
+
+For the same unchanged object state, the method should ordinarily return the same representation.
+
+Avoid including unrelated changing values, such as the current time, random numbers, or external service responses.
+
+Unpredictable output makes debugging and testing harder.
+
+### Guideline 5: Consider immutability and generated methods
+
+IDEs and libraries such as AutoValue can generate `toString()` implementations.
+
+Java records also generate one automatically.
+
+```
+public record Product(int id, String name, double price) {
+}
+```
+
+```
+Product product = new Product(101, "Laptop", 999.99);
+System.out.println(product);
+```
+
+Typical output:
+
+```
+Product[id=101, name=Laptop, price=999.99]
+```
+
+Use generated output when it communicates the object's state well. Customize it when a domain-specific representation is more useful.
+
+### Guideline 6: Don't use `toString()` as your data-access API
+
+If a caller needs the product ID, expose an accessor:
+
+```
+public int getId() {
+    return id;
+}
+```
+
+Don't encourage callers to parse the ID out of a string:
+
+```
+// Fragile: don't do this
+String text = product.toString();
+// Extract the ID by splitting or parsing the text.
+```
+
+Changing the formatting could break such callers.
+
+### Guideline 7: Think about privacy and security
+
+Never expose secrets or sensitive information merely to make debugging easier.
+
+Avoid including:
+
+- Passwords and password hashes
+- Access tokens, refresh tokens, and API keys
+- Session identifiers
+- Personal information that doesn't belong in the log
+- Full payment-card details
+- Sensitive internal configuration
+
+For example, a request object should not produce:
+
+```
+LoginRequest{username='alice', password='secret123'}
+```
+
+Prefer a representation such as:
+
+```
+LoginRequest{username='alice', password=[REDACTED]}
+```
+
+Even usernames can be sensitive in some applications, so choose the representation according to the application's logging and privacy requirements.
+
+## Design decisions
+Before overriding `toString()`, make the following decisions.
+
+| Design decision         | Questions to ask                                           | Recommended approach                                                                 |
+| ----------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Whether to override     | Does the inherited method provide useful information?      | Usually override ordinary domain and value objects                                   |
+| Which fields to include | Which fields help diagnose the object?                     | Include useful state, not necessarily every field                                    |
+| Representation style    | Field-based or domain-specific?                            | Choose the representation that best communicates meaning                             |
+| Exact format            | Must callers rely on the precise output?                   | Specify it only when there is a real compatibility requirement                       |
+| Parsing support         | Should the string be convertible back into an object?      | Provide a matching parser or factory if the format is a supported interchange format |
+| Access to data          | Will callers need individual field values?                 | Provide accessors rather than requiring string parsing                               |
+| Inheritance             | Can subclasses share a representation?                     | Consider implementing common behavior in an abstract superclass                      |
+| Performance             | Can the representation be large or expensive to construct? | Keep it reasonably cheap; avoid expensive external operations                        |
+| Security                | Could the output leak sensitive information?               | Exclude or redact sensitive fields                                                   |
+
+### Should the string returned by `toString()` be documented
+One important decision you’ll have to make when implementing a toString
+method is whether to specify the format of the return value in the documentation. Should the string returned by `toString()` be a documented, stable format that other programs can rely on, or should it be a human-readable representation whose details can change?
+This passage explains a design decision you'll face when overriding `toString()`:
+
+There are two approaches.
+
+#### 1. Approach A: Specify a stable format
+It is recommended that you do this for **value classes**, such as phone number or matrix.
+
+Use this approach when your class represents a value that people may need to read, write, store, or exchange as text.
+
+Examples include:
+
+- Phone numbers
+- Matrices
+- Decimal numbers
+- Large integers
+- Dates and other value-like objects
+
+**Example: `PhoneNumber`**
+
+Suppose you have a phone number class:
+
+```Java
+public class PhoneNumber {
+    private final int areaCode;
+    private final int prefix;
+    private final int lineNum;
+
+    public PhoneNumber(int areaCode, int prefix, int lineNum) {
+        this.areaCode = areaCode;
+        this.prefix = prefix;
+        this.lineNum = lineNum;
+    }
+
+    @Override
+    public String toString() {
+        return String.format(
+                "%03d-%03d-%04d",
+                areaCode, prefix, lineNum
+        );
+    }
+}
+```
+
+Example usage:
+
+```Java
+PhoneNumber phone = new PhoneNumber(707, 867, 123);
+
+System.out.println(phone);
+```
+
+Output:
+
+```
+707-867-0123
+```
+
+Let's understand the format string:
+
+| Format specifier | Meaning                                                   | Example        |
+| ---------------- | --------------------------------------------------------- | -------------- |
+| `%03d`           | Integer padded with leading zeros to a minimum width of 3 | `7` → `007`    |
+| `%03d`           | Same for the prefix                                       | `86` → `086`   |
+| `%04d`           | Integer padded with leading zeros to a minimum width of 4 | `123` → `0123` |
+
+In this example, the documented format is:
+
+```
+XXX-YYY-ZZZZ
+```
+
+Each letter represents a decimal digit. The hyphens are literal characters.
+
+The format defines how every valid phone number is represented, so a caller can rely on the structure.
+
+##### Advantages
+
+The advantage of specifying the format is that it serves as a standard,
+unambiguous, human-readable representation of the object. This representation
+can be used for input and output and in persistent human-readable data objects,
+such as CSV files. 
+
+Suppose another developer needs to store the phone number in a text file.
+
+```Java
+PhoneNumber phone = new PhoneNumber(707, 867, 123);
+
+String storedValue = phone.toString();
+
+System.out.println(storedValue);
+```
+
+The result is:
+
+```
+707-867-0123
+```
+
+A program can now recognize the three components based on the documented positions and separators.
+
+You can also provide a matching parsing method:
+
+```Java
+public static PhoneNumber parse(String text) {
+    String[] parts = text.split("-");
+
+    if (parts.length != 3) {
+        throw new IllegalArgumentException("Invalid phone number");
+    }
+
+    return new PhoneNumber(
+            Integer.parseInt(parts[0]),
+            Integer.parseInt(parts[1]),
+            Integer.parseInt(parts[2])
+    );
+}
+```
+
+Then:
+
+```Java
+PhoneNumber original = new PhoneNumber(707, 867, 123);
+
+String text = original.toString();
+PhoneNumber restored = PhoneNumber.parse(text);
+```
+
+Conceptually, this gives you a round trip:
+```
+PhoneNumber object
+
+areaCode=707, prefix=867, lineNum=123
+      |
+      v
+`toString()`
+      | ^
+      v |
+707-867-0123
+
+`parse(text)`
+      |
+      v
+Equivalent PhoneNumber object
+
+Same represented phone number
+```
+For this example, the round trip works because the textual representation contains all three components and the parser understands the same format.
+
+In production, you would also validate the allowed ranges, input length, signs, and other invalid inputs. A real phone number format might require additional rules.
+
+The important point: if you promise a specific format, programmers can safely build other functionality around that promise.
+
+
+##### Disadvantages
+The disadvantage of specifying the format of the toString return value is that
+once you’ve specified it, you’re stuck with it for life, assuming your class is
+widely used. Programmers will write code to parse the representation, to generate
+it, and to embed it into persistent data. If you change the representation in a future
+release, you’ll break their code and data, and they will yowl. By choosing not to
+specify a format, you preserve the flexibility to add information or improve the
+format in a subsequent release.
+
+Imagine you publish your phone number class, and many developers use it.
+
+Initially:
+
+```
+707-867-0123
+```
+
+Your documentation promises that exact format.
+
+Developers may write code like this:
+
+```Java
+String text = phone.toString();
+
+String areaCode = text.substring(0, 3);
+String prefix = text.substring(4, 7);
+String lineNum = text.substring(8, 12);
+```
+
+Another developer may store the representation in a database:
+
+```
+customer_id,phone_number
+42,707-867-0123
+```
+
+A third developer may use the string as part of a key in a cache.
+
+Now suppose you change `toString()` to return:
+
+```
+(707) 867-0123
+```
+
+Your new format may look nicer to humans, but it breaks assumptions in the existing code:
+
+- `substring()` extracts the wrong portions.
+- Parsers expecting the original format may reject the data.
+- Existing stored strings may no longer match the new parser.
+- Cache keys or other external identifiers may change.
+
+Even if your new implementation is better, you have broken compatibility with users who relied on the old format.
+
+That's what the author means by being "stuck with it for life": once a widely used public format becomes a contract, changing it can be costly.
+
+It doesn't mean the format literally can never change. It means changing it may require compatibility support, migration, or a new API.
+
+##### Provide Static factory or Constructor
+
+If you specify the format, it’s usually a good idea to **provide a
+matching static factory or constructor** so programmers can easily translate back
+and forth between the object and its string representation. 
+
+Suppose you have a `PhoneNumber` object:
+
+```Java
+PhoneNumber phone = new PhoneNumber(707, 867, 123);
+```
+
+Its `toString()` method returns:
+
+```
+707-867-0123
+```
+
+You can convert the object into a string:
+
+```Java
+String text = phone.toString();
+```
+
+But how do you reconstruct the original object from that string? You need a matching constructor or static factory:
+
+```Java
+PhoneNumber restored = PhoneNumber.parse(text);
+```
+
+The goal is to preserve the represented value across the conversion.
+
+---
+
+**Why does the author recommend a static factory or constructor?**
+
+Imagine you implement your own `PhoneNumber` class with this documented format:
+
+```
+XXX-YYY-ZZZZ
+```
+
+You provide:
+
+```Java
+@Override
+public String toString() {
+    return String.format(
+            "%03d-%03d-%04d",
+            areaCode, prefix, lineNum
+    );
+}
+```
+
+But you don't provide a parsing method.
+
+Users can convert the object into a string, but they have to write their own parsing logic to reconstruct the object. Different users might implement that logic differently, leading to duplicated code and inconsistencies.
+
+Instead, provide a matching API:
+
+```Java
+public static PhoneNumber parse(String text) {
+    // Validate the format and extract its components.
+    // Return a new PhoneNumber.
+}
+```
+
+Now users can rely on your implementation for both directions.
+
+---
+
+This approach is taken by many value classes in the Java platform libraries, including `BigInteger`,
+`BigDecimal`, and most of the boxed primitive classes.
+
+The Java platform provides useful examples of classes with well-defined textual representations.
+
+- `BigInteger`: Represents arbitrary-precision integers.
+
+You can create a `BigInteger` from a decimal string using its constructor:
+```Java
+import java.math.BigInteger;
+
+public class Main {
+    public static void main(String[] args) {
+        // String -> BigInteger
+        BigInteger original =
+                new BigInteger("12345678901234567890");
+
+        // BigInteger -> String
+        String text = original.toString();
+
+        // String -> BigInteger again
+        BigInteger restored = new BigInteger(text);
+
+        System.out.println(text);
+        System.out.println(original.equals(restored));
+    }
+}
+```
+
+Output:
+
+```
+12345678901234567890
+true
+```
+
+The decimal representation is useful for displaying and parsing the integer.
+
+Notice the two operations:
+
+- `toString()` converts a `BigInteger` into its decimal string representation.
+- `new BigInteger(text)` parses that representation back into a `BigInteger`.
+
+The round trip works because the constructor understands the format returned by `toString()`.
+
+- `BigDecimal`: Represents decimal numbers with arbitrary precision.
+
+```Java
+import java.math.BigDecimal;
+
+public class Main {
+    public static void main(String[] args) {
+        BigDecimal original = new BigDecimal("123.4500");
+
+        String text = original.toString();
+
+        BigDecimal restored = new BigDecimal(text);
+
+        System.out.println(text);
+        System.out.println(original.equals(restored));
+    }
+}
+```
+
+Output:
+
+```
+123.4500
+```
+
+Notice that the trailing zeros are preserved in this representation. This can matter when scale is significant.
+
+An important detail: `BigDecimal.equals()` considers both numerical value and scale.
+
+For example:
+
+```
+BigDecimal a = new BigDecimal("123.45");
+BigDecimal b = new BigDecimal("123.4500");
+
+System.out.println(a.compareTo(b) == 0); // true
+System.out.println(a.equals(b));         // false
+```
+
+The values are numerically equal, but their scales differ. Because `toString()` preserves the necessary representation for the original `BigDecimal`, reconstructing it preserves that scale as well.
+
+- "boxed primitive classes": The boxed primitive classes also provide recognizable representations:
+
+Java provides wrapper classes such as `Integer`, `Long`, `Double`, and `Boolean`.
+
+These classes offer conversion methods that work naturally with their string representations.
+| Class     | Object to string         | String to object          |
+| --------- | ------------------------ | ------------------------- |
+| `Integer` | `Integer.toString(42)`   | `Integer.valueOf("42")`   |
+| `Long`    | `Long.toString(42L)`     | `Long.valueOf("42")`      |
+| `Double`  | `Double.toString(3.14)`  | `Double.valueOf("3.14")`  |
+| `Boolean` | `Boolean.toString(true)` | `Boolean.valueOf("true")` |
+
+For example:
+```Java
+Integer original = 42;
+
+String text = original.toString();
+
+Integer restored = Integer.valueOf(text);
+
+System.out.println(text);               // 42
+System.out.println(original.equals(restored)); // true
+
+System.out.println(Integer.valueOf(42));     // 42
+System.out.println(Boolean.TRUE);            // true
+System.out.println(Double.valueOf(3.14));    // 3.14
+```
+
+`new BigInteger(text)` uses a constructor, while `Integer.valueOf(text)` uses a static factory method. Both approaches are valid.
+
+These conversions are useful when reading configuration files, processing textual input, or exchanging simple values between components.
+
+Note that parsing rules vary by type. For example, `Integer.valueOf("hello")` throws `NumberFormatException`, while `Boolean.valueOf("hello")` returns `false`.
+
+These textual forms are useful because programmers can read them and, where the relevant parsing API supports it, convert them back into values.
+
+For `BigInteger`, for example:
+
+```Java
+BigInteger original = new BigInteger("123456789");
+
+String text = original.toString();
+BigInteger restored = new BigInteger(text);
+
+System.out.println(original.equals(restored)); // true
+```
+
+The string representation and constructor work together.
+
+One subtle point: a string format being documented doesn't automatically make it a suitable universal serialization format. If you need durable interchange between systems, consider a dedicated, versioned serialization format or a specific formatting API.
+
+---
+
+The important limitation: Not every `toString()` method should be treated as a serialization format.
+
+If your `toString()` returns:
+
+```
+Order{id=42, status=PAID}
+```
+
+that may be perfectly suitable for debugging, but it doesn't automatically mean you should write a parser for it.
+
+The recommendation applies especially when you deliberately specify a stable format intended for conversion, storage, or exchange.
+
+In summary: if you promise that `toString()` returns a specific representation, a matching constructor or static factory makes that representation practical to use. It lets programmers convert an object to text and reconstruct an equivalent object without reinventing the parsing logic.
+
+#### Approach B: Leave the format unspecified
+
+Now consider a different kind of class.
+
+```Java
+public class Potion {
+    private final int id;
+    private final String type;
+    private final String smell;
+    private final String look;
+
+    public Potion(int id, String type, String smell, String look) {
+        this.id = id;
+        this.type = type;
+        this.smell = smell;
+        this.look = look;
+    }
+
+    @Override
+    public String toString() {
+        return "[Potion #" + id +
+                ": type=" + type +
+                ", smell=" + smell +
+                ", look=" + look + "]";
+    }
+}
+```
+
+Suppose it currently produces:
+
+```
+[Potion #9: type=love, smell=turpentine, look=india ink]
+```
+
+You document the method like this:
+
+```Java
+/**
+ * Returns a brief description of this potion.
+ * The exact details of the representation are unspecified
+ * and subject to change, but the following may be regarded
+ * as typical:
+ *
+ * "[Potion #9: type=love, smell=turpentine, look=india ink]"
+ */
+@Override
+public String toString() {
+    // Implementation omitted.
+    return "...";
+}
+```
+
+Notice the difference between this documentation and the phone number documentation.
+
+- The phone number documentation promises an exact format.
+- The potion documentation promises only a brief description. The example illustrates the current style but does not guarantee it.
+
+Later, you could change the potion representation to:
+
+```
+Potion{id=9, type=love}
+```
+
+You might omit the smell and appearance, add a new field, or change the punctuation. Such changes would be permitted by the documented contract, provided the method still returns a brief description.
+
+This gives you more freedom to improve your implementation.
+
+#### Documenting your intentions precisely
+
+Whether or not you decide to specify the format, you should clearly docu-
+ment your intentions. If you specify the format, you should do so precisely.
+
+| Decision           | What your documentation should say                                         | What you gain                        |
+| ------------------ | -------------------------------------------------------------------------- | ------------------------------------ |
+| Stable format      | Define exact characters, field order, separators, padding, and other rules | Predictability and compatibility     |
+| Unspecified format | State its purpose and explicitly say the exact representation may change   | Freedom to evolve the implementation |
+
+For a stable format, avoid vague documentation like:
+
+> Returns the phone number as a formatted string.
+
+Instead, specify the exact representation:
+
+> Returns twelve characters in the format `XXX-YYY-ZZZZ`, where each `X`, `Y`, and `Z` is a decimal digit, with leading zeros used to fill each field.
+
+For an unspecified format, be explicit:
+
+> Returns a brief human-readable description. The exact format is unspecified and subject to change.
+
+That final sentence matters because it warns callers not to parse the result or depend on its exact structure.
+
+For
+example, here’s a toString method to go with the PhoneNumber class in:
+```Java
+/**
+* Returns the string representation of this phone number.
+* The string consists of twelve characters whose format is
+* "XXX-YYY-ZZZZ", where XXX is the area code, YYY is the
+* prefix, and ZZZZ is the line number. Each of the capital
+* letters represents a single decimal digit.
+*
+* If any of the three parts of this phone number is too small
+* to fill up its field, the field is padded with leading zeros.
+* For example, if the value of the line number is 123, the last
+* four characters of the string representation will be "0123".
+*/
+@Override public String toString() {
+    return String.format("%03d-%03d-%04d",areaCode, prefix, lineNum);
+}
+```
+If you decide not to specify a format, the documentation comment should read something like this:
+```Java
+/**
+* Returns a brief description of this potion. The exact details
+* of the representation are unspecified and subject to change,
+* but the following may be regarded as typical:
+*
+* "[Potion #9: type=love, smell=turpentine, look=india ink]"
+*/
+@Override public String toString() { ... }
+```
+
+---
+
+**A practical rule for your own Java classes**
+
+Use this decision guide when designing `toString()`.
+
+What is the main purpose of the string representation?
+
+1. Debugging, logging, or inspecting an object
+
+    Recommended: Return a readable description, but leave the exact format unspecified unless you have a strong reason to promise it.
+
+    Example: `Order{id=42, status=PAID, itemCount=3}`
+
+    Document the purpose and reserve the ability to change the format.
+2. Representing a value that users may parse or persist
+
+    Recommended: Define a precise format and provide a matching parser, constructor, or static factory.
+
+    Example: `BigInteger.toString()` with `new BigInteger(text)`.
+
+    Treat changes to the format as compatibility-sensitive.
+3. Summarizing a large or complex object
+
+    Recommended: Return a concise, self-explanatory summary containing the most useful information.
+    Example: CustomerDirectory[entries=250000]
+    Avoid dumping the entire object merely to include every field.
+
+#### Final takeaway
+
+The decision isn't simply whether the output looks nice. It is whether you're promising that output as part of your class's public contract.
+
+- Specify the format when the string is intended to be a stable, human-readable representation that callers can reliably generate, parse, or persist.
+- Leave the format unspecified when `toString()` is primarily a diagnostic aid and you want freedom to improve it later.
+- In either case, document the intention clearly.
+
+One final distinction worth remembering: `toString()` is not automatically the best API for serialization. If you need a durable external format, a dedicated `toExternalForm()`, `format()`, or `parse()` API can separate the stable data contract from the debugging representation.
+
+
+### Using Auto generation tools
+when an automatically generated `toString()` method is good enough and when you should write your own? The key distinction is between a class that has a standard, meaningful string representation and a class whose fields are enough to describe its contents.
+#### Automatically generated `toString()`
+
+Google's AutoValue generates implementation code for value classes, including methods such as `equals()`, `hashCode()`, and `toString()`.
+
+Tools such as IDEs and Google's AutoValue can generate a `toString()` method based on an object's fields.
+
+Its generated `toString()` is useful when a field-based representation adequately describes the object. However, generation doesn't automatically mean the representation is the most appropriate one for your domain.
+
+The same principle applies to IDE-generated methods
+
+For example, consider a `Potion` class:
+
+```Java
+public class Potion {
+    private final String name;
+    private final String color;
+    private final int strength;
+
+    public Potion(String name, String color, int strength) {
+        this.name = name;
+        this.color = color;
+        this.strength = strength;
+    }
+}
+```
+
+An IDE might generate this method:
+
+```
+@Override
+public String toString() {
+    return "Potion{" +
+            "name='" + name + '\'' +
+            ", color='" + color + '\'' +
+            ", strength=" + strength +
+            '}';
+}
+```
+
+Now let's test it:
+
+```Java
+public class Main {
+    public static void main(String[] args) {
+        Potion potion = new Potion("Healing", "Red", 50);
+
+        System.out.println(potion);
+    }
+}
+```
+
+Output:
+
+```
+Potion{name='Healing', color='Red', strength=50}
+```
+
+This is useful because it tells us the values of the object's fields. For a `Potion`, that may be all we need.
+
+#### Custom `toString()`
+**Why this is not always appropriate**
+
+These auto-generations methods are great for telling
+you the contents of each field but aren’t specialized to the meaning of the class.
+So, for example, it would be inappropriate to use an automatically generated
+toString method for our `PhoneNumber` class (as phone numbers have a standard
+string representation), but it would be perfectly acceptable for our Potion class.
+
+Consider a `PhoneNumber` class.
+
+```Java
+public class PhoneNumber {
+    private final int areaCode;
+    private final int prefix;
+    private final int lineNumber;
+
+    public PhoneNumber(int areaCode, int prefix, int lineNumber) {
+        this.areaCode = areaCode;
+        this.prefix = prefix;
+        this.lineNumber = lineNumber;
+    }
+}
+```
+
+An automatically generated method might produce:
+
+```
+PhoneNumber{areaCode=212, prefix=555, lineNumber=1234}
+```
+
+This tells us the fields, but it doesn't use the conventional phone-number representation.
+
+A phone number is better represented as:
+
+```
+(212) 555-1234
+```
+
+So we should write a specialized `toString()`:
+
+```Java
+@Override
+public String toString() {
+    return String.format(
+            "(%03d) %03d-%04d",
+            areaCode, prefix, lineNumber
+    );
+}
+```
+
+The result is more natural because it reflects the meaning of the object, not merely its internal structure.
+
+---
+
+An automatically generated toString method is far preferable to the
+one inherited from `Object`, which tells you nothing about an object’s value.
+
+If you don't override `toString()`, you might get output such as:
+
+```
+Potion@5acf9800
+```
+
+This is generally far less useful than either generated or custom output.
+
+Compare the three approaches:
+
+| Approach                      | Example output                                     | Usefulness                                                       |
+| ----------------------------- | -------------------------------------------------- | ---------------------------------------------------------------- |
+| Inherited `Object.toString()` | `Potion@5acf9800`                                  | Usually tells you almost nothing about the object's value        |
+| Automatically generated       | `Potion{name='Healing', color='Red', strength=50}` | Good for inspecting fields                                       |
+| Custom implementation         | `(212) 555-1234`                                   | Best when the class has a meaningful conventional representation |
+
+
+#### Practical rule
+
+- Use an automatically generated `toString()` when displaying the object's fields provides a clear, useful representation.
+- Write a custom `toString()` when the class has a conventional or domain-specific representation, such as a phone number, date, or measurement.
+- Avoid relying on `Object.toString()` for ordinary value objects because it generally doesn't communicate their values.
+
+The important point is that an automatically generated `toString()` is a good starting point, not a universal solution. A generated method is usually much better than no useful representation at all.
+
+## Best Practices
+### Provide programmatic access to the information contained in the value returned by `toString`
+Whether or not you specify the format, provide programmatic access to the
+information contained in the value returned by toString. 
+
+The main idea is: `toString()` is for displaying an object; accessors are for retrieving its data programmatically.
+
+Even if you provide a well-designed `toString()` method, you should also provide methods that allow other programmers to access the information stored inside your object directly.
+
+#### The problem: forcing programmers to parse `toString()`
+
+Suppose you implement a `PhoneNumber` class:
+
+```Java
+public class PhoneNumber {
+    private final int areaCode;
+    private final int prefix;
+    private final int lineNum;
+
+    public PhoneNumber(int areaCode, int prefix, int lineNum) {
+        this.areaCode = areaCode;
+        this.prefix = prefix;
+        this.lineNum = lineNum;
+    }
+
+    @Override
+    public String toString() {
+        return String.format(
+                "%03d-%03d-%04d",
+                areaCode, prefix, lineNum
+        );
+    }
+}
+```
+
+Now a developer wants to retrieve the area code. Your class doesn't provide a getter, so the developer might write:
+
+```Java
+PhoneNumber phone = new PhoneNumber(707, 867, 123);
+
+String text = phone.toString();
+
+int areaCode = Integer.parseInt(text.substring(0, 3));
+
+System.out.println(areaCode); // 707
+```
+
+This works, but it's a poor design. Why? you force programmers who need this information to parse the string
+
+- The developer must know the exact string format.
+- The developer must understand where the area code begins and ends.
+- Parsing requires unnecessary work.
+- If you change the format, the developer's code may break.
+- Besides reducing performance and making unnecessary work for
+programmers, this process is error-prone and results in fragile systems that break if you change the format.
+
+Imagine you later change the output from:
+
+```
+707-867-0123
+```
+
+to:
+
+```
+(707) 867-0123
+```
+
+Your updated `toString()` might be:
+
+```Java
+@Override
+public String toString() {
+    return String.format(
+            "(%03d) %03d-%04d",
+            areaCode, prefix, lineNum
+    );
+}
+```
+
+Code that uses `getAreaCode()` continues to work:
+
+```Java
+int areaCode = phone.getAreaCode();
+```
+
+But code that parses the original format may fail:
+
+```Java
+int areaCode = Integer.parseInt(
+        phone.toString().substring(0, 3)
+);
+```
+
+The new string begins with `(`, so parsing the first three characters as an integer throws a `NumberFormatException`.
+
+The comparison is straightforward:
+
+| Approach                                | Depends on the `toString()` format? | Survives formatting changes?                          |
+| --------------------------------------- | ----------------------------------- | ----------------------------------------------------- |
+| `phone.getAreaCode()`                   | No                                  | Yes, provided the accessor contract remains unchanged |
+| Parsing `phone.toString()`              | Yes                                 | Not necessarily                                       |
+| Displaying `phone.toString()` to a user | Only for presentation               | Depends on the desired presentation            
+
+- By failing to provide accessors, you turn the string format into a de facto API(An API is an interface that other code relies on.), even if you’ve specified that it’s subject to change. 
+
+Your `toString()` method has unintentionally become an interface that other code depends on(you turn the string format into a de facto API, even if you’ve specified that it’s subject to change).
+
+Suppose you document your `toString()` method like this:
+
+> Returns a brief description of the phone number. The exact format is unspecified and subject to change.
+
+You might think you're free to change the output at any time.
+
+However, if users have to parse that output to retrieve the area code, prefix, and line number, they'll inevitably depend on the current format.
+
+For example:
+
+```
+String areaCode = phone.toString().substring(0, 3);
+```
+
+Your documentation says the format can change, but the developer's code assumes it cannot.
+
+The string format has therefore become a de facto API: it wasn't intended to be a programmatic interface, but other programs now depend on it as if it were one.
+
+#### The solution: provide accessors
+
+Instead, provide methods to retrieve the individual values.
+
+```Java
+public class PhoneNumber {
+    private final int areaCode;
+    private final int prefix;
+    private final int lineNum;
+
+    public PhoneNumber(int areaCode, int prefix, int lineNum) {
+        this.areaCode = areaCode;
+        this.prefix = prefix;
+        this.lineNum = lineNum;
+    }
+
+    public int getAreaCode() {
+        return areaCode;
+    }
+
+    public int getPrefix() {
+        return prefix;
+    }
+
+    public int getLineNum() {
+        return lineNum;
+    }
+
+    @Override
+    public String toString() {
+        return String.format(
+                "%03d-%03d-%04d",
+                areaCode, prefix, lineNum
+        );
+    }
+}
+```
+
+Now a developer can write:
+
+```Java
+PhoneNumber phone = new PhoneNumber(707, 867, 123);
+
+int areaCode = phone.getAreaCode();
+int prefix = phone.getPrefix();
+int lineNum = phone.getLineNum();
+
+System.out.println(areaCode); // 707
+System.out.println(prefix);   // 867
+System.out.println(lineNum);  // 123
+```
+
+No parsing is needed. The developer doesn't have to know anything about the formatting used by `toString()`.
+
+---
+
+**The three responsibilities to remember**
+
+1. `toString()` — Human-readable representation
+
+    ```Java
+    System.out.println(phone);
+    ```
+
+    Produces something like `707-867-0123`.
+
+2.  Accessors — Programmatic access to data
+
+    ```Java
+    phone.getAreaCode();
+    ```
+
+    Returns the area code directly, without parsing text.
+
+3. Parser or constructor — Reconstructing an object from text
+
+    ```Java
+    PhoneNumber.parse("707-867-0123");
+    ```
+
+    Useful when you deliberately support a textual input format.
+
+These responsibilities are related, but they are not interchangeable.
+
+Final takeaway: Don't make other programmers extract your object's data from its display string. Give them a proper API for accessing the information directly. This avoids unnecessary parsing, reduces bugs, and allows you to change the `toString()` format without breaking code that uses your class.
+
+#### Relation to encapsulation?
+
+This recommendation also reinforces Java's principle of encapsulation.
+
+Your class owns its internal representation:
+
+```Java
+private final int areaCode;
+private final int prefix;
+private final int lineNum;
+```
+
+Other code should interact with that data through the public API you deliberately provide:
+
+```Java
+phone.getAreaCode();
+phone.getPrefix();
+phone.getLineNum();
+```
+
+You can then change how the data is displayed without requiring callers to understand your implementation details.
+
+Accessors are not always necessary for every private field. They should be provided when the information is legitimately part of the class's public API. In this example, the three components are meaningful parts of a phone number, so accessors make sense.
+
+## Common pitfalls
+
+1. Returning only the class name
+
+```
+@Override
+public String toString() {
+    return "Product";
+}
+```
+
+Problem: Different instances become indistinguishable in logs. Include useful identifying information when appropriate.
+
+2. Exposing sensitive data
+
+Problem: Logs can be retained, shipped to third-party systems, or viewed by people who should not see the data. Redact secrets and sensitive values.
+
+3. Including an entire object graph
+
+Problem: An order might reference customers, payments, shipments, and other objects, causing huge output or recursive calls.
+
+Better: Print a summary and selected identifiers rather than traversing every relationship.
+
+4. Performing expensive operations
+
+Problem: Calling a database, network service, or expensive computation inside `toString()` can make logging unexpectedly slow or cause failures while diagnosing another problem.
+
+Better: Use already available state and avoid side effects.
+
+5. Treating the output as a permanent format
+
+Problem: A developer changes field order or punctuation, unintentionally breaking a client that parses the output.
+
+Better: Either document the format as a stable contract or explicitly keep it diagnostic and unspecified.
+
+6. Assuming `toString()` replaces accessors, `equals()`, or serialization
+
+Problem: These serve different purposes.
+
+Better: Use accessors to expose data, `equals()` to define equality, and an appropriate serialization mechanism to exchange or persist structured data.
+
+
+## Common usage
+
+Here are common situations where overriding `toString()` is useful.
+
+| Class or context      | Example representation                | Typical approach                                        |
+| --------------------- | ------------------------------------- | ------------------------------------------------------- |
+| Value object          | `Money{amount=10.50, currency=USD}`   | Include its meaningful values                           |
+| Domain entity         | `Customer{id=42, name='Alice'}`       | Include useful identifiers and selected fields          |
+| Conventional value    | `(212) 555-1234`                      | Use the domain's standard format                        |
+| Collection-like class | `TaskQueue[size=12]`                  | Summarize contents or state                             |
+| Request/response DTO  | `SearchRequest{query='Java', page=1}` | Include useful diagnostic fields; redact sensitive ones |
+| Large aggregate       | `Order{id=5001, itemCount=120}`       | Summarize instead of dumping everything                 |
+| Enum                  | `MONDAY`                              | Usually the default is sufficient                       |
+| Static utility class  | No instances                          | Usually no `toString()` override is needed              |
+| Abstract base class   | Depends on shared state               | Implement a common representation if appropriate        |
+
+### Usage example: application logging
+
+```Java
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class ProductService {
+    private static final Logger log =
+            LoggerFactory.getLogger(ProductService.class);
+
+    public void process(Product product) {
+        log.debug("Processing product: {}", product);
+        // Continue processing...
+    }
+}
+```
+
+If `Product` has a useful `toString()`, the log is more informative. Parameterized logging also allows many logging frameworks to avoid formatting the message when the relevant log level is disabled.
+
+### Quick checklist
+
+Use this checklist when reviewing a `toString()` implementation.
+
+1. The output communicates useful object state.
+
+    It identifies the object and provides relevant values or a meaningful summary.
+
+2. The representation fits the domain.
+
+    A conventional value uses its standard format; other classes can use a field-based representation.
+
+3. The output is reasonably concise and inexpensive.
+
+    It avoids enormous object graphs, database calls, and network calls.
+
+4. Sensitive information is excluded or redacted.
+
+    Passwords, tokens, keys, and unnecessary personal data are not exposed.
+
+5. Callers do not need to parse it to access fields.
+
+    Use accessors for data access and a dedicated format for serialization.
+
+6. The stability expectations are clear.
+
+    If the exact format is public, document it and support it appropriately; otherwise retain flexibility.
+
+## Summary
+Overriding `toString()` is one of the simplest ways to make Java classes easier to understand, debug, test, and maintain. The challenge is deciding what information to expose, how to represent it, and whether the format should be a stable part of the class's API.
+
+The goal of overriding `toString()` is not simply to print every field. It is to give developers and diagnostic tools a useful, safe, and understandable representation of an object.
+
+When designing a class, ask yourself:
+
+> If this object appears in a log message, a debugger, a list, or a map, will its string representation help me understand what it contains?
+
+If the answer is no, consider overriding `toString()`.
+
+Following guidance:
+
+- Override it for meaningful instances when the inherited implementation is inadequate.
+- Include interesting information, or a useful summary for large objects.
+- Use a domain-specific representation when the class has a natural standard format.
+- Avoid making the exact format a public contract unless you intend to maintain it.
+- Never make callers depend on parsing `toString()` to retrieve object data.
+- Prefer an automatically generated implementation over an uninformative inherited one when the generated representation is suitable.
+
+To recap, override Object’s toString implementation in every instantiable
+class you write, unless a superclass has already done so. It makes classes much
+more pleasant to use and aids in debugging. The toString method should return a
+concise, useful description of the object, in an aesthetically pleasing format.
