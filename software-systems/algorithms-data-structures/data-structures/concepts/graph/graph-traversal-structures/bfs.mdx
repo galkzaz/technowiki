@@ -1,0 +1,1336 @@
+
+{/* # Breadth-First Search(BFS) */}
+
+BFS visits vertices in increasing distance from the starting vertex. It explores the immediate neighbors first, then their neighbors, and so on.
+
+**BFS** explores the graph level by level.
+
+BFS uses a queue, which follows FIFO (First In, First Out).
+
+Consider:
+
+```text
+        A
+       / \
+      B   C
+     / \   \
+    D   E   F
+```
+
+Starting at `A`:
+
+```text
+Level 0:
+A
+
+Level 1:
+B C
+
+Level 2:
+D E F
+```
+
+Traversal:
+
+```text
+A → B → C → D → E → F
+```
+
+BFS is particularly useful for finding the shortest path in an **unweighted graph**.
+
+## How BFS explores the graph
+
+```
+        A
+       / \
+      B   C
+     / \   \
+    D   E---F
+```
+
+Starting at A, assuming neighbors are processed in the order shown in the adjacency list.
+
+Level 0
+
+`A`
+
+Level 1
+
+`B, C`
+
+Level 2
+
+`D, E, F`
+
+Traversal order: A → B → C → D → E → F
+
+## BFS step by step
+
+We mark a vertex as visited when we enqueue it. This prevents the same vertex from entering the queue multiple times.
+
+| Step | Visit | Queue after processing |
+| ---- | ----- | ---------------------- |
+| 1    | A     | B, C                   |
+| 2    | B     | C, D, E                |
+| 3    | C     | D, E, F                |
+| 4    | D     | E, F                   |
+| 5    | E     | F                      |
+| 6    | F     | Empty                  |
+
+The queue's contents change as vertices are removed from the front and newly discovered neighbors are added at the back.
+
+## BFS pseudocode
+
+```
+BFS(graph, start):
+    create an empty queue
+    create an empty visited set
+
+    add start to visited
+    enqueue start
+
+    while queue is not empty:
+        vertex = dequeue()
+
+        process(vertex)
+
+        for each neighbor of vertex:
+            if neighbor is not visited:
+                add neighbor to visited
+                enqueue neighbor
+```
+
+```
+BFS(graph, start):
+    visited = {start}
+    queue = [start]
+
+    while queue is not empty:
+        current = remove_front(queue)
+        process(current)
+
+        for each neighbor of current:
+            if neighbor is not visited:
+                mark neighbor visited
+                add neighbor to back of queue
+```
+
+The most important invariant is:
+
+Every vertex enters the queue at most once, and vertices are processed in nondecreasing distance from the starting vertex.
+
+For an adjacency-list graph, the time complexity is $O(V+E)$, and the auxiliary space complexity is $O(V)$.
+
+One final distinction: these implementations traverse only the vertices reachable from `start`. To traverse a disconnected graph completely, add an outer loop that starts a new BFS from every still-unvisited vertex.
+
+## Implementation
+Graph used in all implementations
+
+```
+        A
+       / \
+      B   C
+     / \   \
+    D   E---F
+```
+
+Adjacency list:
+
+```
+A: B, C
+B: A, D, E
+C: A, F
+D: B
+E: B, F
+F: C, E
+```
+
+Starting vertex: `A`
+
+Expected BFS traversal:
+
+```
+A -> B -> C -> D -> E -> F
+```
+
+The traversal order assumes neighbors are processed in the order shown above.
+
+### C implementation
+
+This implementation uses a linked-list adjacency list and a fixed-size array as the queue.
+
+```c
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#define V 6
+
+enum { A, B, C, D, E, F };
+
+const char *names[V] = {
+    "A", "B", "C", "D", "E", "F"
+};
+
+typedef struct Node {
+    int vertex;
+    struct Node *next;
+} Node;
+
+Node *graph[V] = { NULL };
+
+// Add a directed edge to the adjacency list.
+void addDirectedEdge(int from, int to) {
+    Node *node = malloc(sizeof(Node));
+
+    if (node == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    node->vertex = to;
+    node->next = graph[from];
+    graph[from] = node;
+}
+
+// Add an undirected edge.
+void addEdge(int a, int b) {
+    addDirectedEdge(a, b);
+    addDirectedEdge(b, a);
+}
+
+void bfs(int start) {
+    int visited[V] = { 0 };
+    int queue[V];
+
+    int front = 0;
+    int rear = 0;
+
+    // Discover the starting vertex.
+    visited[start] = 1;
+    queue[rear++] = start;
+
+    while (front < rear) {
+        // Remove the oldest discovered vertex.
+        int current = queue[front++];
+
+        printf("%s ", names[current]);
+
+        // Explore its neighbors.
+        for (Node *edge = graph[current];
+             edge != NULL;
+             edge = edge->next) {
+
+            int neighbor = edge->vertex;
+
+            if (!visited[neighbor]) {
+                // Mark when enqueued to avoid duplicates.
+                visited[neighbor] = 1;
+                queue[rear++] = neighbor;
+            }
+        }
+    }
+
+    printf("\n");
+}
+
+void freeGraph(void) {
+    for (int i = 0; i < V; i++) {
+        Node *current = graph[i];
+
+        while (current != NULL) {
+            Node *next = current->next;
+            free(current);
+            current = next;
+        }
+    }
+}
+
+int main(void) {
+    addEdge(A, B);
+    addEdge(A, C);
+    addEdge(B, D);
+    addEdge(B, E);
+    addEdge(C, F);
+    addEdge(E, F);
+
+    printf("BFS starting from A: ");
+    bfs(A);
+
+    freeGraph();
+    return 0;
+}
+
+```
+
+Compile and run:
+
+```
+gcc -std=c11 -Wall -Wextra -pedantic bfs.c -o bfs
+./bfs
+```
+
+Output:
+
+```
+BFS starting from A: A B C D E F
+```
+
+C-specific point: The queue is an array of vertex IDs. Since each vertex is enqueued at most once, a capacity of `V` is sufficient. The linked-list nodes are dynamically allocated and released by `freeGraph()`.
+Let's walk through the C implementation line by line and trace how the graph is built and then traversed.
+
+The two functions have different responsibilities:
+
+- `addDirectedEdge()` builds the graph by adding one connection to an adjacency list.
+- `bfs()` explores the graph using a queue, making sure each vertex is visited at most once.
+
+We'll use the same example as before:
+
+```
+        A
+       / \
+      B   C
+     / \   \
+    D   E---F
+```
+
+The expected BFS traversal, assuming neighbors are processed in the order shown in the original adjacency list, is:
+
+```
+A -> B -> C -> D -> E -> F
+```
+
+One detail matters in our C implementation: because `addDirectedEdge()` inserts nodes at the beginning of a linked list, the actual traversal order will be different. We'll trace that carefully so you understand why.
+
+#### Understand the graph representation
+
+The program represents each vertex using an integer:
+
+```
+enum { A, B, C, D, E, F };
+```
+
+C assigns these values automatically:
+
+| Vertex | Integer ID |
+| ------ | ---------- |
+| A      | 0          |
+| B      | 1          |
+| C      | 2          |
+| D      | 3          |
+| E      | 4          |
+| F      | 5          |
+
+The graph itself is an array of linked-list pointers:
+
+```
+Node *graph[V] = { NULL };
+```
+
+Here is the node structure:
+
+```
+typedef struct Node {
+    int vertex;
+    struct Node *next;
+} Node;
+```
+
+Each `Node` stores two things:
+
+- `vertex`: the ID of a neighboring vertex.
+- `next`: a pointer to the next neighbor in the linked list.
+
+Think of `graph` as six separate linked lists, one for each vertex.
+
+For example, if A has neighbors B and C, its list could look like this:
+
+```
+graph[A]
+   |
+   v
++----------+      +----------+
+| vertex B | ---> | vertex C | ---> NULL
++----------+      +----------+
+```
+
+The `NULL` pointer marks the end of the list.
+
+#### How `addEdge()` works
+
+```
+void addEdge(int a, int b) {
+    addDirectedEdge(a, b);
+    addDirectedEdge(b, a);
+}
+```
+
+Why call `addDirectedEdge()` twice? Because our graph is undirected. A flight or connection between A and B means you can travel from A to B and from B to A.
+
+```
+addEdge(A, B);
+```
+
+is equivalent to:
+
+```
+addDirectedEdge(A, B);  // B becomes a neighbor of A
+addDirectedEdge(B, A);  // A becomes a neighbor of B
+```
+
+After this call:
+
+```
+graph[A] ---> [B] ---> NULL
+graph[B] ---> [A] ---> NULL
+```
+
+Each call to `addDirectedEdge()` creates one linked-list node. Therefore, one undirected edge requires two nodes in this representation.
+#### How `addDirectedEdge()` works
+
+Here is the function again:
+
+```c
+void addDirectedEdge(int from, int to) {
+    Node *node = malloc(sizeof(Node));
+
+    if (node == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    node->vertex = to;
+    node->next = graph[from];
+    graph[from] = node;
+}
+```
+
+Let's examine each statement.
+
+1. Step 1 — Allocate memory for a new node
+
+```c
+Node *node = malloc(sizeof(Node));
+```
+
+`malloc()` requests enough memory to hold one `Node`.
+
+Imagine we call:
+
+```c
+addDirectedEdge(A, B);
+```
+
+Since `A` is `0` and `B` is `1`, this means:
+
+```
+addDirectedEdge(0, 1);
+```
+
+The function allocates a new node, and `node` points to that memory.
+
+```
+node
+ |
+ v
++-------------+
+| vertex: ?   |
+| next:   ?   |
++-------------+
+```
+
+The question marks indicate that the fields have not yet been assigned by this function.
+
+2. Step 2 — Check whether allocation succeeded
+
+```
+if (node == NULL) {
+    fprintf(stderr, "Memory allocation failed\n");
+    exit(EXIT_FAILURE);
+}
+```
+
+If the system cannot allocate memory, `malloc()` returns `NULL`.
+
+The function prints an error and terminates the program instead of dereferencing an invalid pointer.
+
+3. Step 3 — Store the destination vertex
+
+```
+node->vertex = to;
+```
+
+For `addDirectedEdge(A, B)`, we store B's ID, which is `1`.
+
+```
+node
+ |
+ v
++-------------+
+| vertex: 1   |
+| next:   ?   |
++-------------+
+```
+
+Notice that `node->vertex` is equivalent to `(*node).vertex`. The `->` operator accesses a structure field through a pointer.
+
+4. Step 4 — Point the new node to the old list
+
+```
+node->next = graph[from];
+```
+
+This is the key operation.
+
+Suppose A's list is currently empty:
+
+```
+graph[A] = NULL
+```
+
+Then the statement becomes:
+
+```
+node->next = NULL;
+```
+
+If A already has neighbors, `graph[A]` points to the current first node. The new node will point to that existing node.
+
+For example, suppose A's list currently contains B:
+
+```
+graph[A] ---> [B] ---> NULL
+```
+
+Now we add C:
+
+```
+node->next = graph[A];
+```
+
+The new C node points to the old B node:
+
+```
+new node
+    |
+    v
+   [C] ---> [B] ---> NULL
+```
+
+We haven't updated `graph[A]` yet, so the new node is not the list's entry point at this moment.
+
+5. Step 5 — Make the new node the list's first node
+
+```
+graph[from] = node;
+```
+
+Now `graph[A]` points to C:
+
+```
+graph[A]
+    |
+    v
+   [C] ---> [B] ---> NULL
+```
+
+Important: This function inserts at the head of the list, not at the end. Each new neighbor becomes the first neighbor.
+
+That's why the neighbor order can be reversed.
+
+
+
+#### Build the graph step by step
+
+Our `main()` function adds these edges in order:
+
+```
+addEdge(A, B);
+addEdge(A, C);
+addEdge(B, D);
+addEdge(B, E);
+addEdge(C, F);
+addEdge(E, F);
+```
+
+Let's see what happens after each call. I'll write each adjacency list from its head to its tail.
+
+1. After `addEdge(A, B)`
+
+```
+A: B
+B: A
+C: -
+D: -
+E: -
+F: -
+```
+
+2. After `addEdge(A, C)`
+
+C is inserted at the head of A's list, so C comes before B.
+
+```
+A: C -> B
+B: A
+C: A
+D: -
+E: -
+F: -
+```
+
+3. After `addEdge(B, D)`
+
+D is inserted at the head of B's list.
+
+```
+A: C -> B
+B: D -> A
+C: A
+D: B
+E: -
+F: -
+```
+
+4. After `addEdge(B, E)`
+
+E becomes B's new first neighbor.
+
+```
+A: C -> B
+B: E -> D -> A
+C: A
+D: B
+E: B
+F: -
+```
+
+5. After `addEdge(C, F)`
+
+F becomes C's first neighbor.
+
+```
+A: C -> B
+B: E -> D -> A
+C: F -> A
+D: B
+E: B
+F: C
+```
+
+6. After `addEdge(E, F)`
+
+F becomes E's first neighbor, and E becomes F's first neighbor.
+
+The final adjacency lists are:
+
+```
+A: C -> B
+B: E -> D -> A
+C: F -> A
+D: B
+E: F -> B
+F: E -> C
+```
+
+This is the same graph structure as before, but the order of the neighbors differs.
+```
+A: B, C
+B: A, D, E
+C: A, F
+D: B
+E: B, F
+F: C, E
+```
+This affects the traversal order, not the graph's connectivity or BFS correctness.
+
+#### How `bfs()` works
+
+Here is the BFS function from the C implementation:
+
+```
+void bfs(int start) {
+    int visited[V] = { 0 };
+    int queue[V];
+
+    int front = 0;
+    int rear = 0;
+
+    visited[start] = 1;
+    queue[rear++] = start;
+
+    while (front < rear) {
+        int current = queue[front++];
+
+        printf("%s ", names[current]);
+
+        for (Node *edge = graph[current];
+             edge != NULL;
+             edge = edge->next) {
+
+            int neighbor = edge->vertex;
+
+            if (!visited[neighbor]) {
+                visited[neighbor] = 1;
+                queue[rear++] = neighbor;
+            }
+        }
+    }
+
+    printf("\n");
+}
+```
+
+There are four main parts.
+
+1. Part A — Initialize the visited array
+
+```
+int visited[V] = { 0 };
+```
+
+This creates an array of six integers, all initially zero:
+
+```
+visited[A] = 0
+visited[B] = 0
+visited[C] = 0
+visited[D] = 0
+visited[E] = 0
+visited[F] = 0
+```
+
+We use:
+
+- `0` to mean not visited.
+- `1` to mean visited or discovered.
+
+We mark vertices as visited when they are enqueued, not when they are removed from the queue. This prevents a vertex from being added multiple times through different edges.
+
+2. Part B — Initialize the queue
+
+```
+int queue[V];
+
+int front = 0;
+int rear = 0;
+```
+
+The queue is an array. The variables have these meanings:
+
+- `front`: index of the next item to remove.
+- `rear`: index where the next item will be inserted.
+
+Initially:
+
+```
+Queue: []
+front = 0
+rear  = 0
+```
+
+To insert a vertex:
+
+```
+queue[rear++] = start;
+```
+
+This stores the vertex at `queue[rear]` and then increments `rear`.
+
+To remove a vertex:
+
+```
+int current = queue[front++];
+```
+
+This reads `queue[front]` and then increments `front`.
+
+The array elements are not physically shifted when we remove an item. We simply advance `front`.
+
+3. Part C — Discover the starting vertex
+
+```
+visited[start] = 1;
+queue[rear++] = start;
+```
+
+For `bfs(A)`, the starting vertex is A, ID `0`.
+
+After these statements:
+
+```
+visited[A] = 1
+
+Queue: [A]
+front = 0
+rear  = 1
+```
+
+A is now waiting to be processed.
+
+4. Part D — Process the queue until it is empty
+
+```
+while (front < rear)
+```
+
+As long as `front` is less than `rear`, at least one item remains in the queue.
+
+Inside the loop, we remove a vertex, print it, and examine its neighbors.
+
+```
+int current = queue[front++];
+printf("%s ", names[current]);
+```
+
+Then this loop walks through the linked list of neighbors:
+
+```
+for (Node *edge = graph[current];
+     edge != NULL;
+     edge = edge->next)
+```
+
+Let's break down that loop:
+
+1. `edge = graph[current]` points to the first neighbor.
+2. `edge != NULL` means there are still neighbors to examine.
+3. `edge = edge->next` advances to the next neighbor.
+
+For each neighbor, we check:
+
+```
+if (!visited[neighbor]) {
+    visited[neighbor] = 1;
+    queue[rear++] = neighbor;
+}
+```
+
+If the neighbor has not been visited, we mark it and enqueue it. If it has already been discovered, we skip it.
+
+This is how BFS explores the graph without getting trapped in cycles.
+
+##### Complete BFS walkthrough
+
+Now let's trace the exact C program with:
+
+```
+bfs(A);
+```
+
+Remember, the final adjacency lists are:
+
+```
+A: C -> B
+B: E -> D -> A
+C: F -> A
+D: B
+E: F -> B
+F: E -> C
+```
+
+We'll track the queue after each vertex is processed.
+
+1. Step 1 — Start at A
+
+Initialization:
+
+```
+visited[A] = 1;
+queue[rear++] = A;
+```
+
+```
+Queue: [A]
+front = 0, rear = 1
+Visited: {A}
+Output:  (empty)
+```
+
+The loop removes A:
+
+```
+current = queue[front++];
+```
+
+A is printed, and its neighbors are examined in order: C, then B.
+
+Both are unvisited, so we mark and enqueue them.
+
+```
+Queue: [C, B]
+Visited: {A, C, B}
+Output: A
+```
+
+The queue is FIFO, so C will be processed before B.
+
+2. Step 2 — Process C
+
+Remove C from the front and print it.
+
+C's neighbors are:
+
+```
+C: F -> A
+```
+
+- F is unvisited: mark it and enqueue it.
+- A is already visited: skip it.
+
+```
+Queue: [B, F]
+Visited: {A, B, C, F}
+Output: A C
+```
+
+Notice that A is not enqueued again. The visited array prevents this.
+
+3. Step 3 — Process B
+
+Remove B and print it. B's neighbors are:
+
+```
+B: E -> D -> A
+```
+
+Process them one at a time:
+
+| Neighbor | Already visited? | Action           |
+| -------- | ---------------- | ---------------- |
+| E        | No               | Mark and enqueue |
+| D        | No               | Mark and enqueue |
+| A        | Yes              | Skip             |
+
+After processing B:
+
+```
+Queue: [F, E, D]
+Visited: {A, B, C, D, E, F}
+Output: A C B
+```
+
+All six vertices have now been discovered, but some are still waiting in the queue.
+
+4. Step 4 — Process F
+
+Remove F and print it.
+
+```
+F: E -> C
+```
+
+Both E and C are already visited, so neither is enqueued again.
+
+```
+Queue: [E, D]
+Output: A C B F
+```
+
+5. Step 5 — Process E
+
+Remove E and print it.
+
+```
+E: F -> B
+```
+
+Both neighbors are already visited.
+
+```
+Queue: [D]
+Output: A C B F E
+```
+
+6. Step 6 — Process D
+
+Remove D and print it.
+
+```
+D: B
+```
+
+B has already been visited.
+
+```
+Queue: []
+Output: A C B F E D
+```
+
+Now `front == rear`, so the condition `front < rear` is false and the loop terminates.
+
+##### Full trace table
+
+| Step | Current vertex | Newly discovered neighbors | Queue after processing |
+| ---- | -------------- | -------------------------- | ---------------------- |
+| 1    | A              | C, B                       | C, B                   |
+| 2    | C              | F                          | B, F                   |
+| 3    | B              | E, D                       | F, E, D                |
+| 4    | F              | None                       | E, D                   |
+| 5    | E              | None                       | D                      |
+| 6    | D              | None                       | Empty                  |
+
+The actual output of the given C implementation is:
+
+```
+BFS starting from A: A C B F E D
+```
+
+This corrects the earlier stated output for the C version: because its linked lists insert neighbors at the head, its traversal order differs from the Java and Python versions. The traversal is still a valid BFS.
+
+#### Why the queue and visited array are essential
+
+Consider the connection between C and F:
+
+```
+C ---- F
+```
+
+When BFS processes `C`, it discovers `F` and enqueues it.
+
+Later, when BFS processes `F`, it encounters `C` again because the graph is undirected.
+
+```
+C ---- F
+```
+
+However, `C` has already been marked as visited, so BFS skips it instead of adding it to the queue again.
+
+The same situation occurs with other connections. For example, when BFS processes `B`, it encounters `A`, which has already been visited.
+
+The important code is:
+
+```
+if (!visited[neighbor]) {
+    visited[neighbor] = 1;
+    queue[rear++] = neighbor;
+}
+```
+Notice that we mark a vertex as visited when we enqueue it, not when we dequeue it. This prevents the same vertex from being added multiple times by different neighbors before it gets processed.
+
+Let's understand why both data structures matter:
+
+- The visited array prevents a vertex from being discovered and enqueued multiple times. Marking a vertex as visited when it is enqueued is important because another vertex might encounter it before it is processed.
+- The queue ensures that vertices are processed in the order they were discovered. This makes BFS explore nearby vertices before moving to vertices farther away.
+
+Without the visited array, cycles could cause repeated processing or even infinite traversal. Without the queue's FIFO behavior, the traversal would not maintain BFS's level-by-level order.
+
+In short: the visited array prevents unnecessary revisits, while the queue controls the traversal order. Together, they allow BFS to traverse graphs correctly and find shortest paths in unweighted graphs.
+
+| Data structure | Responsibility                               | What happens without it?                                      |
+| -------------- | -------------------------------------------- | ------------------------------------------------------------- |
+| Queue          | Processes discovered vertices in FIFO order  | The traversal may no longer follow BFS's level-by-level order |
+| Visited array  | Prevents rediscovery and repeated processing | Cycles can cause repeated traversal or nontermination         |
+
+Together, they provide BFS with its key property: it visits vertices in increasing order of their shortest-path distance from the starting vertex in an unweighted graph.
+
+That is why BFS is useful not only for traversing graphs, but also for finding the minimum number of edges between two vertices, such as the fewest flights between two cities when every flight has equal cost.
+
+### Java implementation
+#### Using Plain Java
+Below is a pure Java BFS implementation that follows the same approach as the C implementation: a manually implemented adjacency list using linked nodes, a manually managed queue using an array, and a `boolean[]` visited array.
+
+It does not use JDK collections such as `ArrayList`, `LinkedList`, `Queue`, or `ArrayDeque`.
+
+```Java
+
+public class BFS {
+
+    // Number of vertices: A, B, C, D, E, F
+    private static final int V = 6;
+
+    private static final int A = 0;
+    private static final int B = 1;
+    private static final int C = 2;
+    private static final int D = 3;
+    private static final int E = 4;
+    private static final int F = 5;
+
+    private static final char[] LABELS = {'A', 'B', 'C', 'D', 'E', 'F'};
+
+    // A node in the adjacency list
+    static class Node {
+        int vertex;
+        Node next;
+
+        Node(int vertex) {
+            this.vertex = vertex;
+            this.next = null;
+        }
+    }
+
+    // Each array entry points to the head of a linked list
+    private final Node[] graph = new Node[V];
+
+    // Add one directed edge: from -> to
+    private void addDirectedEdge(int from, int to) {
+        Node node = new Node(to);
+
+        // Insert at the beginning of the linked list
+        node.next = graph[from];
+        graph[from] = node;
+    }
+
+    // Add an undirected edge: a <-> b
+    private void addEdge(int a, int b) {
+        addDirectedEdge(a, b);
+        addDirectedEdge(b, a);
+    }
+
+    // Breadth-First Search
+    public void bfs(int start) {
+        boolean[] visited = new boolean[V];
+
+        // Manual queue implementation using an array
+        int[] queue = new int[V];
+        int front = 0;
+        int rear = 0;
+
+        // Mark the starting vertex before enqueuing it
+        visited[start] = true;
+        queue[rear++] = start;
+
+        System.out.print("BFS traversal: ");
+
+        while (front < rear) {
+            // Dequeue the next vertex
+            int current = queue[front++];
+
+            System.out.print(LABELS[current] + " ");
+
+            // Examine all adjacent vertices
+            Node edge = graph[current];
+
+            while (edge != null) {
+                int neighbor = edge.vertex;
+
+                if (!visited[neighbor]) {
+                    // Mark when enqueued to prevent duplicates
+                    visited[neighbor] = true;
+                    queue[rear++] = neighbor;
+                }
+
+                edge = edge.next;
+            }
+        }
+
+        System.out.println();
+    }
+
+    public static void main(String[] args) {
+        BFS bfs = new BFS();
+
+        // Build the undirected graph
+        bfs.addEdge(A, B);
+        bfs.addEdge(A, C);
+        bfs.addEdge(B, D);
+        bfs.addEdge(B, E);
+        bfs.addEdge(C, F);
+        bfs.addEdge(E, F);
+
+        bfs.bfs(A);
+    }
+}
+
+```
+
+**Expected output**
+
+```
+BFS traversal: A C B F E D
+```
+
+The order is affected by inserting each new adjacency-list node at the beginning of its linked list. For example, `C` appears before `B` in `A`'s adjacency list because the edge `A-C` was inserted after `A-B`.
+
+**How the queue works without JDK collections**
+
+The queue is implemented using a regular Java array:
+
+```
+int[] queue = new int[V];
+int front = 0;
+int rear = 0;
+```
+
+Enqueue:
+
+```
+queue[rear++] = vertex;
+```
+
+Dequeue:
+
+```
+int vertex = queue[front++];
+```
+
+The queue uses two indexes:
+
+- `rear` points to the next free position where an element can be inserted.
+- `front` points to the next element to be removed.
+
+Because each vertex is enqueued at most once, an array of size `V` is sufficient for this implementation.
+
+Note: This implementation avoids JDK collection classes, but it still uses ordinary Java language and runtime features, such as arrays, classes, objects, and `System.out`. Java cannot run entirely without its runtime libraries.
+
+#### Using JDK ArrayDeque and ArrayList
+Java's `ArrayDeque` provides an efficient queue implementation. We use an adjacency list built from `List<List<Integer>>`.
+
+```
+
+import java.util.*;
+
+public class BFS {
+    private final List<List<Integer>> graph;
+
+    public BFS(int vertices) {
+        graph = new ArrayList<>();
+
+        for (int i = 0; i < vertices; i++) {
+            graph.add(new ArrayList<>());
+        }
+    }
+
+    // Add an undirected edge.
+    public void addEdge(int a, int b) {
+        graph.get(a).add(b);
+        graph.get(b).add(a);
+    }
+
+    public void bfs(int start) {
+        boolean[] visited = new boolean[graph.size()];
+        Queue<Integer> queue = new ArrayDeque<>();
+
+        // Discover and enqueue the starting vertex.
+        visited[start] = true;
+        queue.offer(start);
+
+        while (!queue.isEmpty()) {
+            int current = queue.poll();
+
+            System.out.print((char) ('A' + current) + " ");
+
+            for (int neighbor : graph.get(current)) {
+                if (!visited[neighbor]) {
+                    visited[neighbor] = true;
+                    queue.offer(neighbor);
+                }
+            }
+        }
+
+        System.out.println();
+    }
+
+    public static void main(String[] args) {
+        BFS graph = new BFS(6);
+
+        graph.addEdge(0, 1); // A -- B
+        graph.addEdge(0, 2); // A -- C
+        graph.addEdge(1, 3); // B -- D
+        graph.addEdge(1, 4); // B -- E
+        graph.addEdge(2, 5); // C -- F
+        graph.addEdge(4, 5); // E -- F
+
+        System.out.print("BFS starting from A: ");
+        graph.bfs(0);
+    }
+}
+
+```
+
+Compile and run:
+
+```
+javac BFS.java
+java BFS
+```
+
+Output:
+
+```
+BFS starting from A: A B C D E F
+```
+
+Java-specific point: `queue.offer()` inserts at the back, and `queue.poll()` removes from the front. Together, they implement FIFO behavior. The `boolean[] visited` array avoids repeatedly discovering vertices.
+
+###  Python implementation
+
+Python's `collections.deque` is well suited to BFS. Use `popleft()` rather than `list.pop(0)`, because removing the first element of a list requires shifting the remaining elements.
+
+```python
+
+from collections import deque
+
+
+def bfs(graph, start):
+    visited = {start}
+    queue = deque([start])
+
+    while queue:
+        current = queue.popleft()
+        print(current, end=" ")
+
+        for neighbor in graph[current]:
+            if neighbor not in visited:
+                 Mark when enqueued, not when dequeued.
+                visited.add(neighbor)
+                queue.append(neighbor)
+
+    print()
+
+
+def main():
+    graph = {
+        "A": ["B", "C"],
+        "B": ["A", "D", "E"],
+        "C": ["A", "F"],
+        "D": ["B"],
+        "E": ["B", "F"],
+        "F": ["C", "E"],
+    }
+
+    print("BFS starting from A:", end=" ")
+    bfs(graph, "A")
+
+
+if __name__ == "__main__":
+    main()
+
+```
+
+Run:
+
+```
+python3 bfs.py
+```
+
+Output:
+
+```
+BFS starting from A: A B C D E F
+```
+
+Python-specific point: A `set` makes membership checks efficient, while `deque` supports efficient insertion at the back and removal from the front.
+
+### Compare the implementations
+
+| Concept              | C                          | Java                  | Python              |
+| -------------------- | -------------------------- | --------------------- | ------------------- |
+| Graph representation | Linked-list adjacency list | `List<List<Integer>>` | Dictionary of lists |
+| Queue                | Fixed-size array           | `ArrayDeque`          | `collections.deque` |
+| Visited structure    | `int[]`                    | `boolean[]`           | `set`               |
+| Add to queue         | `queue[rear++] = v`        | `queue.offer(v)`      | `queue.append(v)`   |
+| Remove from queue    | `queue[front++]`           | `queue.poll()`        | `queue.popleft()`   |
+| Complexity           | $O(V+E)$               | $O(V+E)$          | $O(V+E)$        |
+
+These implementations all traverse the same graph using the same algorithm. Their main differences are how the graph and queue are represented.
+
+## When is BFS useful?
+
+- Finding the shortest path in an unweighted graph.
+- Finding all vertices reachable from a starting vertex.
+- Finding the minimum number of moves in puzzles and games.
+- Exploring social networks by connection distance.
+- Finding connected components in an undirected graph.
+
+For example, BFS can find the fewest number of flights between two cities when every flight is treated as one equal-cost edge.

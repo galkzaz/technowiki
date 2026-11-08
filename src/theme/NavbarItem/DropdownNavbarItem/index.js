@@ -19,7 +19,9 @@ export default function DropdownNavbarItemWrapper(props) {
   const isSoftEng = pathname.startsWith('/software-engineering');
   const isSoftSystems = pathname.startsWith('/software-systems');
 
-  const isAnySection = isMath || isHardware || isEmbedded || isSoftEng || isSoftSystems;
+  const isAI = pathname.startsWith('/artificial-intelligence');
+
+  const isAnySection = isMath || isHardware || isEmbedded || isSoftEng || isSoftSystems || isAI;
 
   // 2. Filter Logic for Dropdowns
 
@@ -29,7 +31,7 @@ export default function DropdownNavbarItemWrapper(props) {
   if (className.includes('nav-software-only') && !isSoftSystems) return null;
   if (className.includes('nav-software-engineering-only') && !isSoftEng) return null;
   if (className.includes('nav-embedded-only') && !isEmbedded) return null;
-
+  if (className.includes('nav-ai-only') && !isAI) return null;
   // 3. Hide Main Hub dropdowns (if you ever change them to dropdowns)
   if (isAnySection && className.includes('nav-main-hub')) {
     return null;

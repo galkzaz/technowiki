@@ -15,9 +15,10 @@ export default function DefaultNavbarItemWrapper(props) {
   // Logical separation for your two software plugins
   const isSoftEng = pathname.startsWith(useBaseUrl("/software-engineering"));
   const isSoftSystems = pathname.startsWith(useBaseUrl("/software-systems"));
+  const isAI = pathname.startsWith(useBaseUrl("/artificial-intelligence"));
 
   const isAnySection =
-    isMath || isHardware || isEmbedded || isSoftEng || isSoftSystems;
+    isMath || isHardware || isEmbedded || isSoftEng || isSoftSystems || isAI;
 
   // 2. Filter Logic
 
@@ -33,6 +34,7 @@ export default function DefaultNavbarItemWrapper(props) {
   if (className.includes("nav-software-engineering-only") && !isSoftEng)
     return null;
   if (className.includes("nav-embedded-only") && !isEmbedded) return null;
+  if (className.includes('nav-ai-only') && !isAI) return null;
 
   // Hide "Back to Hub" if we are at the root homepage
   if (pathname === "/" && className.includes("nav-back-hub")) {

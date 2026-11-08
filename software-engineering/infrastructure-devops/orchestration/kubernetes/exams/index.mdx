@@ -1,0 +1,151 @@
+1. What happens if you run the same kubectl create command twice?
+Answer: The command fails and returns an AlreadyExists error.
+
+2. What happens if you run the same kubectl apply command twice?
+Answer: The command succeeds and returns information to the effect that
+the affected objects are unchanged.
+
+3. In terms of questions 1 and 2, why do they act differently the second time
+they are run?
+Answer: The create command is imperative. This means that it tells
+Kubernetes exactly what to do. The apply command is declarative; this
+means that it is up to Kubernetes to find out what to do if anything at all
+needs to be done, as in this case.
+
+4. What is the purpose of a ReplicaSet, and what other resource creates a
+ReplicaSet?
+Answer: A ReplicaSet is used to ensure that a specified number of Pods are
+running at all times. If a Pod is deleted, it will be replaced with a new Pod by
+ReplicaSet. A ReplicaSet can be created by a Deployment object.
+
+5. What is the purpose of etcd in a Kubernetes cluster?
+Answer: It is used to store the configuration of the Kubernetes cluster.
+
+6. How can a container find out the IP address of another container that runs in
+the same Pod?
+Answer: Containers in the same Pod share the same network namespace,
+meaning that they have the same IP address and port space. They can
+communicate with each other using the localhost hostname, or the IP
+address 127.0.0.1. They have to ensure that they don't use the same ports.
+
+7. What happens if you create two Deployments with the same name but in
+different namespaces?
+Answer: This works perfectly fine. For example, two developers can run
+their own versions of a group of Deployments and Pods in two different
+namespaces in the same Kubernetes cluster.
+
+8. What configuration of two services with the same name can make them fail,
+even if they are created in two different namespaces?
+Answer: If the services are of the NodePort type and try to allocate the same
+node port, they will conflict and the creation of the second service will fail.
+
+3. What's the purpose of liveness and readiness probes?
+Answer: Their purposes are as follows:
+• Liveness probes are used by Kubernetes to determine whether a
+container needs to be restarted
+• Readiness probes are used by Kubernetes to determine whether a
+container is ready to accept incoming requests
+
+5. What is the purpose of the following Helm template directives?
+```yml
+{{- $common := dict "Values" .Values.common -}}
+{{- $noCommon := omit .Values "common" -}}
+{{- $overrides := dict "Values" $noCommon -}}
+{{- $noValues := omit . "Values" -}}
+{{- with merge $noValues $overrides $common -}}
+```
+Answer: It implements an override mechanism so that a parent chart can
+override values from a subchart that it uses.
+6. Why would the following named Helm template fail?
+```yml
+{{- define "common.secrets" -}}
+{{- range $secretName, $secretMap := .Values.secrets }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  labels:
+    app.kubernetes.io/name: {{ $secretName }}
+type: Opaque
+data:
+{{- range $key, $val := $secretMap }}
+  {{ $key }}: {{ $val | b64enc }}
+{{- end }}
+{{- end -}}
+{{- end -}}
+```
+Answer: The template will iterate over the .Values.secrets variable and
+create a Secret manifest for each element in the variable. To produce a valid
+YAML output, each manifest declaration must be separated with ---. A
+line containing --- must be added before the two last end directives. 
+
+For a working code example,
+```yml
+{{- define "common.secrets" -}}
+{{- range $secretName, $secretMap := .Values.secrets }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  labels:
+    app.kubernetes.io/name: {{ $secretName }}
+type: Opaque
+data:
+{{- range $key, $val := $secretMap }}
+  {{ $key }}: {{ $val | b64enc }}
+{{- end }}
+---
+{{- end -}}
+{{- end -}}
+```
+
+7. Why would the following manifests not work together?
+```yml
+apiVersion: v1
+kind: Service
+metadata:
+name: review
+labels:
+app.kubernetes.io/name: review
+spec:
+type: ClusterIP
+ports:
+- name: http
+port: 80
+protocol: TCP
+targetPort: http
+selector:
+app.kubernetes.io/pod-name: review
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+name: review
+labels:
+app.kubernetes.io/name: review
+spec:
+replicas: 1
+selector:
+matchLabels:
+app.kubernetes.io/name: review
+template:
+metadata:
+labels:
+app.kubernetes.io/name: review
+spec:
+containers:
+- name: review
+image: "hands-on/review-service:latest"
+ports:
+- containerPort: 80
+name: http-port
+protocol: TCP
+```
+Answer: Each Pod that will be created based on the Deployment manifest's
+template definition will be labeled with a label named app.kubernetes.io/
+name, which will have the value review. The Service manifest declares its
+selector based on a label named app.kubernetes.io/pod-name. This mismatch
+in label names will result in the Service object not being able to select any
+of the Pods created based on the Deployment manifest. To correct this error,
+the label name used by the Service object's selector should be changed to
+app.kubernetes.io/name.

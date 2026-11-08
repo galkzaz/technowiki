@@ -1,0 +1,851 @@
+# Complete Comparison of Single-Source Shortest-Path (SSSP) Algorithms
+
+Single-Source Shortest-Path (SSSP) algorithms solve the problem of finding the shortest paths from one starting vertex (source) to every other reachable vertex in a weighted or unweighted graph.
+
+Different algorithms solve this problem under different graph conditions. The most important factors when choosing an algorithm are:
+
+1. Whether the graph is weighted or unweighted.
+2. Whether edge weights are positive, zero, or negative.
+3. Whether the graph contains negative-weight cycles.
+4. Whether the graph is sparse or dense.
+5. Whether we need to detect negative cycles.
+6. Whether we need the shortest paths or only shortest distances.
+7. Whether we need to optimize for execution time or memory.
+
+## 1. Algorithms included in the comparison
+
+The main SSSP algorithms are:
+
+| Algorithm                 | Graph type             | Edge-weight restrictions             |
+| ------------------------- | ---------------------- | ------------------------------------ |
+| BFS                       | Unweighted             | All edges have equal cost            |
+| 0-1 BFS                   | Weighted               | Weights must be 0 or 1               |
+| Dijkstra (Linear Scan)    | Weighted               | Non-negative weights                 |
+| Dijkstra (Priority Queue) | Weighted               | Non-negative weights                 |
+| Bellman–Ford              | Weighted               | Positive, zero, and negative weights |
+| DAG Shortest Path         | Directed acyclic graph | Positive, zero, and negative weights |
+| SPFA                      | Weighted               | Positive, zero, and negative weights |
+
+These algorithms are not interchangeable. Each is designed for particular graph properties.
+
+## 2. Complete comparison table
+
+Let:
+
+- \\(V\\) = number of vertices.
+- \\(E\\) = number of edges.
+- \\(W\\) = maximum edge weight (when relevant).
+- \\(s\\) = source vertex.
+
+| Algorithm                 | Best-case applicability | Time complexity        | Auxiliary space |
+| ------------------------- | ----------------------- | ---------------------- | --------------- |
+| BFS                       | Unweighted              | \\(O(V+E)\\)           | \\(O(V)\\)      |
+| 0-1 BFS                   | Weights 0 or 1          | \\(O(V+E)\\)           | \\(O(V)\\)      |
+| DAG Shortest Path         | Directed acyclic graph  | \\(O(V+E)\\)           | \\(O(V)\\)      |
+| Dijkstra (Linear Scan)    | Non-negative weights    | \\(O(V^2+E)\\)         | \\(O(V)\\)      |
+| Dijkstra (Binary Heap)    | Non-negative weights    | \\(O((V+E)\log V)\\)   | \\(O(V)\\)      |
+| Dijkstra (Fibonacci Heap) | Non-negative weights    | \\(O(E+V\log V)\\)     | \\(O(V)\\)      |
+| Bellman–Ford              | Arbitrary weights       | \\(O(VE)\\)            | \\(O(V)\\)      |
+| SPFA                      | Arbitrary weights       | \\(O(VE)\\) worst case | \\(O(V)\\)      |
+
+Important: These are algorithm auxiliary-space estimates. They exclude the graph itself, which typically requires \\(O(V+E)\\) space using adjacency lists.
+
+The complexities above are standard theoretical bounds. In particular, the Fibonacci heap gives a better theoretical bound but is more complicated to implement.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://509.graph.prtest3.cppalliance.org\&sz=32)
+
+509.graph.prtest3.cppalliance.org+2
+
+
+
+## 3. Detailed comparison by algorithm
+
+### 3.1 Breadth-First Search (BFS)
+
+Best for unweighted graphs
+
+How it works
+
+BFS explores vertices level by level, using a FIFO queue.
+
+```
+Source: A
+
+        A
+       / \
+      B   C
+     /     \
+    D       E
+
+Distances:
+A = 0
+B = 1
+C = 1
+D = 2
+E = 2
+```
+
+It guarantees the shortest path in terms of the number of edges.
+
+| Property                 | Description                         |
+| ------------------------ | ----------------------------------- |
+| Graph                    | Directed or undirected              |
+| Weights                  | Unweighted (equivalent to weight 1) |
+| Negative weights         | Not applicable                      |
+| Strategy                 | Level-by-level exploration          |
+| Data structure           | Queue                               |
+| Time                     | \\(O(V+E)\\)                        |
+| Space                    | \\(O(V)\\)                          |
+| Negative cycle detection | No                                  |
+| Path reconstruction      | Yes, using `parent[]`               |
+
+Advantages
+
+- Simple to implement.
+- Linear time complexity.
+- Efficient for large sparse graphs.
+- Finds minimum-hop paths.
+
+Disadvantages
+
+- Cannot handle arbitrary weighted graphs.
+- Does not minimize total weight when edge costs differ.
+
+Applications
+
+- Social network connections.
+- Minimum number of transfers.
+- Network hop counting.
+- Maze solving.
+- Finding the minimum number of moves in a game.
+
+### 3.2 0-1 BFS
+
+Best for binary edge weights
+
+0-1 BFS is a specialized version of BFS for graphs where every edge has a weight of either zero or one.
+
+How it works
+
+Instead of a normal queue, it uses a double-ended queue (Deque).
+
+- Weight 0: insert the destination at the front.
+- Weight 1: insert the destination at the back.
+
+```
+        A
+       / \
+    0 /   \ 1
+     B     C
+      \   /
+     1 \ / 0
+        D
+
+Possible shortest distances:
+A = 0
+B = 0
+C = 1
+D = 0
+```
+
+| Property                 | Description            |
+| ------------------------ | ---------------------- |
+| Graph                    | Directed or undirected |
+| Weights                  | Only 0 and 1           |
+| Strategy                 | Deque-based relaxation |
+| Data structure           | Double-ended queue     |
+| Time                     | \\(O(V+E)\\)           |
+| Space                    | \\(O(V)\\)             |
+| Negative weights         | No                     |
+| Negative cycle detection | No                     |
+
+Advantages
+
+- Faster than general Dijkstra in this restricted case.
+- Linear time complexity.
+- Supports weighted shortest paths.
+
+Disadvantages
+
+- Only works when weights are exactly 0 or 1.
+- Cannot handle negative or arbitrary positive weights.
+
+Applications
+
+- Minimum-cost state transitions.
+- Grid problems with free and costly moves.
+- Graphs with zero-cost and one-cost transitions.
+
+### 3.3 DAG Shortest Path
+
+Best for directed acyclic graphs
+
+A DAG (Directed Acyclic Graph) is a directed graph that contains no directed cycles.
+
+The algorithm uses topological sorting to establish an order in which every vertex appears before its outgoing neighbors.
+
+How it works
+
+1. Perform topological sorting.
+2. Initialize the source distance to zero.
+3. Process vertices in topological order.
+4. Relax all outgoing edges of each vertex.
+
+Example:
+
+```
+        A
+       / \
+     4/   \2
+     B     C
+      \   /
+     3 \ / 1
+        D
+```
+
+From A:
+
+- A → B = 4
+- A → C = 2
+- A → C → D = 3
+
+Therefore, the shortest distance to D is 3.
+
+| Property                 | Description                            |
+| ------------------------ | -------------------------------------- |
+| Graph                    | Directed acyclic graph                 |
+| Weights                  | Positive, zero, or negative            |
+| Strategy                 | Topological ordering + relaxation      |
+| Data structure           | Stack/queue for topological sorting    |
+| Time                     | \\(O(V+E)\\)                           |
+| Space                    | \\(O(V)\\)                             |
+| Negative weights         | Yes                                    |
+| Negative cycle detection | Not needed; DAGs cannot contain cycles |
+
+Advantages
+
+- Linear time complexity.
+- Handles negative edge weights.
+- More efficient than Bellman–Ford for DAGs.
+- Each vertex and edge is processed a constant number of times.
+
+Disadvantages
+
+- Requires a directed acyclic graph.
+- Cannot directly handle general directed graphs containing cycles.
+
+Applications
+
+- Project scheduling.
+- Task dependency resolution.
+- Build systems.
+- Course prerequisite planning.
+- Dependency graphs.
+
+### 3.4 Dijkstra's Algorithm — Linear Scan
+
+Best for dense graphs
+
+This implementation selects the unvisited vertex with the smallest tentative distance by scanning all vertices.
+
+How it works
+
+1. Initialize all distances to infinity.
+2. Set the source distance to zero.
+3. Find the unvisited vertex with the smallest distance.
+4. Mark it as visited.
+5. Relax its outgoing edges.
+6. Repeat until all reachable vertices are processed.
+
+| Property                 | Description                    |
+| ------------------------ | ------------------------------ |
+| Graph                    | Directed or undirected         |
+| Weights                  | Non-negative                   |
+| Strategy                 | Greedy                         |
+| Data structure           | Distance array + visited array |
+| Time                     | \\(O(V^2+E)\\)                 |
+| Space                    | \\(O(V)\\)                     |
+| Negative weights         | No                             |
+| Negative cycle detection | No                             |
+
+For an adjacency matrix, the complexity is \\(O(V^2)\\).
+
+Advantages
+
+- Simple implementation.
+- No priority queue overhead.
+- Good for dense graphs.
+- Predictable performance.
+
+Disadvantages
+
+- Repeatedly scans all vertices.
+- Inefficient for large sparse graphs.
+- Cannot handle negative edge weights.
+
+Applications
+
+- Dense transportation networks.
+- Small weighted graphs.
+- Graphs represented by adjacency matrices.
+
+### 3.5 Dijkstra's Algorithm — Binary Heap / Priority Queue
+
+Best general-purpose choice for non-negative weights
+
+This version improves vertex selection using a min-priority queue.
+
+How it works
+
+Instead of scanning every vertex to find the smallest distance, it extracts the vertex with the smallest tentative distance from a min-heap.
+
+```
+Priority Queue:
+
+(distance, vertex)
+
+(2, C)
+(4, B)
+(7, D)
+(∞, E)
+
+Extract minimum → (2, C)
+```
+
+When a shorter path is discovered, a new entry can be inserted into the priority queue.
+
+In common Java implementations using `PriorityQueue`, outdated entries are skipped when extracted.
+
+| Property                 | Description                                                                 |
+| ------------------------ | --------------------------------------------------------------------------- |
+| Graph                    | Directed or undirected                                                      |
+| Weights                  | Non-negative                                                                |
+| Strategy                 | Greedy                                                                      |
+| Data structure           | Min-priority queue                                                          |
+| Time                     | \\(O((V+E)\log V)\\)                                                        |
+| Space                    | \\(O(V)\\) for a standard lazy-heap implementation, excluding graph storage |
+| Negative weights         | No                                                                          |
+| Negative cycle detection | No                                                                          |
+
+Advantages
+
+- Efficient for sparse graphs.
+- Usually the preferred Dijkstra implementation.
+- Avoids scanning all vertices to find the minimum.
+- Works well with adjacency lists.
+
+Disadvantages
+
+- Requires a priority queue.
+- More complicated than linear-scan Dijkstra.
+- Cannot safely handle negative edges.
+- Lazy implementations may hold multiple entries for the same vertex.
+
+Applications
+
+- GPS navigation.
+- Network routing.
+- Flight route optimization.
+- Logistics and delivery systems.
+- Game pathfinding.
+
+### 3.6 Dijkstra's Algorithm — Fibonacci Heap
+
+This is an advanced Dijkstra implementation that uses a Fibonacci heap.
+
+Its main advantage is that decrease-key operations have an amortized \\(O(1)\\) cost.
+
+| Property         | Description            |
+| ---------------- | ---------------------- |
+| Graph            | Directed or undirected |
+| Weights          | Non-negative           |
+| Data structure   | Fibonacci heap         |
+| Time             | \\(O(E+V\log V)\\)     |
+| Space            | \\(O(V)\\)             |
+| Negative weights | No                     |
+
+Advantages
+
+- Better theoretical complexity for graphs with many decrease-key operations.
+- Particularly attractive for dense theoretical workloads.
+
+Disadvantages
+
+- Complex implementation.
+- High constant factors.
+- More memory and pointer-management overhead.
+- Often slower in practical applications than binary heaps.
+
+Applications
+
+- Theoretical graph algorithm analysis.
+- Specialized graph-processing implementations.
+
+### 3.7 Bellman–Ford Algorithm
+
+Best for negative edge weights
+
+Bellman–Ford is a general-purpose SSSP algorithm that supports negative edge weights.
+
+Unlike Dijkstra, it does not permanently finalize a vertex when it is selected.
+
+How it works
+
+1. Initialize all distances to infinity.
+2. Set the source distance to zero.
+3. Relax every edge.
+4. Repeat the relaxation process \\(V-1\\) times.
+5. Perform one additional pass to detect a reachable negative-weight cycle.
+
+For each edge \\((u,v)\\):
+
+\\[ dist[v] = \min(dist[v],dist[u]+w(u,v)) \\]
+
+Why \\(V-1\\) iterations?
+
+A shortest simple path can contain at most \\(V-1\\) edges.
+
+Each complete pass gives the algorithm an opportunity to propagate shorter distances through another edge.
+
+The additional pass determines whether another improvement is possible.
+
+| Property                 | Description                         |
+| ------------------------ | ----------------------------------- |
+| Graph                    | Directed or undirected              |
+| Weights                  | Positive, zero, or negative         |
+| Strategy                 | Repeated edge relaxation            |
+| Data structure           | Distance array + edge list          |
+| Time                     | \\(O(VE)\\)                         |
+| Space                    | \\(O(V)\\), excluding graph storage |
+| Negative weights         | Yes                                 |
+| Negative cycle detection | Yes, reachable from source          |
+
+Advantages
+
+- Supports negative edge weights.
+- Detects reachable negative-weight cycles.
+- Works with general directed graphs.
+- Conceptually straightforward.
+
+Disadvantages
+
+- Slower than Dijkstra for non-negative graphs.
+- Repeatedly scans all edges.
+- Cannot produce finite shortest distances for vertices affected by reachable negative cycles.
+
+Applications
+
+- Financial arbitrage detection.
+- Currency exchange analysis.
+- Graphs with rewards or penalties represented by negative weights.
+- Network routing protocols such as distance-vector routing.
+
+### 3.8 SPFA (Shortest Path Faster Algorithm)
+
+SPFA is a queue-based optimization of Bellman–Ford.
+
+Instead of repeatedly scanning every edge, it places vertices whose distances have changed into a queue.
+
+How it works
+
+1. Initialize distances.
+2. Insert the source into a queue.
+3. Remove a vertex from the queue.
+4. Relax its outgoing edges.
+5. If a neighbor's distance improves, insert it into the queue if it is not already queued.
+6. Continue until the queue is empty or a negative cycle is detected.
+
+| Property                 | Description                                        |
+| ------------------------ | -------------------------------------------------- |
+| Graph                    | Directed or undirected                             |
+| Weights                  | Positive, zero, or negative                        |
+| Strategy                 | Queue-based relaxation                             |
+| Data structure           | Queue                                              |
+| Average performance      | Often faster than Bellman–Ford on favorable inputs |
+| Worst-case time          | \\(O(VE)\\)                                        |
+| Space                    | \\(O(V)\\), excluding graph storage                |
+| Negative weights         | Yes                                                |
+| Negative cycle detection | Yes, with a correct detection mechanism            |
+
+Advantages
+
+- Often avoids unnecessary edge scans.
+- Can be effective on sparse graphs.
+- Supports negative weights.
+
+Disadvantages
+
+- Worst-case performance is still \\(O(VE)\\).
+- No guaranteed improvement over Bellman–Ford.
+- Performance can be unpredictable.
+- More care is required when implementing negative-cycle detection.
+
+Applications
+
+- Experimental shortest-path implementations.
+- Graphs where only a relatively small number of vertices are repeatedly affected by relaxations.
+
+SPFA should not automatically be considered faster than Bellman–Ford. Its performance depends heavily on the graph structure and edge ordering.
+
+## 4. Comparison by graph properties
+
+This table is particularly useful when deciding which algorithm is valid for a given graph.
+
+| Graph property           | BFS  | 0-1 BFS               | DAG SP          | Dijkstra | Bellman–Ford | SPFA    |
+| ------------------------ | ---- | --------------------- | --------------- | -------- | ------------ | ------- |
+| Unweighted               | Yes  | Yes (if modeled as 1) | Yes, if DAG     | Yes      | Yes          | Yes     |
+| Positive weights         | No\* | No\*                  | Yes             | Yes      | Yes          | Yes     |
+| Zero weights             | No\* | Yes                   | Yes             | Yes      | Yes          | Yes     |
+| Negative weights         | No   | No                    | Yes             | No       | Yes          | Yes     |
+| Directed graph           | Yes  | Yes                   | Yes             | Yes      | Yes          | Yes     |
+| Undirected graph         | Yes  | Yes                   | Only if acyclic | Yes      | Yes\*\*      | Yes\*\* |
+| General cyclic graph     | Yes  | Yes                   | No              | Yes      | Yes          | Yes     |
+| Negative-cycle detection | No   | No                    | Not applicable  | No       | Yes          | Yes     |
+
+\* BFS is correct when every edge has the same cost, not when arbitrary weights are present. 0-1 BFS requires weights of exactly 0 or 1.
+
+\*\* For an undirected graph, a negative-weight edge creates a negative cycle by traversing the edge in both directions. Therefore, a meaningful finite shortest-path solution cannot exist for vertices affected by that edge.
+
+### Negative cycles: an important distinction
+
+Consider:
+
+```
+A ----2----> B
+^            |
+|            |
++-----(-5)---+
+```
+
+The total cycle weight is:
+
+\\[ 2+(-5)=-3 \\]
+
+Every time we traverse this cycle, the total path cost decreases by 3.
+
+After repeatedly traversing it:
+
+```
+First traversal:  -3
+Second traversal: -6
+Third traversal:  -9
+Fourth traversal: -12
+```
+
+There is no finite minimum distance.
+
+The important distinction:
+
+- Negative edge: An edge whose weight is below zero.
+- Negative cycle: A cycle whose total weight is below zero.
+- Negative cycle reachable from source: Can make shortest distances undefined for vertices reachable from that cycle.
+
+Bellman–Ford detects negative cycles reachable from its source. It does not necessarily detect negative cycles in disconnected components.
+
+For a general directed graph, a negative cycle may exist without affecting the shortest paths from a particular source.
+
+## 5. Performance comparison: sparse vs. dense graphs
+
+Graph density is another important consideration.
+
+A graph is sparse when it has relatively few edges compared with the maximum possible number of edges.
+
+A graph is dense when it has many edges.
+
+For a simple directed graph without self-loops:
+
+\\[ E\_{\max}=V(V-1) \\]
+
+For an undirected graph:
+
+\\[ E\_{\max}=\frac{V(V-1)}{2} \\]
+
+### Sparse graph
+
+Example:
+
+```
+A ---- B ---- C
+|      |
+D      E ---- F
+```
+
+Here, the number of edges is relatively small.
+
+| Algorithm              | Suitability                         |
+| ---------------------- | ----------------------------------- |
+| BFS                    | Excellent                           |
+| 0-1 BFS                | Excellent when applicable           |
+| DAG Shortest Path      | Excellent when applicable           |
+| Dijkstra (Linear Scan) | Usually inefficient                 |
+| Dijkstra (Binary Heap) | Excellent                           |
+| Bellman–Ford           | Useful when negative weights exist  |
+| SPFA                   | Potentially good, but unpredictable |
+
+For sparse graphs, adjacency lists and binary-heap Dijkstra are generally a good combination.
+
+### Dense graph
+
+Example:
+
+```
+A ----- B
+|\     /|
+| \   / |
+|  \ /  |
+|  / \  |
+| /   \ |
+|/     \|
+C ----- D
+```
+
+Many vertices are connected to many others.
+
+| Algorithm              | Suitability                          |
+| ---------------------- | ------------------------------------ |
+| BFS                    | Excellent                            |
+| 0-1 BFS                | Excellent when applicable            |
+| DAG Shortest Path      | Excellent when applicable            |
+| Dijkstra (Linear Scan) | Excellent                            |
+| Dijkstra (Binary Heap) | Good, but heap overhead may not help |
+| Bellman–Ford           | Expensive                            |
+| SPFA                   | Unpredictable                        |
+
+For dense graphs, linear-scan Dijkstra with an adjacency matrix is often a practical choice.
+
+### Why does density matter for Dijkstra?
+
+Consider the two implementations:
+
+Linear-scan Dijkstra
+
+\\[ O(V^2+E) \\]
+
+For a dense graph, \\(E=O(V^2)\\):
+
+\\[ O(V^2+V^2)=O(V^2) \\]
+
+Binary-heap Dijkstra
+
+\\[ O((V+E)\log V) \\]
+
+For a dense graph:
+
+\\[ O(V^2\log V) \\]
+
+Therefore, linear-scan Dijkstra has a better asymptotic bound for dense graphs.
+
+For sparse graphs, binary-heap Dijkstra is generally preferable.
+
+## 6. Comparison of algorithmic strategies
+
+An interesting way to understand these algorithms is to compare how they process vertices and edges.
+
+| Algorithm         | Main strategy                             | How it selects the next vertex  | Edge relaxation                  |
+| ----------------- | ----------------------------------------- | ------------------------------- | -------------------------------- |
+| BFS               | Breadth-first exploration                 | FIFO queue                      | When first discovered            |
+| 0-1 BFS           | Deque-based exploration                   | Front/back according to weight  | When a shorter distance is found |
+| DAG Shortest Path | Topological processing                    | Topological order               | Once per outgoing edge           |
+| Dijkstra (Linear) | Greedy                                    | Minimum-distance scan           | When a shorter distance is found |
+| Dijkstra (Heap)   | Greedy                                    | Min-priority queue              | When a shorter distance is found |
+| Bellman–Ford      | Dynamic programming / repeated relaxation | No greedy vertex selection      | Every edge, repeatedly           |
+| SPFA              | Queue-based relaxation                    | FIFO queue of affected vertices | When a shorter distance is found |
+
+### The common foundation: Edge Relaxation
+
+Most shortest-path algorithms use the same fundamental operation: relaxation.
+
+Given an edge:
+
+\\[ u \xrightarrow{w} v \\]
+
+The algorithm checks whether reaching \\(v\\) through \\(u\\) produces a shorter path.
+
+\\[ dist[v] > dist[u]+w(u,v) \\]
+
+If so:
+
+\\[ dist[v]=dist[u]+w(u,v) \\]
+
+And, when reconstructing the path:
+
+\\[ parent[v]=u \\]
+
+The main difference between algorithms is the order in which they relax edges and how they decide which edges to process next.
+
+For example:
+
+- BFS uses levels.
+- 0-1 BFS uses a deque.
+- Dijkstra uses greedy minimum-distance selection.
+- DAG Shortest Path uses topological order.
+- Bellman–Ford repeatedly processes all edges.
+- SPFA processes vertices whose distances have changed.
+
+This is why understanding relaxation makes it much easier to understand the entire family of shortest-path algorithms.
+
+## 7. Path reconstruction comparison
+
+All these algorithms can reconstruct the actual shortest path, not just calculate its distance.
+
+The standard approach is to maintain:
+
+```
+int[] dist;
+int[] parent;
+```
+
+Whenever an algorithm improves the distance to a vertex:
+
+```
+dist[v] = dist[u] + weight;
+parent[v] = u;
+```
+
+To reconstruct the path from the source to a destination:
+
+```
+List<Integer> path = new ArrayList<>();
+
+for (int current = destination;
+     current != -1;
+     current = parent[current]) {
+
+    path.add(current);
+}
+
+Collections.reverse(path);
+```
+
+This example assumes the parent array is initialized to `-1` and the destination is reachable.
+
+| Algorithm         | Distance | Parent tracking |
+| ----------------- | -------- | --------------- |
+| BFS               | Yes      | Yes             |
+| 0-1 BFS           | Yes      | Yes             |
+| DAG Shortest Path | Yes      | Yes             |
+| Dijkstra          | Yes      | Yes             |
+| Bellman–Ford      | Yes      | Yes             |
+| SPFA              | Yes      | Yes             |
+
+Path reconstruction normally adds only \\(O(V)\\) space and takes \\(O(L)\\) time, where \\(L\\) is the number of vertices in the reconstructed path.
+
+## 8. Choosing the right SSSP algorithm
+
+Here is a practical decision process:
+
+```
+                START
+                  |
+           Is graph unweighted?
+              /       \
+            YES        NO
+             |          |
+            BFS    Are weights only
+                    0 or 1?
+                    /    \
+                  YES     NO
+                   |       |
+                0-1 BFS  Is graph a DAG?
+                         /       \
+                       YES       NO
+                        |         |
+                    DAG SP    Are all weights
+                              non-negative?
+                               /       \
+                             YES       NO
+                              |         |
+                          Dijkstra  Bellman-Ford
+```
+
+Additional implementation decisions:
+
+- For sparse graphs, prefer binary-heap Dijkstra.
+- For dense graphs, consider linear-scan Dijkstra.
+- Consider SPFA only when its practical performance is suitable and its worst-case behavior is acceptable.
+
+An important optimization is to exploit graph structure before selecting a general-purpose algorithm. A DAG, for example, can be solved in linear time even with negative weights.
+
+## 9. Which algorithms are actually SSSP?
+
+It is useful to distinguish SSSP from other shortest-path problems.
+
+| Algorithm           | Problem type | Explanation                                      |
+| ------------------- | ------------ | ------------------------------------------------ |
+| BFS                 | SSSP         | One source to all reachable vertices             |
+| 0-1 BFS             | SSSP         | One source to all reachable vertices             |
+| Dijkstra            | SSSP         | One source to all reachable vertices             |
+| Bellman–Ford        | SSSP         | One source to all reachable vertices             |
+| DAG Shortest Path   | SSSP         | One source to all reachable vertices             |
+| SPFA                | SSSP         | One source to all reachable vertices             |
+| Floyd–Warshall      | APSP         | All pairs of vertices                            |
+| Johnson's Algorithm | APSP         | All pairs, particularly useful for sparse graphs |
+| A\*                 | Single-pair  | One source to one specified destination          |
+
+Floyd–Warshall and Johnson's are not SSSP algorithms, although Johnson's uses Bellman–Ford and Dijkstra internally.
+
+A\* is also not normally classified as a general SSSP algorithm because it focuses its search on a particular destination.
+
+## 10. Java implementation considerations
+
+Since these algorithms are being studied as data structures and algorithms, the following implementation choices are useful:
+
+| Algorithm            | Recommended Java data structures        |
+| -------------------- | --------------------------------------- |
+| BFS                  | `ArrayDeque`, adjacency list, arrays    |
+| 0-1 BFS              | `ArrayDeque`, adjacency list, arrays    |
+| DAG Shortest Path    | `ArrayList`, `ArrayDeque`, arrays       |
+| Dijkstra (Linear)    | Adjacency matrix, arrays                |
+| Dijkstra (Heap)      | `PriorityQueue`, adjacency list, arrays |
+| Dijkstra (Fibonacci) | Custom Fibonacci heap, adjacency list   |
+| Bellman–Ford         | Edge list, arrays                       |
+| SPFA                 | `ArrayDeque`, adjacency list, arrays    |
+
+For a Java implementation, also consider:
+
+- Use `long[] dist` instead of `int[] dist` when path weights might exceed the integer range.
+- Use a safe infinity value, such as `Long.MAX_VALUE / 4`.
+- Avoid adding infinity to edge weights.
+- Use a custom `Edge` class or record.
+- Use a `parent[]` array when path reconstruction is required.
+- Use `PriorityQueue` with a comparator based on distance for Dijkstra.
+
+One important distinction: Java's standard `PriorityQueue` does not provide a decrease-key operation. The common solution is to insert a new distance entry and ignore outdated entries when they are removed.
+
+## 11. Final summary: Which algorithm should you learn and when?
+
+| Priority | Algorithm                 | Why learn it?                                             |
+| -------- | ------------------------- | --------------------------------------------------------- |
+| 1        | BFS                       | Fundamental graph traversal and unweighted shortest paths |
+| 2        | Dijkstra (Linear Scan)    | Understand greedy shortest-path selection                 |
+| 3        | Dijkstra (Priority Queue) | Efficient shortest paths in weighted graphs               |
+| 4        | Bellman–Ford              | Understand negative weights and negative-cycle detection  |
+| 5        | DAG Shortest Path         | Understand topological ordering and efficient relaxation  |
+| 6        | 0-1 BFS                   | Understand specialized shortest-path optimization         |
+| 7        | SPFA                      | Understand queue-based relaxation and its limitations     |
+| 8        | Dijkstra (Fibonacci Heap) | Understand advanced priority-queue optimization           |
+
+My recommended learning sequence:
+
+1. BFS — understand distances and parent tracking.
+2. Dijkstra Linear — understand greedy selection.
+3. Dijkstra Priority Queue — optimize vertex selection.
+4. Bellman–Ford — understand repeated relaxation.
+5. DAG Shortest Path — understand topological ordering.
+6. 0-1 BFS — understand specialized queue optimization.
+7. SPFA — understand optimization of Bellman–Ford.
+8. Fibonacci Heap Dijkstra — understand advanced heap complexity.
+
+The most important algorithms to master are BFS, Dijkstra, Bellman–Ford, and DAG Shortest Path. Together, they cover the fundamental SSSP problem across the most important graph structures and edge-weight conditions.
+
+## 12. Recommended references
+
+For further study:
+
+1. [MIT — Introduction to Algorithms: Single Source Shortest Paths Review](https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/6027e2a155c948937fdfb93981f7070c_MIT6_006S20_r14.pdf?utm_source=chatgpt.com).
+2. [University of Oxford — Design and Analysis of Algorithms](https://www.cs.ox.ac.uk/files/12673/paths.pdf?utm_source=chatgpt.com).
+3. [Boost Graph Library — Shortest Paths Overview](https://509.graph.prtest3.cppalliance.org/graph/algorithms/shortest_paths/shortest_paths_overview.html?utm_source=chatgpt.com).
+
+These provide additional theoretical explanations and complexity analysis.
+
+The central concept to remember: Don't select a shortest-path algorithm based only on its time complexity. First identify the graph's properties and constraints, then select the fastest algorithm that guarantees a correct answer.

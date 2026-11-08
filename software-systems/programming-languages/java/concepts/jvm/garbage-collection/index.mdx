@@ -1,0 +1,1223 @@
+# Garbage Collection in Java: JVM Internals and the Java Memory Model
+
+Garbage Collection (GC) is one of the most important mechanisms in the Java runtime. To understand it properly, we need to connect three concepts:
+
+1. JVM architecture — where objects live, how memory is allocated, and how the runtime manages that memory.
+2. Garbage Collection — how the JVM identifies objects that are no longer needed and reclaims their memory.
+3. Java Memory Model (JMM) — how threads interact with shared memory, and how visibility, ordering, and synchronization affect the objects a collector must preserve.
+
+These concepts are related, but they solve different problems. GC manages memory reclamation; the JMM defines the rules for multithreaded access to memory.
+
+**The big picture**
+
+```
+ +------------------------------------------------------------------------------+                 
+ |                                     </>                                      |         
+ |                              Java application                                |         
+ |               Objects, references, threads, method calls                     |         
+ |                                                                              |         
+ +------------------------------------------------------------------------------+         
+ +------------------------------------------------------------------------------+         
+ |                                                                              |         
+ |                               JVM runtime                                    |         
+ |        Class loading · execution engine · runtime data areas                 |         
+ |                                                                              |         
+ +------------------------------------------------------------------------------+         
+ +------------------------------------+ +---------------------------------------+          
+ | Heap                               | | Threads and stacks                    |          
+ | Objects and arrays;                | | Execution frames, local variables and |          
+ | primary target of ordinary Java GC | | references used as GC roots           |          
+ |                                    | |                                       |          
+ |                                    | |                                       |          
+ +------------------------------------+ +---------------------------------------+          
+ +------------------------------------------------------------------------------+          
+ |                            Garbage Collector                                 |          
+ |        Find reachable objects · reclaim unreachable objects                  |          
+ |                        · maintain heap space                                 |          
+ |                                                                              |          
+ +------------------------------------------------------------------------------+                                                                                       
+                                                                                
+```                                                                                
+The key idea is this:
+
+Java GC does not normally ask whether your program will ever use an object again. It asks whether the object is reachable from a set of roots that the JVM considers live.
+
+An object can be useless to your business logic but still reachable. Conversely, an object can become eligible for collection while the program is still running.
+
+Let's build up the concepts from the memory layout to the collector algorithms and then connect them to the JMM.
+
+## JVM memory architecture: where does garbage collection happen?
+
+The JVM defines runtime data areas with different purposes and lifetimes. In a typical HotSpot JVM, the distinction looks like this.
+
+```
++---------------------------------------------------------------------------+           
+|   Shared runtime areas                                                    |           
+|  +---------------------------------------------------------------------+  |           
+|  |Heap                                                                 |  |           
+|  |Most Java objects and arrays. The principal area managed by          |  |           
+|  |the garbage collector.                                               |  |                
+|  |                                                                     |  |           
+|  +---------------------------------------------------------------------+  |           
+|  +---------------------------------------------------------------------+  |           
+|  |Metaspace / class metadata                                           |  |           
+|  |Class metadata stored in native memory in HotSpot. Class unloading   |  |           
+|  | and metadata reclamation can accompany GC.                          |  |                     
+|  |                                                                     |  |           
+|  +---------------------------------------------------------------------+  |           
+|  +---------------------------------------------------------------------+  | 
+|  | Per-thread runtime areas                                            |  |          
+|  |+-------------------------------------------------------------------+|  |           
+|  ||Java stack                                                         ||  |           
+|  ||Frames, local variables, operand stacks and method execution state.||  |          
+|  ||References in active frames can keep heap objects alive.           ||  |                 
+|  ||                                                                   ||  |           
+|  |+-------------------------------------------------------------------+|  |           
+|  |+-------------------------------------------------------------------+|  |           
+|  ||PC register and native method stack                                ||  |           
+|  ||Execution state for each thread, with implementation-dependent     ||  |           
+|  ||details for native execution.                                      ||  |           
+|  ||                                                                   ||  |           
+|  |+-------------------------------------------------------------------+|  |
+|  +---------------------------------------------------------------------+  |          
++---------------------------------------------------------------------------+                                                                                       
+```    
+
+### The heap
+
+Consider:
+
+```Java
+public class HeapExample {
+    public static void main(String[] args) {
+        Person person = new Person("Alice");
+    }
+}
+
+class Person {
+    String name;
+
+    Person(String name) {
+        this.name = name;
+    }
+}
+```
+
+Conceptually, the JVM may have a heap object graph like this:
+
+```                                                                            
+ +-------------------------------------------------------------------+          
+ | +---------------------------------------------------------------+ |          
+ | |                                                               | |          
+ | |               Stack frame — main()                            | |          
+ | |               person → reference to a Person                  | |                      
+ | |                                                               | |          
+ | +---------------------------------------------------------------+ |  
+ |                               |                                   |
+ |                               V                                   |
+ | +---------------------------------------------------------------+ |          
+ | |                                                               | |          
+ | |              Heap — Person object                             | |          
+ | |              name → reference to "Alice"                      | |                  
+ | |                                                               | |          
+ | +---------------------------------------------------------------+ |          
+ +-------------------------------------------------------------------+          
+ ```                                                                                                                            
+This is a conceptual illustration. Java does not require the local variable to contain a literal machine address; the JVM may use handles, compressed references, compiler optimizations, or other implementation techniques.
+
+When the method finishes and no other live reference keeps the `Person` reachable, the object can become eligible for collection.
+
+### The stack is not the heap
+
+A common misconception is that GC simply frees everything when a method returns.
+
+That is not true.
+
+```Java
+static Person createPerson() {
+    Person p = new Person("Alice");
+    return p;
+}
+
+static void mainLogic() {
+    Person person = createPerson();
+    System.out.println(person.name);
+}
+```
+
+The local reference `p` belongs to the method's execution state. But returning from `createPerson()` does not destroy the returned `Person` object. The caller now has a reference to it.
+
+The important distinction is:
+
+- Stack frame lifetime: associated with method execution.
+- Object lifetime: determined by reachability and runtime optimizations, not by the method that created it.
+
+### Other memory areas and GC
+
+| Area                 | Typical contents                   | Relationship to GC                                       |
+| -------------------- | ---------------------------------- | -------------------------------------------------------- |
+| Heap                 | Objects and arrays                 | Main collection target                                   |
+| Metaspace in HotSpot | Class metadata                     | Can be reclaimed when classes are unloaded               |
+| Java stacks          | Frames and local execution state   | References in active frames may be GC roots              |
+| Code cache           | JIT-compiled machine code          | Managed separately; not ordinary heap object reclamation |
+| Direct/native memory | Native allocations, direct buffers | Not necessarily reclaimed by heap GC alone               |
+
+For example, a direct `ByteBuffer` can use native memory outside the Java heap. The Java object representing the buffer may be collected, but the native allocation has its own lifecycle and cleanup mechanisms.
+
+Important: GC does not mean the JVM automatically manages every byte of process memory in the same way. Heap memory, class metadata, native allocations, thread stacks, and compiled code have distinct management mechanisms.
+
+## What exactly is garbage?
+
+An object is generally eligible for garbage collection when it is no longer strongly reachable from the JVM's live roots, subject to Java's reachability rules and reference-processing mechanisms.
+
+Consider:
+
+```Java
+Person person = new Person("Alice");
+
+person = new Person("Bob");
+```
+
+The first object was created with `"Alice"`. Then `person` is assigned a reference to a second object.
+
+The heap conceptually changes from:
+
+```
+                                                                                
+ +--------------------------------------------------------------------+         
+ | Before reassignment                                                |         
+ | +----------------------------------------------------------------+ |         
+ | |                  person → Person("Alice")                      | |         
+ | +----------------------------------------------------------------+ |         
+ | After reassignment                                                 |         
+ | +----------------------------------------------------------------+ |         
+ | |                   person → Person("Bob")                       | |         
+ | +----------------------------------------------------------------+ |         
+ | +----------------------------------------------------------------+ |              
+ | |                 Person("Alice") — unreachable                  | |         
+ | +----------------------------------------------------------------+ |               
+ |                                                                    |         
+ +--------------------------------------------------------------------+          
+```
+
+Assuming no other live reference points to the Alice object, it is now eligible for collection.
+
+Three important distinctions:
+
+- Unreachable: no applicable live reference path leads to the object.
+- Eligible for collection: the object may be reclaimed by the collector.
+- Collected: the collector has actually reclaimed or otherwise recovered its storage.
+
+These are not the same event. An object may remain in memory for some time after becoming unreachable.
+
+### Java does not require explicit deallocation
+
+In C, you might write:
+
+```c
+Person *person = malloc(sizeof(Person));
+
+free(person);
+```
+
+In Java, you normally write:
+
+```Java
+Person person = new Person("Alice");
+
+person = null;
+```
+
+The assignment removes this particular reference. It does not force collection, and it does not guarantee that the object is immediately reclaimed.
+
+```
+System.gc();
+```
+
+This method is only a request or suggestion to the JVM. A JVM is permitted to ignore it, depending on its configuration and implementation.
+
+Do not use `System.gc()` as a normal memory-management strategy.
+
+## Reachability: how the JVM decides what survives
+
+The fundamental operation behind tracing garbage collectors is to start from known live roots and follow references.
+
+### GC roots
+
+A garbage collector uses a set of roots to discover live objects. In HotSpot, these can include:
+
+- References in active Java thread stacks and registers.
+- References held by live static fields and class-related runtime structures.
+- References held by JVM internal structures.
+- References in JNI handles and other native integration structures.
+- Other implementation-specific root references.
+
+The exact root set depends on the JVM implementation and the collector.
+
+Consider this program:
+
+```Java
+public class ReachabilityExample {
+
+    static class Node {
+        String name;
+        Node next;
+
+        Node(String name) {
+            this.name = name;
+        }
+    }
+
+    public static void main(String[] args) {
+        Node first = new Node("A");
+        Node second = new Node("B");
+
+        first.next = second;
+
+        second = null;
+
+        System.out.println(first.name);
+    }
+}
+```
+
+Even after `second = null`, the second node is still reachable through `first.next`.
+
+The graph is:
+
+```
+                                                                                
+ +--------------------------------------------------------------------+         
+ | +----------------------------------------------------------------+ |         
+ | |                                                                | |         
+ | |                        GC root                                 | |         
+ | |                 Local reference first                          | |         
+ | |                                                                | |         
+ | +----------------------------------------------------------------+ |     
+ |                              |                                     |
+ |                              V                                     |
+ | +----------------------------------------------------------------+ |         
+ | |                       Node A                                   | |         
+ | |                    next → Node B                               | |         
+ | |                                                                | |         
+ | +----------------------------------------------------------------+ |    
+ |                              |                                     |
+ |                              V                                     |
+ | +----------------------------------------------------------------+ |         
+ | |                                                                | |         
+ | |                         Node B                                 | |         
+ | |                     Still reachable                            | |         
+ | |                                                                | |         
+ | +----------------------------------------------------------------+ |                 
+ +--------------------------------------------------------------------+         
+```
+
+The `second` variable is no longer needed, but the object it once referenced is still reachable through another path.
+
+If we subsequently execute:
+
+```
+first.next = null;
+first = null;
+```
+
+and there are no other live paths to either node, both nodes can become eligible for collection.
+
+### Reachability is a graph problem
+
+The heap can be modeled as a directed graph:
+
+- Vertices represent objects.
+- Directed edges represent references from one object to another.
+- Roots are references originating outside the ordinary heap object graph.
+
+An object is live for tracing purposes if a valid path exists from a root to that object.
+
+This explains why GC can reclaim an entire object graph rather than just individual objects.
+
+### Circular references are not a problem
+
+Consider:
+
+```Java
+Node a = new Node("A");
+Node b = new Node("B");
+
+a.next = b;
+b.next = a;
+
+a = null;
+b = null;
+```
+
+The heap contains a cycle:
+
+```
+     ┌─────────────┐
+     │             ▼
+  Node A ──────► Node B
+     ▲             │
+     └─────────────┘
+```
+
+Neither node references a GC root after both local references disappear.
+
+A tracing collector can determine that both nodes are unreachable and reclaim them. Java GC does not rely on simple reference counting, so the cycle does not prevent collection.
+
+This is one of the key differences between tracing GC and a basic reference-counting scheme.
+
+## How garbage collection works internally
+
+A simplified tracing collector follows three broad steps:
+
+1. Discover live objects.
+2. Identify memory that can be reclaimed.
+3. Reorganize or reuse memory as needed.
+
+There are several algorithms for doing this.
+
+### 5.1 Mark-and-sweep
+
+The mark-and-sweep algorithm is one of the fundamental GC techniques.
+
+### Phase 1 — Mark live objects
+
+Suppose A and B are reachable, but C and D are not.
+
+Roots → A → B
+
+A and B: marked live
+
+C and D: unmarked garbage
+
+### Phase 2 — Sweep unreachable objects
+
+A and B remain allocated
+
+C and D: storage reclaimed
+
+The collector marks the objects reachable from the roots, then scans the heap and reclaims unmarked objects.
+
+Advantages:
+
+- Objects do not need to be moved.
+- The algorithm is conceptually straightforward.
+
+Disadvantages:
+
+- It can leave memory fragmentation.
+- Finding suitable contiguous memory for large allocations can become difficult.
+- Scanning the heap and maintaining free-space structures costs time.
+
+### 5.2 Mark-and-compact
+
+Mark-and-compact adds a compaction phase.
+
+After identifying live objects, the collector moves them closer together and updates references to their new locations.
+
+Before compaction:
+
+```
+Heap:
++------+------+------+------+------+------+------+
+|  A   | free |  B   | free |  C   | free |  D   |
++------+------+------+------+------+------+------+
+```
+
+After compaction:
+
+```
+Heap:
++------+------+------+------+------+------+------+
+|  A   |  B   |  C   |  D   | free | free | free |
++------+------+------+------+------+------+------+
+```
+
+Here A–D represent live objects in this illustrative example; the gaps represent free storage.
+
+Compaction can reduce fragmentation and create larger contiguous free regions. However, moving objects and updating references can be expensive.
+
+### 5.3 Copying collection
+
+A copying collector copies live objects from one memory area to another and then reuses the source area.
+
+```
+From-space                 To-space
++------+------+            +------+------+------+
+| live | dead |    ---->   | live | live | free |
++------+------+            +------+------+------+
+```
+
+Dead objects are not copied. Once the surviving objects have been relocated, the old space can be reused.
+
+This is especially useful when most objects in a region are short-lived.
+
+The trade-off is that copying requires destination space and work proportional to the surviving objects being moved.
+
+### 5.4 Comparison
+
+| Algorithm               | Main advantage                                   | Main drawback                                         |
+| ----------------------- | ------------------------------------------------ | ----------------------------------------------------- |
+| Mark-and-sweep          | Does not inherently require moving objects       | Fragmentation                                         |
+| Mark-and-compact        | Reclaims space and reduces fragmentation         | Moving objects can be expensive                       |
+| Copying                 | Efficiently reclaims a region with few survivors | Requires space to receive survivors                   |
+| Generational collection | Focuses frequent work on young objects           | Needs mechanisms to track cross-generation references |
+
+Real JVM collectors often combine these techniques rather than using only one.
+
+## 6. Generational garbage collection
+
+The generational hypothesis says that many objects die young, while a smaller portion survive for a long time.
+
+For example, a Spring Boot request may create:
+
+```Java
+OrderRequest request = parseRequest(json);
+Order order = validateAndBuildOrder(request);
+OrderResponse response = process(order);
+```
+
+Temporary parsing objects, intermediate strings, and request-scoped objects may become unreachable after the request finishes.
+
+By contrast, application-wide caches, shared configuration, and long-lived service state can remain reachable for the entire process lifetime.
+
+This difference motivates dividing the heap into generations.
+
+### 6.1 Young and old generations
+
+In a traditional generational HotSpot heap, the young generation contains Eden and survivor spaces, while the old generation contains objects that have survived long enough or otherwise meet promotion criteria.
+```
+## Traditional generational heap
+
+### Young generation
+
+Eden
+
+New allocations
+
+Survivor 0
+
+Surviving objects
+
+Survivor 1
+
+Alternate survivor space
+
+Objects that survive and meet promotion criteria
+
+### Old generation
+
+Longer-lived objects
+```
+The diagram shows the traditional layout, not the physical layout of every collector. G1, for example, uses heap regions that are assigned roles such as Eden, survivor, or old. Other collectors organize memory differently.
+
+### 6.2 Eden and survivor spaces
+
+A simplified object lifecycle:
+
+1. A thread allocates an object, often in Eden.
+2. Eden fills up, triggering a young collection.
+3. The collector identifies surviving objects.
+4. Surviving objects are copied to survivor space or promoted, depending on their age and collector policy.
+5. Objects that survive additional collections may eventually be promoted to the old generation.
+
+```
+Object allocation
+       |
+       v
+     Eden
+       |
+       | Young GC
+       v
+  Survivor space
+       |
+       | Further survival
+       v
+  Old generation
+```
+
+Not every object follows this exact sequence. Large allocations, collector-specific policies, and allocation optimizations can change the path.
+
+### 6.3 Why young collections can be efficient
+
+Suppose a young region contains 10,000 objects, but only 200 remain reachable.
+
+A copying collector can move those 200 survivors and reuse the rest of the region. It does not need to move all 10,000 objects.
+
+This is one reason young-generation collection can be efficient when the surviving fraction is low.
+
+### 6.4 Minor, major, and full GC terminology
+
+These terms appear frequently in Java discussions, but their meanings are not completely uniform across collectors and JVM versions.
+
+- Young GC: collects young-generation regions.
+- Old-generation collection: targets old-generation objects or regions.
+- Full GC: generally refers to a broad collection involving the heap, often with expensive stop-the-world work; exact behavior depends on the collector.
+
+Do not assume that every old-generation collection is a Full GC, or that all collectors use identical terminology and phases.
+
+## 7. How objects are allocated efficiently
+
+Garbage collection is only half of memory management. The JVM must also allocate objects quickly.
+
+### 7.1 Allocation with TLABs
+
+HotSpot commonly uses Thread-Local Allocation Buffers (TLABs).
+
+Instead of making every small object allocation contend for a shared allocation structure, the JVM can reserve a small region of heap space for an individual thread.
+
+Conceptually:
+
+```
+Java heap
++------------------------------------------------+
+| Thread A TLAB | Thread B TLAB | Shared space   |
++------------------------------------------------+
+        |                |
+        v                v
+   Object A1         Object B1
+   Object A2         Object B2
+   Object A3         Object B3
+```
+
+The thread can often allocate a small object by advancing a pointer within its TLAB. This is fast and usually requires no lock for each allocation.
+
+When its buffer fills, the thread can obtain another one or allocate through a different path.
+
+TLABs are an implementation optimization, not a requirement of the Java language.
+
+### 7.2 What happens when the heap is nearly full?
+
+A simplified allocation path is:
+
+1. Try to allocate in the current allocation buffer.
+2. Obtain more allocation space if needed.
+3. If available space is insufficient, the JVM may trigger GC.
+4. After GC, retry the allocation.
+5. If the JVM cannot satisfy the allocation, an `OutOfMemoryError` may occur.
+
+The JVM can also initiate collection before the heap is completely full, especially when a collector needs time to perform concurrent work.
+
+### 7.3 Does every `new` create a physical heap object?
+
+Not necessarily.
+
+The Java language specifies observable behavior, not a mandatory physical allocation for every source-level `new` expression.
+
+The JIT compiler may use escape analysis and optimizations such as scalar replacement to eliminate an allocation when it can prove that doing so preserves program behavior.
+
+For example:
+
+```
+static int calculate() {
+    Point p = new Point(10, 20);
+    return p.x + p.y;
+}
+
+static class Point {
+    final int x;
+    final int y;
+
+    Point(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+}
+```
+
+A sufficiently optimizing JVM may replace the temporary object's fields with scalar values and avoid allocating a physical `Point` object. This is not guaranteed, and the code's behavior must remain equivalent.
+
+This matters for GC performance: fewer physical allocations generally mean less allocation pressure.
+
+## 8. Stop-the-world pauses, parallel GC, and concurrent GC
+
+GC needs to inspect and sometimes move objects while application threads are running. That creates a difficult problem: what happens if an application thread changes a reference while the collector is inspecting it?
+
+JVM implementations solve this using techniques such as safepoints, synchronization with application threads, and write barriers.
+
+### 8.1 Stop-the-world (STW)
+
+A stop-the-world pause suspends application threads, often called mutator threads, while the collector performs work that requires a consistent view of relevant runtime state.
+
+For example:
+
+```
+Application threads
+──────────────────────────────────────────
+Running ───── Running ── PAUSED ── Running
+Running ───── Running ── PAUSED ── Running
+                          |
+                          v
+GC thread             Collection work
+```
+
+The exact pause duration depends on the collector, the amount of work, heap layout, live data, and other factors.
+
+A pause can be short or long. GC is not automatically a problem merely because an STW pause occurs; the relevant question is whether the pause and overall collection overhead meet the application's latency and throughput requirements.
+
+### 8.2 Parallel GC
+
+A parallel collector uses multiple GC worker threads to perform collection work simultaneously.
+
+```
+GC work
+   |
+   +---- Worker 1
+   +---- Worker 2
+   +---- Worker 3
+   +---- Worker 4
+```
+
+Parallelism can reduce elapsed collection time by using multiple CPU cores.
+
+However, parallel does not mean concurrent with the application. A parallel collection can still be stop-the-world.
+
+### 8.3 Concurrent GC
+
+A concurrent collector performs some GC work while application threads continue executing.
+
+```
+Timeline
+─────────────────────────────────────────────>
+Application:  Running ───────────────────────
+GC thread:    Mark ─── Mark ─── Cleanup
+Application:  Running ───────────────────────
+```
+
+Concurrent collection can reduce the length of pauses, but it requires additional coordination. Application threads can modify references while the collector is tracing the heap, and the collector must account for those changes.
+
+Concurrent collection also consumes CPU and memory bandwidth while the application is running.
+
+### 8.4 A useful distinction
+
+| Property       | Meaning                                       |
+| -------------- | --------------------------------------------- |
+| Stop-the-world | Application threads are paused for a phase    |
+| Parallel       | Multiple GC workers perform work together     |
+| Concurrent     | GC work overlaps with application execution   |
+| Incremental    | Work is split into smaller portions over time |
+
+A collector can be parallel and stop-the-world in one phase, then concurrent in another.
+
+For example, G1 performs some concurrent marking work, but its evacuation phases involve stop-the-world pauses. Its design aims to balance throughput with pause-time goals.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://www.oracle.com\&sz=32)
+
+Oracle
+
++1
+
+
+
+## 9. GC and the Java Memory Model (JMM)
+
+This is the most important connection for understanding Java concurrency and memory management.
+
+The Java Memory Model specifies the legal behavior of multithreaded Java programs. It describes how reads and writes to shared variables interact with program order, synchronization, and the happens-before relationship.
+
+The JMM does not prescribe a particular garbage-collection algorithm. GC is an implementation mechanism that must preserve the behavior required by the Java language and JVM specifications.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.oracle.com\&sz=32)
+
+Oracle Documentation
+
++1
+
+
+
+### 9.1 The three concepts you must separate
+
+| Concept             | Question it answers                                                     |
+| ------------------- | ----------------------------------------------------------------------- |
+| Java Memory Model   | When can one thread's writes be observed by another thread?             |
+| Object reachability | Is an object still reachable through a valid live reference path?       |
+| Garbage collector   | How does the runtime reclaim storage for objects that can be collected? |
+
+These concepts interact, but they are not interchangeable.
+
+Consider:
+
+```
+class SharedData {
+    int value = 42;
+}
+
+static SharedData shared;
+```
+
+If one thread creates an object and assigns it to `shared`, while another thread reads `shared`, the program needs correct synchronization or another suitable publication mechanism to guarantee visibility.
+
+GC does not fix a data race. An object being live says nothing about whether its fields are safely published or whether concurrent accesses are properly synchronized.
+
+### 9.2 `volatile` and reachability
+
+Consider a shared volatile reference:
+
+```
+class SharedConfig {
+    int port;
+}
+
+static volatile SharedConfig config;
+
+static void publish() {
+    SharedConfig c = new SharedConfig();
+    c.port = 8080;
+
+    config = c;
+}
+
+static void readConfig() {
+    SharedConfig c = config;
+
+    if (c != null) {
+        System.out.println(c.port);
+    }
+}
+```
+
+When the reader observes the published non-null reference through the volatile read, the volatile write/read synchronization establishes the relevant happens-before relationship. The prior initialization of `port` is therefore visible to that reader.
+
+The object is also reachable through `config` while that reference remains live.
+
+Notice the two different guarantees:
+
+- JMM guarantee: the reader sees properly published state.
+- GC guarantee: the collector must preserve an object while it is strongly reachable under the applicable reachability rules.
+
+`volatile` does not prevent an object from ever becoming eligible for collection. It governs memory visibility and ordering, not permanent object ownership.
+
+### 9.3 Can GC run while threads are running?
+
+Yes.
+
+Some collectors perform work concurrently with application execution. Others use stop-the-world phases. The JVM coordinates with application threads so that the collector can safely inspect roots, preserve reachable objects, and update references when objects move.
+
+This is why a collector is more complicated than simply scanning the heap for objects that appear unused.
+
+## 10. How concurrent GC handles changing references
+
+Imagine the collector begins marking this graph:
+
+```
+Root → A → B
+```
+
+While the collector is tracing, an application thread changes a reference:
+
+```
+a.next = c;
+```
+
+The graph now looks like:
+
+```
+Root → A → C
+
+B is no longer reachable through A.
+```
+
+Depending on when this happens, a naïve concurrent marker could miss a newly reachable object or incorrectly classify an object as dead.
+
+A concurrent collector therefore needs a strategy that accounts for mutations during marking.
+
+### 10.1 Write barriers
+
+A write barrier is runtime-generated or runtime-managed logic associated with certain memory operations. It helps the collector track changes that matter to collection.
+
+A simplified conceptual example:
+
+```
+a.next = c;
+
+// Conceptual collector bookkeeping:
+// record information needed to account for
+// this reference change during concurrent GC.
+```
+
+The actual implementation is not necessarily a literal function call after every assignment. JIT-generated code can inline or optimize the relevant operations.
+
+Two important strategies are:
+
+- Snapshot-at-the-beginning (SATB): preserve a logical snapshot of objects that were live at the beginning of a marking phase. G1 uses SATB-style marking.
+- Incremental update: track reference changes so that newly relevant objects or edges are not missed.
+
+These are alternative tracing strategies, not interchangeable names for the same algorithm.
+
+### 10.2 Remembered sets and old-to-young references
+
+Generational collectors have another challenge.
+
+Suppose an old-generation object points to a young-generation object:
+
+```
+Old generation             Young generation
+
+OrderCache ──────────────► TemporaryEntry
+```
+
+A young collection must account for the old-to-young reference. Scanning every old-generation object during every young collection could be expensive.
+
+Collectors therefore track relevant cross-region or cross-generation references, often using write barriers and remembered sets or related metadata.
+
+Conceptually:
+
+1. The application stores a reference from an old object to a young object.
+2. Collector bookkeeping records the relevant reference location or region.
+3. A young collection uses that information when discovering roots into the young collection area.
+
+The details vary by collector. G1, for example, uses remembered sets to help identify references into regions selected for collection.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.oracle.com\&sz=32)
+
+Oracle Documentation
+
++1
+
+
+
+## 11. Major Java garbage collectors
+
+The JVM does not have one universal collector. HotSpot provides several choices with different throughput, latency, and resource trade-offs.
+
+[G1 GC. Garbage Collection (GC) is one of the… | by Kaustubh Saha | Medium](https://images.openai.com/static-rsc-4/E4AkfjAwFDNgYgolQx7Ck5-1cE_mobv4fxjkWOwU6B6WeHL_X7wFl6fR55-dRygu9u7P7CtTbcL-QFZQA-2D64G3g0WBmLaAAb3XzVJ4Uq7NvYyHcVU_g6T4qlyiJikXS5dmcj_2ZAgIbrem4nJwab0jxXYhS9ICTIQpSzVxFeE?purpose=inline)
+
+G1 GC — Garbage-First
+
+A general-purpose collector that divides the heap into regions. It prioritizes regions expected to yield useful reclamation and aims to meet a configurable pause-time target.
+
+Typical use: general server applications and services.
+
+[Z Garbage Collector in Java](https://images.openai.com/static-rsc-4/Hx4-sgmah5dDPabPFnvyNW_18R7jl7GJLedBpH4VjnyDaJqB2xgRI1RErLGNJWIE0FH1Fl26hwD8R-0hKoYlacTqeUowWeyCfPX2J3na9slhmI_pgPNm9sjPIn-FgJeDpmCXI3UAeKdK5CGfg1Qj8zHQPLMcu93LJCpsF7J0bVM?purpose=inline)
+
+ZGC
+
+A low-latency collector designed to keep GC pauses very short, including with large heaps. It uses concurrent work and specialized mechanisms such as barriers and colored pointers.
+
+Typical use: latency-sensitive applications.
+
+[How Java Works — Part 5. A Deep dive to core working of Garbage… | by Sonisumit | Medium](https://images.openai.com/static-rsc-4/L6xisZ6EcGMD_hgfUzAK684VxYUiCr3OcfHT0Vppm80Pk1dJ0whBKwkYkOjOaqScuM420w_fLrPrxk20v_JTltOPk-4HquM_pALX2VyJibQtgX6jezlDfH9ifrYBIoH35fZpVCaL8axuI21a2jDmNCATUHUkKx3pK1q9nmePs6M?purpose=inline)
+
+Parallel GC
+
+A throughput-oriented collector that uses multiple workers for collection work, with stop-the-world phases.
+
+Typical use: batch processing and workloads where throughput matters more than very short pauses.
+
+[OpenJDK Concurrent Collectors | PPTX](https://images.openai.com/static-rsc-4/kM7xVfn9ROt46XAAsXlGUpgOejd6lUm2vW14SGPiQTH4UWtlyOpmrxrre5cAqyWXekflD4jWtZP0bdEVzXpZ61ph7G9b0J9aYlCHAKw80OnhIaMmvFAozuZvd1NTrMWUTPTr7VgWbTRytRNct7RS2y8uaN8F0-S2eW6VJ6AQyZ4?purpose=inline)
+
+Shenandoah
+
+A low-pause collector that performs much of its marking and object relocation concurrently with application execution.
+
+Typical use: applications that need low pause times, where the relevant JVM distribution supports it.
+
+These are different implementation strategies, not different Java Memory Models. The JMM remains the programming-language contract regardless of which collector is used.
+
+For current HotSpot GC documentation and JVM-specific details, start with Oracle's [Java Virtual Machine Guide](https://docs.oracle.com/en/java/javase/26/vm/index.html?utm_source=chatgpt.com) and its [G1 GC documentation](https://docs.oracle.com/en/java/javase/25/gctuning/garbage-first-g1-garbage-collector1.html?utm_source=chatgpt.com).
+
+## 12. Strong, soft, weak, and phantom references
+
+Java provides more than one kind of reference. These affect how the garbage collector treats objects and are especially important for caches and resource management.
+
+The relevant APIs are in `java.lang.ref`.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.oracle.com\&sz=32)
+
+Oracle Documentation
+
+
+
+| Reference type | Meaning                                                                                             | Typical use                                                                                     |
+| -------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Strong         | Keeps the object strongly reachable                                                                 | Ordinary application references                                                                 |
+| Soft           | Allows the collector to clear the reference under memory pressure, subject to implementation policy | Historically used for memory-sensitive caches; explicit cache limits are often more predictable |
+| Weak           | Does not by itself keep the referent alive                                                          | Weak-key maps and certain lookup structures                                                     |
+| Phantom        | Supports post-mortem reachability tracking and cleanup coordination                                 | Advanced resource-lifecycle management                                                          |
+
+### 12.1 Strong references
+
+```
+Person person = new Person("Alice");
+```
+
+As long as `person` is a live strong reference and points to the object, the object cannot be reclaimed as unreachable.
+
+This is the normal Java programming model.
+
+### 12.2 Weak references
+
+```
+import java.lang.ref.WeakReference;
+
+Person person = new Person("Alice");
+
+WeakReference<Person> weak =
+        new WeakReference<>(person);
+
+person = null;
+
+// The referent may be cleared by GC.
+Person recovered = weak.get();
+```
+
+`weak.get()` may return the object if it is still available, or `null` if the weak reference has been cleared.
+
+Weak references are useful when the reference itself should not keep an object alive. They do not guarantee when collection will occur.
+
+### 12.3 Soft references
+
+Soft references are cleared at the collector's discretion in response to memory demand and other implementation considerations.
+
+They are not a deterministic cache-eviction policy. For a production cache, explicit maximum sizes, expiration rules, and eviction policies are generally easier to reason about.
+
+### 12.4 Phantom references and `reachabilityFence`
+
+Phantom references are useful for advanced cleanup mechanisms, often in combination with a `ReferenceQueue` or a `Cleaner`.
+
+One subtlety is that the JIT compiler can determine that an object is no longer needed earlier than a programmer expects, even before the lexical end of a method.
+
+When a native resource must remain associated with a Java object until a particular operation finishes, `Reference.reachabilityFence(object)` can be important. It ensures that the object remains strongly reachable through that point.
+
+For native resource management, prefer structured cleanup such as `try`-with-resources whenever the resource API supports `AutoCloseable`. Do not rely on GC timing to release files, sockets, or database connections.
+
+## 13. Garbage collection does not eliminate memory leaks
+
+This is a critical point for Java backend developers.
+
+A memory leak in Java often means that an object is no longer useful but remains reachable.
+
+Consider a static collection:
+
+```
+import java.util.ArrayList;
+import java.util.List;
+
+public class CacheLeak {
+    private static final List<byte[]> CACHE =
+            new ArrayList<>();
+
+    public static void addData() {
+        CACHE.add(new byte[1024 * 1024]);
+    }
+}
+```
+
+Every call adds roughly one MiB of array payload, ignoring array headers and other overhead. Because the static collection retains references to the arrays, they remain reachable.
+
+The GC cannot simply reclaim these arrays because the application may still access them through `CACHE`.
+
+A different example is a listener that is registered but never removed:
+
+```
+Long-lived event source
+         |
+         v
+    Listener object
+         |
+         v
+    Large object graph
+```
+
+Even if the feature that needed the listener has ended, the event source can keep the listener and its entire reachable graph alive.
+
+### Common causes of memory leaks
+
+- Unbounded caches and collections.
+- Static maps holding objects indefinitely.
+- Listeners or callbacks that are never deregistered.
+- `ThreadLocal` values retained by long-lived thread-pool threads.
+- Unbounded queues and request backlogs.
+- References held by sessions or application registries long after their intended lifetime.
+
+Rule: GC solves the reclamation of unreachable objects. It cannot infer that your program should stop retaining an object.
+
+## 14. GC, finalization, and external resources
+
+Java objects can represent resources that are not managed solely by heap memory:
+
+- File descriptors
+- Sockets
+- Native memory
+- Database connections
+- Operating-system handles
+
+Collecting the Java wrapper does not mean the resource was released at the correct time.
+
+For example, prefer:
+
+```
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+
+public class FileExample {
+    public static void main(String[] args) throws IOException {
+        try (BufferedReader reader =
+                     new BufferedReader(
+                             new FileReader("data.txt"))) {
+
+            System.out.println(reader.readLine());
+        }
+    }
+}
+```
+
+The `try`-with-resources construct calls `close()` when control leaves the block, including when an exception occurs.
+
+Historically, Java offered finalization through `finalize()`. Finalization is deprecated for removal, has unpredictable timing, and can introduce substantial problems. New code should not use it for resource management.
+
+For advanced cleanup, investigate `Cleaner`, phantom references, and the `java.lang.ref` APIs, but do not treat these as substitutes for deterministic resource ownership.
+
+## 15. How to observe garbage collection in a real JVM
+
+You can learn a lot by running a small program with GC logging.
+
+### 15.1 A simple allocation experiment
+
+```
+import java.util.ArrayList;
+import java.util.List;
+
+public class GcExperiment {
+
+    public static void main(String[] args) {
+        List<byte[]> retained = new ArrayList<>();
+
+        for (int i = 0; i < 100; i++) {
+            byte[] data = new byte[1024 * 1024];
+
+            if (i % 10 == 0) {
+                retained.add(data);
+            }
+        }
+
+        System.out.println("Finished allocating.");
+        System.out.println("Retained arrays: " + retained.size());
+    }
+}
+```
+
+Most allocated arrays become unreachable as the loop advances, while some remain referenced by `retained`.
+
+Run it with a modern HotSpot JVM:
+
+```
+javac GcExperiment.java
+
+java -Xms64m -Xmx128m \
+     -Xlog:gc* \
+     GcExperiment
+```
+
+Options:
+
+- `-Xms64m`: initial heap size of 64 MiB.
+- `-Xmx128m`: maximum heap size of 128 MiB.
+- `-Xlog:gc*`: enables detailed GC logging.
+
+The JVM may collect objects during execution, and the log can show collection events, heap occupancy, and pause information. The exact output depends on the JVM version and selected collector.
+
+### 15.2 Useful diagnostic commands
+
+| Command or tool                 | Purpose                                                      |
+| ------------------------------- | ------------------------------------------------------------ |
+| `java -Xlog:gc* ...`            | Inspect GC activity and heap behavior                        |
+| `jcmd <pid> GC.heap_info`       | Inspect heap information                                     |
+| `jcmd <pid> GC.class_histogram` | Inspect object counts and approximate memory by class        |
+| Java Flight Recorder (JFR)      | Analyze allocation activity, GC pauses, and runtime behavior |
+| `jcmd <pid> JFR.start ...`      | Start a recording on a running JVM                           |
+| Heap dump + Eclipse MAT         | Investigate retained objects and memory leaks                |
+
+A class histogram or heap dump is a diagnostic snapshot, not proof that every displayed object is a leak. Use paths to GC roots and retained-size analysis to understand why an object remains reachable.
+
+For a production service, start by measuring allocation rates, pause durations, heap occupancy after collection, and latency percentiles. Avoid tuning the collector based on a single memory reading.
+
+## 16. GC tuning: what the JVM options really mean
+
+GC tuning should begin with a measured problem, not a guess.
+
+Common options include:
+
+| Option                     | Purpose                                                        |
+| -------------------------- | -------------------------------------------------------------- |
+| `-Xms`                     | Initial heap size                                              |
+| `-Xmx`                     | Maximum heap size                                              |
+| `-XX:+UseG1GC`             | Select G1 in HotSpot                                           |
+| `-XX:+UseZGC`              | Select ZGC where supported                                     |
+| `-XX:+UseParallelGC`       | Select Parallel GC in HotSpot                                  |
+| `-XX:MaxGCPauseMillis=200` | Set a G1 pause-time target; not a guarantee of a maximum pause |
+| `-Xlog:gc*`                | Enable detailed GC logging                                     |
+
+Always verify available options and defaults for the actual JDK distribution and version you run. Do not assume a flag or default applies identically to every JVM.
+
+### How to diagnose common symptoms
+
+- Frequent young collections: investigate allocation rate, temporary object creation, and the young-generation behavior of your collector.
+- Old-generation occupancy continually increasing: inspect retained objects, caches, collections, and long-lived application state.
+- Long GC pauses: analyze pause logs, live data, collector phases, and heap sizing.
+- High CPU usage from GC: inspect collection frequency, allocation pressure, concurrency, and whether the collector suits the workload.
+- `OutOfMemoryError: Java heap space`: investigate both insufficient heap capacity and objects retained unexpectedly.
+- `OutOfMemoryError: Direct buffer memory`: investigate off-heap direct-buffer usage and its lifecycle, not just `-Xmx`.
+
+For a Spring Boot service, also correlate GC events with request latency, queue lengths, throughput, and allocation-heavy endpoints.
+
+## 17. Putting it all together
+
+Consider a request handled by a Java microservice:
+
+```
+HTTP request arrives
+        |
+        v
+Allocate request objects
+        |
+        v
+Process request and query database
+        |
+        v
+Build response objects
+        |
+        v
+Return response
+        |
+        v
+Temporary objects become unreachable
+        |
+        v
+GC may reclaim their storage later
+```
+
+Several JVM mechanisms work together:
+
+1. The JVM allocates objects, often using a thread-local allocation buffer.
+2. The JIT compiler may eliminate some allocations.
+3. The application creates and removes references as the request proceeds.
+4. The JMM governs visibility and ordering when threads share state.
+5. The collector traces roots and reference relationships to identify live objects.
+6. Collector-specific mechanisms handle concurrent changes, cross-region references, and object relocation.
+7. Unreachable storage becomes available for reuse, potentially through copying, sweeping, or compaction.
+
+The JMM does not determine the collection schedule, and GC does not make an incorrectly synchronized application correct.
+
+## 18. Recommended study order
+
+Given your focus on JVM internals and the Java Memory Model, I would study GC in this order:
+
+1. Heap, stack, and object references — understand the JVM runtime data areas and object graphs.
+2. Reachability and GC roots — trace live objects, cycles, static references, and local variables.
+3. Collection algorithms — mark-and-sweep, mark-and-compact, copying, and generational collection.
+4. Allocation internals — TLABs, allocation fast paths, escape analysis, and scalar replacement.
+5. Concurrent collection — safepoints, write barriers, SATB, remembered sets, and relocation.
+6. JMM connections — happens-before, safe publication, volatile references, and `Reference.reachabilityFence`.
+7. Collectors — G1 first, followed by ZGC, Parallel GC, and Shenandoah.
+8. Diagnostics and tuning — GC logs, JFR, heap dumps, GC roots, and retained-size analysis.
+
+### Primary references
+
+- Java Virtual Machine Guide — [JVM architecture and GC documentation](https://docs.oracle.com/en/java/javase/26/vm/index.html?utm_source=chatgpt.com).
+- Java Language Specification — [Java SE 26 specification, including Chapter 17 on threads and the memory model](https://docs.oracle.com/en/java/javase/26/docs/specs/jls/index.html?utm_source=chatgpt.com).
+- Java SE Reference API: java.lang.ref — [Reference types, reference queues, and reachability](https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/ref/package-summary.html?utm_source=chatgpt.com).
+- [G1 GC tuning and implementation details](https://docs.oracle.com/en/java/javase/25/gctuning/garbage-first-g1-garbage-collector1.html?utm_source=chatgpt.com).
+
+The central lesson is that the JMM governs how threads observe shared state, reachability determines which objects must be preserved, and the garbage collector determines how and when reclaimable memory is recovered. Understanding all three gives you a much stronger mental model of how the JVM executes a Java application.

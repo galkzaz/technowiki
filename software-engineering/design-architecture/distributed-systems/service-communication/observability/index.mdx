@@ -4,6 +4,922 @@ title: Observability
 sidebar_position: 1
 ---
 
-# Observability
+Observability is one of the foundations of operating reliable distributed systems. It helps you understand what is happening inside an application, why a request is slow or failing, and which component is responsible when a problem crosses multiple services.
 
-> Expand this section with detailed explanations, diagrams, and real-world examples.
+## What is observability?
+
+### Definition
+
+Observability is the ability to understand the internal state and behavior of a system by examining the information it exposes through its external outputs.
+
+In software systems, those outputs are commonly called telemetry data, including:
+
+- Metrics: Numerical measurements of system behavior.
+- Logs: Records of events that occurred.
+- Traces: Records of a request's journey through one or more components.
+
+Observability helps answer questions such as:
+
+- Why did an API request take 4 seconds instead of 100 milliseconds?
+- Why are some customers receiving errors while others are not?
+- Which downstream service caused a request to fail?
+- Is the problem caused by CPU saturation, a slow database, or a network timeout?
+- Why did latency increase after the latest deployment?
+- Is a failure affecting one service or the entire application?
+
+The important distinction is that observability is not simply collecting data. It is the ability to use that data to investigate system behavior, including problems you did not anticipate in advance.
+
+### Understanding the concept through an example
+
+Suppose a client requests product information from a microservices application.
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/service-communication/observability/observability-example.png)
+Suppose the overall request takes 3.4 seconds.
+
+Without observability, you might know only that the API is slow. You may restart the gateway or increase its resources, even though neither action addresses the real problem.
+
+With observability, you can correlate the relevant data:
+
+| Signal  | Example observation                                    | What it tells you                               |
+| ------- | ------------------------------------------------------ | ----------------------------------------------- |
+| Metrics | Recommendation latency has increased                   | The problem may be concentrated in that service |
+| Logs    | Database query timed out                               | A likely explanation for the delay              |
+| Traces  | Most request time was spent in the recommendation call | Where the latency occurred in the request path  |
+
+Together, these signals help you move from noticing a symptom to identifying its cause.
+
+### Observability as an investigation process
+
+A useful way to think about observability is as a sequence:
+```
+                 Observe
+
+Collect metrics, logs, traces, and context
+                  ↓
+                 Detect
+
+Notice an error, latency increase, or unusual pattern
+                  ↓
+             Investigate
+
+Correlate signals and narrow down possible causes
+                  ↓
+            Understand and act
+
+Identify the likely cause, fix it, and verify recovery
+```
+This process is iterative. An initial metric may reveal an issue, a trace may identify the slow component, and logs from that component may explain why it was slow.
+
+### The connection to control theory
+
+The term observability comes from control theory, where it describes whether a system's internal state can be inferred from its outputs over time.
+
+The analogy is useful in software engineering:
+
+- Internal state: Queue depth, connection pool saturation, thread contention, request processing, and dependency health.
+- Outputs: Metrics, logs, traces, and other exposed diagnostic information.
+- Inference: Using those outputs to determine what is happening internally.
+
+However, software observability is a broader engineering practice, not simply a direct application of the mathematical definition from control theory.
+
+### The three common telemetry signals
+
+- **Metrics — What is happening over time?**
+
+    Numerical measurements aggregated over time, such as request rate, error rate, CPU usage, and latency percentiles.
+
+    Example: 8% of requests returned HTTP 500 during the last five minutes.
+
+- **Logs — What happened at a particular point in time?**
+
+    Records of events, ideally containing timestamps, severity, service identity, and relevant request context.
+
+    Example: A recommendation query timed out after 3 seconds.
+
+- **Traces — Where did a request spend its time?**
+
+    A trace connects operations involved in processing a request across services. Individual operations are represented by spans.
+
+    Example: Gateway 15 ms → Product Composite 30 ms → Recommendation 3,200 ms.
+
+These signals complement one another. None is sufficient for every investigation.
+
+For example, a metric may show that latency is increasing, but not explain why. A trace can reveal which service is slow, while a log may identify the failed database query.
+
+## Observability in distributed systems (`observability-in-distributed-systems`)
+
+### Why distributed systems need observability
+
+In a monolithic application, a request may be handled by one process and one deployment unit. You still need observability, but many investigations can be conducted within that process.
+
+In a distributed system, a single logical request may cross multiple independently deployed services, databases, queues, and network boundaries.
+
+For example:
+
+```
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Product Composite
+  |------------------|
+  v                  v
+Product Service   Recommendation Service
+  |                  |
+  v                  v
+MongoDB            MySQL
+```
+
+A failure in any component can affect the final response. A slow response might also be caused by the interactions between components rather than by a single component.
+
+Distributed observability therefore needs to answer two questions:
+
+1. Local question: What is happening inside this service?
+2. End-to-end question: How did the behavior of multiple services combine to produce the final outcome?
+
+### The main characteristics of distributed observability
+
+1\. **Cross-service correlation**
+
+You need to associate events from different services with the same request.
+
+Consider these log entries:
+
+```
+Gateway:
+  request received
+
+Product Composite:
+  fetching product
+
+Recommendation Service:
+  database query timed out
+```
+
+Without shared correlation information, it may be difficult to determine whether these entries belong to the same request.
+
+Distributed tracing solves much of this problem by propagating trace context across service boundaries. Logs can also include a trace ID and span ID so that they can be associated with the corresponding trace.
+
+2\. **End-to-end latency analysis**
+
+The total duration of a request depends on its execution path.
+
+For sequential calls:
+$$
+T\_{\text{total}} \approx T_A + T_B + T_C + T\_{\text{overhead}}
+$$
+
+
+For two independent calls executed in parallel:
+$$
+T\_{\text{total}} \approx \max(T_B,T_C)+T\_{\text{overhead}}
+$$
+These are simplified models. Actual timing also depends on queuing, network communication, retries, serialization, and other work.
+
+This distinction matters because adding the durations of parallel spans would overestimate the request's elapsed time.
+
+3\. **Partial failures**
+
+A distributed system can be partially healthy.
+
+For example:
+
+- Product Service is healthy.
+- Recommendation Service is failing.
+- The gateway is accepting requests.
+- The composite service returns a partial response or an error.
+
+A single system-wide health indicator may hide this situation. Observability needs to expose the condition of individual components and their effect on user-facing operations.
+
+4\. **Asynchronous operations**
+
+Not all work happens in one synchronous request.
+
+A request may publish an event to RabbitMQ or Kafka, after which a consumer processes it later.
+
+```
+Order Service
+    |
+    | Publish OrderCreated
+    v
+Message Broker
+    |
+    | Deliver event later
+    v
+Notification Consumer
+    |
+    v
+Email Provider
+```
+
+Tracing asynchronous workflows requires context propagation through message headers and appropriate relationships between producer and consumer spans. The trace may be delayed, split into separate traces, or outlive the original HTTP request, depending on the instrumentation and tracing model.
+
+5\. **Changing infrastructure**
+
+Containers may restart, pods may be rescheduled, and instances may scale up or down. Service instances are therefore not always stable identifiers.
+
+Telemetry should include enough resource information to identify the service, deployment, environment, and instance involved in an event without depending on a particular machine's identity alone.
+
+### Distributed tracing: following a request
+
+A trace consists of spans. A span represents an operation, such as an incoming HTTP request, an outgoing HTTP call, or a database query.
+
+```
+Trace: 9f31...
+|
++-- Gateway: GET /products/42            180 ms
+    |
+    +-- Composite: assemble response     150 ms
+        |
+        +-- Product Service call          35 ms
+        |
+        +-- Recommendation Service call  110 ms
+            |
+            +-- MySQL query               85 ms
+```
+
+The numbers are illustrative. Nested spans may overlap, so their durations should not automatically be added together.
+
+Important concepts:
+
+| Concept                   | Meaning                                                                     |
+| ------------------------- | --------------------------------------------------------------------------- |
+| Trace ID                  | Identifies the distributed trace                                            |
+| Span ID                   | Identifies one operation within a trace                                     |
+| Parent span ID            | Identifies the operation that initiated a child operation, where applicable |
+| Span attributes           | Metadata such as HTTP method, route, status, and service operation          |
+| Span events               | Timestamped events associated with a span                                   |
+| Trace context propagation | Carrying trace identity across process boundaries                           |
+
+In modern instrumented systems, the W3C Trace Context standard commonly uses headers such as `traceparent` to propagate trace identity between services.
+
+### The three pillars in a distributed architecture
+
+| Signal  | Primary purpose               | Distributed-systems example                                |
+| ------- | ----------------------------- | ---------------------------------------------------------- |
+| Metrics | Detect and quantify behavior  | Recommendation error rate rises to 12%                     |
+| Logs    | Explain individual events     | Connection acquisition timed out                           |
+| Traces  | Locate work across components | 90% of request time was spent waiting on a downstream call |
+
+These are often called the three pillars of observability. The term is a useful model, not a strict definition requiring exactly three kinds of data. Profiles, events, exemplars, deployment metadata, and other signals can also improve investigations.
+
+### Observability architecture
+
+A typical architecture separates the generation, collection, storage, and analysis of telemetry.
+
+{/* Instrumented applications
+
+Spring Boot · Gateway · Workers · Databases
+
+Instrumentation and telemetry collection
+
+Micrometer · OpenTelemetry SDK · OpenTelemetry Collector
+
+Metrics
+
+Prometheus
+
+Logs
+
+Log backend
+
+Traces
+
+Tempo / Jaeger
+
+Visualization, querying, and alerting
+
+Grafana · dashboards · trace exploration · alerts */}
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/service-communication/observability/observability-architecture.png)
+
+This is a logical view, not a mandatory deployment topology. For example, an application may export traces directly to a tracing backend, or through an OpenTelemetry Collector. Some platforms consolidate storage and analysis for multiple signal types.
+
+The key architectural principle is to standardize telemetry generation and propagation while allowing the collection and storage infrastructure to evolve independently.
+
+## Observability vs. monitoring (`observability-vs-monitoring`)
+
+These concepts are closely related, but they solve different problems.
+
+Monitoring tells you whether a system is behaving as expected. Observability helps you investigate why it is not.
+
+### 3.1 Monitoring
+
+Monitoring is the practice of continuously collecting and evaluating predefined signals to determine whether a system is healthy and meeting its operational objectives.
+
+A monitoring system commonly uses:
+
+- Metrics and dashboards.
+- Thresholds and alert rules.
+- Health checks.
+- Service-level indicators (SLIs).
+- Service-level objectives (SLOs).
+
+For example, you might configure an alert:
+
+```
+IF HTTP 5xx error rate > 5%
+FOR 5 minutes
+THEN trigger an alert
+```
+
+This is useful because the system can detect a known failure condition and notify the responsible team without someone watching a dashboard.
+
+However, the alert does not necessarily tell you why the error rate increased.
+
+### 3.2 Observability
+
+Observability extends the investigation beyond predefined conditions.
+
+Suppose the error rate increases, but you have not previously defined an alert for the particular failure pattern.
+
+With sufficiently rich telemetry, you might investigate:
+
+- Which endpoints are affected?
+- Which deployment introduced the problem?
+- Are failures concentrated in one region or instance?
+- Are database queries failing?
+- Are retries making the situation worse?
+- Do failed requests share a common trace or dependency?
+
+Monitoring generally begins with a question or condition you already know to check. Observability supports investigating unexpected behavior by exploring the available evidence.
+
+### 3.3 Side-by-side comparison
+
+| Dimension              | Monitoring                                  | Observability                                                   |
+| ---------------------- | ------------------------------------------- | --------------------------------------------------------------- |
+| Primary goal           | Detect known or defined problems            | Understand system behavior and investigate causes               |
+| Typical starting point | Alert, dashboard, or health check           | Alert, user report, unusual pattern, or new question            |
+| Questions              | Is the error rate too high?                 | Why are these requests failing?                                 |
+| Data                   | Often aggregated metrics and status signals | Metrics, logs, traces, and contextual telemetry                 |
+| Detection              | Thresholds, rules, anomaly detection        | Can support detection, but especially emphasizes investigation  |
+| Investigation          | May identify the affected component         | Helps correlate evidence across components                      |
+| Unknown failure modes  | Limited by the checks and data available    | Can help uncover unexpected causes if relevant telemetry exists |
+
+Observability does not eliminate the need for monitoring. It makes monitoring findings more actionable.
+
+### 3.4 Example: a slow API
+
+Imagine an API has an SLO requiring 99% of requests to finish within 500 ms.
+
+Step 1 — Monitoring detects a problem
+
+The dashboard shows that only 92% of requests meet the latency objective. An alert fires.
+
+Step 2 — Observability supports investigation
+
+A latency dashboard reveals that requests to the recommendation endpoint are disproportionately slow.
+
+Step 3 — A trace narrows down the cause
+
+The recommendation service spends most of its time waiting for a database query.
+
+Step 4 — Logs provide more evidence
+
+The relevant logs reveal a query timeout following a recent deployment.
+
+The monitoring alert identifies the problem. Observability helps explain it. Engineers then use their understanding of the application to choose and verify a fix.
+
+### 3.5 Where do health checks and SLOs fit?
+
+- Health checks provide a limited view of whether a component can operate or should receive traffic.
+- Monitoring evaluates operational signals, including health checks and SLI/SLO measurements.
+- Observability provides the evidence needed to understand component behavior and investigate violations.
+- SLOs define the reliability or performance target that monitoring can evaluate.
+
+For example, a service can return a successful health-check response while its important business endpoint is too slow. A health check alone is not a complete measure of service quality.
+
+Remember: Monitoring and observability are complementary practices, not competing technologies.
+
+## 4. Observability vs. diagnostics (`observability-vs-diagnostics`)
+
+These concepts overlap, but their emphasis is different.
+
+Observability provides evidence about system behavior; diagnostics uses evidence to identify and understand a particular problem.
+
+### 4.1 What is diagnostics?
+
+Diagnostics is the process of examining a system to determine the nature, location, or cause of a fault or unexpected behavior.
+
+In software engineering, diagnostic activities may include:
+
+- Examining exception stack traces.
+- Inspecting thread dumps.
+- Analyzing heap dumps.
+- Checking database execution plans.
+- Reviewing operating-system resource usage.
+- Inspecting network connections and packet captures.
+- Comparing application behavior before and after a deployment.
+- Reproducing a failure in a test environment.
+
+Diagnostics is not limited to production incidents. You can diagnose a problem during development, testing, or performance analysis.
+
+### 4.2 How they differ
+
+| Dimension      | Observability                                         | Diagnostics                                                             |
+| -------------- | ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| Primary role   | Make internal behavior inferable from exposed outputs | Investigate a specific issue                                            |
+| Scope          | Continuous and system-wide                            | Often focused on a fault or question                                    |
+| Typical inputs | Metrics, logs, traces, events, contextual metadata    | Telemetry plus dumps, profiles, queries, configuration, and experiments |
+| Timing         | Designed into the system before incidents occur       | Can occur before, during, or after an incident                          |
+| Output         | Evidence and context for understanding behavior       | A diagnosis, hypothesis, or identified cause                            |
+| Example        | A trace shows where latency accumulates               | An execution plan explains why the query is slow                        |
+
+Diagnostics can use observability data, but it can also use tools that are not part of routine telemetry collection.
+
+For example, a thread dump may expose a deadlock that is difficult to establish from request metrics alone.
+
+### 4.3 A practical example: high CPU usage
+
+Suppose a Java microservice's CPU utilization rises from 25% to 95%.
+
+Observability evidence:
+
+```
+CPU utilization:          95%
+Request rate:             unchanged
+p99 request latency:      2.4 seconds
+Error rate:               1.2%
+```
+
+These measurements establish a pattern: CPU usage and tail latency increased even though the request rate did not.
+
+A dashboard alone cannot establish the exact cause.
+
+Diagnostic investigation:
+
+1. Examine JVM thread activity and CPU profiles.
+2. Identify methods consuming the most CPU.
+3. Check whether a recent code change introduced excessive computation.
+4. Inspect garbage-collection activity or lock contention if the evidence points in that direction.
+5. Reproduce the behavior and test a correction.
+
+Suppose profiling reveals that a new implementation repeatedly sorts the same collection for every request. That finding provides a concrete explanation and suggests a fix.
+
+The distinction is that the metrics expose the problem, while profiling and code analysis help diagnose it.
+
+### 4.4 Where diagnostics fits into incident response
+
+A useful operational workflow is:
+
+```
+Monitoring alert
+      |
+      v
+Observability investigation
+      |
+      v
+Diagnostic hypothesis
+      |
+      v
+Test / validate the hypothesis
+      |
+      v
+Fix the problem
+      |
+      v
+Verify recovery using telemetry
+```
+
+This is not always a strictly linear process. A diagnostic tool may reveal a new question that requires more telemetry analysis, and the investigation may iterate several times.
+
+Also, diagnostics is not necessarily the final stage. Sometimes you identify only the most likely cause and need a controlled experiment to confirm it.
+
+### 4.5 Observability without sufficient diagnostic detail
+
+Consider a service that exports only these metrics:
+
+```
+http_requests_total
+http_request_duration_seconds
+process_cpu_usage
+```
+
+These metrics may be sufficient to detect a latency problem, but not to determine whether it was caused by:
+
+- A slow database.
+- A blocked connection pool.
+- A downstream service.
+- Lock contention.
+- Excessive garbage collection.
+
+Adding distributed traces, structured logs, database metrics, and profiles can improve the evidence available for diagnosis.
+
+However, collecting more data does not automatically guarantee a correct diagnosis. The data must be relevant, trustworthy, sufficiently detailed, and interpreted in the context of the application.
+
+## 5. Observability vs. telemetry (`observability-vs-telemetry`)
+
+This distinction is especially important when designing an observability architecture.
+
+Telemetry is the data emitted by a system. Observability is the capability and practice of using such data to understand the system.
+
+### 5.1 What is telemetry?
+
+Telemetry is information automatically collected or transmitted from a system to help monitor, analyze, or understand its behavior.
+
+In application infrastructure, telemetry can include:
+
+- Request counts and durations.
+- CPU, memory, and garbage-collection measurements.
+- Application logs.
+- Distributed traces.
+- Database connection-pool statistics.
+- Queue depth and consumer lag.
+- Deployment events.
+- Resource and environment metadata.
+
+For example, a Spring Boot application might emit a metric for the number of HTTP requests processed by an endpoint.
+
+That measurement is telemetry. A dashboard that displays the metric is a way of presenting telemetry. An investigation that uses it alongside traces and logs is part of observability.
+
+### 5.2 Telemetry is not the same as observability
+
+Consider these four situations:
+
+| Situation                                                             | Telemetry? | Observability capability?                                                 |
+| --------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------- |
+| An application writes logs to a file                                  | Yes        | Limited by itself                                                         |
+| A service exports request metrics                                     | Yes        | Provides useful evidence, but may be insufficient for root-cause analysis |
+| Traces connect requests across services and include useful attributes | Yes        | Strongly supports end-to-end investigation                                |
+| Metrics, logs, and traces are correlated and searchable               | Yes        | Usually provides a richer basis for investigation                         |
+
+Telemetry is an input to observability, not a guarantee of it.
+
+A system can generate terabytes of telemetry while remaining difficult to understand. For example, logs without service identity or request correlation may be nearly useless during a cross-service incident.
+
+### 5.3 The telemetry lifecycle
+
+Telemetry passes through several stages.
+
+1\. Instrumentation
+
+Applications and infrastructure produce signals
+
+2\. Collection and transport
+
+Agents, exporters, SDKs, and collectors
+
+3\. Processing and enrichment
+
+Resource metadata, filtering, batching, sampling
+
+4\. Storage and indexing
+
+Metrics, logs, and trace backends
+
+5\. Querying and interpretation
+
+Dashboards, alerts, correlation, investigation
+
+Failures at any stage can reduce observability.
+
+For example:
+
+- Missing instrumentation means a component emits insufficient information.
+- A collector outage may cause telemetry loss.
+- Incorrect metadata may prevent correlation between services.
+- An aggressive sampling policy may omit the trace needed to investigate a rare error.
+- Poor queries or dashboards may hide a problem despite successful data collection.
+
+### 5.4 Instrumentation: where telemetry originates
+
+There are several common approaches.
+
+Code-based instrumentation
+
+Developers explicitly add metrics, spans, or structured logs around important operations.
+
+```
+public Product getProduct(String id) {
+    logger.info("Fetching product");
+    return repository.findById(id)
+        .orElseThrow(() -> new ProductNotFoundException(id));
+}
+```
+
+This simplified example records an event, but it does not automatically provide a complete trace or useful request correlation. Production logging should generally include relevant context without exposing sensitive data.
+
+Library or framework instrumentation
+
+A framework integration automatically instruments common operations, such as incoming HTTP requests, outgoing HTTP calls, and database interactions.
+
+Agent-based instrumentation
+
+An agent can instrument supported libraries or runtime operations without requiring explicit instrumentation code for every operation.
+
+Infrastructure instrumentation
+
+Exporters and agents collect information about the host, container, database, message broker, or other infrastructure.
+
+These approaches are complementary. Automatic instrumentation reduces implementation effort, while custom instrumentation adds domain-specific context that generic integrations may not know.
+
+### 5.5 OpenTelemetry, Micrometer, and observability backends
+
+These technologies occupy different roles in a typical architecture.
+
+| Technology              | Main role                                                                   |
+| ----------------------- | --------------------------------------------------------------------------- |
+| OpenTelemetry           | APIs, SDKs, instrumentation, context propagation, and telemetry export      |
+| Micrometer              | Application metrics instrumentation and integration with monitoring systems |
+| Prometheus              | Scraping, storing, querying, and alerting on metrics                        |
+| Grafana                 | Dashboards and visualization across supported data sources                  |
+| Jaeger                  | Distributed trace collection, storage, and exploration                      |
+| OpenTelemetry Collector | Receiving, processing, and exporting telemetry                              |
+
+In a Spring Boot application, Spring Boot Actuator and Micrometer are common choices for exposing application metrics. OpenTelemetry instrumentation can provide distributed traces, while an OpenTelemetry Collector can centralize telemetry processing and export.
+
+The exact arrangement depends on the framework versions, supported integrations, and the storage backends you choose.
+
+The key point is that installing a telemetry library is not equivalent to implementing a complete observability solution. You also need appropriate collection, storage, access, correlation, and investigation workflows.
+
+## 6. Observability challenges (`observability-challenges`)
+
+Building observability into a distributed system is not just a matter of installing monitoring tools. The difficult part is producing useful, reliable, correlated information without overwhelming the system or the people operating it.
+
+Let's examine the main challenges and how to address them.
+
+### 6.1 Distributed context propagation
+
+Problem: A request crosses several services, but each service records telemetry independently.
+
+Suppose the gateway records a request ID, the composite service records a different identifier, and the recommendation service records only a database error. Connecting those events becomes difficult.
+
+```
+Gateway                 Composite              Recommendation
+trace=A                 trace=B                no trace context
+   |                        |                         |
+   +------------------------+-------------------------+
+                Correlation is difficult
+```
+
+Solution:
+
+- Propagate trace context across HTTP and messaging boundaries.
+- Use compatible instrumentation and context-propagation standards.
+- Include trace and span identifiers in logs when available.
+- Preserve context across asynchronous execution where appropriate.
+- Test propagation across service boundaries rather than assuming it works.
+
+For HTTP services, W3C Trace Context is a common standard. For messaging systems, propagation commonly uses message headers.
+
+A trace ID is not a substitute for a business identifier, such as an order ID. The two answer different questions: a trace ID identifies an execution, while a business identifier can connect multiple executions involving the same business entity.
+
+### 6.2 High telemetry volume and cost
+
+Problem: A busy system may generate millions of requests and enormous volumes of logs and spans.
+
+For example, consider a service processing 10,000 requests per second. If every request produces five spans, the system generates approximately:
+$$
+10{,}000 \times 5 = 50{,}000
+$$
+spans per second, or 4.32 billion spans per day if the rate remains constant.
+
+This is an illustrative calculation, not a recommended instrumentation rate.
+
+High volume increases storage, indexing, network, and processing costs. It may also make useful information harder to find.
+
+Solution:
+
+- Sample traces intelligently.
+- Avoid logging every successful, routine operation at excessive verbosity.
+- Apply appropriate retention policies.
+- Filter unnecessary telemetry.
+- Aggregate metrics where detailed individual events are not needed.
+- Monitor the observability pipeline's own resource consumption.
+
+Sampling needs care. Head-based sampling makes a decision early in a trace and may miss rare errors. Tail-based sampling can retain traces based on their completed characteristics, such as errors or latency, but requires additional buffering and processing.
+
+### 6.3 High-cardinality metrics
+
+Problem: Metrics systems often identify time series using metric names and label combinations. Adding a label with many possible values can produce a very large number of time series.
+
+Consider a request counter:
+
+```
+http_requests_total{
+    service="product",
+    method="GET",
+    status="200"
+}
+```
+
+These labels have relatively manageable value sets.
+
+Now consider adding a unique request ID:
+
+```
+http_requests_total{
+    service="product",
+    request_id="unique-for-every-request"
+}
+```
+
+If every request has a different ID, the number of time series can grow dramatically.
+
+Solution:
+
+- Use bounded labels such as service, HTTP method, and normalized route.
+- Avoid request IDs, user IDs, and raw URLs as metric labels.
+- Use traces and appropriately structured logs for per-request details.
+- Review cardinality before adding new dimensions.
+
+For example, prefer a normalized route such as `/products/{id}` over `/products/12345`, `/products/12346`, and so on.
+
+### 6.4 Incomplete or inconsistent instrumentation
+
+Problem: Some services emit detailed telemetry while others emit almost nothing.
+
+This can create blind spots in the request path. A trace might show that the composite service called another service but not reveal what happened inside that service.
+
+Solution:
+
+- Establish shared instrumentation standards.
+- Use supported automatic instrumentation where appropriate.
+- Define common resource attributes such as service name, environment, and service version.
+- Instrument important business operations explicitly.
+- Test telemetry coverage in integration tests.
+
+Consistency is important. If one service calls its deployment attribute `version` and another calls it `release`, queries and dashboards may become unnecessarily complicated.
+
+### 6.5 Telemetry correlation and data quality
+
+Problem: Metrics, logs, and traces exist, but they cannot be connected reliably.
+
+Common causes include:
+
+- Missing trace IDs in logs.
+- Incorrect timestamps or clock differences.
+- Inconsistent service names.
+- Missing deployment metadata.
+- Incorrect parent-child relationships between spans.
+- Broken context propagation.
+
+Solution:
+
+Adopt consistent resource metadata and context propagation. Validate telemetry with representative requests and verify that trace identifiers connect the expected spans and logs.
+
+Also remember that timestamps from different machines may differ because of clock skew. Distributed tracing systems generally use span relationships and timing information together; comparing wall-clock timestamps alone is not always sufficient to reconstruct causality.
+
+### 6.6 Sampling and rare failures
+
+Problem: Sampling reduces volume, but it may discard the evidence needed to understand an unusual failure.
+
+Suppose only 1% of traces are sampled randomly. If a failure occurs in 0.1% of requests, the retained sample may contain very few examples of that failure.
+
+Solution:
+
+- Choose sampling policies based on operational needs.
+- Consider tail-based sampling for errors and unusually slow requests.
+- Keep metrics that quantify all relevant requests, independently of trace sampling.
+- Avoid assuming that a missing trace means the request never happened.
+
+Sampling policies should also consider privacy, storage budgets, and the capacity of the collector pipeline.
+
+### 6.7 Sensitive information and security
+
+Problem: Telemetry may accidentally expose credentials, personal data, or confidential business information.
+
+Examples include:
+
+- Authorization headers.
+- Session cookies.
+- Passwords and API keys.
+- Full request or response bodies.
+- Personal identifiers in URLs or logs.
+- SQL parameters containing sensitive values.
+
+Solution:
+
+- Redact secrets before telemetry leaves the application or trusted collection boundary.
+- Avoid recording unnecessary personal data.
+- Apply access controls to telemetry backends.
+- Encrypt telemetry in transit and, where appropriate, at rest.
+- Establish retention and deletion policies.
+- Audit access to sensitive diagnostic information.
+
+Trace attributes and logs should follow the same security standards as other production data. Observability must not become an alternate route for leaking secrets.
+
+### 6.8 Instrumentation overhead
+
+Problem: Collecting telemetry consumes CPU, memory, network bandwidth, and storage.
+
+For example, recording every method invocation or generating extremely detailed logs may introduce additional latency and resource pressure.
+
+Solution:
+
+- Measure the overhead of instrumentation.
+- Prefer supported and efficient instrumentation libraries.
+- Avoid unnecessary high-frequency events.
+- Batch and export telemetry efficiently.
+- Tune sampling and logging levels.
+- Monitor collector queues and export failures.
+
+The objective is not to maximize the amount of telemetry. It is to maximize useful diagnostic information within acceptable operational costs.
+
+### 6.9 Asynchronous workflows and message queues
+
+Problem: In message-driven systems, a producer and consumer may operate at different times, on different instances, or even in different deployments.
+
+A trace that ends when the producer publishes a message may not reveal how long the consumer waited before processing it.
+
+Solution:
+
+- Propagate trace context through message headers.
+- Instrument message production and consumption.
+- Measure queue depth and consumer lag.
+- Track processing duration and retry counts.
+- Distinguish message publication, delivery, processing, and completion.
+- Account for dead-letter queues and redelivery.
+
+For example, a notification may be delivered late because the consumer is processing slowly, even though the producer and broker are healthy. Queue metrics and consumer traces help distinguish this from an HTTP latency problem.
+
+### 6.10 Alert fatigue and too much data
+
+Problem: Teams receive many alerts that are noisy, repetitive, or not actionable.
+
+A high CPU alert on a short-lived spike may be less useful than an alert showing sustained user-facing errors or a rapidly growing queue.
+
+Solution:
+
+- Tie alerts to meaningful user impact and reliability objectives.
+- Set thresholds using actual service behavior.
+- Use appropriate evaluation windows.
+- Deduplicate related alerts.
+- Define clear ownership and response procedures.
+- Use dashboards for investigation rather than turning every measurement into an alert.
+
+A useful alert should tell an operator what is wrong, how serious it is, and where to begin investigating.
+
+### 6.11 Observability of the observability pipeline
+
+Problem: The telemetry collection system itself can fail.
+
+For example, an OpenTelemetry Collector might run out of memory, a backend might become unavailable, or an exporter might repeatedly fail to send data.
+
+The application could still be running while its telemetry disappears.
+
+Solution:
+
+Monitor the telemetry pipeline itself:
+
+- Collector availability and resource consumption.
+- Queue capacity and dropped telemetry.
+- Export errors and retry activity.
+- Ingestion latency.
+- Backend availability and storage limits.
+
+Telemetry loss should be treated as an operational concern. Otherwise, the system may become hardest to investigate precisely when an incident is underway.
+
+### 6.12 Ownership and organizational complexity
+
+Problem: Distributed systems often involve several teams responsible for different services and infrastructure components.
+
+A trace may reveal that a request is slow inside a downstream service, but the team investigating the incident may not own that service.
+
+Solution:
+
+- Establish service ownership.
+- Maintain service catalogs and dependency maps.
+- Standardize service names and deployment metadata.
+- Define incident escalation procedures.
+- Agree on shared reliability objectives where appropriate.
+- Make dashboards and traces accessible to authorized teams.
+
+Observability is as much an operational practice as a technical implementation. Data is useful only when the right people can access and interpret it.
+
+## 7. Putting the concepts together
+
+The following table summarizes how the six topics relate to one another.
+
+| Concept                              | Main question                                           | Example                                                                          |
+| ------------------------------------ | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| What is observability?               | Can we infer internal behavior from external outputs?   | Investigate why a request is slow                                                |
+| Observability in distributed systems | Can we understand behavior across services?             | Trace an API request through a gateway, services, and a database                 |
+| Observability vs. monitoring         | Can we detect a problem and then understand it?         | An alert detects a latency SLO violation; a trace narrows down the cause         |
+| Observability vs. diagnostics        | How do we use evidence to investigate a specific fault? | Analyze a CPU profile to find an expensive method                                |
+| Observability vs. telemetry          | What data do we collect, and how do we use it?          | Export spans, store them, and correlate them with logs                           |
+| Observability challenges             | Can we obtain useful evidence reliably and efficiently? | Control cardinality, propagate context, protect sensitive data, and manage costs |
+
+### A final mental model
+
+Telemetry — the evidence
+
+Metrics, logs, traces, profiles, and other signals emitted by the system.
+
+Monitoring — detecting known problems
+
+Dashboards, health checks, SLO evaluation, and alerts.
+
+Observability — understanding behavior
+
+Correlating and exploring evidence to answer questions about the system, including unexpected questions.
+
+Diagnostics — investigating a specific fault
+
+Using telemetry and other diagnostic tools to test hypotheses and identify likely causes.
+
+These practices work together. A reliable distributed system needs enough telemetry to expose important behavior, monitoring to identify problems quickly, observability to support investigation, and diagnostic techniques to validate causes and guide corrective action.
+
+For your software-engineering documentation, these concepts fit naturally under `software-engineering/design-architecture/distributed-systems/service-communication/observability`, before the framework-specific implementations such as Spring Boot Actuator, Micrometer, OpenTelemetry, Prometheus, tracing backends, and Grafana.

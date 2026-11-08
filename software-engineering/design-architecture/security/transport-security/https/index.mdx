@@ -2,7 +2,6 @@
 id: software-engineering-design-architecture-security-transport-security-https
 title: "HTTPS"
 ---
-## Overview
 
 HTTPS (**HyperText Transfer Protocol Secure**) is the secure version of HTTP. It combines:
 
@@ -34,15 +33,15 @@ Without HTTPS:
 
 ```
 Client ---------------------- HTTP ---------------------- Server
-
+```
 Anyone on the network can:
 
-✓ Read passwords
-✓ Read cookies
-✓ Modify responses
-✓ Inject JavaScript
-✓ Steal sessions
-```
+- ✓ Read passwords
+- ✓ Read cookies
+- ✓ Modify responses
+- ✓ Inject JavaScript
+- ✓ Steal sessions
+
 
 With HTTPS:
 
@@ -52,13 +51,9 @@ Client ======== Encrypted TLS Tunnel ======== Server
 Attacker sees only encrypted bytes.
 ```
 
-Under the hood, HTTPS uses the Secure Sockets Layer (SSL) protocol to
-encrypt communication. SSL is a protocol that provides privacy, authentication, and data integrity
-in communications. Over time, SSL was succeeded by its more secure and modern counterpart,
-Transport Layer Security (TLS).
----
+Under the hood, HTTPS uses the Secure Sockets Layer (SSL) protocol to encrypt communication. SSL is a protocol that provides privacy, authentication, and data integrity in communications. Over time, SSL was succeeded by its more secure and modern counterpart, Transport Layer Security (TLS).
 
-# Why HTTPS Exists
+## Why HTTPS Exists
 
 Imagine logging into an online bank.
 
@@ -81,9 +76,7 @@ Encrypted Data
 
 The attacker only sees encrypted bytes.
 
----
-
-# Security Goals
+## Security Goals
 
 HTTPS protects against:
 
@@ -93,9 +86,7 @@ HTTPS protects against:
 * Data tampering
 * Fake websites (when certificates are validated correctly)
 
----
-
-# Components of HTTPS
+## Components of HTTPS
 
 ```
 HTTPS
@@ -113,9 +104,7 @@ HTTP remains unchanged.
 
 TLS secures the transport.
 
----
-
-# HTTPS Request Flow
+## HTTPS Request Flow
 
 ```
 Browser
@@ -133,18 +122,14 @@ HTTP GET
 Encrypted Response
 ```
 
----
-
-# Default Port
+## Default Port
 
 | Protocol | Port |
 | -------- | ---- |
 | HTTP     | 80   |
 | HTTPS    | 443  |
 
----
-
-# HTTPS vs HTTP
+## HTTPS vs HTTP
 
 | HTTP                       | HTTPS                |
 | -------------------------- | -------------------- |
@@ -153,9 +138,67 @@ Encrypted Response
 | Vulnerable to interception | Protected by TLS     |
 | Port 80                    | Port 443             |
 
----
+## TLS message format
+TLS communication uses a binary format, not ordinary text like JSON, XML, or HTTP headers.
 
-# TLS Handshake
+For example, the `ClientHello` message is encoded using the TLS protocol's defined binary structures. Let's look at how that works.
+
+In TLS 1.2 and TLS 1.3, handshake messages have a logical structure like this:
+
+```
+Handshake Message
++-------------------------+
+| Handshake Type (1 byte) |
++-------------------------+
+| Length (3 bytes)        |
++-------------------------+
+| Handshake Body          |
+|                         |
+| ClientHello fields      |
++-------------------------+
+```
+
+For `ClientHello`:
+
+- Handshake Type: identifies the message as `ClientHello` (`0x01`).
+- Length: specifies the size of the handshake body.
+- Handshake Body: contains fields such as the client random, cipher suites, and extensions.
+
+The exact fields depend on the TLS version.
+
+A simplified TLS 1.3 `ClientHello` looks like this:
+
+```
+ClientHello
+|
++-- legacy_version
+|      2 bytes
+|
++-- random
+|      32 bytes
+|
++-- legacy_session_id
+|      variable length
+|
++-- cipher_suites
+|      length + list of cipher suite IDs
+|
++-- legacy_compression_methods
+|      length + values
+|
++-- extensions
+       total length
+       |
+       +-- supported_versions
+       +-- supported_groups
+       +-- key_share
+       +-- server_name (SNI)
+       +-- application_layer_protocol_negotiation (ALPN)
+```
+
+Notice that SNI and ALPN are not separate network messages. They are encoded as extensions inside the `ClientHello`.
+
+## TLS Handshake
 
 The TLS handshake establishes a secure session before any HTTP data is exchanged.
 
@@ -170,7 +213,7 @@ Modern HTTPS uses **TLS 1.3**, which simplifies and speeds up the handshake comp
 
 ---
 
-## High-Level TLS 1.3 Handshake
+### High-Level TLS 1.3 Handshake
 
 ```
 Client                               Server
@@ -193,9 +236,62 @@ HTTP Response
 
 ---
 
-## Step 1: ClientHello
+### Step 1: ClientHello
 
 The client sends information needed to start the connection.
+
+When a browser connects to an HTTPS website, it starts the TLS handshake by sending a message called `ClientHello`.
+
+The purpose is to tell the server:
+
+> These are the TLS versions and cryptographic options I support, the key-exchange methods I can use, the hostname I want to reach, and the application protocols I can speak. Let's find a compatible configuration.
+
+For example, when you visit `https://shop.example.com`, the browser sends a `ClientHello` containing several pieces of information.
+```
++------------------------------------------------------------------+ 
+|                            Browser (TLS Client)
+|
+|                    Wants to connect to shop.example.com
+|                                 |
+|                                 V
+|                            ClientHello
+| +---------------------------------------------------------------+
+| | Information sent to the server
+| | 
+| | Supported TLS versions
+| | 
+| | Which TLS versions can be used?
+| | ---------------------------------------------------------------
+| | Cipher suites
+| | 
+| | Which encryption and integrity algorithms are supported?
+| | ---------------------------------------------------------------
+| | Key-exchange parameters
+| | 
+| | How can both parties establish shared secrets?
+| | ---------------------------------------------------------------
+| | Random value
+| | 
+| | Provides fresh input to the handshake.
+| | ---------------------------------------------------------------
+| | SNI
+| | 
+| | Which hostname does the client want?
+| | ---------------------------------------------------------------
+| | ALPN
+| | 
+| | Which application protocol should be used?                   | |
+| +--------------------------------------------------------------+ |
+|                                 |                                |
+|                                 V                                |
+|                   Server selects compatible options              |
+| +--------------------------------------------------------------+ |
+| |                            Web Server                        | |
+| |       Responds with ServerHello and other handshake messages | |
+| +--------------------------------------------------------------+ |
++------------------------------------------------------------------+ 
+```
+
 
 Example contents:
 
@@ -225,9 +321,285 @@ X25519
 P-256
 ```
 
+Let's examine each item and understand why it is needed.
+
+#### Supported TLS versions
+
+TLS has evolved over time, with newer versions providing better security and performance.
+
+Examples:
+
+- TLS 1.2
+- TLS 1.3
+
+The client indicates which versions it supports so that the client and server can agree on a common version.
+
+For example:
+
+```
+ClientHello:
+    Supported versions:
+        TLS 1.3
+        TLS 1.2
+```
+
+Suppose the server supports TLS 1.3 and TLS 1.2. It can select TLS 1.3, assuming its configuration and the remaining negotiation requirements permit it.
+
+```
+Client                         Server
+  |                              |
+  | Supported: 1.3, 1.2          |
+  |----------------------------->|
+  |                              |
+  | Selected: TLS 1.3            |
+  |<-----------------------------|
+```
+
+Why does this matter?
+
+The client and server must agree on a TLS version that both support. They cannot complete the handshake if they have no acceptable version in common.
+
+In TLS 1.3, supported versions are explicitly advertised through the `supported_versions` extension.
+
+#### Supported cipher suites
+
+A cipher suite specifies cryptographic algorithms used to protect TLS communication.
+
+In TLS 1.3, a cipher suite primarily specifies:
+
+- The symmetric encryption algorithm.
+- The hash algorithm used by the TLS key schedule and related operations.
+
+Examples:
+
+```
+TLS_AES_128_GCM_SHA256
+TLS_AES_256_GCM_SHA384
+TLS_CHACHA20_POLY1305_SHA256
+```
+
+Here is what one name means:
+
+`TLS_AES_128_GCM_SHA256`
+
+| Component | Meaning                                                                |
+| --------- | ---------------------------------------------------------------------- |
+| AES_128   | AES encryption with a 128-bit key                                      |
+| GCM       | Authenticated encryption mode, providing confidentiality and integrity |
+| SHA256    | SHA-256 hash used by TLS cryptographic operations                      |
+
+The client might send:
+
+```
+ClientHello:
+    Cipher suites:
+        TLS_AES_128_GCM_SHA256
+        TLS_AES_256_GCM_SHA384
+```
+
+The server selects a compatible suite, for example:
+
+```
+Selected:
+    TLS_AES_128_GCM_SHA256
+```
+
+Important distinction: In TLS 1.3, cipher suites do not specify the key-exchange algorithm or the certificate's signature algorithm. Those are negotiated through separate mechanisms.
+
+#### Supported key-exchange groups
+
+Before exchanging encrypted application data, the client and server need shared cryptographic secrets.
+
+TLS 1.3 commonly achieves this using ephemeral Diffie–Hellman key exchange, particularly elliptic-curve Diffie–Hellman (ECDHE).
+
+The client advertises supported groups using the `supported_groups` extension and normally sends an initial key-exchange value in the `key_share` extension.
+
+Examples of groups include:
+
+- `X25519`
+- `secp256r1` (also called P-256)
+
+Imagine this exchange:
+
+```
+Client                              Server
+  |                                    |
+  | Supported groups: X25519, P-256    |
+  | Key share: X25519 public value     |
+  |----------------------------------->|
+  |                                    |
+  | Server key share: X25519 value     |
+  |<-----------------------------------|
+  |                                    |
+  | Both derive the same shared secret |
+```
+
+The client and server use their respective private values and the exchanged public values to derive the same shared secret. The private values are not transmitted.
+
+The shared secret is then used as input to TLS's key schedule to derive the keys that protect the connection.
+
+Why does this matter?
+
+It allows the parties to establish session keys without sending those keys directly over the network. Using suitable ephemeral key exchange also provides forward secrecy: a later compromise of the server's certificate private key alone should not reveal previously recorded sessions.
+
+#### Random value
+
+The `ClientHello` includes a 32-byte field historically called `Random`.
+
+Conceptually:
+
+```
+ClientHello:
+    Random: 32 bytes of fresh random data
+```
+
+The value is generated using a cryptographically secure random-number generator.
+
+Randomness helps make handshakes distinct and supports the protocol's cryptographic constructions.
+
+However, there is an important TLS 1.3 detail: the `ClientHello.random` field is not itself the session key. TLS 1.3 derives handshake and application traffic secrets from the key-exchange secret and handshake transcript through its key schedule.
+
+The client also generates private key-exchange material separately; that secret private material is never sent to the server.
+
+#### Server Name Indication (SNI)
+
+A single IP address can host many websites.
+
+For example:
+
+```
+                  One IP address
+                        |
+            +-----------+-----------+
+            |           |           |
+       shop.example  blog.example  api.example
+```
+
+When a client connects to that IP address, the server may need to know which website the client wants before it can select the appropriate certificate.
+
+This is the purpose of Server Name Indication (SNI), a TLS extension.
+
+Example:
+
+```
+ClientHello:
+    SNI: shop.example.com
+```
+
+The server can then select the certificate appropriate for `shop.example.com`.
+
+```
+Browser
+   |
+   | ClientHello
+   | SNI = shop.example.com
+   v
+Web Server
+   |
+   +-- Select certificate for shop.example.com
+   |
+   +-- Continue TLS handshake
+```
+
+SNI is especially important for hosting providers, reverse proxies, and servers hosting multiple HTTPS websites.
+
+Security note: In ordinary TLS 1.2 and TLS 1.3 handshakes, SNI is visible to network observers. Encrypted ClientHello (ECH), where supported and successfully negotiated, can protect the inner ClientHello, including the actual server name.
+
+#### Application-Layer Protocol Negotiation (ALPN)
+
+TLS protects application traffic, but it does not by itself determine which application protocol the parties will use.
+
+ALPN lets the client advertise supported protocols so the server can select one.
+
+Common examples:
+
+| ALPN identifier | Protocol |
+| --------------- | -------- |
+| `http/1.1`      | HTTP/1.1 |
+| `h2`            | HTTP/2   |
+| `h3`            | HTTP/3   |
+
+For example:
+
+```
+ClientHello:
+    ALPN protocols:
+        h2
+        http/1.1
+```
+
+The server may select `h2`, meaning HTTP/2.
+
+```
+Client                         Server
+  |                               |
+  | ALPN: h2, http/1.1             |
+  |------------------------------>|
+  |                               |
+  | Selected ALPN: h2              |
+  |<------------------------------|
+```
+
+The client and server can now use HTTP/2 over the negotiated TLS connection.
+
+One qualification: HTTP/3 uses QUIC rather than TCP, and TLS 1.3 is integrated into QUIC. The ALPN identifier `h3` is used to negotiate HTTP/3, but HTTP/3 does not run over a conventional TCP-based TLS connection.
+
+#### 8. Putting it all together
+
+Suppose you enter:
+
+```
+https://shop.example.com/products
+```
+
+The process looks like this:
+
+1\. Browser starts the connection
+
+DNS resolution and transport connection setup as appropriate
+
+2\. Client sends ClientHello
+
+- TLS versions: TLS 1.3, TLS 1.2
+- Cipher suites: supported TLS 1.3 suites
+- Key exchange: supported groups and initial key share
+- Random: fresh 32-byte value
+- SNI: `shop.example.com`
+- ALPN: `h2`, `http/1.1`
+
+3\. Server responds
+
+- Selects a TLS version and cipher suite
+- Selects compatible key-exchange parameters
+- Sends its certificate and proof of private-key possession
+- Negotiates an application protocol
+
+4\. Handshake completes
+
+Both parties verify the handshake and derive traffic keys.
+
+5\. Encrypted HTTP communication
+
+The browser sends the request for /products.
+
+The exact message contents vary by TLS version, extensions, and configuration. For example, TLS 1.3 may send the client's key share in the initial `ClientHello`, while other cases can require an additional round trip using a `HelloRetryRequest`.
+
+#### Quick reference
+
+| Information                     | Main question answered                                     |
+| ------------------------------- | ---------------------------------------------------------- |
+| Supported TLS versions          | Which TLS version can we use?                              |
+| Cipher suites                   | Which symmetric encryption and hash algorithms can we use? |
+| Supported groups and key shares | How can we establish shared cryptographic secrets?         |
+| Random value                    | What fresh input contributes to this handshake?            |
+| SNI                             | Which hostname is the client trying to reach?              |
+| ALPN                            | Which application protocol should we use?                  |
+
+The key idea is that `ClientHello` begins negotiation; it does not, by itself, establish a fully authenticated and secure connection. The remaining handshake messages establish the selected parameters, authenticate the server, and verify that both sides agree on the cryptographic handshake before application data is exchanged.
+
 ---
 
-## Step 2: ServerHello
+### Step 2: ServerHello
 
 The server selects compatible parameters.
 
@@ -243,9 +615,22 @@ At this point both sides derive shared encryption keys using ephemeral key excha
 
 ---
 
-## Step 3: Certificate
+### Step 3: Certificate
 
 The server proves its identity by sending its certificate chain.
+
+The Certificate step is where the server sends its digital certificate to the client (for example, a web browser) so the client can verify the server's identity.
+
+Suppose you visit:
+
+`https://shop.example.com`
+
+Your browser needs to establish two important facts:
+
+1. Identity: Is this server authorized to represent `shop.example.com`?
+2. Public key: Which public key should be associated with that identity?
+
+The server's certificate provides the information needed to answer these questions. The browser then validates the certificate before trusting it.
 
 Example:
 
@@ -262,15 +647,327 @@ Public Key:
 RSA/ECDSA
 ```
 
+In TLS 1.3, the server's Certificate, CertificateVerify, and Finished messages are encrypted using handshake traffic keys established after ServerHello.
+
+An important distinction: receiving a certificate is not the same as proving that the server owns the corresponding private key. That proof is provided by the subsequent `CertificateVerify` message.
+
+
+#### How does the server send the certificate?
+
+The server transmits a TLS handshake message named `Certificate`.
+
+In TLS 1.3, its structure is conceptually:
+
+```
+TLS Certificate Message
+|
++-- Handshake Type: Certificate
+|
++-- Request Context
+|
++-- Certificate List
+      |
+      +-- Certificate Entry 1
+      |     |
+      |     +-- Certificate Data (DER-encoded X.509)
+      |     +-- Certificate Extensions
+      |
+      +-- Certificate Entry 2
+      |     |
+      |     +-- Certificate Data
+      |     +-- Certificate Extensions
+      |
+      +-- ...
+```
+
+The certificate data is typically DER-encoded X.509 data, carried inside the TLS handshake's binary structure.
+
+The server usually sends its leaf certificate and the intermediate certificates needed to build a trust chain. It generally does not need to send the root certificate because the client already has its own trusted root store.
+
+#### How does the browser use the certificate?
+
+Imagine the browser receives a certificate for `shop.example.com`.
+```
++----------------------------------------------------------------------------------+  
+|                         Server sends certificate
+|   
+|                   Claims identity: shop.example.com
+|                               |
+|                               V
+| +--------------------------------------------------------------------------------+       
+| | Check 1 — Hostname
+| | 
+| | Does the certificate's SAN match shop.example.com?
+| +--------------------------------------------------------------------------------+ 
+| +--------------------------------------------------------------------------------+ 
+| | Check 2 — Validity and purpose
+| | 
+| | Is it within its validity period and appropriate for TLS server authentication?
+| +--------------------------------------------------------------------------------+ 
+| +--------------------------------------------------------------------------------+ 
+| | Check 3 — Certificate chain
+| | 
+| | Can the browser validate the certificate signatures up to a trusted root CA?
+| +--------------------------------------------------------------------------------+ 
+|                               |
+|                               V
+| +--------------------------------------------------------------------------------+ 
+| | Certificate validation succeeds
+| | 
+| | The browser can trust the certificate's identity binding, subject 
+| | to the remaining TLS checks.
+| +--------------------------------------------------------------------------------+  
++----------------------------------------------------------------------------------+  
+```
+If required validation fails, the browser will normally terminate the connection and display a certificate or security error rather than proceed as if the server were trusted.
+
+Note that certificate validation and proof of private-key possession are separate checks. The browser must also verify the server's `CertificateVerify` message.
+
+#### How does the certificate prove the server's identity?
+
+Consider three parties:
+
+- Server: `shop.example.com`
+- Certificate Authority: the issuer that signs the certificate
+- Browser: the client establishing the HTTPS connection
+
+The CA verifies the domain-control requirements for certificate issuance and signs the certificate containing the server's public key and domain identity.
+
+```
+Certificate Authority (CA)
+         |
+         | Signs certificate
+         v
+Certificate
+  Domain: shop.example.com
+  Public key: K_public
+         |
+         | Sent during TLS handshake
+         v
+Browser
+  |
+  +-- Validates certificate signature and chain
+  +-- Checks hostname and validity
+  +-- Establishes trust in the public key binding
+```
+
+The browser does not simply trust a certificate because the server sent it. It trusts the certificate only if the relevant validation checks succeed.
+
+However, the certificate alone does not prove that the peer currently possesses the corresponding private key. That is why TLS 1.3 includes the next step.
+
 ---
 
-## Step 4: CertificateVerify
+### Step 4: CertificateVerify
 
 The server signs part of the handshake using the private key corresponding to the certificate, proving ownership of that private key.
 
+The `CertificateVerify` message proves that the server possesses the private key corresponding to the public key in its certificate, and that it is participating in the current TLS handshake.
+
+Remember the distinction from Step 3:
+
+- Certificate: The server sends a certificate containing its public key and identity information.
+- CertificateVerify: The server uses its private key to sign data associated with the current handshake, proving possession of that key.
+
+This prevents an attacker from impersonating a website merely by copying its publicly available certificate.
+
+
+In a typical full TLS 1.3 handshake, the server sends these messages after `ServerHello`:
+
+#### Why is CertificateVerify necessary?
+
+Imagine that a legitimate server owns this certificate:
+
+```
+Certificate
+-------------------------
+Domain: shop.example.com
+
+Public Key: K_public
+
+Signed by: Trusted CA
+```
+
+The certificate is public. Anyone can download and copy it.
+
+Suppose an attacker intercepts traffic and sends the same certificate to your browser. The browser might find that the certificate's CA signature is valid and that its hostname matches.
+
+But that is not enough to prove the attacker is the legitimate server.
+
+The attacker also needs to demonstrate possession of the corresponding private key, $K_{\text{private}}$.
+
+```
+Legitimate server:
+    Certificate + K_private
+            |
+            v
+    Can produce a valid signature
+
+Attacker:
+    Copied certificate only
+            |
+            v
+    Cannot produce the required signature
+```
+
+That is the purpose of `CertificateVerify`.
+
+####  How does CertificateVerify work?
+Let's walk through the process.
+
+1. Step 1 — The client and server exchange handshake messages
+
+The client sends `ClientHello`, and the server responds with `ServerHello` and its certificate.
+
+Both sides maintain a transcript of the handshake messages exchanged so far.
+
+Conceptually:
+
+```
+Handshake Transcript
+----------------------------
+ClientHello
+ServerHello
+EncryptedExtensions
+Certificate
+----------------------------
+```
+
+The actual transcript contains the protocol-defined encodings of the messages, not their human-readable descriptions.
+
+2. Step 2 — The server constructs the signed input
+
+In TLS 1.3, the server constructs a specific input containing:
+
+- 64 space characters (`0x20`).
+- A context string identifying the server's CertificateVerify operation.
+- A zero byte (`0x00`).
+- The hash of the handshake transcript up to that point.
+
+Conceptually:
+
+```
+Signed Input
+-------------------------------
+64 spaces
+"TLS 1.3, server CertificateVerify"
+0x00
+Hash(handshake transcript)
+-------------------------------
+```
+
+This exact structure matters: it binds the signature to the TLS protocol context and the messages exchanged in this particular handshake.
+
+The context string for the server is:
+
+```
+TLS 1.3, server CertificateVerify
+```
+
+The client uses a different context string when authenticating itself with CertificateVerify.
+
+3. Step 3 — The server signs the input
+
+The server uses the private key corresponding to the public key in its certificate.
+
+Conceptually:
+
+$$
+S = \operatorname{Sign}(K\_{\text{private}}, M)
+$$
+
+where:
+
+- $K\_{\text{private}}$ is the server's private key.
+- $M$ is the specially constructed input.
+- $S$ is the resulting digital signature.
+
+The exact signing operation depends on the certificate's supported signature algorithm, such as RSA-PSS or ECDSA.
+
+The server sends a `CertificateVerify` message containing the signature scheme and signature bytes.
+
+The private key is never sent to the client.
+
+4. Step 4 — The client verifies the signature
+
+The browser constructs the same signed input from its own copy of the handshake transcript.
+
+It then verifies the signature using the public key from the server's certificate.
+
+Conceptually:
+$$
+\operatorname{Verify}(K\_{\text{public}}, M, S)
+$$
+
+If verification succeeds, the client has evidence that the sender possesses the private key corresponding to that public key and has signed the transcript for this handshake.
+
+If verification fails, the client aborts the handshake.
+
+```goat
+ +-------------------------------------------------------------------+          
+ |            Client                         Server                  |          
+ |          ClientHello                    ServerHello               |          
+ |              ->                             <-                    |          
+ |                                                                   |          
+ |                                                                   |          
+ |              Both derive handshake traffic keys                   |          
+ |                              <-                                   |          
+ |               Certificate — certificate chain                     |          
+ | +--------------------------------------------------------------+  |          
+ | | Server creates signature                                     |  |          
+ | | Signs the transcript using its private key.                  |  |          
+ | |                                                              |  |          
+ | +--------------------------------------------------------------+  |          
+ |                              <-                                   |          
+ |                 CertificateVerify — signature                     |          
+ | +-------------------------------------------------------------+   |          
+ | |Client verifies signature                                    |   |          
+ | |Uses the certificate's public key and the matching transcript.   |          
+ | +-------------------------------------------------------------+   |          
+ |                             <-                                    |          
+ |                          Finished                                 |          
+ |                                                                   |          
+ |             Handshake authentication continues                    |          
+ |                                                                   |          
+ |  The client must also verify the Finished message before          |          
+ |  accepting the server handshake.                                  |          
+ |                                                                   |          
+ |                                                                   |          
+ +-------------------------------------------------------------------+          
+```
+
+#### Certificate versus CertificateVerify
+
+This distinction is fundamental to understanding TLS.
+
+| Message             | Purpose                                                                                                     |
+| ------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `Certificate`       | Supplies the certificate and public key, along with the certificate chain                                   |
+| `CertificateVerify` | Proves possession of the corresponding private key by signing the handshake transcript                      |
+| `Finished`          | Verifies the integrity and authenticity of the handshake using a key derived from the TLS handshake secrets |
+
+Conceptually:
+
+```
+Certificate
+    |
+    | Provides public key K_public
+    v
+CertificateVerify
+    |
+    | Server signs handshake transcript
+    | using corresponding private key K_private
+    v
+Browser verifies signature using K_public
+    |
+    v
+Proof of private-key possession
+```
+
+An attacker who copies a legitimate website's public certificate cannot successfully impersonate that website merely by presenting the copied certificate. The attacker also needs the corresponding private key or another way to defeat the protocol's security.
+
 ---
 
-## Step 5: Finished Messages
+### Step 5: Finished Messages
 
 Both sides exchange **Finished** messages that authenticate the entire handshake transcript.
 
@@ -282,7 +979,18 @@ Handshake complete
 
 ---
 
-## Secure Communication
+Think of the certificate as an identity document containing a public key, signed by a trusted authority.
+
+- The certificate tells the browser which identity the public key is associated with.
+- The CA's signature lets the browser verify the certificate's authenticity through a trusted chain.
+- Certificate validation checks whether the certificate is appropriate for the requested hostname and connection.
+- `CertificateVerify` demonstrates that the server possesses the corresponding private key.
+- `Finished` confirms handshake integrity.
+
+Together, these mechanisms let the browser authenticate the HTTPS server and establish a secure connection without transmitting the server's private key.
+
+
+### Secure Communication
 
 Only after the handshake completes are HTTP messages exchanged:
 
@@ -296,7 +1004,7 @@ The request and response are encrypted with symmetric session keys negotiated du
 
 ---
 
-## Why Symmetric Encryption?
+### Why Symmetric Encryption?
 
 Public-key cryptography is computationally expensive.
 
@@ -307,7 +1015,7 @@ Instead:
 
 ---
 
-## Session Resumption
+### Session Resumption
 
 To reduce latency, TLS supports session resumption, allowing later connections to reuse previously established secrets instead of performing a full handshake.
 
@@ -319,7 +1027,7 @@ Benefits:
 
 ---
 
-# Certificates
+## Certificates
 
 A **TLS certificate** is a digitally signed document that binds a public key to an identity, such as a domain name.
 
@@ -331,7 +1039,9 @@ Without certificates, an attacker could substitute their own public key.
 
 ---
 
-## Certificate Contents
+### Certificate Contents
+
+A TLS server certificate is usually an X.509 certificate. It binds a public key to a domain name or other identity and includes a digital signature from the issuing Certificate Authority (CA).
 
 Typical fields include:
 
@@ -343,6 +1053,37 @@ Serial Number
 Validity Period
 Signature Algorithm
 Extensions
+```
+For example, a simplified certificate might contain:
+
+```
+X.509 Certificate
+|
++-- Subject
+|     CN = shop.example.com
+|
++-- Subject Alternative Name (SAN)
+|     DNS: shop.example.com
+|     DNS: www.shop.example.com
+|
++-- Subject Public Key Info
+|     Algorithm: ECDSA
+|     Public Key: <public key bytes>
+|
++-- Issuer
+|     Example Intermediate CA
+|
++-- Validity
+|     Not Before: 2026-01-01
+|     Not After:  2027-01-01
+|
++-- Key Usage / Extended Key Usage
+|     Intended purpose: TLS server authentication
+|
++-- Serial Number
+|
++-- Digital Signature
+      Issuer CA's signature
 ```
 
 Example:
@@ -362,9 +1103,23 @@ Public Key:
 ECDSA
 ```
 
+
+These fields serve different purposes:
+
+| Field                          | Why it matters                                                    |
+| ------------------------------ | ----------------------------------------------------------------- |
+| Subject Alternative Name (SAN) | Identifies the domain names the certificate covers                |
+| Public key                     | Identifies the public key associated with the certificate         |
+| Issuer                         | Identifies the CA that issued the certificate                     |
+| Validity period                | Indicates when the certificate is valid                           |
+| Key Usage / Extended Key Usage | Restricts the permitted cryptographic purposes                    |
+| Digital signature              | Allows verification that the certificate was signed by its issuer |
+
+The certificate is not a password, and it does not contain the server's private key.
+
 ---
 
-## Certificate Chain
+### Certificate Chain
 
 Servers usually send a chain:
 
@@ -380,7 +1135,7 @@ The client already trusts the root CA, so it verifies each signature up the chai
 
 ---
 
-## Public and Private Keys
+### Public and Private Keys
 
 The server generates a key pair:
 
@@ -398,27 +1153,27 @@ The private key must remain secret. Compromise of the private key allows attacke
 
 ---
 
-## Types of Certificates
+### Types of Certificates
 
-### Domain Validation (DV)
+#### Domain Validation (DV)
 
 * Confirms control of the domain.
 * Most common for public websites.
 * Automated issuance (e.g., ACME).
 
-### Organization Validation (OV)
+#### Organization Validation (OV)
 
 * Includes organization identity checks.
 * Less common today.
 
-### Extended Validation (EV)
+#### Extended Validation (EV)
 
 * Requires extensive validation of the organization.
 * Modern browsers no longer give EV certificates special visual treatment.
 
 ---
 
-## Wildcard Certificates
+### Wildcard Certificates
 
 ```
 *.example.com
@@ -440,7 +1195,7 @@ a.b.example.com
 
 ---
 
-## SAN (Subject Alternative Name)
+### SAN (Subject Alternative Name)
 
 A certificate can secure multiple names.
 
@@ -454,7 +1209,7 @@ api.example.com
 
 ---
 
-# Certificate Authorities (CAs)
+## Certificate Authorities (CAs)
 
 A **Certificate Authority (CA)** is a trusted organization that verifies identities and signs certificates.
 
@@ -467,7 +1222,7 @@ Examples include:
 
 ---
 
-## Trust Model
+### Trust Model
 
 ```
 Browser
@@ -487,7 +1242,7 @@ Operating systems and browsers maintain a trusted store of root CA certificates.
 
 ---
 
-## Why Use Intermediate CAs?
+### Why Use Intermediate CAs?
 
 Instead of signing end-entity certificates directly, root CAs typically sign intermediate CAs.
 
@@ -499,13 +1254,13 @@ Benefits:
 
 ---
 
-# Certificate Validation
+## Certificate Validation
 
 When connecting to a server, the client performs multiple checks before trusting the certificate.
 
 ---
 
-## 1. Signature Validation
+### 1. Signature Validation
 
 ```
 Root
@@ -519,13 +1274,13 @@ Each certificate's signature must verify correctly.
 
 ---
 
-## 2. Trust Anchor
+### 2. Trust Anchor
 
 The certificate chain must terminate at a trusted root CA already installed on the client.
 
 ---
 
-## 3. Hostname Validation
+### 3. Hostname Validation
 
 The requested hostname must match the certificate's Subject Alternative Name (SAN).
 
@@ -555,7 +1310,7 @@ example.com
 
 ---
 
-## 4. Validity Period
+### 4. Validity Period
 
 The current time must fall within the certificate's validity window.
 
@@ -568,19 +1323,19 @@ Expired or not-yet-valid certificates are rejected.
 
 ---
 
-## 5. Key Usage and Extensions
+### 5. Key Usage and Extensions
 
 The certificate must be appropriate for TLS server authentication, based on extensions such as Key Usage and Extended Key Usage.
 
 ---
 
-## 6. Revocation Status
+### 6. Revocation Status
 
 The client may check whether the certificate has been revoked before its expiration date.
 
 ---
 
-# Certificate Revocation
+## Certificate Revocation
 
 Sometimes a valid certificate should no longer be trusted.
 
@@ -593,7 +1348,7 @@ Common reasons:
 
 ---
 
-## Certificate Revocation List (CRL)
+### Certificate Revocation List (CRL)
 
 A CA periodically publishes a signed list of revoked certificate serial numbers.
 
@@ -609,19 +1364,19 @@ Revoked:
 
 Clients can download and consult the list.
 
-### Pros
+#### Pros
 
 * Simple.
 * Signed by the CA.
 
-### Cons
+#### Cons
 
 * Lists can become large.
 * Revocation information may be stale between updates.
 
 ---
 
-## Online Certificate Status Protocol (OCSP)
+### Online Certificate Status Protocol (OCSP)
 
 Instead of downloading a full list, the client asks an OCSP responder about a specific certificate.
 
@@ -641,19 +1396,19 @@ or
 "Revoked"
 ```
 
-### Advantages
+#### Advantages
 
 * Smaller responses.
 * More up-to-date status.
 
-### Disadvantages
+#### Disadvantages
 
 * Adds latency.
 * Requires contacting the CA's responder unless stapled.
 
 ---
 
-## OCSP Stapling
+### OCSP Stapling
 
 To avoid extra client requests, the server periodically obtains a signed OCSP response from the CA and "staples" it to the TLS handshake.
 
@@ -677,7 +1432,7 @@ Benefits:
 
 ---
 
-# HSTS (HTTP Strict Transport Security)
+## HSTS (HTTP Strict Transport Security)
 
 HSTS is an HTTP response header that instructs browsers to always use HTTPS for a site for a specified period.
 
@@ -696,7 +1451,7 @@ Meaning:
 
 ---
 
-## Why HSTS Matters
+### Why HSTS Matters
 
 Without HSTS:
 
@@ -738,7 +1493,7 @@ No insecure HTTP request is sent.
 
 ---
 
-## HSTS Preload
+### HSTS Preload
 
 Some domains are included in browser preload lists, meaning browsers know they must use HTTPS even on the very first visit.
 
@@ -758,7 +1513,7 @@ This protects against attacks on the initial connection before the browser has s
 
 ---
 
-# Summary
+## Summary
 
 | Topic                   | Purpose                                                                            |
 | ----------------------- | ---------------------------------------------------------------------------------- |

@@ -1,0 +1,706 @@
+This section introduces three techniques for making LLMs smaller and cheaper to run:
+
+1. Quantization: Store model parameters using fewer bits.
+2. Pruning: Remove parameters or connections that contribute relatively little to the model.
+3. Knowledge distillation: Train a smaller model to imitate a larger one.
+
+The important distinction is that these techniques optimize models in different ways. Quantization changes numerical precision, pruning removes parts of the model, and distillation transfers learned behavior into another model.
+
+Let's examine each one, using examples and Java deployment analogies.
+
+# 1. Quantization: reducing numerical precision
+
+Reduce memory per parameter
+
+A model contains billions of numerical parameters called weights.
+
+During training, these weights are commonly represented using floating-point formats such as FP32 or BF16. But inference doesn't always require that much numerical precision.
+
+Quantization reduces the number of bits used to represent weights.
+
+For example:
+
+| Format | Bits per parameter | Approximate storage |
+| ------ | ------------------ | ------------------- |
+| FP32   | 32                 | 4 bytes             |
+| FP16   | 16                 | 2 bytes             |
+| BF16   | 16                 | 2 bytes             |
+| INT8   | 8                  | 1 byte              |
+| INT4   | 4                  | 0.5 bytes           |
+
+Imagine a model with 7 billion parameters.
+
+At FP32:
+
+\\[ 7B \times 4 = 28 \text{ GB} \\]
+
+At FP16:
+
+\\[ 7B \times 2 = 14 \text{ GB} \\]
+
+At INT8:
+
+\\[ 7B \times 1 = 7 \text{ GB} \\]
+
+At INT4:
+
+\\[ 7B \times 0.5 = 3.5 \text{ GB} \\]
+
+These are approximate decimal GB for weights only, excluding metadata, KV cache, activations, and runtime overhead.
+
+Memory required for a 7B model
+
+Approximate weight storage at different numerical precisions, in GB.
+
+0 GB8 GB16 GB24 GB32 GBFP32FP16INT8INT4
+
+The key observation is that INT4 requires approximately one-eighth of the FP32 weight storage.
+
+## How does quantization actually work?
+
+Consider a few original floating-point weights:
+
+```
+Original FP32 weights:
+
+  0.82
+ -0.45
+  0.13
+  0.67
+ -0.91
+```
+
+Instead of storing these values with 32-bit floating-point precision, quantization maps them into a smaller numerical representation.
+
+Conceptually:
+
+```
+Original weights
+      |
+      v
+  32-bit FP32
+      |
+      v
+ Quantization
+      |
+      v
+  8-bit / 4-bit
+      |
+      v
+ Smaller model
+```
+
+The quantized values approximate the original values. When the model performs inference, those approximations can produce slightly different calculations and outputs.
+
+A simplified uniform quantization formula is:
+
+\\[ q = \operatorname{round}\left(\frac{x}{s}\right)+z \\]
+
+Where:
+
+- \\(x\\): Original floating-point value.
+- \\(s\\): Scale factor.
+- \\(z\\): Zero point.
+- \\(q\\): Quantized integer value.
+
+The original value can be approximately reconstructed as:
+
+\\[ \hat{x}=s(q-z) \\]
+
+The scale and zero point help map a range of floating-point values into a smaller integer range.
+
+Actual LLM quantization schemes can be more sophisticated, using groups of weights, different scales, and specialized algorithms.
+
+## What happens to accuracy?
+
+Quantization introduces numerical approximation.
+
+For example:
+
+```
+Original weight:   0.823456
+Quantized weight:  0.820000
+```
+
+The difference is small in this example, but remember that a model has billions of weights. Numerical errors can accumulate and affect the final output.
+
+This is why quantization must be evaluated rather than assumed to be harmless.
+
+In many applications, INT8 or INT4 quantization can retain useful performance, but the result depends on the model, quantization method, and task.
+
+## The audio compression analogy
+
+The paragraph compares quantization to converting WAV audio into MP3.
+
+| Audio compression                      | Model quantization                      |
+| -------------------------------------- | --------------------------------------- |
+| WAV stores audio at higher precision   | FP32 stores weights at higher precision |
+| MP3 uses a more compact representation | INT8/INT4 use fewer bits                |
+| File size decreases                    | Model weight storage decreases          |
+| Some audio information may be lost     | Some numerical precision may be lost    |
+
+The analogy is useful because both techniques trade representation fidelity for reduced storage.
+
+However, quantization is not exactly the same as MP3 compression: model quantization changes the numerical representation used in neural-network computations.
+
+# 2. Two approaches to quantization
+
+There are two important approaches you should understand.
+
+## A. Post-Training Quantization (PTQ)
+
+Quantize an already-trained model
+
+This is the simpler approach.
+
+You first train a model normally, then convert its weights into a lower-precision format.
+
+```
+Training data
+     |
+     v
+Train full-precision model
+     |
+     v
+Trained FP32 / BF16 model
+     |
+     v
+Post-training quantization
+     |
+     v
+Quantized INT8 / INT4 model
+```
+
+Advantages:
+
+- No need to train the entire model again.
+- Often relatively inexpensive.
+- Can be applied to existing pretrained models.
+- Practical for developers deploying existing LLMs.
+
+Some PTQ methods use a small representative calibration dataset to understand activation ranges and improve quantization quality.
+
+## B. Quantization-Aware Training (QAT)
+
+Account for quantization during training
+
+Instead of training a model normally and quantizing afterward, QAT introduces simulated quantization effects during training.
+
+The model learns to tolerate the numerical approximations.
+
+```
+Training data
+     |
+     v
+Training with simulated
+quantization effects
+     |
+     v
+Learned model
+     |
+     v
+Quantized deployment
+     |
+     v
+INT8 / INT4 model
+```
+
+QAT can preserve accuracy better than a basic PTQ approach, particularly when quantization is aggressive.
+
+However, it requires additional training work and is not always necessary.
+
+| Characteristic        | PTQ                       | QAT                             |
+| --------------------- | ------------------------- | ------------------------------- |
+| Starts with           | Trained model             | Training process                |
+| Additional training   | Usually no                | Yes                             |
+| Implementation        | Generally simpler         | More involved                   |
+| Accuracy preservation | Depends on method         | Can be better                   |
+| Typical use           | Existing model deployment | Accuracy-sensitive quantization |
+
+# 3. Weight pruning: removing less important parameters
+
+Reduce the number of active parameters or connections
+
+Quantization keeps the model's general structure but stores its weights using fewer bits.
+
+Pruning takes a different approach: it identifies weights or structures that contribute relatively little and removes them.
+
+Imagine a simplified neural network with these weights:
+
+```
+Before pruning:
+
+       Input
+      /  |  \
+   0.82 0.001 -0.45
+    |     |     |
+    v     v     v
+   N1    N2    N3
+      \  |  /
+       Output
+```
+
+Suppose the weight `0.001` is considered insignificant under a particular pruning strategy.
+
+The model could remove that connection:
+
+```
+After pruning:
+
+       Input
+       /   \
+    0.82  -0.45
+     |      |
+     v      v
+    N1     N3
+       \   /
+       Output
+```
+
+This is a simplified illustration. Real pruning decisions are based on criteria such as weight magnitude, sensitivity, or structured importance—not simply whether a weight looks small.
+
+## How does pruning work?
+
+A common approach is magnitude pruning:
+
+1. Examine the model weights.
+2. Calculate the magnitude (absolute value) of each weight.
+3. Identify weights below a selected threshold or within a selected percentage.
+4. Set those weights to zero or remove the corresponding structures.
+5. Fine-tune the model if necessary.
+
+For example:
+
+| Original weight | Absolute value | Pruning decision |
+| --------------- | -------------- | ---------------- |
+| 0.82            | 0.82           | Keep             |
+| 0.001           | 0.001          | Remove           |
+| -0.45           | 0.45           | Keep             |
+| 0.003           | 0.003          | Remove           |
+| -0.91           | 0.91           | Keep             |
+
+### Two important pruning types
+
+Unstructured pruning
+
+Removes individual weights wherever they occur.
+
+```
+Before:
+[0.8, 0.1, 0.6, 0.02, 0.9, 0.01]
+
+After:
+[0.8, 0,   0.6, 0,    0.9, 0]
+```
+
+The original matrix dimensions remain unchanged, but many entries are zero.
+
+Structured pruning
+
+Removes complete structures, such as neurons, channels, attention heads, or other groups.
+
+```
+Before:
+
+Layer 1: [N1] [N2] [N3] [N4]
+Layer 2: [N1] [N2] [N3] [N4]
+
+After:
+
+Layer 1: [N1] [N3] [N4]
+Layer 2: [N1] [N3] [N4]
+```
+
+Structured pruning can make the model physically smaller and reduce computation more directly because entire structures disappear.
+
+## Does pruning always make inference faster?
+
+No. This is an important practical detail.
+
+Unstructured pruning may produce many zero weights, but ordinary dense matrix multiplication hardware can still process the full matrix.
+
+To benefit from those zeros, the inference engine and hardware must support efficient sparse computation.
+
+Structured pruning is often easier to translate into actual speed improvements because the model's dimensions become smaller.
+
+Think about a Java array:
+
+```
+double[] weights = {
+    0.8, 0.0, 0.6, 0.0, 0.9, 0.0
+};
+```
+
+You have zeroed some values, but the array still has six elements. A normal loop still visits all six positions.
+
+To reduce actual work, you need an execution strategy that skips the zeros or a representation that stores only the useful values.
+
+That is the difference between reducing the number of nonzero weights and reducing actual runtime cost.
+
+# 4. Knowledge distillation: transferring knowledge to a smaller model
+
+Create a smaller student model
+
+Knowledge distillation is different from both quantization and pruning.
+
+Instead of modifying the precision of an existing model or removing its weights, we train a smaller model to imitate the behavior of a larger model.
+
+The two models have different roles:
+
+- Teacher: The larger, more capable pretrained model.
+- Student: The smaller model that learns to reproduce the teacher's behavior.
+
+## Knowledge distillation
+
+Teacher model
+
+# 70B
+
+Large model · More parameters
+
+Training examples and teacher outputs
+
+Student model
+
+# 7B
+
+Smaller model · Learns teacher behavior
+
+Illustrative sizes only. Distillation does not guarantee that the student retains all teacher capabilities.
+
+## How does the student learn?
+
+Suppose the teacher and student receive the same question:
+
+```
+Question:
+Why does a Java HashMap use hashing?
+```
+
+The teacher generates an answer and may also provide probability distributions over possible next tokens.
+
+The student is trained to produce similar outputs.
+
+A simplified training process:
+
+```
+              Training question
+                      |
+             +--------+--------+
+             |                 |
+             v                 v
+        Teacher model     Student model
+             |                 |
+             v                 v
+        Teacher output    Student output
+             |                 |
+             +--------+--------+
+                      |
+                      v
+              Compare outputs
+                      |
+                      v
+              Calculate loss
+                      |
+                      v
+          Update student parameters
+                      |
+                      v
+             Repeat training
+```
+
+The goal is to reduce the difference between the teacher's behavior and the student's behavior.
+
+## What does the student actually learn?
+
+There are several distillation approaches.
+
+1\. Response-based distillation
+
+The teacher generates answers, and the student learns to generate similar answers.
+
+Example:
+
+```
+Teacher:
+A HashMap uses a hash function to map
+keys to bucket positions.
+
+Student:
+A HashMap calculates a hash from a key
+to determine its bucket location.
+```
+
+2\. Logit-based distillation
+
+The teacher provides its output scores (logits), which are converted into a probability distribution.
+
+The student learns to approximate that distribution.
+
+Why is this useful?
+
+Suppose the teacher predicts the next token with these probabilities:
+
+| Candidate token | Teacher probability |
+| --------------- | ------------------- |
+| hashing         | 0.70                |
+| indexing        | 0.20                |
+| sorting         | 0.08                |
+| compiling       | 0.02                |
+
+The teacher is not merely indicating that `hashing` is the correct answer. It also communicates how plausible the alternatives are.
+
+The student can learn from this richer information.
+
+3\. Feature-based distillation
+
+The student learns to reproduce selected internal representations from the teacher, rather than learning only from its final answers.
+
+This can help transfer information about how the teacher represents data internally.
+
+## Does the student become as capable as the teacher?
+
+Not necessarily.
+
+A 7B student distilled from a 70B teacher may perform very well on selected tasks, but it cannot be assumed to preserve all of the teacher's capabilities.
+
+The result depends on:
+
+- Quality and diversity of training examples.
+- Teacher model capabilities.
+- Student architecture and capacity.
+- Distillation objective.
+- Training duration and data quality.
+
+Distillation is especially useful when you want a smaller model specialized for a particular workload.
+
+For example, a company might use a large teacher model to generate high-quality customer-support training examples, then train a smaller student to handle routine support questions locally.
+
+# 5. Comparing quantization, pruning, and distillation
+
+These techniques are related, but they solve different problems.
+
+| Characteristic              | Quantization                | Pruning                                     | Distillation                                  |
+| --------------------------- | --------------------------- | ------------------------------------------- | --------------------------------------------- |
+| Main idea                   | Reduce bits per weight      | Remove less important weights or structures | Train a smaller model to imitate a larger one |
+| Changes numerical precision | Yes                         | Not necessarily                             | Not necessarily                               |
+| Removes parameters          | No                          | Yes, potentially                            | Student has fewer parameters                  |
+| Requires training           | Not necessarily             | Sometimes fine-tuning                       | Yes                                           |
+| Reduces weight storage      | Yes                         | If sparsity is stored efficiently           | Yes, if student is smaller                    |
+| Can improve inference speed | Yes, with suitable hardware | Yes, with sparse/structured support         | Yes, with suitable deployment                 |
+
+A useful way to remember the differences:
+
+```
+QUANTIZATION
+Same model
+Different numerical precision
+
+PRUNING
+Same general model
+Fewer weights or structures
+
+DISTILLATION
+Different, smaller model
+Learns from a larger model
+```
+
+# 6. Can we combine these techniques?
+
+Absolutely. In fact, combining them is a common optimization strategy.
+
+Imagine starting with a 70B model.
+
+```
+             Original model
+                  70B
+                   |
+                   v
+             Knowledge
+             distillation
+                   |
+                   v
+              Student
+                13B
+                   |
+                   v
+              Quantization
+                 INT4
+                   |
+                   v
+          Smaller deployment
+```
+
+You could also apply pruning before or after other optimization steps, depending on the training and deployment approach.
+
+The important point is that these techniques are complementary.
+
+For example:
+
+- Distillation reduces the number of parameters by creating a smaller model.
+- Quantization reduces the storage required for each remaining parameter.
+- Pruning removes unnecessary weights or structures.
+
+# 7. How does this relate to Java and the JVM?
+
+The paragraph mentions JIT optimization and compressed search indexes. These are useful analogies, but they are not technically the same mechanisms.
+
+Let's distinguish them.
+
+| Java / JVM concept                 | AI optimization analogy               | Connection                                                                                                           |
+| ---------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| JIT compilation                    | Quantization / inference optimization | Both aim to improve execution efficiency, but JIT compiles code while quantization changes numerical representation. |
+| Dead-code elimination              | Pruning                               | Both eliminate elements considered unnecessary, although pruning uses learned model importance.                      |
+| Smaller specialized implementation | Distillation                          | Both aim to deliver required functionality with fewer resources.                                                     |
+| Compressed search indexes          | Quantization / pruning                | Both reduce storage requirements, potentially introducing trade-offs.                                                |
+
+One particularly useful distinction:
+
+JIT does not make an LLM smaller by reducing its parameters. It optimizes how code executes. Quantization changes how model weights are represented.
+
+# 8. Practical example: deploying an LLM in Spring Boot
+
+Suppose your company wants to deploy an internal AI assistant.
+
+Your initial model is a 70B model, but the GPU infrastructure is expensive.
+
+You have three possible strategies:
+
+| Strategy     | What you do                      | Expected benefit              |
+| ------------ | -------------------------------- | ----------------------------- |
+| Quantization | Convert the model to INT4        | Lower memory requirements     |
+| Pruning      | Remove less important structures | Potentially lower computation |
+| Distillation | Train a 7B or 13B student        | Smaller model to deploy       |
+
+A possible architecture:
+
+```
+             Spring Boot
+                  |
+                  v
+            Spring AI
+                  |
+                  v
+           Model API
+                  |
+                  v
+       Optimized inference server
+                  |
+             +----+----+
+             |         |
+             v         v
+          INT4       GPU
+          Model    Execution
+             |         |
+             +----+----+
+                  |
+                  v
+             AI Response
+```
+
+Your Spring Boot application doesn't need to know how the weights were quantized or distilled. It communicates with the inference service through an API.
+
+You can use the same general integration approach whether the model is full precision, quantized, or distilled.
+
+# 9. When should you use each technique?
+
+| Situation                                                        | Recommended starting point                                    |
+| ---------------------------------------------------------------- | ------------------------------------------------------------- |
+| Model does not fit into GPU memory                               | Quantization                                                  |
+| You already have a trained model and want to reduce storage      | Post-training quantization                                    |
+| You need a smaller model for a specialized task                  | Knowledge distillation                                        |
+| You have redundant model connections and sparse hardware support | Pruning                                                       |
+| You want to deploy on consumer hardware                          | Quantization, possibly combined with distillation             |
+| You need to preserve accuracy as much as possible                | Evaluate several precision levels and distillation approaches |
+
+My recommendation for your learning sequence:
+
+Study these topics in this order:
+
+1. Numerical precision: FP32, FP16, BF16, INT8, INT4.
+2. Quantization: PTQ and QAT.
+3. Pruning: unstructured and structured.
+4. Knowledge distillation: teacher/student, logits, and training loss.
+5. Combining compression techniques.
+6. Running quantized models locally using Ollama or llama.cpp.
+7. Integrating the inference server with Spring AI.
+
+The practical distinction to retain is:
+
+- Quantization: Store the same model more compactly.
+- Pruning: Remove parts of the model.
+- Distillation: Build a smaller model that learns from a larger one.
+
+These are three different ways to make AI applications more resource-efficient without unnecessarily sacrificing the quality of their results.
+
+I recommend placing this topic under Generative AI → Large Language Models → LLM Optimization Techniques.
+
+It belongs after Transformer Architecture, model types, and model-size fundamentals, but before advanced inference optimization and deployment.
+
+## Recommended AI TOC
+
+```
+08-generative-ai/
+└── large-language-models/
+    ├── 01-llm-fundamentals/
+    │   ├── introduction-to-llms.mdx
+    │   ├── llm-architecture-types.mdx
+    │   ├── encoder-only-models.mdx
+    │   ├── decoder-only-models.mdx
+    │   ├── encoder-decoder-models.mdx
+    │   └── model-size-and-complexity.mdx
+    │
+    ├── 02-transformer-architecture/
+    │   ├── transformer-overview.mdx
+    │   ├── self-attention.mdx
+    │   ├── multi-head-attention.mdx
+    │   ├── feed-forward-networks.mdx
+    │   └── positional-encoding.mdx
+    │
+    ├── 03-llm-training/
+    │   └── ...
+    │
+    ├── 04-llm-inference-and-generation/
+    │   └── ...
+    │
+    ├── 05-modern-llm-architectures/
+    │   ├── mixture-of-experts.mdx
+    │   └── sparse-computation.mdx
+    │
+    ├── 06-llm-optimization-techniques/
+    │   ├── model-quantization.mdx
+    │   ├── model-pruning.mdx
+    │   ├── knowledge-distillation.mdx
+    │   ├── model-compression-overview.mdx
+    │   └── flash-attention.mdx
+    │
+    └── 07-llm-inference-optimization/
+        ├── kv-cache.mdx
+        ├── continuous-batching.mdx
+        ├── speculative-decoding.mdx
+        ├── tensor-parallelism.mdx
+        └── gpu-memory-optimization.mdx
+```
+
+## Where should your current material go?
+
+I would organize it into separate articles rather than keeping everything in one page.
+
+| Article                          | Content                                               |
+| -------------------------------- | ----------------------------------------------------- |
+| `model-quantization.mdx`         | FP32, FP16, BF16, INT8, INT4, PTQ, QAT                |
+| `model-pruning.mdx`              | Unstructured pruning, structured pruning, sparsity    |
+| `knowledge-distillation.mdx`     | Teacher/student models, logits, distillation training |
+| `model-compression-overview.mdx` | Comparison and combination of compression techniques  |
+
+## One important distinction
+
+Keep these topics separate:
+
+- LLM Optimization Techniques: Make model weights and computations more efficient through quantization, pruning, distillation, and FlashAttention.
+- LLM Inference Optimization: Improve the efficiency of serving requests through KV caching, batching, speculative decoding, and GPU memory management.
+- Model Deployment: Deploy and operate models using model servers, containers, Kubernetes, and cloud infrastructure.
+
+This separation will make your AI documentation easier to navigate and avoid mixing model optimization with infrastructure operations.
+
+My recommendation: Put your current article under `06-llm-optimization-techniques/` and name it `model-compression-overview.mdx` if you intend to cover all three techniques together. Otherwise, split them into the three dedicated articles above.&#x20;

@@ -5,7 +5,7 @@ title: Graphs
 
 A **graph** is a non-linear data structure used to represent **relationships between objects**. It consists of a set of vertices (nodes) and a set of edges connecting pairs of vertices.
 
-The objects are called **vertices (or nodes)**, and the relationships between them are called **edges**.
+The objects are called **vertices (or nodes)**, and the relationships between them are called **edges(or links)**.
 
 A simple graph might look like:
 
@@ -47,7 +47,22 @@ The graph doesn't necessarily describe a hierarchy. Instead, it describes **how 
 This is the most flexible data structure there is, and it can be
 used to represent almost any type of data. For example, graphs
 are ideal for representing a social network, where nodes are people
-and edges represent friendships.
+and edges represent friendships, telephone networks (nodes are telephones and stations,
+edges are communications), and much more..
+
+Given the structure defined by the edges in a graph, many problems can be stated in
+terms of paths from a source vertex to a destination vertex in the graph constructed
+using the existing edges in the graph. Sometimes an edge has an associated numeric
+value known as its weight; sometimes an edge is directed with a specific orientation
+(like a one-way street). In the Single-Source Shortest Path algorithm, one is given a
+specific vertex, `s`, and asked to compute the shortest path (by sum of edge weights)
+to all other vertices in the graph. The All-Pairs Shortest Path problem requires that
+the shortest path be computed for all pairs `(u, v)` of vertices in the graph.
+
+Some problems seek a deeper understanding of the underlying graph structure. For
+example, the minimum spanning tree (MST) of an undirected, weighted graph is a
+subset of that graph’s edges such that (a) the original set of vertices is still connected
+in the MST, and (b) the sum total of the weights of the edges in the MST is minimum. We show how to efficiently solve this problem using Prim’s Algorithm.
 
 Graphs are useful for modeling computer networks, social networks, road maps, dependencies between software components, and communication systems.
 
@@ -324,7 +339,7 @@ Important: Adjacency describes a direct connection, not whether two vertices can
 
 An edge is incident to a vertex if that vertex is one of the edge's endpoints.
 
-For the edge \\(e=(A,B)\\):
+For the edge $e=(A,B)$:
 
 - `e` is incident to `A`.
 - `e` is incident to `B`.
@@ -429,10 +444,10 @@ Consider:
        C -------- D
 ```
 
-- \\(\deg(A)=2\\)
-- \\(\deg(B)=1\\)
-- \\(\deg(C)=2\\)
-- \\(\deg(D)=1\\)
+- $\deg(A)=2$
+- $\deg(B)=1$
+- $\deg(C)=2$
+- $\deg(D)=1$
 
 Vertex `A` has degree 2 because it connects to `B` and `C`.
 
@@ -487,7 +502,9 @@ The edge weights could represent distances, travel times, prices, or connection 
 
 For the path `A → C → B`, the total weight is:
 
-\\[ 2+3=5 \\]
+$$
+2+3=5
+$$
 
 Weighted graphs are commonly used in shortest-path algorithms such as Dijkstra's algorithm.
 
@@ -616,8 +633,375 @@ $$
 E = \{(A,B),(A,C),(B,D),(C,D)\}
 $$
 
-## Graph Algorithms
 
+## Graph operations: the big picture
+A graph is more than a collection of vertices and edges. A useful graph implementation needs operations to create the graph, inspect its structure, modify it, traverse it, analyze its properties, and solve problems such as finding shortest paths or detecting cycles.
+
+A practical graph API can be organized into these categories.
+
+### Graph API
+
+Operations supported by the graph data structure
+
+1\. Create & Initialize
+
+    Construct, configure, clear, copy
+
+2\. Inspect
+
+    Vertices, edges, neighbors, weights
+
+3\. Update
+
+    Add, remove, change vertices and edges
+
+4\. Traverse
+
+    DFS, BFS, reachability
+
+5\. Analyze
+
+    Cycles, components, degree, connectivity
+
+6\. Solve Problems
+
+    Shortest paths, MST, topological order
+
+There is an important distinction here:
+
+- Graph operations are the capabilities provided by the graph data structure.
+- Graph algorithms are procedures that use those capabilities to answer questions or solve problems.
+- Algorithm strategies are the general approaches used to design those procedures, such as traversal, greedy selection, dynamic programming, or disjoint-set merging.
+
+For example, `addEdge(u, v, weight)` is a graph operation. Dijkstra's algorithm is a graph algorithm. Its strategy is to repeatedly select the unsettled vertex with the smallest known distance.
+
+### Create and initialize operations
+
+These operations establish the graph's initial state.
+
+| Operation              | Purpose                                       | Example API           |
+| ---------------------- | --------------------------------------------- | --------------------- |
+| Construct              | Create a graph with $V$ vertices          | `Graph(5, true)`      |
+| Choose direction       | Set directed or undirected behavior           | `isDirected()`        |
+| Initialize weights     | Define default or explicit edge weights       | `addEdge(u, v, w)`    |
+| Clear                  | Remove all vertices and edges                 | `clear()`             |
+| Copy                   | Create an independent graph copy              | Copy constructor      |
+| Assign                 | Replace one graph's contents with another     | `operator=`           |
+| Build from input       | Load edges from a file, stream, or edge list  | `readGraph(input)`    |
+| Convert representation | Convert adjacency list to matrix or edge list | `toAdjacencyMatrix()` |
+
+A graph with five vertices might use IDs `0` through `4`. The vertices can exist even if they have no edges.
+
+Design decision: Decide whether the number of vertices is fixed or whether vertices can be added dynamically. Fixed vertex IDs simplify many graph algorithms and are a good starting point for a learning implementation.
+
+### Inspect operations
+
+Inspection operations read the graph without changing it.
+
+#### Basic graph properties
+
+| Operation       | Meaning                                     |
+| --------------- | ------------------------------------------- |
+| `vertexCount()` | Number of vertices                          |
+| `edgeCount()`   | Number of logical edges                     |
+| `isDirected()`  | Whether edges have direction                |
+| `isWeighted()`  | Whether weights are part of the graph model |
+| `isEmpty()`     | Whether the graph has no vertices           |
+| `degree(u)`     | Degree in an undirected graph               |
+| `inDegree(u)`   | Number of incoming edges                    |
+| `outDegree(u)`  | Number of outgoing edges                    |
+| `hasVertex(u)`  | Whether vertex `u` exists                   |
+
+For a directed graph, incoming and outgoing degrees are different. For an undirected graph, the degree of a vertex is the number of incident edges, with a self-loop convention that should be defined explicitly.
+
+#### Edge inspection
+
+| Operation             | Purpose                               |
+| --------------------- | ------------------------------------- |
+| `hasEdge(u, v)`       | Determine whether an edge exists      |
+| `getWeight(u, v)`     | Retrieve an edge's weight             |
+| `getEdge(u, v)`       | Retrieve edge details                 |
+| `neighbors(u)`        | Enumerate adjacent vertices           |
+| `outgoingEdges(u)`    | Enumerate outgoing edges              |
+| `incomingEdges(u)`    | Enumerate incoming edges              |
+| `edges()`             | Enumerate all logical edges           |
+| `selfLoops()`         | Find edges from a vertex to itself    |
+| `parallelEdges(u, v)` | Find duplicate edges between vertices |
+
+For a weighted directed graph, `hasEdge(u, v)` and `hasEdge(v, u)` are independent queries.
+
+For an undirected graph, they should return the same answer.
+
+#### Iterators and ranges
+
+In idiomatic C++, it is useful to expose a range of neighbors or edges rather than forcing every algorithm to access the internal `std::list` directly.
+
+For example:
+
+```
+for (const auto& edge : graph.outgoingEdges(u)) {
+    int v = edge.to;
+    int weight = edge.weight;
+
+    // Process edge u -> v.
+}
+```
+
+This hides implementation details and lets you change the internal representation later without rewriting every algorithm.
+
+### Update operations
+
+Update operations change the graph's structure or edge information.
+
+#### Edge operations
+
+| Operation               | Purpose                                    | Important consideration                                  |
+| ----------------------- | ------------------------------------------ | -------------------------------------------------------- |
+| `addEdge(u, v, w)`      | Add an edge with weight `w`                | Add reverse entry for undirected graphs                  |
+| `removeEdge(u, v)`      | Remove an edge                             | Define behavior for parallel edges                       |
+| `updateWeight(u, v, w)` | Change an edge's weight                    | Decide which edge if duplicates exist                    |
+| `clearEdges()`          | Remove all edges while preserving vertices | Reset edge count                                         |
+| `reverse()`             | Reverse every edge in a directed graph     | Usually produces a new graph or mutates the existing one |
+| `contractEdge(u, v)`    | Merge connected vertices into one          | Update affected edges and handle self-loops              |
+
+For an undirected graph, removing `(u, v)` must also remove the corresponding `(v, u)` adjacency entry. These are two stored entries representing one logical edge.
+
+#### Vertex operations
+
+| Operation                | Purpose                                                   |
+| ------------------------ | --------------------------------------------------------- |
+| `addVertex()`            | Add a new vertex                                          |
+| `removeVertex(u)`        | Remove a vertex and its incident edges                    |
+| `clearVertex(u)`         | Remove all edges incident to a vertex without deleting it |
+| `renameVertex(u, label)` | Change a vertex's label, if labels are supported          |
+| `relabelVertices()`      | Remap vertex identifiers                                  |
+
+Removing a vertex is more expensive than removing an edge in a typical adjacency-list implementation. The implementation must remove its outgoing edges and also find and remove incoming edges.
+
+#### Graph transformations
+
+These are useful extensions to the basic CRUD operations:
+
+- `transpose()` — create a directed graph with every edge reversed.
+- `toUndirected()` — create an undirected representation of a directed graph, following a defined duplicate-edge policy.
+- `inducedSubgraph(S)` — create a graph containing a selected vertex set $S$ and all edges between those vertices.
+- `subgraph(vertices, edges)` — create a graph from selected vertices and edges.
+- `complement()` — create a graph containing the edges absent from the original graph, for a specified simple-graph model.
+- `clone()` — create an independent copy.
+
+These transformations are not necessary for every basic Graph class, but they are valuable in graph algorithms and research.
+
+### Traversal operations
+
+Traversal is where graph operations start becoming graph algorithms.
+
+A traversal visits vertices systematically while keeping track of which vertices have already been discovered.
+
+Consider this directed graph:
+
+```
+       A
+      / \
+     B   C
+     |   |
+     D---E
+```
+
+For this illustration, assume the edges are:
+
+```
+A -> B
+A -> C
+B -> D
+C -> E
+D -> E
+```
+
+The exact visitation order depends on the neighbor ordering.
+
+#### Depth-First Search (DFS)
+
+DFS explores one path as deeply as possible before backtracking.
+
+Strategy: use a stack, either explicitly or through recursion.
+
+```
+DFS(A)
+  A
+  |
+  B
+  |
+  D
+  |
+  E
+  |
+  backtrack
+  |
+  C
+```
+
+The diagram illustrates one possible exploration order; the actual order depends on the adjacency-list ordering.
+
+Common operations built on DFS include:
+
+- `dfs(start)` — traverse reachable vertices.
+- `reachable(u, v)` — determine whether `v` can be reached from `u`.
+- `connectedComponents()` — identify connected components in an undirected graph.
+- `hasCycle()` — detect cycles.
+- `topologicalSort()` — produce a valid ordering for a directed acyclic graph (DAG), using DFS finishing times.
+- `stronglyConnectedComponents()` — find maximal groups of mutually reachable vertices in a directed graph, using Tarjan's or Kosaraju's algorithm.
+
+#### Breadth-First Search (BFS)
+
+BFS explores all vertices at distance one from the starting vertex, then distance two, and so on.
+
+Strategy: use a FIFO queue.
+
+```
+Start: A
+
+Level 0:       A
+              / \
+Level 1:     B   C
+             |
+Level 2:     D
+             |
+Level 3:     E
+```
+
+Common BFS-based operations include:
+
+- `bfs(start)` — traverse reachable vertices.
+- `shortestPathUnweighted(source, target)` — find a shortest path by number of edges.
+- `distancesFrom(source)` — calculate minimum edge counts from a source.
+- `isBipartite()` — test whether a graph can be divided into two vertex sets with no internal edges.
+- `connectedComponents()` — find components in an undirected graph.
+- Multi-source BFS — calculate distances from the nearest of several starting vertices.
+
+Important: BFS finds shortest paths in an unweighted graph, or a graph where every edge has the same positive cost. It does not generally find minimum-weight paths in arbitrary weighted graphs.
+
+#### Traversal complexity
+
+With an adjacency list and a visited array:
+
+$$
+T(V,E)=O(V+E)
+$$
+
+This is the worst-case time for traversing an entire graph. A traversal starting from one vertex visits only the vertices reachable from that start, and examines their adjacency-list entries.
+
+For disconnected graphs, a complete traversal must start again from each still-unvisited vertex.
+
+### Graph analysis operations
+
+These operations answer questions about the graph's structure rather than simply visiting its vertices.
+
+| Problem                                 | Typical algorithm                | Strategy                     |
+| --------------------------------------- | -------------------------------- | ---------------------------- |
+| Find connected components               | DFS or BFS                       | Traversal                    |
+| Detect a cycle in an undirected graph   | DFS or DSU                       | Traversal or set merging     |
+| Detect a cycle in a directed graph      | DFS coloring or Kahn's algorithm | State tracking or indegrees  |
+| Test graph connectivity                 | DFS or BFS                       | Reachability                 |
+| Find strongly connected components      | Tarjan or Kosaraju               | DFS and graph ordering       |
+| Test bipartiteness                      | BFS or DFS two-coloring          | Graph coloring               |
+| Find articulation points                | DFS low-link values              | Structural analysis          |
+| Find bridges                            | DFS low-link values              | Structural analysis          |
+| Compute vertex degrees                  | Scan adjacency lists             | Counting                     |
+| Check whether a directed graph is a DAG | DFS or Kahn's algorithm          | Cycle detection or indegrees |
+| Find a topological order                | Kahn's algorithm or DFS          | Dependency ordering          |
+
+#### Connected components versus strongly connected components
+
+These terms are easy to confuse.
+
+- In an undirected graph, a connected component is a maximal set of vertices where every pair is connected by a path.
+- In a directed graph, a strongly connected component is a maximal set where every vertex can reach every other vertex by following edge directions.
+- A weakly connected component of a directed graph is obtained by ignoring edge directions when determining connectivity.
+
+A simple DFS or BFS can find connected components in an undirected graph. Strongly connected components require additional logic, such as Tarjan's or Kosaraju's algorithm.
+
+### Pathfinding and shortest-path operations
+
+Pathfinding is one of the most important families of graph algorithms.
+
+| Algorithm           | Strategy                                       | Suitable use                                                       |
+| ------------------- | ---------------------------------------------- | ------------------------------------------------------------------ |
+| BFS                 | Explore by increasing edge count               | Unweighted shortest paths                                          |
+| Dijkstra            | Greedily settle the closest unsettled vertex   | Nonnegative edge weights                                           |
+| Bellman–Ford        | Repeatedly relax all edges                     | Negative edge weights; detects reachable negative cycles           |
+| Floyd–Warshall      | Dynamic programming over intermediate vertices | All-pairs shortest paths                                           |
+| A\*                 | Best-first search using a heuristic            | Goal-directed pathfinding                                          |
+| Bidirectional BFS   | Search from both endpoints                     | Unweighted shortest-path problems when reverse search is practical |
+| Johnson's algorithm | Reweight edges and run repeated Dijkstra       | All-pairs shortest paths on sparse graphs, with no negative cycles |
+
+### Spanning trees and minimum spanning trees
+
+A spanning tree connects all vertices of a connected, undirected graph without cycles. A minimum spanning tree (MST) is a spanning tree with the smallest possible total edge weight.
+
+Two principal algorithms are:
+
+| Algorithm | Strategy                                                                               | Typical complexity                                                  |
+| --------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Kruskal   | Sort edges by weight and accept edges that do not form a cycle                         | $O(E\log E)$                                                    |
+| Prim      | Grow a tree by repeatedly choosing a minimum-weight edge connecting it to a new vertex | $O(E\log V)$ with a suitable priority queue and adjacency lists |
+
+Kruskal's algorithm commonly uses a Disjoint Set Union (DSU) data structure to track which vertices are already connected.
+
+For disconnected, undirected graphs, these algorithms can be adapted to produce a minimum spanning forest.
+
+Remember that an MST is not the same as a shortest-path tree. An MST minimizes the total weight of the selected edges; a shortest-path tree minimizes distances from a particular source.
+
+### Topological sorting and dependency analysis
+
+A topological ordering arranges the vertices of a directed acyclic graph so that every edge $u \to v$ places $u$ before $v$.
+
+For example:
+
+```
+Requirements -> Design -> Implementation -> Testing
+```
+
+Two common strategies are:
+
+1. Kahn's algorithm: repeatedly remove vertices with indegree zero, decrementing the indegrees of their neighbors.
+2. DFS-based ordering: order vertices by decreasing DFS finishing time.
+
+Both run in $O(V+E)$ time using an adjacency list.
+
+Applications include:
+
+- Build systems and compilation dependencies.
+- Task scheduling.
+- Package installation order.
+- Course prerequisite planning.
+- Dependency resolution in software systems.
+
+If Kahn's algorithm cannot process every vertex, the directed graph contains a cycle and no topological ordering exists.
+
+### Other important graph algorithm families
+
+Beyond traversal, pathfinding, and spanning trees, a comprehensive graph curriculum should include the following.
+
+| Family                       | Representative algorithms                           | Strategy                               |
+| ---------------------------- | --------------------------------------------------- | -------------------------------------- |
+| Graph search                 | DFS, BFS, iterative deepening                       | Systematic exploration                 |
+| Shortest paths               | BFS, Dijkstra, Bellman–Ford, A\*                    | Relaxation, greedy search, heuristics  |
+| All-pairs paths              | Floyd–Warshall, Johnson                             | Dynamic programming, reweighting       |
+| Spanning trees               | Prim, Kruskal                                       | Greedy edge selection                  |
+| Connectivity                 | DFS, Tarjan, Kosaraju                               | Traversal and low-link analysis        |
+| Directed acyclic graphs      | Kahn, DFS topological sort                          | Dependency ordering                    |
+| Cycle detection              | DFS colors, DSU                                     | Traversal state or component tracking  |
+| Bipartite matching           | Augmenting paths, Hopcroft–Karp                     | Matching and residual paths            |
+| Maximum flow                 | Ford–Fulkerson, Edmonds–Karp, Dinic                 | Residual networks and augmenting paths |
+| Eulerian paths and circuits  | Hierholzer's algorithm                              | Edge traversal                         |
+| Hamiltonian paths and cycles | Backtracking, dynamic programming                   | Combinatorial search                   |
+| Graph coloring               | Greedy coloring, backtracking                       | Constraint satisfaction                |
+| Centrality and ranking       | PageRank, degree centrality, betweenness centrality | Iteration or path analysis             |
+| Approximation and heuristics | Greedy approximations, local search                 | Approximation and optimization         |
+
+Not all these algorithms belong as member functions of `Graph`. For example, maximum flow and bipartite matching are often better implemented as separate algorithm classes that consume a graph.
+
+### Graph algorithms
 Graphs are important largely because of the algorithms that operate on them.
 
 A useful learning hierarchy is:
@@ -653,7 +1037,61 @@ Graph Algorithms
     └── Critical Path
 ```
 
----
+## Algorithm design strategies
+
+The same problem can sometimes be solved by different approaches. Understanding these strategies helps you choose an algorithm rather than memorize names.
+
+| Strategy                      | Main idea                                                   | Graph examples                                                |
+| ----------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------- |
+| Traversal                     | Systematically visit vertices and edges                     | DFS, BFS                                                      |
+| Greedy                        | Make a locally best choice at each step                     | Dijkstra, Prim, Kruskal                                       |
+| Dynamic programming           | Reuse solutions to smaller subproblems                      | Floyd–Warshall, Held–Karp for TSP                             |
+| Divide and conquer            | Break a problem into smaller problems and combine results   | Specialized graph algorithms; less common for basic traversal |
+| Backtracking                  | Explore candidates and undo choices when constraints fail   | Hamiltonian paths, graph coloring                             |
+| Branch and bound              | Prune search branches that cannot improve the best solution | Exact traveling salesperson solutions                         |
+| Disjoint-set merging          | Maintain and merge connected groups                         | Kruskal, undirected cycle detection                           |
+| Relaxation                    | Improve estimates using edges                               | Dijkstra, Bellman–Ford                                        |
+| Topological processing        | Process vertices in dependency order                        | DAG shortest paths, dependency analysis                       |
+| Residual-network augmentation | Repeatedly improve a feasible flow                          | Ford–Fulkerson, Dinic                                         |
+| Randomized algorithms         | Use random choices to guide or simplify computation         | Randomized contraction and specialized graph algorithms       |
+| Approximation                 | Find a near-optimal answer with useful guarantees           | Some vertex-cover and network-design algorithms               |
+
+These categories overlap. Dijkstra, for example, is both a greedy algorithm and a shortest-path algorithm. Floyd–Warshall is both an all-pairs shortest-path algorithm and a dynamic-programming algorithm.
+
+### Choosing the right strategy
+
+Here is a compact problem-to-algorithm reference.
+
+| Question                                                  | Recommended starting point                                      |
+| --------------------------------------------------------- | --------------------------------------------------------------- |
+| Can I reach vertex `v` from vertex `u`?                   | DFS or BFS                                                      |
+| What is the minimum number of edges between two vertices? | BFS                                                             |
+| What is the minimum path cost with nonnegative weights?   | Dijkstra                                                        |
+| Are negative edge weights allowed?                        | Bellman–Ford                                                    |
+| What is the shortest distance between every pair?         | Floyd–Warshall or Johnson                                       |
+| Does the graph contain a cycle?                           | DFS; DSU for an undirected graph                                |
+| Is this directed graph a DAG?                             | DFS cycle detection or Kahn                                     |
+| In what order should tasks run?                           | Topological sorting                                             |
+| How many connected components exist?                      | DFS, BFS, or DSU                                                |
+| Which edges connect all vertices at minimum total cost?   | Prim or Kruskal                                                 |
+| Can vertices be divided into two nonadjacent groups?      | Bipartite testing with BFS or DFS                               |
+| What is the maximum possible flow through a network?      | Dinic or another maximum-flow algorithm                         |
+| What is the minimum number of colors needed?              | Graph coloring algorithms; exact optimization is generally hard |
+
+### Suggested learning roadmap
+
+Study the operations and algorithms in this order:
+
+1. Graph fundamentals and representation: vertices, directed and undirected edges, weights, adjacency lists, adjacency matrices, and edge lists.
+2. Core API: construction, edge insertion and removal, neighbor iteration, degree calculations, and edge lookup.
+3. Traversal: DFS, BFS, visited arrays, parent arrays, disconnected graphs, and reachability.
+4. Structural analysis: connected components, cycle detection, bipartite testing, and topological sorting.
+5. Shortest paths: BFS shortest paths, Dijkstra, Bellman–Ford, and Floyd–Warshall.
+6. Spanning trees: DSU, Kruskal, and Prim.
+7. Advanced graph algorithms: strongly connected components, bridges, articulation points, matching, and maximum flow.
+8. Engineering: complexity analysis, unit testing, edge cases, API contracts, and comparing graph representations.
+
+The best first milestone is to implement and test the core adjacency-list API, then implement DFS and BFS as separate algorithms. Once those are correct, you will have the foundation needed for most of the graph topics that follow.
 
 ## Connectivity
 ### Connected components

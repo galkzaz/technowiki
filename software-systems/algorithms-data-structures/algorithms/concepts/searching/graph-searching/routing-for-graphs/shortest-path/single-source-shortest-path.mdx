@@ -1,0 +1,873 @@
+# Single-Source Shortest Path (SSSP)
+
+## 1. Overview
+
+Single-Source Shortest Path (SSSP) is a graph problem that involves finding the shortest paths from one specified source vertex to every other reachable vertex in a graph.
+
+Instead of finding a path between just two vertices, SSSP calculates the minimum-cost paths from one starting point to all other vertices.
+
+For example, imagine a road network:
+
+- Vertices represent cities.
+- Edges represent roads connecting cities.
+- Edge weights represent distances between cities.
+- One city is selected as the starting point.
+
+The objective is to determine the shortest route from that starting city to every other reachable city.
+
+Consider this weighted directed graph:
+
+```
+                 4
+           A ----------> B
+           |              |
+         10|              |3
+           |              |
+           v              v
+           C ----------> D
+                 2
+```
+
+Suppose A is the source vertex.
+
+We want to calculate:
+
+```
+Shortest paths from A:
+
+A → A
+A → B
+A → C
+A → D
+```
+
+The results are:
+
+| Destination | Shortest Path | Total Cost |
+| ----------- | ------------- | ---------- |
+| A           | A             | 0          |
+| B           | A → B         | 4          |
+| C           | A → C         | 10         |
+| D           | A → B → D     | 7          |
+
+Notice that there are two possible paths from A to D:
+
+```
+A → B → D = 4 + 3 = 7
+
+A → C → D = 10 + 2 = 12
+```
+
+The shortest path is A → B → D, with a total cost of 7.
+
+The important idea is that one execution of an SSSP algorithm calculates shortest-path information for all reachable vertices from the same source.
+
+## 2. Problem Definition
+
+A graph is represented as:
+
+$$
+G=(V,E)
+$$
+
+Where:
+
+- $V$ is the set of vertices.
+- $E$ is the set of edges.
+- $w(u,v)$ represents the weight of an edge from $u$ to $v$.
+
+Given a source vertex $s$, the objective is to calculate the shortest distance from $s$ to every vertex $v$.
+
+The shortest distance is defined as:
+
+$$
+\boxed{ \delta(s,v)=\min\_{P\in P(s,v)} Cost(P) }
+$$
+
+Where:
+
+- $s$ is the source.
+- $v$ is a destination vertex.
+- $P(s,v)$ is the set of paths from $s$ to $v$.
+- $Cost(P)$ is the total weight of a path.
+
+If no path exists from $s$ to $v$:
+
+$$
+\delta(s,v)=\infty
+$$
+
+For the source itself:
+
+$$
+\delta(s,s)=0
+$$
+
+This is because the shortest path from a vertex to itself is the empty path, which has zero cost, assuming no negative cycle makes the shortest-path value undefined.
+
+### SSSP input and output
+
+| Component            | Description                                              |
+| -------------------- | -------------------------------------------------------- |
+| Input                | A graph $G=(V,E)$                                    |
+| Source               | A specified starting vertex $s$                      |
+| Output               | Shortest distance from $s$ to every reachable vertex |
+| Optional output      | Actual shortest paths                                    |
+| Unreachable vertices | Distance remains infinity                                |
+
+## 3. Understanding the SSSP Result
+
+SSSP generally produces two important results:
+
+1. A shortest-distance value for each vertex.
+2. A predecessor (parent) for each vertex, allowing us to reconstruct the shortest paths.
+
+Consider:
+
+```
+              4
+         A --------> B
+         |            |
+        10            | 3
+         |            |
+         v            v
+         C ---------> D
+              2
+```
+
+Starting from A, the resulting information might be:
+
+Distance array
+
+```
+dist[A] = 0
+dist[B] = 4
+dist[C] = 10
+dist[D] = 7
+```
+
+Predecessor array
+
+```
+pred[A] = -1
+pred[B] = A
+pred[C] = A
+pred[D] = B
+```
+
+The distance array tells us the minimum cost.
+
+The predecessor array tells us how to reconstruct the corresponding paths.
+
+### 3.1 Distance Array
+
+The distance array maintains the currently known shortest distance from the source to every vertex.
+
+Initially:
+
+$$
+dist[v]= \begin{cases} 0 & \text{if }v=s\\\ \infty & \text{otherwise} \end{cases}
+$$
+
+For source A:
+
+```
+dist[A] = 0
+dist[B] = ∞
+dist[C] = ∞
+dist[D] = ∞
+```
+
+As the algorithm progresses, these values are improved through edge relaxation.
+
+### 3.2 Predecessor Array
+
+The predecessor array stores the previous vertex along the currently known shortest path.
+
+For example:
+
+```
+pred[A] = -1
+pred[B] = A
+pred[C] = A
+pred[D] = B
+```
+
+To reconstruct the shortest path to D:
+
+```
+Start at D:
+
+D ← B ← A
+
+Reverse the sequence:
+
+A → B → D
+```
+
+This gives us the actual route, not just its cost.
+
+## 4. How SSSP Works: Edge Relaxation
+
+The central operation behind most SSSP algorithms is called edge relaxation.
+
+Relaxation means attempting to improve the currently known shortest distance to a vertex by discovering a cheaper path through another vertex.
+
+### 4.1 Relaxation Formula
+
+Suppose we have an edge:
+
+```
+u ----w----> v
+```
+
+Where:
+
+- `u` is the current vertex.
+- `v` is its neighbor.
+- `w` is the edge weight.
+- `dist[u]` is the currently known distance to u.
+- `dist[v]` is the currently known distance to v.
+
+The relaxation formula is:
+
+$$
+\boxed{ dist[v]=\min(dist[v],dist[u]+w(u,v)) }
+$$
+
+In other words:
+
+1. Calculate the cost of reaching v through u.
+2. Compare it with the existing distance to v.
+3. If the new route is cheaper, update `dist[v]`.
+4. Set `pred[v] = u`.
+
+### 4.2 Example
+
+Consider:
+
+```
+        4          3
+   A ------> B ------> C
+    \
+     \
+      \ 10
+       \
+        -------> C
+```
+
+We start from A.
+
+Initial state
+
+| Vertex | Distance | Predecessor |
+| ------ | -------- | ----------- |
+| A      | 0        | -1          |
+| B      | ∞        | -1          |
+| C      | ∞        | -1          |
+
+Step 1: Process A → B
+
+$$
+dist[B]=\min(\infty,0+4)=4
+$$
+
+Updated state:
+
+| Vertex | Distance | Predecessor |
+| ------ | -------- | ----------- |
+| A      | 0        | -1          |
+| B      | 4        | A           |
+| C      | ∞        | -1          |
+
+Step 2: Process A → C
+
+$$
+dist[C]=\min(\infty,0+10)=10
+$$
+
+Updated state:
+
+| Vertex | Distance | Predecessor |
+| ------ | -------- | ----------- |
+| A      | 0        | -1          |
+| B      | 4        | A           |
+| C      | 10       | A           |
+
+Step 3: Process B → C
+
+We have discovered another route to C through B.
+
+$$
+dist[C]=\min(10,4+3)=7
+$$
+
+Since 7 is smaller than 10, we update the distance and predecessor.
+
+Final state:
+
+| Vertex | Distance | Predecessor |
+| ------ | -------- | ----------- |
+| A      | 0        | -1          |
+| B      | 4        | A           |
+| C      | 7        | B           |
+
+The final shortest path is:
+
+```
+A → B → C
+
+Total cost = 7
+```
+
+This illustrates an important principle:
+
+The first discovered path to a vertex is not necessarily its shortest path. Relaxation allows an algorithm to improve previously discovered distances.
+
+## 5. Main SSSP Algorithms
+
+SSSP is a problem, not a specific algorithm.
+
+Several algorithms solve it, each using a different strategy depending on the graph's properties.
+
+### 5.1 Breadth-First Search (BFS)
+
+Unweighted graphs
+
+BFS solves SSSP when all edges have equal weights.
+
+It explores vertices level by level using a queue.
+
+Example:
+
+```
+          A
+         / \
+        B   C
+       /     \
+      D       E
+     /
+    F
+```
+
+Starting from A:
+
+```
+Level 0: A
+Level 1: B, C
+Level 2: D, E
+Level 3: F
+```
+
+BFS guarantees that when a vertex is first discovered, its distance from the source is the minimum number of edges.
+
+It maintains:
+
+- A queue of vertices to process.
+- A visited array or color array.
+- A distance array.
+- A predecessor array.
+
+Time complexity:
+
+$$
+O(V+E)
+$$
+
+When to use:
+
+- Unweighted graphs.
+- Minimum number of connections.
+- Minimum number of moves.
+- Social network relationship distances.
+
+### 5.2 Dijkstra's Algorithm
+
+Non-negative edge weights
+
+Dijkstra solves SSSP for weighted graphs where all edge weights are non-negative.
+
+It uses a greedy strategy.
+
+The main idea is to repeatedly select the unprocessed vertex with the smallest tentative distance.
+
+General procedure:
+
+1. Initialize the source distance to zero.
+2. Initialize all other distances to infinity.
+3. Insert the source into a priority queue.
+4. Extract the vertex with the smallest tentative distance.
+5. Relax its outgoing edges.
+6. Insert or update improved distances in the priority queue.
+7. Repeat until no more vertices need processing.
+
+The priority queue is usually implemented using a min-heap.
+
+Typical complexity with an adjacency list and binary min-heap:
+
+$$
+O((V+E)\log V)
+$$
+
+When to use:
+
+- Road networks with non-negative distances.
+- Network routing.
+- Weighted graphs.
+- Navigation systems.
+
+### 5.3 Bellman-Ford Algorithm
+
+Negative edge weights supported
+
+Bellman-Ford solves SSSP even when the graph contains negative-weight edges.
+
+Unlike Dijkstra, it does not rely on greedily finalizing the nearest vertex.
+
+Instead, it repeatedly relaxes all edges.
+
+For a graph with $V$ vertices, it performs up to:
+
+$$
+V-1
+$$
+
+complete relaxation passes.
+
+Why $V-1$?
+
+A shortest path without a cycle can contain at most $V-1$ edges. If no reachable negative-weight cycle exists, $V-1$ passes are sufficient to propagate shortest distances throughout the graph.
+
+It also performs an additional pass to detect reachable negative-weight cycles.
+
+Time complexity:
+
+$$
+O(VE)
+$$
+
+When to use:
+
+- Graphs with negative edge weights.
+- Financial or cost networks with negative adjustments.
+- Situations requiring negative-cycle detection.
+
+### 5.4 DAG Shortest Path
+
+Directed acyclic graphs
+
+A Directed Acyclic Graph (DAG) is a directed graph that contains no directed cycles.
+
+SSSP can be solved efficiently in a DAG using topological sorting and relaxation.
+
+Procedure:
+
+1. Perform topological sorting.
+2. Initialize distances.
+3. Process vertices in topological order.
+4. Relax their outgoing edges.
+
+Time complexity:
+
+$$
+O(V+E)
+$$
+
+An important advantage is that DAG shortest path algorithms support negative edge weights without requiring Bellman-Ford.
+
+### 5.5 Algorithm Comparison
+
+| Algorithm         | Graph Requirements       | Strategy                | Time Complexity        |
+| ----------------- | ------------------------ | ----------------------- | ---------------------- |
+| BFS               | Equal edge weights       | Queue / level traversal | $O(V+E)$           |
+| Dijkstra          | Non-negative weights     | Greedy + min-heap       | $O((V+E)\log V)$\* |
+| Bellman-Ford      | Negative weights allowed | Repeated relaxation     | $O(VE)$            |
+| DAG Shortest Path | Directed acyclic graph   | Topological order       | $O(V+E)$           |
+
+\*Assumes an adjacency list and binary min-heap with lazy priority-queue updates.
+
+## 6. SSSP Algorithm Selection
+
+How do we choose the appropriate algorithm?
+
+The most important factors are:
+
+- Are the edges weighted?
+- Are all edge weights equal?
+- Can edge weights be negative?
+- Is the graph a DAG?
+
+A practical decision process:
+
+```
+             Single-Source Shortest Path
+                         |
+                   Is the graph
+                   unweighted?
+                    /       \
+                  Yes        No
+                   |          |
+                  BFS      Are there
+                           negative edges?
+                           /          \
+                         Yes           No
+                          |             |
+                    Is it a DAG?     Dijkstra
+                     /      \
+                   Yes       No
+                    |         |
+                DAG SSSP   Bellman-Ford
+```
+
+An important clarification: a DAG with non-negative weights can also use Dijkstra, but the DAG-specific algorithm is linear in the graph size and can be more efficient.
+
+## 7. Shortest Path Tree (SPT)
+
+One important result of SSSP is a structure called the Shortest Path Tree.
+
+A Shortest Path Tree represents the shortest paths from the source to all reachable vertices.
+
+It is constructed using the predecessor information produced by the algorithm.
+
+Consider:
+
+```
+Original graph:
+
+          4
+     A -------- B
+     |          |
+    10          | 3
+     |          |
+     C -------- D
+          2
+```
+
+Starting from A, the shortest distances are:
+
+```
+A = 0
+B = 4
+C = 10
+D = 7
+```
+
+The predecessor relationships are:
+
+```
+pred[A] = -1
+pred[B] = A
+pred[C] = A
+pred[D] = B
+```
+
+Therefore, the shortest path tree is:
+
+```
+       A
+      / \
+     B   C
+     |
+     D
+```
+
+Notice that the original edge C → D is not included in the shortest path tree because reaching D through C would cost 12, whereas reaching it through B costs 7.
+
+### 7.1 Properties of a Shortest Path Tree
+
+For a graph with $V$ vertices and a source that can reach all vertices:
+
+- The tree contains all $V$ vertices.
+- It contains exactly $V-1$ tree edges.
+- Every vertex except the source has one predecessor.
+- The path from the source to each vertex is a shortest path.
+
+For a disconnected or partially reachable graph, the predecessor relationships form a shortest path forest over the reachable vertices, with the source as the root of its component.
+
+Important distinction:
+
+A Shortest Path Tree is not the same as a Minimum Spanning Tree (MST).
+
+| Shortest Path Tree                       | Minimum Spanning Tree                                 |
+| ---------------------------------------- | ----------------------------------------------------- |
+| Minimizes source-to-vertex path costs    | Minimizes total weight of selected tree edges         |
+| Depends on a specified source            | Does not require a source                             |
+| Preserves shortest paths from the source | Preserves connectivity with minimum total edge weight |
+| Solved by Dijkstra, Bellman-Ford, etc.   | Solved by Prim or Kruskal                             |
+
+## 8. Complexity Analysis
+
+The performance of SSSP depends on the selected algorithm and graph representation.
+
+Let:
+
+- $V$: Number of vertices.
+- $E$: Number of edges.
+
+| Algorithm                           | Time Complexity      | Space Complexity |
+| ----------------------------------- | -------------------- | ---------------- |
+| BFS                                 | $O(V+E)$         | $O(V+E)$     |
+| Dijkstra (binary min-heap)          | $O((V+E)\log V)$ | $O(V+E)$     |
+| Dijkstra (array / adjacency matrix) | $O(V^2)$         | $O(V^2)$     |
+| Bellman-Ford                        | $O(VE)$          | $O(V+E)$     |
+| DAG Shortest Path                   | $O(V+E)$         | $O(V+E)$     |
+
+These complexities generally include graph storage and algorithm auxiliary structures.
+
+### Why does Bellman-Ford take $O(VE)$?
+
+Bellman-Ford performs up to $V-1$ passes over all edges.
+
+Each pass examines $E$ edges.
+
+Therefore:
+
+$$
+O((V-1)E)=O(VE)
+$$
+
+### Why is Dijkstra efficient with a priority queue?
+
+Dijkstra needs to repeatedly select the vertex with the smallest tentative distance.
+
+A binary min-heap allows efficient minimum extraction and priority updates.
+
+With an adjacency list and lazy priority-queue updates:
+
+$$
+O((V+E)\log V)
+$$
+
+This makes Dijkstra particularly useful for large sparse graphs.
+
+## 9. Correctness and Important Properties
+
+Understanding why an SSSP algorithm produces correct results is just as important as understanding its implementation.
+
+### 9.1 Relaxation and Distance Estimates
+
+At any point during execution, `dist[v]` represents a known upper bound on the actual shortest distance from the source to v, assuming no undefined negative-cycle distances.
+
+In other words:
+
+$$
+dist[v]\geq\delta(s,v)
+$$
+
+The algorithm attempts to reduce these estimates until they become optimal.
+
+For algorithms such as Bellman-Ford, repeated relaxation eventually computes the shortest distances if no reachable negative-weight cycle affects them.
+
+### 9.2 Optimal Substructure
+
+A shortest path consists of shortest subpaths.
+
+For example:
+
+```
+A → B → C → D
+```
+
+If this is a shortest path from A to D, then:
+
+```
+B → C → D
+```
+
+must also be a shortest path from B to D.
+
+This property is fundamental to shortest path algorithms.
+
+### 9.3 Negative-Weight Cycles
+
+A reachable negative-weight cycle creates a special situation.
+
+Suppose:
+
+```
+A --2--> B
+B --(-5)--> C
+C --1--> B
+```
+
+The cycle B → C → B has total weight:
+
+$$
+-5+1=-4
+$$
+
+A path from A to B can repeatedly traverse this cycle, decreasing its total cost indefinitely.
+
+Therefore, no finite shortest distance exists for B or C, and for any other vertex reachable from that cycle.
+
+Bellman-Ford can detect such cycles.
+
+### 9.4 Disconnected Graphs
+
+An SSSP algorithm does not require every vertex to be reachable from the source.
+
+Consider:
+
+```
+A ---- B ---- C
+
+
+D ---- E
+```
+
+Starting from A:
+
+| Vertex | Distance |
+| ------ | -------- |
+| A      | 0        |
+| B      | 1        |
+| C      | 2        |
+| D      | ∞        |
+| E      | ∞        |
+
+The algorithm should process the reachable component and leave the other vertices at infinity.
+
+## 10. Real-World Applications
+
+SSSP is used whenever we need to calculate the best routes from one starting point to multiple destinations.
+
+| Application         | Graph Model                      | Objective                                         |
+| ------------------- | -------------------------------- | ------------------------------------------------- |
+| GPS Navigation      | Cities and roads                 | Calculate routes from a starting location         |
+| Network Routing     | Routers and links                | Calculate minimum-cost routes from one router     |
+| Social Networks     | Users and relationships          | Calculate connection distances from one user      |
+| Airline Networks    | Airports and flights             | Calculate routes from one airport                 |
+| Robotics            | Positions and possible movements | Find efficient routes from a starting position    |
+| Game Development    | Map locations and transitions    | Calculate movement paths from a starting position |
+| Distributed Systems | Nodes and communication links    | Calculate minimum-cost communication routes       |
+
+### Example: Network Routing
+
+Imagine a computer network:
+
+```
+          4
+     A -------- B
+     |          |
+     2          3
+     |          |
+     C -------- D
+          1
+```
+
+Each vertex represents a router, and each edge represents a network connection.
+
+The edge weight might represent:
+
+- Network latency.
+- Communication cost.
+- Administrative routing metric.
+
+Suppose router A is the source.
+
+An SSSP algorithm can calculate the minimum-cost route from A to every other router.
+
+This is closely related to routing protocols such as OSPF, which uses Dijkstra's shortest-path algorithm to calculate routes within an OSPF area.
+
+## 11. Common Mistakes and Pitfalls
+
+| Mistake                                    | Explanation                                                               |
+| ------------------------------------------ | ------------------------------------------------------------------------- |
+| Confusing SSSP with Single-Pair            | SSSP calculates paths from one source to all reachable vertices.          |
+| Using BFS on arbitrary weighted graphs     | BFS minimizes edge count, not arbitrary total edge weight.                |
+| Using Dijkstra with negative edges         | Its greedy strategy is not guaranteed to produce correct results.         |
+| Forgetting predecessor updates             | Distances may be correct, but path reconstruction will be incorrect.      |
+| Assuming every vertex is reachable         | Unreachable vertices must retain infinite distance.                       |
+| Confusing SPT with MST                     | They solve different optimization problems.                               |
+| Ignoring negative cycles                   | Finite shortest distances may not exist for affected vertices.            |
+| Forgetting integer overflow                | Distance calculations can exceed the capacity of the chosen integer type. |
+| Processing outdated priority queue entries | Dijkstra implementations using lazy updates must skip stale entries.      |
+
+## 12. SSSP vs. Other Shortest Path Problems
+
+It is useful to understand how SSSP relates to the other shortest path problem categories.
+
+| Problem                          | Input           | Objective                                                |
+| -------------------------------- | --------------- | -------------------------------------------------------- |
+| Single-Pair Shortest Path        | Source + target | Find the shortest path between two vertices              |
+| Single-Source Shortest Path      | One source      | Find shortest paths to all reachable vertices            |
+| Single-Destination Shortest Path | One destination | Find shortest paths from all vertices to one destination |
+| All-Pairs Shortest Path          | Entire graph    | Find shortest paths between every pair of vertices       |
+
+For example, consider a graph containing 100 vertices.
+
+- Single-Pair: Find the shortest path from A to Z.
+- SSSP: Find the shortest paths from A to all other 99 vertices.
+- Single-Destination: Find the shortest paths from all other vertices to Z.
+- APSP: Find shortest paths between all pairs of vertices.
+
+This distinction matters when selecting an algorithm and deciding whether to perform one calculation or many.
+
+## 13. Recommended Learning Sequence
+
+For your DSA documentation, I recommend organizing SSSP as follows:
+
+```
+single-source-shortest-path/
+│
+├── overview.mdx
+│
+├── concepts/
+│   ├── problem-definition.mdx
+│   ├── distance-and-predecessor-arrays.mdx
+│   ├── edge-relaxation.mdx
+│   └── shortest-path-tree.mdx
+│
+├── algorithms/
+│   ├── bfs-shortest-path.mdx
+│   ├── dijkstra/
+│   │   ├── overview.mdx
+│   │   ├── greedy-strategy.mdx
+│   │   ├── priority-queue.mdx
+│   │   ├── algorithm-walkthrough.mdx
+│   │   ├── implementation.mdx
+│   │   └── complexity-analysis.mdx
+│   │
+│   ├── bellman-ford/
+│   │   ├── overview.mdx
+│   │   ├── repeated-relaxation.mdx
+│   │   ├── negative-cycle-detection.mdx
+│   │   └── implementation.mdx
+│   │
+│   └── dag-shortest-path/
+│       ├── overview.mdx
+│       ├── topological-ordering.mdx
+│       └── implementation.mdx
+│
+├── shortest-path-tree/
+│   ├── construction.mdx
+│   └── path-reconstruction.mdx
+│
+├── complexity-analysis.mdx
+│
+└── algorithm-comparison.mdx
+```
+
+I would avoid duplicating the same Dijkstra implementation under Single-Pair and SSSP. Keep its implementation here and explain its early-termination optimization under Single-Pair Shortest Path.
+
+## 14. What to Study Next
+
+I recommend this progression:
+
+1. BFS for Single-Source Shortest Path
+
+   Understand how BFS calculates shortest distances in unweighted graphs and constructs a shortest path tree.
+2. Dijkstra's Algorithm
+
+   Understand greedy selection, distance relaxation, min-heaps, and why non-negative weights are required.
+3. Bellman-Ford Algorithm
+
+   Understand repeated edge relaxation, negative weights, and negative-cycle detection.
+4. DAG Shortest Path
+
+   Understand how topological sorting allows shortest paths to be calculated in linear time.
+5. Shortest Path Tree and Reconstruction
+
+   Implement predecessor tracking and reconstruct complete paths.
+
+My recommendation: Study BFS for SSSP first, even though you already know BFS traversal. This will help you understand how ordinary graph traversal can be extended to calculate distances and reconstruct shortest paths. Then move to Dijkstra, where the main new idea is replacing the FIFO queue with a priority queue to handle weighted edges.

@@ -1,0 +1,2905 @@
+# The `compareTo()` Contract in Java
+
+The general contract of the compareTo method is similar to that of equals:
+Compares this object with the specified object for order. Returns a negative
+integer, zero, or a positive integer as this object is less than, equal to, or greater
+than the specified object. Throws ClassCastException if the specified
+object’s type prevents it from being compared to this object.
+
+The `compareTo()` contract defines the rules that a Java class must follow when implementing `Comparable<T>`. This rules every implementation must follow so Java can sort objects reliably and maintain correct behavior in collections such as `TreeSet` and `TreeMap`.
+
+The goal is to ensure that objects have a consistent, predictable ordering so that Java's sorting algorithms and ordered collections work correctly.
+
+Recall the method signature:
+
+```Java
+public interface Comparable<T> {
+    int compareTo(T other);
+}
+```
+
+The return value has three possible meanings:
+
+| Result   | Meaning                                                 |
+| -------- | ------------------------------------------------------- |
+| Negative | `this` object comes before `other`.                     |
+| Zero     | Both objects are equivalent according to this ordering. |
+| Positive | `this` object comes after `other`.                      |
+
+The contract is more demanding than simply returning one of these three kinds of values. Your implementation must satisfy several mathematical properties.
+
+The most important idea is this: `compareTo()` must define a consistent ordering, not merely return a number that seems correct for a few examples.
+
+In the following description, the notation sgn(expression) designates the math-
+ematical signum function, which is defined to return -1, 0, or 1, according to
+whether the value of expression is negative, zero, or positive.
+
+
+$$
+\operatorname{sgn}(n)= \begin{cases} -1 & n < 0\\\ 0 & n = 0\\\ 1 & n > 0 \end{cases}
+$$
+
+In Java, we can represent this function as:
+
+```
+static int sgn(int value) {
+    return Integer.compare(value, 0);
+}
+```
+
+For example:
+
+```
+sgn(-25); // -1
+sgn(0);   //  0
+sgn(80);  //  1
+```
+.:::note
+
+Why does the contract use `sgn()` instead of requiring exact return values?
+
+Because `compareTo()` does not have to return exactly `-1`, `0`, or `1`. It may return any negative or positive integer.
+
+```
+Integer.compare(10, 20); // -1
+Integer.compare(10, 30); // -1
+
+// Both results mean the first value comes before the second.
+```
+
+The contract cares about the sign of the result, not its exact magnitude.
+
+:::
+
+## 1. Sign symmetry
+
+Rule: Reversing the two objects must reverse the sign of the comparison result.
+
+For objects `x` and `y`, the signs of `x.compareTo(y)` and `y.compareTo(x)` must be opposite.
+
+Formally:
+
+$$ 
+\operatorname{sign}(x.compareTo(y)) = -\operatorname{sign}(y.compareTo(x))
+$$
+
+Here, `sign` means negative, zero, or positive. It does not mean the exact numeric values must be negatives of each other.
+
+In plain English:
+
+If `x` comes before `y`, then `y` must come after `x`. If they compare as equal, they must compare as equal in both directions.
+
+This provision
+says that if you reverse the direction of a comparison between two object refer-
+ences, the expected thing happens: if the first object is less than the second, then
+the second must be greater than the first; if the first object is equal to the second,
+then the second must be equal to the first; and if the first object is greater than the
+second, then the second must be less than the first. 
+**Correct example**
+
+Suppose employees are ordered by employee ID.
+
+```Java
+@Override
+public int compareTo(Employee other) {
+    return Integer.compare(this.id, other.id);
+}
+```
+
+For employee IDs 101 and 102:
+
+```
+employee101.compareTo(employee102) < 0
+employee102.compareTo(employee101) > 0
+```
+
+The comparisons agree because the smaller ID comes first regardless of which object performs the comparison.
+
+## What happens if you violate the rule?
+
+Consider this incorrect comparator-like implementation:
+
+```Java
+@Override
+public int compareTo(Employee other) {
+    if (this.id < other.id) {
+        return -1;
+    }
+
+    return 1;
+}
+```
+
+This implementation is incorrect because it returns `1` when both IDs are equal. Consequently, comparing an object with itself returns a positive result instead of zero.
+
+```
+Employee x = new Employee(10);
+Employee y = new Employee(10);
+
+System.out.println(x.compareTo(y)); // -1
+System.out.println(y.compareTo(x)); // -1
+```
+
+Both objects claim to come before the other. That's contradictory.
+
+Design guideline: Handle equal values correctly and use comparison utilities such as `Integer.compare()` instead of writing unnecessary comparison logic.
+
+### What about exceptions?
+
+The first rule also means that if comparing `x` to `y` throws an exception, comparing `y` to `x` must throw an exception too.
+
+For example, a comparison method should not reject one direction but accept the reverse direction for the same pair. That would make the comparison relationship inconsistent.
+
+## 2. Transitivity
+
+The contract states:
+
+$$
+\begin{aligned} &(x.compareTo(y)>0\\\ &\quad\land\ y.compareTo(z)>0)\\\ &\implies x.compareTo(z)>0 \end{aligned}
+$$
+
+Rule: If `x` comes before `y`, and `y` comes before `z`, then `x` must come before `z`.
+
+Formally:
+
+$$
+x < y \land y < z \implies x < z
+$$
+
+The same principle applies to the greater-than relationship.
+
+The second provision says that
+if one object is greater than a second and the second is greater than a third, then
+the first must be greater than the third.
+
+### Example
+
+Suppose products are ordered by price.
+
+```
+Product A: $10
+Product B: $20
+Product C: $30
+```
+
+The comparisons must be consistent:
+
+```
+A.compareTo(B) < 0
+B.compareTo(C) < 0
+A.compareTo(C) < 0
+```
+
+A comparison implementation that produces contradictory results can break the assumptions made by sorting algorithms.
+
+
+### What does a violation look like?
+
+Imagine an incorrect comparison rule for three integer values that defines this cycle:
+
+```
+0 comes before 1
+1 comes before 2
+2 comes before 0
+```
+
+The resulting relationship looks like this:
+
+```
+0 ──before──> 1
+^             |
+|             |
+before       before
+|             v
+2 <───────────
+```
+
+More simply, the rule says:
+
+- `0` comes before `1`.
+- `1` comes before `2`.
+- Therefore, `0` must come before `2`.
+- But the broken rule says `2` comes before `0`.
+
+That is a contradiction.
+
+A sorting algorithm expects a consistent ordering. A violation can cause incorrectly ordered results or, depending on the implementation and input, an `IllegalArgumentException` from Java's sorting implementation.
+
+Design lesson: Don't invent complicated comparison rules that can produce cycles. Build comparisons from consistent ordering criteria, such as numeric values or lexicographic sequences of fields.
+
+### Why does transitivity matter?
+
+Sorting algorithms do not independently verify that your comparison method is mathematically consistent. They rely on it to determine where elements belong.
+
+If `compareTo()` violates transitivity, a sort may produce unexpected results or, in some cases, throw an exception indicating that the comparison method violates its general contract.
+
+Design guideline: Base comparisons on stable, well-defined ordering criteria rather than rules that contradict one another.
+
+The key idea: a sorting algorithm relies on comparisons to decide where elements belong. It assumes those comparisons describe one consistent ordering. If the comparisons contradict one another, the algorithm's decisions can become inconsistent.
+
+Let's build a concrete example and then look inside Java's sorting algorithm.
+
+Suppose we have three objects: `A`, `B`, and `C`.
+
+With a valid ordering, we might have:
+
+```
+A < B
+B < C
+---------
+A < C
+```
+
+This is transitivity: if A comes before B and B comes before C, A must come before C.
+
+Now imagine a broken `compareTo()` implementation produces this cycle:
+
+```
+A < B
+B < C
+C < A
+```
+
+An impossible ordering cycle: each object is considered smaller than another object, yet the cycle returns to its starting point.
+
+If `A < B` and `B < C`, transitivity requires `A < C`. But the cycle says `C < A`, which contradicts that requirement.
+
+There is no valid sorted order that can satisfy all three comparisons.
+
+
+**A concrete Java example with a broken `compareTo()`**
+
+We can implement three objects whose comparison rules form the cycle above.
+
+```Java
+enum Item implements Comparable<Item> {
+    A, B, C;
+
+    @Override
+    public int compareTo(Item other) {
+        if (this == other) {
+            return 0;
+        }
+
+        // A < B, B < C, C < A
+        if ((this == A && other == B)
+                || (this == B && other == C)
+                || (this == C && other == A)) {
+            return -1;
+        }
+
+        return 1;
+    }
+}
+```
+
+This code intentionally violates the `Comparable` contract. Do not use this pattern in production.
+
+Let's examine its comparisons:
+
+```
+System.out.println(Item.A.compareTo(Item.B)); // -1
+System.out.println(Item.B.compareTo(Item.C)); // -1
+System.out.println(Item.C.compareTo(Item.A)); // -1
+```
+
+All three objects claim to come before another object, forming a cycle.
+
+Now sort this array:
+
+```Java
+Item[] items = {Item.A, Item.B, Item.C};
+
+Arrays.sort(items);
+
+System.out.println(Arrays.toString(items));
+// [A, B, C] is a possible result
+```
+
+Why might the sorting algorithm leave the array unchanged?
+
+Because a sorting algorithm does not necessarily compare every pair of elements. It chooses comparisons according to its algorithm, trusting that the comparison contract holds.
+
+In this case, the adjacent pairs already appear to be in ascending order:
+
+```
+A < B    true
+B < C    true
+```
+
+But the full ordering is still invalid:
+
+```
+A < C    false
+C < A    true
+```
+
+The result can look sorted if you check only adjacent pairs, even though the comparison rule makes a globally consistent order impossible.
+
+The important distinction is that this is not a failure of Java's sorting algorithm. The comparison implementation violates the assumptions the algorithm requires.
+
+### Inside Out
+#### Inside Java's object sorting algorithm
+For object arrays, `Arrays.sort()` uses a stable sorting implementation based on TimSort in modern OpenJDK implementations. `List.sort()` also sorts using the list's natural ordering or a supplied comparator, and its default implementation sorts through an array.
+
+TimSort combines techniques including identifying already ordered runs, binary insertion sort, and merging runs.
+
+Let's examine the first step with our three elements.
+
+```excalidraw
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "id": "jx7MTHmZCiMK4dHymd_Me",
+      "type": "rectangle",
+      "x": 8.5,
+      "y": 9,
+      "width": 660.5,
+      "height": 752.4999999999999,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a0",
+      "roundness": null,
+      "seed": 1103595156,
+      "version": 518,
+      "versionNonce": 20899988,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "id": "7g7_G6X4vuSrCjYT8OXqc",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1792444231406,
+      "created": 1792434191667,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "UCnGBC7fOM1vFGNMVI17w",
+      "type": "text",
+      "x": 38.5,
+      "y": 24,
+      "width": 457.79998779296875,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a1",
+      "roundness": null,
+      "seed": 994620716,
+      "version": 175,
+      "versionNonce": 1003202068,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792444765781,
+      "created": 1792434200272,
+      "link": null,
+      "locked": false,
+      "text": "TimSort: detecting an ascending run",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "TimSort: detecting an ascending run",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "EG-CPGYs2LQkCEE_Hw2CI",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 65.5,
+      "width": 462.3999938964844,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a2",
+      "roundness": null,
+      "seed": 155007916,
+      "version": 123,
+      "versionNonce": 566857108,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792443743884,
+      "created": 1792442717724,
+      "link": null,
+      "locked": false,
+      "text": "Simplified walkthrough for the three-element array",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Simplified walkthrough for the three-element array",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "hlUWXjTA3t59QbFB-tj6R",
+      "type": "text",
+      "x": 41.266666412353516,
+      "y": 113,
+      "width": 101.46666717529297,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a3",
+      "roundness": null,
+      "seed": 2076935956,
+      "version": 97,
+      "versionNonce": 1978317588,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792443743884,
+      "created": 1792442765358,
+      "link": null,
+      "locked": false,
+      "text": "Initial array",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Initial array",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "e9miYzobg_Q_irPLTetw8",
+      "type": "rectangle",
+      "x": 37.30000305175781,
+      "y": 171.809375,
+      "width": 189.5,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a4",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 907436564,
+      "version": 200,
+      "versionNonce": 1004462764,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "D6I0PwLVPXT4eZ5BvbLv3"
+        }
+      ],
+      "updated": 1792444710949,
+      "created": 1792442784709,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "D6I0PwLVPXT4eZ5BvbLv3",
+      "type": "text",
+      "x": 124.71666955947876,
+      "y": 183.44062499999998,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a4V",
+      "roundness": null,
+      "seed": 1757900948,
+      "version": 158,
+      "versionNonce": 835038508,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792444710949,
+      "created": 1792442801934,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "e9miYzobg_Q_irPLTetw8",
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "SsDeokVES5FGRPe_cJpll",
+      "type": "rectangle",
+      "x": 242.95781326293948,
+      "y": 172.7375,
+      "width": 192.99999999999994,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a5",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 278899116,
+      "version": 276,
+      "versionNonce": 17830060,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "CLMMphBKNBXJwomUelNiT"
+        }
+      ],
+      "updated": 1792444738510,
+      "created": 1792442790111,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "CLMMphBKNBXJwomUelNiT",
+      "type": "text",
+      "x": 332.67447996139526,
+      "y": 184.36875,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a5V",
+      "roundness": null,
+      "seed": 1323757972,
+      "version": 173,
+      "versionNonce": 1419844396,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792444738510,
+      "created": 1792442804237,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "SsDeokVES5FGRPe_cJpll",
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "6lY3AZHm2E2bXQtkIkraJ",
+      "type": "rectangle",
+      "x": 450.3125,
+      "y": 171.5,
+      "width": 184.49999999999997,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 401073324,
+      "version": 242,
+      "versionNonce": 1730839980,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "6epJMRN8JUOkTb0sYIDJ-"
+        }
+      ],
+      "updated": 1792444732046,
+      "created": 1792442794856,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "6epJMRN8JUOkTb0sYIDJ-",
+      "type": "text",
+      "x": 535.8125,
+      "y": 183.13125,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6V",
+      "roundness": null,
+      "seed": 1758219948,
+      "version": 160,
+      "versionNonce": 1503981612,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792444732046,
+      "created": 1792443204321,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "6lY3AZHm2E2bXQtkIkraJ",
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "kwtp92KGczjYvNiWB9vEP",
+      "type": "text",
+      "x": 877,
+      "y": 314.5,
+      "width": 55.36666488647461,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a7",
+      "roundness": null,
+      "seed": 565293716,
+      "version": 12,
+      "versionNonce": 495569324,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792443203026,
+      "created": 1792442806379,
+      "link": null,
+      "locked": false,
+      "text": "        C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "        C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "UIGe73Iq5OLWOv4-X9o7x",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 270.5,
+      "width": 354.73333740234375,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a8",
+      "roundness": null,
+      "seed": 121108884,
+      "version": 117,
+      "versionNonce": 255222700,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792444622601,
+      "created": 1792442972985,
+      "link": null,
+      "locked": false,
+      "text": "Step 1: Compare the first two elements",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 1: Compare the first two elements",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "A1gX1fFjWKDRQ8pwfvSoq",
+      "type": "text",
+      "x": 180.66666650772095,
+      "y": 317.5,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a9",
+      "roundness": null,
+      "seed": 1740808724,
+      "version": 101,
+      "versionNonce": 1978623764,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792443743884,
+      "created": 1792442985056,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "ohDyGbzyv_lWlKr7TakbN",
+      "type": "text",
+      "x": 465.7166666984558,
+      "y": 317.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aA",
+      "roundness": null,
+      "seed": 1070164628,
+      "version": 155,
+      "versionNonce": 1259955348,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792443743884,
+      "created": 1792442989501,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "zlZ7gf1TKVxcM0cX2mSBI",
+      "type": "arrow",
+      "x": 719.9228235227661,
+      "y": 456.5,
+      "width": 24.76236346286305,
+      "height": 40.03932584269654,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aB",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1594798612,
+      "version": 508,
+      "versionNonce": 261839252,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792443702595,
+      "created": 1792443006499,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -24.76236346286305,
+          40.03932584269654
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": {
+        "elementId": "jx7MTHmZCiMK4dHymd_Me",
+        "mode": "inside",
+        "fixedPoint": [
+          0.4650423316576881,
+          0.4651685393258427
+        ]
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "moveMidPointsWithElement": false
+    },
+    {
+      "id": "-FQ63PgydbBW6xRdTnSap",
+      "type": "arrow",
+      "x": 321.84072494477346,
+      "y": 337,
+      "width": 20.736456238139024,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aC",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1257068436,
+      "version": 163,
+      "versionNonce": 652516268,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792444498319,
+      "created": 1792443017496,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20.736456238139024,
+          -1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "moveMidPointsWithElement": true
+    },
+    {
+      "id": "ioGFWcAp2pFNrYxepqKq7",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 402,
+      "width": 269.73333740234375,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aD",
+      "roundness": null,
+      "seed": 1724302356,
+      "version": 146,
+      "versionNonce": 277155372,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792444622602,
+      "created": 1792443035700,
+      "link": null,
+      "locked": false,
+      "text": "Step 2: Compare the next pair",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 2: Compare the next pair",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "sguHkWnZ2Xaiif9IWC6AB",
+      "type": "text",
+      "x": 183.19166660308838,
+      "y": 450.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aE",
+      "roundness": null,
+      "seed": 1357943444,
+      "version": 174,
+      "versionNonce": 1963539732,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792443743884,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "0vZdNcYDVUTAiIFdJEpmv",
+      "type": "text",
+      "x": 468.24166679382324,
+      "y": 450.5,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aF",
+      "roundness": null,
+      "seed": 334045204,
+      "version": 228,
+      "versionNonce": 881359508,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792443743884,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "ruKnUpyd8gXi4cLtk98jN",
+      "type": "arrow",
+      "x": 340.5715246191928,
+      "y": 452,
+      "width": 16.589164990511218,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aG",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 807525012,
+      "version": 265,
+      "versionNonce": 1064159404,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792444504285,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -16.589164990511218,
+          1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "LDjhc0M5hmo7t-ogyed7Q",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 355,
+      "width": 524.9000244140625,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aH",
+      "roundness": null,
+      "seed": 577825172,
+      "version": 140,
+      "versionNonce": 2006608044,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "id": "7g7_G6X4vuSrCjYT8OXqc",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1792444622602,
+      "created": 1792443062023,
+      "link": null,
+      "locked": false,
+      "text": "A.compareTo(B) is negative, so the run is ascending so far.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "A.compareTo(B) is negative, so the run is ascending so far.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "Ill1X3fA_tLk27_3ZywaR",
+      "type": "arrow",
+      "x": 321.74894243386814,
+      "y": 475.68085239399215,
+      "width": 20.736456238139024,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aI",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 229730324,
+      "version": 244,
+      "versionNonce": 1854395180,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792444504285,
+      "created": 1792443089151,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20.736456238139024,
+          -1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "LzNgkZwSuilRs6lCKwDnH",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 492,
+      "width": 539.7666625976562,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aJ",
+      "roundness": null,
+      "seed": 907889044,
+      "version": 136,
+      "versionNonce": 941650732,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792444622603,
+      "created": 1792443148006,
+      "link": null,
+      "locked": false,
+      "text": "B.compareTo(C) is negative, so the ascending run continues.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B.compareTo(C) is negative, so the ascending run continues.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "cIPbgyJfFZxsQBSQ9rf-4",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 537,
+      "width": 201.06666564941406,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aK",
+      "roundness": null,
+      "seed": 220271252,
+      "version": 107,
+      "versionNonce": 1082207660,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792444622603,
+      "created": 1792443154966,
+      "link": null,
+      "locked": false,
+      "text": "Step 3: Accept the run",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 3: Accept the run",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "6kfKbR0Hww8b39c7xEz9E",
+      "type": "rectangle",
+      "x": 311.5666675567627,
+      "y": 307.75,
+      "width": 160.5,
+      "height": 78,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aL",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 956021164,
+      "version": 131,
+      "versionNonce": 734478356,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792443195769,
+      "created": 1792443185303,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "F9GvMAkGDVu28ngPn2YqW",
+      "type": "text",
+      "x": 384.48333406448364,
+      "y": 334.25,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aM",
+      "roundness": null,
+      "seed": 1127195692,
+      "version": 91,
+      "versionNonce": 1197177644,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792443195769,
+      "created": 1792443185303,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "6kfKbR0Hww8b39c7xEz9E",
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "fwVHOWvrcQXB1ySNCvhqX",
+      "type": "rectangle",
+      "x": 523.8166675567627,
+      "y": 309.25,
+      "width": 160.5,
+      "height": 78,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aN",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 1686257324,
+      "version": 187,
+      "versionNonce": 177085844,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792443195769,
+      "created": 1792443185303,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "h3qJA1Whhokkn55sTCbDm",
+      "type": "text",
+      "x": 597.2833342552185,
+      "y": 335.75,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aO",
+      "roundness": null,
+      "seed": 631081260,
+      "version": 86,
+      "versionNonce": 1125856684,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792443195769,
+      "created": 1792443185303,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "fwVHOWvrcQXB1ySNCvhqX",
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "g5zB6XWdKvFSq4gb74FJe",
+      "type": "text",
+      "x": 759.0666675567627,
+      "y": 326.75,
+      "width": 55.36666488647461,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aP",
+      "roundness": null,
+      "seed": 1777042348,
+      "version": 94,
+      "versionNonce": 2006797076,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792443195769,
+      "created": 1792443185303,
+      "link": null,
+      "locked": false,
+      "text": "        C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "        C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "IirBEJIdXoGSSfRdmmDfC",
+      "type": "rectangle",
+      "x": 37.30000305175781,
+      "y": 596.25,
+      "width": 188.5,
+      "height": 51.5,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aQ",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 1873986324,
+      "version": 214,
+      "versionNonce": 1389795500,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "sw_uSR4UAr1bstWjIAp2g"
+        }
+      ],
+      "updated": 1792444699611,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "sw_uSR4UAr1bstWjIAp2g",
+      "type": "text",
+      "x": 124.21666955947876,
+      "y": 609.5,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aR",
+      "roundness": null,
+      "seed": 1374351788,
+      "version": 174,
+      "versionNonce": 1012310828,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792444699611,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "IirBEJIdXoGSSfRdmmDfC",
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "4ntyCTMsqj_K6KGBPI4ck",
+      "type": "rectangle",
+      "x": 244.45781326293945,
+      "y": 597.25,
+      "width": 196.50000000000003,
+      "height": 49.49999999999999,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aS",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 140163092,
+      "version": 284,
+      "versionNonce": 623471508,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "wcPFKxxquAgD9sd88_Fh5"
+        }
+      ],
+      "updated": 1792444741834,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "wcPFKxxquAgD9sd88_Fh5",
+      "type": "text",
+      "x": 335.92447996139526,
+      "y": 609.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aT",
+      "roundness": null,
+      "seed": 84113068,
+      "version": 183,
+      "versionNonce": 2107562260,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792444741834,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "4ntyCTMsqj_K6KGBPI4ck",
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "paRuBDzSCq-5csYRSAjRp",
+      "type": "rectangle",
+      "x": 453.3125,
+      "y": 600,
+      "width": 178.49999999999994,
+      "height": 44,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aU",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 772533524,
+      "version": 258,
+      "versionNonce": 376310444,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "qSJj_B1xVqESBJelxbuah"
+        }
+      ],
+      "updated": 1792444732046,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "qSJj_B1xVqESBJelxbuah",
+      "type": "text",
+      "x": 535.8125,
+      "y": 609.5,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aV",
+      "roundness": null,
+      "seed": 1434368940,
+      "version": 178,
+      "versionNonce": 1076876588,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792444732046,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "paRuBDzSCq-5csYRSAjRp",
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "tOe5o53lr8-1wBnt9evlF",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 671.5,
+      "width": 617.7000122070314,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aW",
+      "roundness": null,
+      "seed": 1797304468,
+      "version": 209,
+      "versionNonce": 568760364,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792444622603,
+      "created": 1792443234326,
+      "link": null,
+      "locked": false,
+      "text": "TimSort can recognize the whole array as an ascending run and\nleave it unchanged. It has no reason to compare C against A during\nthis scan.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "TimSort can recognize the whole array as an ascending run and leave it unchanged. It has no reason to compare C against A during this scan.",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "7g7_G6X4vuSrCjYT8OXqc",
+      "type": "arrow",
+      "x": 341.9916018838546,
+      "y": 320.90432213838733,
+      "width": 21.65819465352797,
+      "height": 0.13772144489394123,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aX",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 555248788,
+      "version": 402,
+      "versionNonce": 1818318508,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792444496454,
+      "created": 1792443705595,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -21.65819465352797,
+          0.13772144489394123
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    }
+  ],
+  "appState": {
+    "gridSize": 20,
+    "gridStep": 5,
+    "gridModeEnabled": false,
+    "viewBackgroundColor": "#ffffff",
+    "lockedMultiSelections": {}
+  },
+  "files": {}
+}
+```
+
+This is a simplified view of the relevant internal logic, not a promise about every implementation or input size.
+OpenJDK's TimSort contains a run-detection method named `countRunAndMakeAscending`. Its logic is approximately:
+
+```
+// Simplified illustration, not the complete JDK source.
+
+int countRunAndMakeAscending(
+        Object[] array, int lo, int hi) {
+
+    int runHi = lo + 1;
+
+    if (runHi == hi) {
+        return 1;
+    }
+
+    // Determine the direction using the first pair.
+    if (compare(array[runHi++], array[lo]) < 0) {
+
+        // Continue scanning a descending run.
+        while (runHi < hi
+                && compare(array[runHi],
+                           array[runHi - 1]) < 0) {
+            runHi++;
+        }
+
+        // Reverse the descending run.
+        reverseRange(array, lo, runHi);
+
+    } else {
+
+        // Continue scanning an ascending run.
+        while (runHi < hi
+                && compare(array[runHi],
+                           array[runHi - 1]) >= 0) {
+            runHi++;
+        }
+    }
+
+    return runHi - lo;
+}
+```
+
+The actual OpenJDK implementation uses specialized comparison methods for natural ordering and comparators, but the important behavior is the same: it checks adjacent elements to detect a run.
+
+For our array, the scan checks B against A, then C against B. Both comparisons indicate ascending order, so the scan accepts the run.
+
+Notice what it does not check: A against C.
+
+That is why a broken comparison contract can go undetected.
+
+The same principle applies to merge sort, which divides an array into smaller parts and merges them using comparisons.
+
+Suppose the two sorted halves are:
+
+```
+Left:  [A, B]
+Right: [C]
+```
+
+The merge operation compares the first unprocessed elements of the two halves and selects whichever comes first.
+
+Simplified merge logic:
+
+```
+// Simplified merge operation.
+
+while (leftIndex < left.length
+        && rightIndex < right.length) {
+
+    if (compare(left[leftIndex],
+                right[rightIndex]) <= 0) {
+
+        result[out++] = left[leftIndex++];
+
+    } else {
+        result[out++] = right[rightIndex++];
+    }
+}
+```
+
+With our cyclic ordering:
+
+```
+A < B
+B < C
+C < A
+```
+
+The merge operation might select `A` before `C`, because the comparison says `A` comes after `C`? No: under our defined rules, `A.compareTo(C)` is positive, so it selects `C` first.
+
+The merged result can therefore be:
+
+```
+[C, A, B]
+```
+
+Check the adjacent pairs:
+
+```
+C < A    true
+A < B    true
+```
+
+Yet the ordering also says `B < C`, so the result cannot represent a globally consistent ordering.
+
+The merge algorithm can combine locally ordered runs, but it cannot repair an ordering relation that contradicts itself.
+
+You may encounter an exception such as:
+
+```
+java.lang.IllegalArgumentException:
+Comparison method violates its general contract!
+```
+
+TimSort has internal checks that can detect certain inconsistencies while merging runs. If those checks are triggered, sorting can fail with this exception.
+
+However, Java does not guarantee that every broken `compareTo()` implementation will be detected. Some inputs may be sorted without an exception, even though the resulting order is logically inconsistent.
+
+This gives us three possible outcomes when the comparison contract is broken:
+
+- The sort completes and produces an apparently sorted result.
+- The sort completes but the result does not satisfy a global ordering.
+- The sort detects an inconsistency and throws an exception.
+
+The precise outcome depends on the input and the comparisons performed by the sorting implementation.
+
+For further study, examine the OpenJDK source for [`TimSort.java`](https://github.com/openjdk/jdk/blob/master/src/java.base/share/classes/java/util/TimSort.java?utm_source=chatgpt.com), particularly `countRunAndMakeAscending()` and `mergeLo()` / `mergeHi()`. These methods show how run detection and merging rely on the ordering contract.
+
+## 3. Consistency of zero comparisons
+
+The contract states:
+
+$$
+\begin{aligned} x.compareTo(y)=0 \implies {}& \operatorname{sgn}(x.compareTo(z))\\\ ={}&\operatorname{sgn}(y.compareTo(z)) \end{aligned}
+$$
+
+This rule is a little more subtle.
+
+In plain English:
+
+If `x` and `y` are equivalent according to `compareTo()`, they must behave identically when compared with any third object `z`.
+
+Rule: If two objects compare as zero, they must behave equivalently when compared with any third object.
+
+Formally, if:
+
+$$
+x.compareTo(y) = 0
+$$
+
+then for every object $z$:
+
+$$
+\operatorname{sign}(x.compareTo(z)) = \operatorname{sign}(y.compareTo(z))
+$$
+
+In other words, if `x` and `y` occupy the same position according to the ordering, they must have the same ordering relationship with every other object.
+
+### Example
+
+Suppose employees are ordered by department number only.
+
+```
+Employee alice = new Employee(101, "Alice", 10);
+Employee bob   = new Employee(102, "Bob", 10);
+Employee carol = new Employee(103, "Carol", 20);
+```
+
+Assume `compareTo()` compares only the department number.
+
+```
+Alice: department 10
+Bob:   department 10
+Carol: department 20
+```
+
+Then:
+
+```
+alice.compareTo(bob) == 0
+alice.compareTo(carol) < 0
+bob.compareTo(carol) < 0
+```
+
+This is consistent: Alice and Bob are equivalent in the department-based ordering, and both come before Carol.
+
+Now imagine a flawed implementation that compares by department for one comparison but uses employee ID in another. Alice and Bob might compare as equal to each other but have different relationships with Carol. That would violate the contract.
+
+Design guideline: Use one coherent ordering rule throughout `compareTo()`.
+
+### Why does this rule matter?
+
+Imagine a broken comparison method that behaves like this:
+
+```
+x vs. y = equal
+x vs. z = before
+y vs. z = after
+```
+
+If `x` and `y` are equivalent, they cannot legitimately lie on opposite sides of `z` under the same ordering.
+
+Otherwise, the ordering becomes inconsistent, and sorting and ordered collections cannot reliably interpret the comparison results.
+
+This rule also applies when the third object `z` is compared in the opposite direction, because sign symmetry must hold as well.
+
+## 4. Consistency with `equals()`
+
+It is strongly recommended, but not required, that `(x.compareTo(y) == 0) == (x.equals(y))`.
+
+This is a recommendation rather than a strict requirement of `Comparable`.
+
+It means that ideally, two objects should be equal according to `equals()` exactly when they compare as equivalent according to `compareTo()`.
+
+In logical terms:
+
+$$
+x.compareTo(y)=0 \iff x.equals(y)
+$$
+
+This provision says that all objects that
+compare as equal must yield the same results when compared to any other object.
+This is one of the most important design considerations when implementing `Comparable`.
+
+The Java `Comparable` documentation strongly recommends that natural ordering be consistent with `equals()`.
+
+That means:
+
+```
+x.compareTo(y) == 0
+```
+
+if and only if:
+
+```
+x.equals(y)
+```
+
+These methods serve different purposes:
+
+- `equals()` determines whether two objects are equal.
+- `compareTo()` determines their relative ordering.
+
+Consistency means both methods agree about whether two objects are equivalent.
+
+Let's understand both possibilities.
+
+### Example A: Consistent with `equals()`
+
+Consider a `Money` class whose equality and natural ordering are both based on the amount.
+
+```Java
+import java.math.BigDecimal;
+
+public class Money implements Comparable<Money> {
+
+    private final BigDecimal amount;
+
+    public Money(String amount) {
+        this.amount = new BigDecimal(amount);
+    }
+
+    @Override
+    public int compareTo(Money other) {
+        return amount.compareTo(other.amount);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (!(obj instanceof Money other)) {
+            return false;
+        }
+
+        return amount.equals(other.amount);
+    }
+
+    @Override
+    public int hashCode() {
+        return amount.hashCode();
+    }
+}
+```
+
+For this example:
+
+```Java
+Money a = new Money("10");
+Money b = new Money("10");
+
+System.out.println(a.compareTo(b) == 0); // true
+System.out.println(a.equals(b));         // true
+```
+
+Both methods agree.
+
+### Example B: Inconsistent with `equals()`
+
+Consider these values:
+
+```Java
+BigDecimal a = new BigDecimal("10.0");
+BigDecimal b = new BigDecimal("10.00");
+
+System.out.println(a.compareTo(b) == 0); // true
+System.out.println(a.equals(b));         // false
+```
+
+Why?
+
+- `compareTo()` considers their numerical values equal.
+- `equals()` also considers their scale, so `10.0` and `10.00` are not equal.
+
+This is a well-known example of natural ordering that is inconsistent with `equals()`.
+
+Such an inconsistency is permitted by the `Comparable` contract, but it must be understood when using sorted collections.
+
+### Why does this matter for `TreeSet`?
+
+A `TreeSet` uses comparison results to determine whether an element is already represented in the set.
+
+```Java
+import java.math.BigDecimal;
+import java.util.TreeSet;
+
+TreeSet<BigDecimal> values = new TreeSet<>();
+
+values.add(new BigDecimal("10.0"));
+values.add(new BigDecimal("10.00"));
+
+System.out.println(values.size()); // 1
+```
+
+Even though the two values are not equal according to `equals()`, they compare as zero. Therefore, the `TreeSet` treats them as equivalent for set membership and retains only one.
+
+Compare that with a `HashSet`, which uses `equals()` and `hashCode()`:
+
+```Java
+import java.util.HashSet;
+import java.util.Set;
+
+Set<BigDecimal> values = new HashSet<>();
+
+values.add(new BigDecimal("10.0"));
+values.add(new BigDecimal("10.00"));
+
+System.out.println(values.size()); // 2
+```
+
+The difference is intentional: hash-based collections and comparison-based collections use different mechanisms to identify duplicates.
+
+Design guideline: Prefer consistency between `compareTo()` and `equals()` unless there is a good reason for the natural ordering to define equivalence differently.
+
+## 5. Exception symmetry
+
+The contract also specifies that if comparing `x` with `y` throws an exception, comparing `y` with `x` must throw an exception as well.
+
+In other words, the comparison must not succeed in one direction while failing in the other.
+
+For example, a badly designed implementation might access an invalid field in one comparison direction but not the other. That creates asymmetric behavior.
+
+In ordinary implementations, this requirement is usually satisfied by using the same fields and a consistent comparison strategy for both objects.
+
+The contract does not require every possible comparison to succeed: a class may reject incompatible or invalid comparisons. However, the behavior must follow the documented rules.
+
+## Contract Example
+
+Here is a complete example of a well-behaved `Comparable` implementation.
+
+```Java
+
+import java.util.Objects;
+
+public final class Employee implements Comparable<Employee> {
+
+    private final int id;
+    private final String name;
+
+    public Employee(int id, String name) {
+        this.id = id;
+        this.name = Objects.requireNonNull(name);
+    }
+
+    @Override
+    public int compareTo(Employee other) {
+        Objects.requireNonNull(other);
+        return Integer.compare(this.id, other.id);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (!(obj instanceof Employee other)) {
+            return false;
+        }
+
+        return id == other.id;
+    }
+
+    @Override
+    public int hashCode() {
+        return Integer.hashCode(id);
+    }
+}
+
+```
+
+In this design:
+
+- The natural ordering is based on employee ID.
+- `Integer.compare()` avoids arithmetic overflow.
+- The ordering is transitive and satisfies sign symmetry.
+- Equal IDs compare as zero.
+- `equals()` and `hashCode()` use the same identity criterion, so ordering is consistent with equality.
+- The fields are immutable, so the ordering cannot change during the object's lifetime.
+
+Notice that two employees with the same ID but different names are treated as equal in this example. That is a deliberate design decision, not a requirement for all employee classes.
+
+## Consequences of Violating the Contract
+
+An important design principle in Java: when your class implements `Comparable`, you are not just defining how two objects compare; you are defining behavior that many other Java APIs rely on.
+
+If your `compareTo()` implementation violates its contract, the problem can spread to sorting algorithms, searching methods, and sorted collections.
+
+Let's connect this to the Java APIs you've been studying.
+
+### 1. The connection between `hashCode()` and `compareTo()`
+
+Just as a class that violates the hashCode contract can break other classes that
+depend on hashing, a class that violates the compareTo contract can break other
+classes that depend on comparison.  Classes that depend on comparison include
+the sorted collections TreeSet and TreeMap and the utility classes Collections
+and Arrays, which contain searching and sorting algorithms.
+
+Think of `hashCode()` and `compareTo()` as rules that Java libraries trust your class to follow.
+
+| Method        | Defines                              | Java APIs that depend on it                                                     |
+| ------------- | ------------------------------------ | ------------------------------------------------------------------------------- |
+| `hashCode()`  | Hash code consistent with `equals()` | `HashMap`, `HashSet`, `ConcurrentHashMap`                                       |
+| `compareTo()` | Natural ordering between objects     | `TreeSet`, `TreeMap`, `Arrays.sort()`, `Collections.sort()`, binary search APIs |
+
+When a class violates the relevant contract, these APIs may behave incorrectly even though their own implementations are correct.
+
+For example, `HashSet` assumes that objects considered equal have the same hash code. Similarly, a binary search algorithm assumes that the elements are sorted according to a consistent ordering.
+
+The underlying idea: library algorithms rely on the contracts of the objects you supply.
+
+### 2. How a broken `compareTo()` can cause problems
+
+Let's create a class with an incorrect implementation.
+
+```
+public class Product implements Comparable<Product> {
+
+    private final int id;
+
+    public Product(int id) {
+        this.id = id;
+    }
+
+    @Override
+    public int compareTo(Product other) {
+        // BUG: returns -1 even when IDs are equal.
+        return this.id < other.id ? -1 : 1;
+    }
+}
+```
+
+The implementation has a serious flaw: when two products have the same ID, both comparisons return `1`.
+
+```
+Product a = new Product(10);
+Product b = new Product(10);
+
+System.out.println(a.compareTo(b)); // 1
+System.out.println(b.compareTo(a)); // 1
+```
+
+This violates sign symmetry. If `a` compares greater than `b`, then `b` must compare less than `a`.
+
+The correct implementation for ordering by ID is:
+
+```
+@Override
+public int compareTo(Product other) {
+    return Integer.compare(this.id, other.id);
+}
+```
+
+Now equal IDs produce zero, smaller IDs come first, and larger IDs come later.
+
+### 3. How Java APIs depend on a valid comparison contract
+
+#### A. `TreeSet` — sorted elements and uniqueness
+
+A `TreeSet` uses comparisons to keep elements ordered and to determine whether a new element is equivalent to an existing one.
+
+```
+Set<Product> products = new TreeSet<>();
+
+products.add(new Product(10));
+products.add(new Product(10));
+
+System.out.println(products.size());
+```
+
+With the broken implementation, the two products may be treated as distinct because their comparison returns a nonzero result. The set's behavior no longer matches the intended ordering and uniqueness rules.
+
+With the corrected `compareTo()`, both products compare as zero, so the `TreeSet` retains only one of them.
+
+Note that `TreeSet` uses comparison equivalence, not necessarily `equals()`. If your natural ordering is inconsistent with `equals()`, the set can behave differently from a hash-based set.
+
+#### B. `TreeMap` — sorted keys
+
+A `TreeMap` uses comparisons to position keys in its internal search tree.
+
+```
+Map<Product, String> products = new TreeMap<>();
+
+products.put(new Product(10), "Keyboard");
+products.put(new Product(20), "Mouse");
+```
+
+The map expects comparisons to provide a consistent ordering so that it can navigate its tree to find keys.
+
+If comparisons are inconsistent, key lookup and insertion can produce results that don't match the intended ordering. A broken comparison contract can therefore undermine the collection's expected behavior.
+
+#### C. `Arrays.sort()` and `Collections.sort()` — sorting
+
+Sorting algorithms repeatedly compare elements to decide where they belong.
+
+```
+Product[] products = {
+    new Product(30),
+    new Product(10),
+    new Product(20)
+};
+
+Arrays.sort(products);
+```
+
+With a correct `compareTo()`, the result is ordered by ID:
+
+```
+10 → 20 → 30
+```
+
+With an inconsistent comparison, the algorithm's assumptions are violated. It may produce an incorrectly ordered result, and some sorting implementations may throw `IllegalArgumentException` if they detect a violated comparison contract.
+
+#### D. Binary search — finding an element in sorted data
+
+Binary search assumes the input is already sorted using the same ordering used for searching.
+
+```
+Arrays.sort(products);
+
+int index = Arrays.binarySearch(
+    products,
+    new Product(20)
+);
+```
+
+If `compareTo()` defines a valid ordering and the array was sorted using that ordering, binary search can work correctly.
+
+If the array isn't sorted according to that ordering—or the comparison is inconsistent—binary search may fail to find an element that is present.
+
+This is an important distinction: binary search does not repair the data or verify the whole array's ordering. It relies on the caller to satisfy its precondition.
+
+### 4. The dependency chain
+
+Your class implements `Comparable<T>`
+
+You define `compareTo()`.
+
+Java APIs trust your ordering
+
+They assume sign symmetry, transitivity, and the other contract requirements.
+
+Sorting
+
+`Arrays.sort()`
+
+Searching
+
+`binarySearch()`
+
+Sorted sets
+
+`TreeSet`
+
+Sorted maps
+
+`TreeMap`
+
+A broken comparison rule can undermine the behavior of every dependent API.
+
+### 5. How to avoid these problems
+
+For a typical class ordered by a numeric field, use the standard comparison methods rather than manually implementing the logic.
+
+```
+@Override
+public int compareTo(Product other) {
+    return Integer.compare(this.id, other.id);
+}
+```
+
+Avoid subtraction:
+
+```
+return this.id - other.id; // Avoid: integer overflow can reverse the result.
+```
+
+Then test the `compareTo()` contract:
+
+- Sign symmetry: reversing the operands reverses the sign.
+- Transitivity: if `a > b` and `b > c`, then `a > c`.
+- Zero consistency: if `a` compares as zero with `b`, their comparisons against any third object must have the same sign.
+- Consistency with `equals()`: strongly recommended, though not mandatory.
+
+Also remember that fields used for comparison should generally remain stable while objects are stored in a `TreeSet` or used as keys in a `TreeMap`. Mutating an object's ordering fields can disrupt the collection's ability to locate it.
+
+### Key takeaway
+
+The passage is warning you about the consequences of violating a contract. A bad `hashCode()` can undermine hash-based collections; a bad `compareTo()` can undermine sorting, searching, and sorted collections.
+
+This is why `compareTo()` is not merely a convenience method. It is part of the behavioral contract between your class and the Java Collections Framework.
+
+## Testing `compareTo()` contract
+
+A comparison method can appear correct in simple examples and still fail on edge cases. Test its mathematical properties.
+
+For a collection of test objects, check:
+
+| Property             | What to test                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| Sign symmetry        | Reverse each pair and verify opposite signs.                                         |
+| Transitivity         | Check triples of objects.                                                            |
+| Zero consistency     | Objects comparing as zero have the same comparison signs against every third object. |
+| Self-comparison      | `x.compareTo(x)` returns zero.                                                       |
+| Equality consistency | When intended, `x.compareTo(y) == 0` exactly when `x.equals(y)`.                     |
+| Edge cases           | Minimum and maximum numeric values, equal keys, and relevant null handling.          |
+
+For example, a simple self-comparison test is:
+
+```Java
+Employee employee = new Employee(101, "Alice");
+
+assert employee.compareTo(employee) == 0;
+```
+
+For more extensive testing, you can generate many object pairs and triples and verify the contract properties automatically. Remember that Java's `assert` statements require assertions to be enabled; unit-testing frameworks are often more convenient for a real project.
+
+A good test suite for `Comparable<T>` should verify more than whether objects sort correctly. It should check that the comparison method obeys its mathematical contract for different combinations of objects.
+
+We'll build a reusable Java test suite that checks:
+
+1. Sign symmetry — reversing the operands reverses the comparison's sign.
+2. Transitivity — if $x < y$ and $y < z$, then $x < z$.
+3. Consistency of comparisons against a third object — if $x = y$ according to `compareTo()`, both must compare consistently with every $z$.
+4. Consistency with `equals()` — recommended, though not mandatory by the `Comparable` contract.
+5. Exception symmetry — if comparing $x$ with $y$ throws, comparing $y$ with $x$ must also throw.
+6. Practical behavior — sorting, `TreeSet`, and duplicate handling.
+
+We'll use Java and include both a correct implementation and intentionally broken implementations to see which tests catch the problems.
+
+### The contract we want to test
+
+For objects `x`, `y`, and `z`, let `sign(x.compareTo(y))` mean whether the result is negative, zero, or positive.
+
+| Rule                        | Required behavior                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------------- |
+| Sign symmetry               | `sign(x.compareTo(y)) == -sign(y.compareTo(x))`                                         |
+| Transitivity                | If `x < y` and `y < z`, then `x < z`                                                    |
+| Zero consistency            | If `x.compareTo(y) == 0`, then `x` and `y` must compare with any `z` with the same sign |
+| Exception symmetry          | If `x.compareTo(y)` throws, `y.compareTo(x)` must throw too                             |
+| Consistency with `equals()` | Strongly recommended, but not required                                                  |
+
+The tests must compare signs, not exact numeric results. For example, `compareTo()` may return `-27`, `-1`, `0`, `1`, or `42`; only negative, zero, or positive matters.
+
+### Complete Java testing example
+
+Save the following as `CompareToContractTest.java`. It uses only standard Java APIs, so you can run it without JUnit or any external dependency.
+
+The test harness checks every pair and triple of supplied objects. It also includes a deliberately broken comparison implementation to demonstrate that the tests can detect a transitivity violation.
+
+```Java
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.TreeSet;
+
+public class CompareToContractTest {
+
+    // A correct Comparable implementation.
+    static final class Student implements Comparable<Student> {
+        private final int id;
+        private final String name;
+
+        Student(int id, String name) {
+            this.id = id;
+            this.name = name;
+        }
+
+        public int getId() {
+            return id;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public int compareTo(Student other) {
+            // Compare by ID without risking integer overflow.
+            return Integer.compare(this.id, other.id);
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+
+            if (!(obj instanceof Student other)) {
+                return false;
+            }
+
+            // Equality uses the same key as compareTo().
+            return this.id == other.id;
+        }
+
+        @Override
+        public int hashCode() {
+            return Integer.hashCode(id);
+        }
+
+        @Override
+        public String toString() {
+            return "Student{id=" + id + ", name='" + name + "'}";
+        }
+    }
+
+    // Intentionally broken: ordering is cyclic.
+    // 0 < 1, 1 < 2, but 2 < 0.
+    static final class CyclicNumber
+            implements Comparable<CyclicNumber> {
+
+        private final int value;
+
+        CyclicNumber(int value) {
+            this.value = value;
+        }
+
+        @Override
+        public int compareTo(CyclicNumber other) {
+            if (this.value == other.value) {
+                return 0;
+            }
+
+            if ((this.value + 1) % 3 == other.value) {
+                return -1;
+            }
+
+            return 1;
+        }
+
+        @Override
+        public String toString() {
+            return Integer.toString(value);
+        }
+    }
+
+    // Simple test assertion: works even when Java assertions are disabled.
+    private static void check(boolean condition, String message) {
+        if (!condition) {
+            throw new AssertionError(message);
+        }
+    }
+
+    private static int sign(int value) {
+        return Integer.compare(value, 0);
+    }
+
+    private static String describe(Object x, Object y) {
+        return "(" + x + ", " + y + ")";
+    }
+
+    // Returns true if compareTo throws a RuntimeException.
+    private static boolean comparisonThrows(
+            Comparable<Object> x, Object y) {
+
+        try {
+            x.compareTo(y);
+            return false;
+        } catch (RuntimeException ex) {
+            return true;
+        }
+    }
+
+    /*
+     * Checks the Comparable contract for every pair and triple.
+     *
+     * checkEqualsConsistency is optional because consistency
+     * with equals() is strongly recommended, but not mandatory.
+     */
+    static <T extends Comparable<? super T>>
+    void testContract(
+            List<T> values,
+            boolean checkEqualsConsistency) {
+
+        int n = values.size();
+
+        // Test 1: pairwise rules.
+        for (T x : values) {
+            for (T y : values) {
+                int xy;
+
+                try {
+                    xy = x.compareTo(y);
+                } catch (RuntimeException ex) {
+                    // If one direction throws, the reverse must throw too.
+                    boolean reverseThrows;
+
+                    try {
+                        y.compareTo(x);
+                        reverseThrows = false;
+                    } catch (RuntimeException reverseEx) {
+                        reverseThrows = true;
+                    }
+
+                    check(reverseThrows,
+                            "Exception symmetry violated for "
+                                    + describe(x, y));
+
+                    continue;
+                }
+
+                int yx;
+
+                try {
+                    yx = y.compareTo(x);
+                } catch (RuntimeException ex) {
+                    throw new AssertionError(
+                            "Only reverse comparison threw for "
+                                    + describe(x, y), ex);
+                }
+
+                // Rule 1: sign symmetry.
+                check(sign(xy) == -sign(yx),
+                        "Sign symmetry violated for "
+                                + describe(x, y)
+                                + ": xy=" + xy + ", yx=" + yx);
+
+                // Rule 4: compareTo()==0 should imply equals(),
+                // when consistency with equals is required by policy.
+                if (checkEqualsConsistency && xy == 0) {
+                    check(x.equals(y),
+                            "compareTo() is inconsistent with equals(): "
+                                    + describe(x, y));
+                }
+            }
+        }
+
+        // Test 2: rules involving triples.
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                for (int k = 0; k < n; k++) {
+                    T x = values.get(i);
+                    T y = values.get(j);
+                    T z = values.get(k);
+
+                    int xy = x.compareTo(y);
+                    int yz = y.compareTo(z);
+                    int xz = x.compareTo(z);
+
+                    // Rule 2: transitivity.
+                    if (xy < 0 && yz < 0) {
+                        check(xz < 0,
+                                "Transitivity violated: "
+                                        + x + " < " + y
+                                        + ", " + y + " < " + z
+                                        + ", but " + x + " !< " + z);
+                    }
+
+                    if (xy > 0 && yz > 0) {
+                        check(xz > 0,
+                                "Transitivity violated: "
+                                        + x + " > " + y
+                                        + ", " + y + " > " + z
+                                        + ", but " + x + " !> " + z);
+                    }
+
+                    // Rule 3: if x compares equal to y,
+                    // their comparisons with z must have the same sign.
+                    if (xy == 0) {
+                        check(sign(xz) == sign(y.compareTo(z)),
+                                "Zero-consistency violated against " + z);
+
+                        check(sign(z.compareTo(x))
+                                        == sign(z.compareTo(y)),
+                                "Zero-consistency violated in reverse "
+                                        + "against " + z);
+                    }
+                }
+            }
+        }
+
+        System.out.println("Contract checks passed for "
+                + n + " objects.");
+    }
+
+    public static void main(String[] args) {
+        System.out.println("=== Test 1: Correct Student ===");
+
+        List<Student> students = Arrays.asList(
+                new Student(3, "Mona"),
+                new Student(1, "Ali"),
+                new Student(2, "Omar"),
+                new Student(2, "Different name, same ID")
+        );
+
+        testContract(students, true);
+
+        // Sorting should follow natural order (student ID).
+        List<Student> sorted = new ArrayList<>(students);
+        Collections.sort(sorted);
+        System.out.println("Sorted: " + sorted);
+
+        // TreeSet uses compareTo() to determine uniqueness.
+        TreeSet<Student> set = new TreeSet<>(students);
+        System.out.println("TreeSet size: " + set.size());
+
+        check(set.size() == 3,
+                "Expected duplicate ID to count as one TreeSet element");
+
+        System.out.println("\n=== Test 2: Broken CyclicNumber ===");
+
+        List<CyclicNumber> broken = Arrays.asList(
+                new CyclicNumber(0),
+                new CyclicNumber(1),
+                new CyclicNumber(2)
+        );
+
+        try {
+            testContract(broken, false);
+            throw new AssertionError(
+                    "The broken comparator should have failed!");
+        } catch (AssertionError expected) {
+            System.out.println("Correctly detected a violation:");
+            System.out.println(expected.getMessage());
+        }
+    }
+}
+
+```
+
+**Run the test**
+
+```sh
+javac CompareToContractTest.java
+java CompareToContractTest
+```
+
+Expected output will resemble:
+
+```
+=== Test 1: Correct Student ===
+Contract checks passed for 4 objects.
+Sorted: [Student{id=1, name='Ali'}, Student{id=2, name='Omar'}, Student{id=2, name='Different name, same ID'}, Student{id=3, name='Mona'}]
+TreeSet size: 3
+
+=== Test 2: Broken CyclicNumber ===
+Correctly detected a violation:
+Transitivity violated: 0 < 1, 1 < 2, but 0 !< 2
+```
+
+The order of the two ID-2 students is preserved because Java's object sorting is stable.
+
+### Understand what each test catches
+
+Sign symmetry
+
+If `x.compareTo(y)` is negative, `y.compareTo(x)` must be positive, and vice versa. Both results must be zero together.
+
+Transitivity
+
+The cyclic example fails: `0 < 1`, `1 < 2`, but `0 > 2`. A sorting algorithm cannot rely on a consistent global order when this happens.
+
+Zero consistency
+
+Two students with the same ID compare as zero. Their comparisons against any third student must agree in sign.
+
+Consistency with `equals()`
+
+The example checks that `compareTo() == 0` implies `equals()`. Full consistency also requires the reverse implication: if `equals()` is true, `compareTo()` should return zero. This is strongly recommended, but not mandatory.
+
+To test full consistency with `equals()`, replace the equality check inside the pairwise loop with:
+
+```Java
+if (checkEqualsConsistency) {
+    check((xy == 0) == x.equals(y),
+            "compareTo() is inconsistent with equals(): "
+                    + describe(x, y));
+}
+```
+
+## 7. A practical checklist for your `compareTo()` implementation
+
+Before using your class with Java sorting algorithms or ordered collections, ask:
+
+- Does `x.compareTo(y)` have the opposite sign from `y.compareTo(x)`?
+- Is the ordering transitive?
+- If two objects compare as zero, do they compare consistently against every third object?
+- Does the method return zero for objects that are logically equal?
+- If the last two concepts differ, is that intentional and documented?
+- Am I using safe comparison methods such as `Integer.compare()` rather than subtraction?
+
+For testing, don't check only a few expected outputs. Test pairs for sign symmetry and triples for transitivity, and check comparison-equivalent objects against third objects.
+
+The key takeaway: `compareTo()` is a contract that defines a coherent ordering for your class. Following that contract makes your objects safe to use with Java's sorting algorithms and ordered collections; aligning it with `equals()` makes their behavior more predictable across the Collections Framework.
+### Important limitations
+
+- The example is a standalone test harness, not a formal proof. It tests every pair and triple in the supplied sample, so its work grows as $O(n^3)$.
+- The sample assumes comparisons among the supplied objects are valid and do not throw. The pairwise loop checks exception symmetry, but the triple loop is intended for non-throwing comparison domains. If you need to test exception behavior specifically, use dedicated test cases for the documented exceptional inputs.
+- Add boundary values, duplicate keys, negative values, minimum and maximum integers, and randomized samples. A subtraction-based implementation such as `return this.id - other.id;` is particularly worth testing for integer overflow.
+- In a real project, JUnit tests and property-based testing can make these checks easier to maintain and run against many generated inputs.
+
+Study tip: Keep the contract tests close to the class that implements `Comparable`. A successful sort alone does not prove that `compareTo()` is correct.
+
+Would you like a reminder to revisit these contract tests after your next Java Collections study session?
+
+## Quick reference
+
+Sign symmetry
+
+Reversing the operands reverses the sign.
+
+Transitivity
+
+If A comes before B and B before C, A comes before C.
+
+Consistency of zero comparisons
+
+Objects that compare as zero have matching ordering relationships with other objects.
+
+Exception symmetry
+
+A comparison that throws in one direction must also throw in the reverse direction.
+
+Consistency with `equals()`
+
+Strongly recommended, but not mandatory under the `Comparable` contract.
+
+The central lesson is that `compareTo()` must define a coherent ordering, not merely return negative, zero, or positive values. Following this contract makes your classes safer to use with sorting algorithms, `TreeSet`, `TreeMap`, and other APIs that depend on comparison.

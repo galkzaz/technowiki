@@ -4,9 +4,15 @@ title: "lab11: Using Spring Cloud Config for centralized configuration"
 sidebar_position: 11
 ---
 
+Spring Cloud Config Server (shortened to config server) will be added to the existing microservice
+landscape behind the edge server, in the same way as for the other microservices:
+
+![How Spring Cloud Config fits into the microservice landscape](/docs/assets/software-engineering/design-architecture/architectural-styles/microservices/labs/product-review-recommendation-microservices/lab11-Adding-config-server-to-system-landscape.png)
+
 The following diagram illustrates the cooperation between Spring Cloud Config, its clients, a Git
 repository, and Spring Cloud Bus:
-![How Spring Cloud Config fits into the microservice landscape](/docs/assets/software-engineering/design-architecture/architectural-styles/microservices/labs/product-review-recommendation-microservices/lab11.png)
+
+![Adding a config server to the system landscape](/docs/assets/software-engineering/design-architecture/architectural-styles/microservices/labs/product-review-recommendation-microservices/lab11-How-Spring-Cloud-Config-fits-into-microservice-landscape.png)
 
 The diagram shows the following:
 1. When the microservices start up, they ask the configuration server for its configuration.
@@ -17,5 +23,442 @@ server when Git commits are pushed to the Git repository.
 services that are affected by the change will react and retrieve the updated configuration
 from the configuration server.
 
-Finally, Spring Cloud Config also supports the encryption of sensitive information in the config-
-uration, such as credentials.
+Finally, Spring Cloud Config also supports the encryption of sensitive information in the configuration, such as credentials.
+
+## Selecting the storage type of the configuration repository
+
+
+In this Lab, we will use a local filesystem. To use the local filesystem, the config server needs
+to be launched with the Spring profile, `native`, enabled. The location of the configuration repository is specified using `the spring.cloud.config.server.native.searchLocations` property.
+
+:::note
+
+Using the local filesystem is easy to set up and therefore preferable in a develop-
+ment environment. In a product environment, a more secure alternative should
+be used – for example, HashiCorp Vault. For an introduction on how to get started
+with HashiCorp Vault, see https://docs.spring.io/spring-cloud-config/
+reference/server/environment-repository/vault-backend.html.
+
+:::
+
+## Deciding on the initial client connection
+In this lab, the clients will first connect to the config server. With this approach, it will be
+possible to store the configuration of the discovery server in the config server.
+
+## Securing the configuration
+From a runtime
+perspective, the config server does not need to be exposed to the outside through the edge serv-
+er. During development, however, it is useful to be able to access the API of the config server to
+check the configuration. In production environments, it is recommended to lock down external
+access to the config server.
+### Securing the configuration in transit
+
+To ensure that the API user is a known client, we will use HTTP Basic authentication. We can set
+up HTTP Basic authentication by using Spring Security in the config server and specifying the
+`SPRING_SECURITY_USER_NAME` and `SPRING_SECURITY_USER_PASSWORD` environment variables,
+with the permitted credentials.
+
+### Securing the configuration at rest
+In this Lab, we will use a symmetric key. The symmetric key is given to the config server at
+startup by specifying an environment variable, `ENCRYPT_KEY`. The encrypted key is just a plain
+text string that needs to be protected in the same way as any sensitive information.
+
+## Setting up a config server
+Setting up a config server on the basis of the decisions discussed is straightforward:
+1. Create a Spring Boot project using Spring Initializr, as described in Chapter 3, Creating a
+Set of Cooperating Microservices. Refer to the Using Spring Initializr to generate skeleton code
+section.
+2. Add the dependencies, spring-cloud-config-server and spring-boot-starter-
+security, to the Gradle build file, build.gradle.
+3. Add the @ E n a b l e C o n f i g S e r v e r annotation to the application class,
+ConfigServerApplication:
+```Java
+@EnableConfigServer
+@SpringBootApplication
+public class ConfigServerApplication {
+```
+4. Add the configuration for the config server to the default property file, `application.yml`:
+```yml
+server.port: 8888
+
+spring.cloud.config.server.native.searchLocations: file:${PWD}/config-repo
+
+# WARNING: Exposing all management endpoints over http should only be used during development, must be locked down in production!
+management.endpoint.health.show-details: "ALWAYS"
+management.endpoints.web.exposure.include: "*"
+
+logging:
+  level:
+    root: info
+
+---
+spring.config.activate.on-profile: docker
+spring.cloud.config.server.native.searchLocations: file:/config-repo
+
+```
+The most important configuration is to specify where to find the configuration repository,
+indicated using the `spring.cloud.config.server.native.searchLocations` property.
+5. Add a routing rule to the edge server to make the API of the config server accessible from
+outside the microservice landscape.
+6. Add a Dockerfile and a definition of the config server to the three Docker Compose files.
+7. Externalize sensitive configuration parameters to the standard Docker Compose envi-
+ronment file, `.env`. The parameters are described in the Configuring the config server for
+use with Docker section.
+8. Add the config server to the common build file, settings.gradle:
+```
+include ':spring-cloud:config-server'
+```
+## Setting up a routing rule in the edge server
+To be able to access the API of the config server from outside the microservice landscape, we add
+a routing rule to the edge server. All requests to the edge server that begin with /config will be
+routed to the config server with the following routing rule:
+```yml
+- id: config-server
+  uri: ${spring.cloud.config.uri}
+  predicates:
+  - Path=/config/**
+  filters:
+  - RewritePath=/config/(?<segment>.*), /$\{segment}
+```
+The `RewritePath` filter in the routing rule will remove the leading part, `/config`, from the incoming URL before it sends it to the config server.
+The edge server is also configured to permit all requests to the config server, delegating the security checks to the config server. The following line is added to the SecurityConfig class in the
+edge server:
+```jaava
+.pathMatchers("/config/**").permitAll()
+```
+With this routing rule in place, we can use the API of the config server; for example, run the
+following command to ask for the configuration of the product service when it uses the docker
+Spring profile:
+```sh
+curl https://dev-usr:dev-pwd@localhost:8443/config/product/docker -ks | jq
+```
+## Configuring the config server for use with Docker
+The Dockerfile of the config server looks the same as for the other microservices, except for the
+fact that it exposes port 8888 instead of port 8080.
+When it comes to adding the config server to the Docker Compose files, it looks a bit different
+from what we have seen for the other microservices:
+```yml
+  config-server:
+    build: spring-cloud/config-server
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker,native
+      - ENCRYPT_KEY=${CONFIG_SERVER_ENCRYPT_KEY}
+      - SPRING_SECURITY_USER_NAME=${CONFIG_SERVER_USR}
+      - SPRING_SECURITY_USER_PASSWORD=${CONFIG_SERVER_PWD}
+    volumes:
+      - $PWD/config-repo:/config-repo
+```
+
+Here are the explanations for the preceding source code:
+1. The Spring profile, native, is added to signal to the config server that the config repository is based on local files.
+2. The `ENCRYPT_KEY` environment variable is used to specify the symmetric encryption key that will be used by the config server to encrypt and decrypt sensitive configuration information.
+3. The `SPRING_SECURITY_USER_NAME` and `SPRING_SECURITY_USER_PASSWORD` environment
+variables are used to specify the credentials to be used for protecting the APIs using basic HTTP authentication.
+4. The volumes declaration will make the config-repo folder accessible in the Docker container at `/config-repo`.
+
+The values of the three preceding environment variables, marked in the Docker Compose file with `${...}`, are fetched by Docker Compose from the `.env` file:
+```
+CONFIG_SERVER_ENCRYPT_KEY=my-very-secure-encrypt-key
+CONFIG_SERVER_USR=dev-usr
+CONFIG_SERVER_PWD=dev-pwd
+```
+
+:::note
+
+The information stored in the .env file, that is, the username, password, and
+encryption key, is sensitive and must be protected if used for something other
+than development and testing. Also, note that losing the encryption key will
+lead to a situation where the encrypted information in the config repository
+cannot be decrypted!
+
+:::
+
+## Configuring clients of a config server
+
+To be able to get their configurations from the config server, our microservices need to be up-
+dated. The microservices will use Spring’s retry mechanism to reconnect to a config server. This
+is especially useful when the whole landscape of microservices and its config server are started
+simultaneously – for example, when using the docker compose up command.
+
+In this scenario, many of the clients will be trying to connect to the config server before it is ready,
+and the retry logic will make the clients connect to the config server successfully once it is up
+and running.
+
+:::note
+
+Initially, Spring Cloud Config provided a bootstrap mechanism for clients to connect
+to the server. Starting with Spring Boot 2.4, configuration data can be imported using
+the spring.config.import property. This has become the default approach for
+connecting to Spring Cloud Config Server.
+However, in scenarios where we need to define multiple config server URLs and
+enable retries for each, using the spring.config.import property does not work.
+Instead, we must use the older bootstrap mechanism. This is enabled by adding the
+spring-cloud-starter-bootstrap dependency.
+The bootstrap method for connecting to Spring Cloud Config Server remains fully
+supported, with no current plans for deprecation. For more details, see https://
+github.com/spring-cloud/spring-cloud-config/issues/2244#issuecomm
+ent-1497695548.
+
+:::
+
+This can be done with the following steps:
+1. Add the `spring-cloud-starter-config`,`spring-cloud-starter-bootstrap`, and
+`spring-retry` dependencies to the Gradle build file, `build.gradle`.
+2. Move the configuration file, application.yml, to the config repository and rename it with
+the name of the client as specified by the spring.application.name property.
+3. Add a new bootstrap.yml file to the src/main/resources folder. This file will be used
+to hold the configuration required to connect to the config server. Refer to the following
+Configuring connection information section for an explanation of its content.
+4. Add credentials for accessing the config server to the Docker Compose files – for example,
+the product service:
+```yml
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - CONFIG_SERVER_USR=${CONFIG_SERVER_USR}
+      - CONFIG_SERVER_PWD=${CONFIG_SERVER_PWD}
+```
+5. Disable the use of the config server when running Spring Boot-based automated tests.
+This is done by adding spring.cloud.config.enabled=false to the @DataMongoTest, @
+DataJpaTest, and @SpringBootTest annotations. They look like this:
+```Java
+@DataMongoTest(properties = {"spring.cloud.config.enabled=false"})
+@DataJpaTest(properties = {"spring.cloud.config.enabled=false"})
+@SpringBootTest(webEnvironment=RANDOM_PORT, properties = {"eureka.client.enabled=false","spring.cloud.config.enabled=false"})
+```
+
+## Configuring connection information
+`application.yml` file now holds the client
+configuration that is required to connect to the config server. This file has the same content
+for all clients of the config server, except for the application name as specified by the `spring.
+application.name` property (in the following example, set to product):
+```yml
+spring.application.name: product
+
+spring.cloud.config:
+  import: "configserver:http://localhost:8888"
+  failFast: true
+  retry:
+    initialInterval: 3000
+    multiplier: 1.3
+    maxInterval: 10000
+    maxAttempts: 20
+  uri: http://localhost:8888
+  username: ${CONFIG_SERVER_USR}
+  password: ${CONFIG_SERVER_PWD}    
+
+---
+spring.config.activate.on-profile: docker
+
+spring.cloud.config.import: "configserver:http://config-server:8888"
+```
+This configuration will make the client do the following:
+1. Connect to the config server using the `http://localhost:8888` URL when it runs out-
+side Docker, and using the `http://config-server:8888` URL when running in a Docker
+container.
+2. Use HTTP Basic authentication, based on the value of the `CONFIG_SERVER_USR` and `CONFIG_SERVER_PWD` properties, as the client’s username and password.
+3. Try to reconnect to the config server during startup up to 20 times, if required.
+4. If the connection attempt fails, the client will initially wait for 3 seconds before trying
+to reconnect.
+5. The wait time for subsequent retries will increase by a factor of 1.3.
+6. The maximum wait time between connection attempts will be 10 seconds.
+7. If the client can’t connect to the config server after 20 attempts, its startup will fail.
+
+This configuration is generally good for resilience against temporary connectivity problems with
+the config server – for example, when the whole landscape of microservices and its config server
+is started at once, as described.
+
+## Structuring the configuration repository
+After moving the configuration files from each client’s source code to the configuration repository,
+we will have some common configuration in many of the configuration files – for example, for the
+configuration of actuator endpoints and how to connect to Eureka, RabbitMQ, and Kafka. 
+
+The  common parts have been placed in a common configuration file named `application.yml`. This
+file is shared by all clients. The configuration repository contains the following files:
+```
+config-repo/
+├── application.yml
+├── auth-server.yml
+├── eureka-server.yml
+├── gateway.yml
+├── product-composite.yml
+├── product.yml
+├── recommendation.yml
+└── review.yml
+```
+The configuration repository can be found in `config-repo` folder.
+
+## Trying out Spring Cloud Config Server
+Now it is time to try out the config server:
+1. First, we will build from source and run the test script to ensure that everything fits together.
+2. Next, we will try out the config server API to retrieve the configuration for our microservices.
+3. Finally, we will see how we can encrypt and decrypt sensitive information – for example, passwords.
+
+### Building and running automated tests
+So, now we’ll build and run verification tests of the system landscape, as follows:
+1. First, build the Docker images with the following commands:
+```
+./gradlew build && docker compose build
+```
+2. Next, start the system landscape in Docker and run the usual tests with the following
+command:
+```
+./test-em-all-docker.bash start
+```
+
+### Getting the configuration using the config server API
+As described previously, we can reach the API of the config server through the edge server by
+using the URL prefix, /config. We also have to supply credentials as specified in the .env file
+for HTTP Basic authentication. For example, to retrieve the configuration used for the product
+service when it runs as a Docker container, that is, having activated the docker Spring profile,
+run the following command:
+```sh
+curl https://dev-usr:dev-pwd@localhost:8443/config/product/docker -ks | jq
+```
+Expect a response with the following structure:
+```json
+{
+  "name": "product",
+  "profiles": [
+    "docker"
+  ],
+  "label": null,
+  "version": null,
+  "state": null,
+  "propertySources": [
+    {
+      "name": "Config resource 'file [/config-repo/product.yml]' via location 'file:/config-repo/' (document #1)",
+      "source": {
+        "spring.config.activate.on-profile": "docker",
+        "server.port": 8080,
+        "spring.data.mongodb.host": "mongodb"
+      }
+    },
+    {
+      "name": "Config resource 'file [/config-repo/product.yml]' via location 'file:/config-repo/' (document #0)",
+      "source": {
+        "server.port": 7002,
+        "server.error.include-message": "always",
+        "spring.data.mongodb.host": "localhost",
+        "spring.data.mongodb.port": 27017,
+        "spring.data.mongodb.database": "product-db",
+        "spring.cloud.function.definition": "messageProcessor",
+        "spring.cloud.stream.default.contentType": "application/json",
+        "spring.cloud.stream.bindings.messageProcessor-in-0.destination": "products",
+        "spring.cloud.stream.bindings.messageProcessor-in-0.group": "productsGroup",
+        "spring.cloud.stream.bindings.messageProcessor-in-0.consumer.maxAttempts": 3,
+        "spring.cloud.stream.bindings.messageProcessor-in-0.consumer.backOffInitialInterval": 500,
+        "spring.cloud.stream.bindings.messageProcessor-in-0.consumer.backOffMaxInterval": 1000,
+        "spring.cloud.stream.bindings.messageProcessor-in-0.consumer.backOffMultiplier": 2.0,
+        "spring.cloud.stream.rabbit.bindings.messageProcessor-in-0.consumer.autoBindDlq": true,
+        "spring.cloud.stream.rabbit.bindings.messageProcessor-in-0.consumer.republishToDlq": true,
+        "spring.cloud.stream.kafka.bindings.messageProcessor-in-0.consumer.enableDlq": true,
+        "logging.level.root": "INFO",
+        "logging.level.se.magnus": "DEBUG",
+        "logging.level.org.springframework.data.mongodb.core.ReactiveMongoTemplate": "DEBUG"
+      }
+    },
+    {
+      "name": "Config resource 'file [/config-repo/application.yml]' via location 'file:/config-repo/' (document #1)",
+      "source": {
+        "spring.config.activate.on-profile": "docker",
+        "spring.rabbitmq.host": "rabbitmq",
+        "spring.cloud.stream.kafka.binder.brokers": "kafka",
+        "app.eureka-server": "eureka",
+        "app.auth-server": "auth-server"
+      }
+    },
+    {
+      "name": "Config resource 'file [/config-repo/application.yml]' via location 'file:/config-repo/' (document #0)",
+      "source": {
+        "app.eureka-username": "u",
+        "app.eureka-server": "localhost",
+        "app.auth-server": "localhost",
+        "eureka.client.serviceUrl.defaultZone": "http://${app.eureka-username}:${app.eureka-password}@${app.eureka-server}:8761/eureka/",
+        "eureka.client.initialInstanceInfoReplicationIntervalSeconds": 5,
+        "eureka.client.registryFetchIntervalSeconds": 5,
+        "eureka.instance.leaseRenewalIntervalInSeconds": 5,
+        "eureka.instance.leaseExpirationDurationInSeconds": 5,
+        "spring.rabbitmq.host": "127.0.0.1",
+        "spring.rabbitmq.port": 5672,
+        "spring.rabbitmq.username": "guest",
+        "spring.cloud.stream.kafka.binder.brokers": "127.0.0.1",
+        "spring.cloud.stream.kafka.binder.defaultBrokerPort": 9092,
+        "spring.cloud.stream.defaultBinder": "rabbit",
+        "management.endpoint.health.show-details": "ALWAYS",
+        "management.endpoints.web.exposure.include": "*",
+        "app.eureka-password": "p",
+        "spring.rabbitmq.password": "guest"
+      }
+    }
+  ]
+}
+```
+The explanations for this response are as follows:
+- The response contains properties from a number of property sources, one per property
+file and Spring profile that matched the API request. The property sources are returned
+in priority order; if a property is specified in multiple property sources, the first property
+in the response takes precedence. The preceding sample response contains the following
+property sources, in the following priority order:
+  - /config-repo/product.yml, for the docker Spring profile
+  - /config-repo/product.yml, for the default Spring profile
+  /config-repo/application.yml, for the docker Spring profile
+  - /config-repo/application.yml, for the default Spring profile
+  
+  For example, the port used will be 8080 and not 7002, since "server.port": 8080 is
+specified before "server.port": 7002 in the preceding response.
+- Sensitive information, such as the passwords to Eureka and RabbitMQ, are returned in
+plain text – for example, "p" and "guest", but they are encrypted on disk. In the configuration file, application.yml, they are specified as follows:
+```yml
+app:
+eureka-password:
+'{cipher}
+bf298f6d5f878b342f9e44bec08cb9ac00b4ce57e98316f030194a225fac89fb'
+spring.rabbitmq:
+password: '{cipher}17fcf0ae5b8c5cf87de6875b699be4a1746dd49
+3a99d926c7a26a68c422117ef'
+```
+
+### Encrypting and decrypting sensitive information
+Information can be encrypted and decrypted using the /encrypt and /decrypt endpoints exposed
+by the config server. The /encrypt endpoint can be used to create encrypted values to be placed
+in the property file in the config repository. Refer to the example in the previous section, where
+the passwords to Eureka and RabbitMQ are stored encrypted on disk. The /decrypt endpoint can
+be used to verify encrypted information that is stored on disk in the config repository.
+1. To encrypt the hello world string, run the following command:
+curl -k https://dev-usr:dev-pwd@localhost:8443/config/encrypt --data-urlencode "hello world"
+2. Expect a response along the lines of the following:
+3. To decrypt the encrypted value, run the following command:
+curl -k https://dev-usr:dev-pwd@localhost:8443/config/decrypt -d
+d91001603dcdf3eb1392ccbd40ff201cdcf7b9af2fcaab3da39e37919033b206
+4. Expect the hello world string as the response:
+Figure 12.3: A decrypted value of a configuration parameter
+5. If you want to use an encrypted value in a configuration file, you need to prefix it with
+`{cipher}` and wrap it in ''. For example, to store the encrypted version of hello world,
+add the following line in a YAML-based configuration file:
+```yml
+my-secret: '{cipher}d91001603dcdf3eb1392ccbd40ff201cdcf7b9af2fcaab3da39e37919033b206'
+```
+6. When the config server detects values in the format `{cipher}...`, it tries to decrypt
+them using its encryption key before sending them to a client.
+7. These tests conclude the chapter on centralized configuration. Wrap it up by shutting
+down the system landscape:
+docker compose down
+
+## Summary
+In this Lab, we saw how we can use Spring Cloud Config Server to centralize managing the
+configuration of our microservices. We can place the configuration files in a common configuration repository and share common configurations in a single configuration file while keeping
+microservice-specific configuration in microservice-specific configuration files. The microservices
+were updated to retrieve their configuration from the config server at startup and configured to
+handle temporary outages while retrieving their configuration from the config server.
+
+The config server can protect configuration information by requiring authenticated usage of its
+API with HTTP Basic authentication and can prevent eavesdropping by exposing its API externally
+through the edge server that uses HTTPS. To prevent intruders who obtained access to the configuration files on disk from gaining access to sensitive information such as passwords, we can use
+the config server `/encrypt` endpoint to encrypt the information and store it encrypted on disk.
+
+While exposing the APIs from the config server externally is useful during development, they
+should be locked down before use in production.
+
+In the next Lab, we will learn how we can use **Resilience4j** to mitigate the potential drawbacks
+of overusing synchronous communication between microservices.

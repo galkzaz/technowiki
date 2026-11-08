@@ -1,0 +1,785 @@
+# Single-Pair Shortest Path (SPSP)
+
+Single-Pair Shortest Path (SPSP) is a graph problem where we want to find the shortest path between one specific source vertex and one specific destination vertex.
+
+For example, imagine a road network:
+
+- You are currently at Cairo.
+- You want to travel to Alexandria.
+- You want to find the route with the minimum total travel cost or distance.
+
+You don't need to calculate the shortest routes from Cairo to every other city. You only care about the route from Cairo to Alexandria.
+
+That's the central idea behind SPSP.
+
+BFS for Single-Pair Shortest Path (SPSP) and BFS for Single-Source Shortest Path (SSSP) use essentially the same BFS algorithm. The difference is what we want to calculate and when we stop the search.
+
+## 1. Problem definition
+
+Given a graph:
+
+$$
+G=(V,E)
+$$
+
+where:
+
+- $V$ is the set of vertices.
+- $E$ is the set of edges.
+- Each edge may have a weight representing distance, cost, time, or another metric.
+
+We are also given:
+
+- $s$: the source vertex.
+- $t$: the target (destination) vertex.
+
+The objective is to find a path from $s$ to $t$ that minimizes the total edge weight.
+
+Formally:
+
+$$
+\boxed{ \delta(s,t)=\min\_{p\in P(s,t)} w(p) }
+$$
+
+Where:
+
+- $P(s,t)$ is the set of all paths from $s$ to $t$.
+- $w(p)$ is the sum of the edge weights along path $p$.
+- $\delta(s,t)$ is the shortest-path distance.
+
+If no path exists between the source and target, the distance is infinity.
+
+### Example
+
+Consider this weighted directed graph:
+
+```
+             4
+        A --------> B
+        |            |
+      10|            |3
+        |            |
+        v            v
+        C --------> D
+             2
+```
+
+Suppose:
+
+```
+Source      = A
+Destination = D
+```
+
+There are two possible paths:
+
+```
+Path 1:
+A → C → D
+Cost = 10 + 2 = 12
+
+Path 2:
+A → B → D
+Cost = 4 + 3 = 7
+```
+
+Therefore:
+
+```
+Shortest path = A → B → D
+Shortest cost = 7
+```
+
+Notice that we only need the shortest path from `A` to `D`, not the shortest paths from `A` to every other vertex.
+
+## 2. SPSP versus SSSP versus APSP
+
+These three problem formulations differ in how many source/destination combinations we need to solve.
+
+Single-Pair Shortest Path (SPSP)
+
+One source → one destination
+
+```
+A ─────── shortest path ───────> D
+```
+
+Find the shortest path from `A` to `D`.
+
+Single-Source Shortest Path (SSSP)
+
+One source → all reachable destinations
+
+```
+           B
+          /
+     A ──┼──> C
+          \
+           D
+```
+
+Find shortest paths from `A` to every reachable vertex.
+
+All-Pairs Shortest Path (APSP)
+
+Every source → every destination
+
+```
+A → B, C, D
+B → A, C, D
+C → A, B, D
+D → A, B, C
+```
+
+Find shortest paths between every pair of vertices.
+
+| Problem | Input                  | Required result                                   |
+| ------- | ---------------------- | ------------------------------------------------- |
+| SPSP    | Source `s`, target `t` | Shortest path from `s` to `t`                     |
+| SSSP    | Source `s`             | Shortest paths from `s` to all reachable vertices |
+| APSP    | Graph                  | Shortest paths between all vertex pairs           |
+
+An important distinction: SPSP is a problem formulation, not a particular algorithm.
+
+## 3. Why do we need SPSP if SSSP already exists?
+
+You might ask: if Dijkstra or BFS can calculate shortest paths from a source to all reachable vertices, why introduce SPSP?
+
+Because sometimes calculating all those distances is unnecessary work.
+
+Imagine a graph containing 100,000 vertices.
+
+You want to find a path from vertex `A` to vertex `Z`.
+
+An SSSP algorithm may explore a large portion of the graph to calculate distances to all reachable vertices.
+
+But SPSP only needs to find the path to `Z`.
+
+This creates an opportunity for optimization:
+
+- Stop the search once the target's shortest distance is guaranteed.
+- Search simultaneously from both endpoints.
+- Use domain knowledge to guide the search toward the target.
+
+These ideas lead to several SPSP algorithms and optimizations.
+
+## 4. Algorithms used for SPSP
+
+There isn't one algorithm that is always best for SPSP. The appropriate algorithm depends on the graph's edge weights and structure.
+
+| Graph characteristics                                           | Suitable algorithm     |
+| --------------------------------------------------------------- | ---------------------- |
+| Unweighted graph                                                | BFS                    |
+| All edges have equal weight                                     | BFS                    |
+| Nonnegative edge weights                                        | Dijkstra               |
+| Negative edge weights, no reachable negative cycle              | Bellman-Ford           |
+| Directed acyclic graph (DAG)                                    | DAG shortest path      |
+| Large search space with a useful heuristic                      | A\*                    |
+| Large unweighted graph where both endpoints are known           | Bidirectional BFS      |
+| Large nonnegative weighted graph where both endpoints are known | Bidirectional Dijkstra |
+
+Let's examine them.
+
+## 5. BFS for SPSP
+
+BFS is suitable when all edges have equal weight.
+
+It explores vertices level by level, so the first time it discovers the destination, it has found a shortest path.
+
+Consider:
+
+```
+             A
+           /   \
+          B     C
+         / \     \
+        D   E     F
+             \
+              G
+```
+
+We want:
+
+```
+Source      = A
+Destination = G
+```
+
+BFS exploration:
+
+```
+Level 0: A
+Level 1: B, C
+Level 2: D, E, F
+Level 3: G
+```
+
+The shortest path is:
+
+```
+A → B → E → G
+```
+
+Distance:
+
+```
+dist[G] = 3
+```
+
+### Early termination
+
+Unlike BFS for SSSP, which continues until the queue is empty, BFS for SPSP can stop when it first discovers the target.
+
+```
+BFS-SPSP(G, source, target)
+
+    initialize dist[] = ∞
+    initialize pred[] = NIL
+    initialize visited[] = false
+
+    dist[source] = 0
+    visited[source] = true
+
+    Q = empty queue
+    ENQUEUE(Q, source)
+
+    if source == target:
+        return 0, [source]
+
+    while Q is not empty:
+
+        u = DEQUEUE(Q)
+
+        for each neighbor v of u:
+
+            if not visited[v]:
+
+                visited[v] = true
+                dist[v] = dist[u] + 1
+                pred[v] = u
+
+                if v == target:
+                    return dist[v], RECONSTRUCT-PATH(pred, source, target)
+
+                ENQUEUE(Q, v)
+
+    return ∞, no path
+```
+
+Why is early termination safe?
+
+When the target is first discovered from `u`, BFS has already processed vertices in nondecreasing order of distance.
+
+Therefore, no shorter path to the target can still be waiting to be discovered.
+
+You can also stop when the target is dequeued, which is correct but may perform extra work.
+
+Complexity:
+
+- Worst-case time: $O(V+E)$.
+- Auxiliary space: $O(V)$.
+
+The worst-case complexity is the same as SSSP, but early termination can reduce actual work.
+
+## 6. Dijkstra for SPSP
+
+When edge weights are nonnegative but not necessarily equal, use Dijkstra's algorithm.
+
+Consider:
+
+```
+             4
+        A --------> B
+        |            |
+      10|            |3
+        |            |
+        v            v
+        C --------> D
+             2
+```
+
+Source: `A`
+
+Target: `D`
+
+Dijkstra maintains tentative distances and uses a min-priority queue to process the vertex with the smallest tentative distance.
+
+Initial state:
+
+```
+dist[A] = 0
+dist[B] = ∞
+dist[C] = ∞
+dist[D] = ∞
+```
+
+### Walkthrough
+
+Step 1: Process A
+
+Relax its outgoing edges:
+
+```
+A → B: 0 + 4 = 4
+A → C: 0 + 10 = 10
+```
+
+Updated distances:
+
+```
+A = 0
+B = 4
+C = 10
+D = ∞
+```
+
+Priority queue:
+
+```
+(B, 4), (C, 10)
+```
+
+Step 2: Process B
+
+`B` has the smallest tentative distance, 4.
+
+Relax:
+
+```
+B → D: 4 + 3 = 7
+```
+
+Updated distances:
+
+```
+A = 0
+B = 4
+C = 10
+D = 7
+```
+
+Priority queue contains candidates for `D` and `C`.
+
+Step 3: Process D
+
+The smallest valid tentative distance is now 7.
+
+We have extracted the target from the min-priority queue with its current minimum distance.
+
+Safe to terminate
+
+The shortest path is:
+
+```
+A → B → D
+```
+
+Total cost:
+
+$$
+4+3=\boxed{7}
+$$
+
+### Why not stop when D is first discovered?
+
+Because discovery does not guarantee that the current path is optimal.
+
+For example:
+
+```
+          10
+     A --------> D
+      \
+       \ 2
+        v
+        B
+        |
+        | 3
+        v
+        D
+```
+
+Dijkstra might discover `D` directly with cost 10, but later find a better route through `B` with cost 5.
+
+Therefore:
+
+For Dijkstra, stop when the target is removed from the priority queue with its current minimum tentative distance, not when it is first discovered.
+
+In a lazy priority-queue implementation, skip stale queue entries before checking whether the removed vertex is the target.
+
+Complexity: With an adjacency list and binary heap:
+
+$$
+O((V+E)\log V)
+$$
+
+Auxiliary space: $O(V)$, excluding the graph.
+
+## 7. Bidirectional BFS
+
+Bidirectional BFS is an optimization for finding a path between two vertices in an unweighted graph.
+
+Instead of searching only from the source, it searches from both endpoints:
+
+- Forward BFS starts at the source.
+- Backward BFS starts at the destination.
+- The searches expand until they meet.
+
+For example:
+
+```
+Source = A
+Target = G
+```
+
+Conceptually:
+
+```
+Forward search                 Backward search
+
+       A                              G
+      / \                            / \
+     B   C                          E   F
+      \                              /
+       E ---------------------------
+
+       The searches meet at E
+```
+
+The backward search follows incoming edges when the graph is directed. For an undirected graph, it can use the ordinary neighbors.
+
+Once the two searches meet, we can combine their paths.
+
+### Why can it be faster?
+
+Suppose the average branching factor is $b$, and the shortest path has depth $d$.
+
+A conventional BFS may explore approximately:
+
+$$
+O(b^d)
+$$
+
+A balanced bidirectional search may explore approximately:
+
+$$
+O(b^{d/2})
+$$
+
+For example, with branching factor 10 and path depth 6:
+
+```
+Ordinary BFS:        approximately 10^6 nodes
+Bidirectional BFS:   approximately 2 × 10^3 nodes
+```
+
+These are illustrative search-tree estimates, not guaranteed graph operation counts.
+
+### Important implementation detail
+
+For a directed graph, backward BFS must traverse the reversed graph.
+
+Also, you must maintain distances and predecessor/successor information for both searches and use a correct meeting/termination condition. Simply stopping at the first arbitrary intersection is not always sufficient if the searches expand unevenly.
+
+## 8. Bidirectional Dijkstra
+
+This applies the same two-direction search idea to graphs with nonnegative edge weights.
+
+```
+Forward Dijkstra                 Backward Dijkstra
+
+       A                                G
+        \                              /
+         B                            E
+          \                          /
+           C ---------------------- D
+```
+
+- Forward search starts at the source.
+- Backward search starts at the destination on the reversed graph.
+- Each direction uses its own min-priority queue.
+- When the searches establish a connecting route, they can produce a candidate complete path.
+
+The algorithm maintains the best complete route found so far, often denoted by $\mu$.
+
+It must not stop merely because the searches have encountered a common vertex. A valid termination condition uses the minimum unsettled distances from both queues and the best complete route found so far.
+
+For example, a common form is to stop when:
+
+$$
+\min(Q_f)+\min(Q_b)\geq\mu
+$$
+
+where:
+
+- $Q_f$ is the forward priority queue.
+- $Q_b$ is the backward priority queue.
+- $\mu$ is the best complete path cost found.
+
+This is an optimization of Dijkstra for a known source-target pair.
+
+## 9. A\* (A-star) algorithm
+
+A\* is another important algorithm for SPSP, especially in navigation, robotics, and games.
+
+It uses a heuristic to guide the search toward the destination.
+
+Instead of selecting the vertex with the smallest known distance from the source alone, A\* considers:
+
+$$
+\boxed{f(n)=g(n)+h(n)}
+$$
+
+Where:
+
+- $g(n)$: actual cost from the source to vertex $n$.
+- $h(n)$: estimated remaining cost from $n$ to the destination.
+- $f(n)$: estimated total cost of a route through $n$.
+
+Example:
+
+Imagine a grid-based game where the player wants to move from `S` to `G`.
+
+```
+S . . . .
+. # # . .
+. . . . .
+. # . # .
+. . . . G
+```
+
+A\* uses a heuristic such as Manhattan distance:
+
+$$
+h(n)=|x_n-x_G|+|y_n-y_G|
+$$
+
+This estimates the remaining number of horizontal and vertical moves, assuming four-directional movement and no diagonal moves.
+
+A\* prioritizes vertices that appear promising based on both the cost already paid and the estimated remaining cost.
+
+### Important heuristic properties
+
+For A\* to guarantee an optimal path under the usual graph-search formulation:
+
+- Admissible: The heuristic never overestimates the true remaining cost.
+- Consistent: The heuristic satisfies the triangle inequality with respect to every edge.
+
+Consistency is especially useful because it allows standard graph-search A\* to avoid reopening already expanded vertices.
+
+With a zero heuristic:
+
+$$
+h(n)=0
+$$
+
+A\* reduces to Dijkstra's algorithm.
+
+A\* is particularly useful when we have a good heuristic, such as geographical distance between two locations.
+
+## 10. Bellman-Ford and DAG shortest path
+
+These algorithms are also applicable to SPSP, although they are often introduced under SSSP.
+
+### Bellman-Ford
+
+Use Bellman-Ford when the graph may contain negative edge weights.
+
+It repeatedly relaxes edges, up to $V-1$ passes, then performs an additional pass to detect reachable negative cycles.
+
+For SPSP:
+
+1. Run Bellman-Ford from the source.
+2. Check whether a reachable negative cycle can affect the destination.
+3. If the destination has a finite shortest distance, reconstruct its path using predecessors.
+
+Complexity:
+
+$$
+O(VE)
+$$
+
+### DAG shortest path
+
+If the graph is a directed acyclic graph, we can use topological ordering followed by edge relaxation.
+
+It supports negative edge weights because a DAG cannot contain a directed cycle.
+
+For SPSP:
+
+1. Compute a topological ordering.
+2. Initialize distances from the source.
+3. Relax outgoing edges in topological order.
+4. Reconstruct the target path.
+
+Complexity:
+
+$$
+O(V+E)
+$$
+
+This is particularly efficient when the graph is known to be acyclic.
+
+## 11. Comparing SPSP algorithms
+
+Here is a summary of the algorithms and when to use each one.
+
+| Algorithm              | Edge weights                                    | Main data structure             | Worst-case time                                         |
+| ---------------------- | ----------------------------------------------- | ------------------------------- | ------------------------------------------------------- |
+| BFS                    | Equal weights                                   | FIFO queue                      | $O(V+E)$                                            |
+| Dijkstra               | Nonnegative                                     | Min-priority queue              | $O((V+E)\log V)$\*                                  |
+| Bidirectional BFS      | Equal weights                                   | Two FIFO queues                 | $O(V+E)$                                            |
+| Bidirectional Dijkstra | Nonnegative                                     | Two min-priority queues         | Implementation-dependent; commonly $O((V+E)\log V)$ |
+| A\*                    | Depends on valid heuristic and cost assumptions | Min-priority queue              | Can be exponential in search depth in the worst case    |
+| Bellman-Ford           | Negative edges allowed                          | Distance and predecessor arrays | $O(VE)$                                             |
+| DAG shortest path      | Any edge weights                                | Topological ordering            | $O(V+E)$                                            |
+
+\*For adjacency lists and a binary heap.
+
+## 12. How to choose an SPSP algorithm
+
+The following decision process is a useful starting point:
+
+```
+             SPSP problem
+                  |
+                  v
+        Are all edge weights equal?
+             /          \
+           Yes           No
+            |             |
+            v             v
+           BFS       Are there negative
+                     edge weights?
+                       /       \
+                     Yes        No
+                      |          |
+                      v          v
+                Is the graph    Dijkstra
+                    a DAG?       |
+                  /      \       |
+                Yes       No     |
+                 |         |     |
+                 v         v     |
+             DAG SSSP   Bellman-  |
+                        Ford      |
+```
+
+There are also optimizations:
+
+```
+Known source + destination
+          |
+          ├── Unweighted graph
+          |      └── Bidirectional BFS
+          |
+          ├── Nonnegative weighted graph
+          |      └── Bidirectional Dijkstra
+          |
+          └── Useful heuristic available
+                 └── A*
+```
+
+These are not mutually exclusive categories. For example, A\* can be applied to nonnegative weighted graphs, and bidirectional search can be useful when both endpoints are known.
+
+## 13. SPSP output: What should the algorithm return?
+
+Unlike SSSP, where we usually produce a distance array and optionally a predecessor array for all reachable vertices, SPSP only needs the result for one destination.
+
+A typical SPSP result contains:
+
+```
+Source:      A
+Destination: D
+
+Shortest distance: 7
+
+Shortest path:
+A → B → D
+```
+
+Internally, the algorithm may still maintain arrays:
+
+```
+dist[]
+pred[]
+```
+
+But it only needs to return the distance and reconstructed path for the requested target.
+
+There are three possible outcomes:
+
+| Situation                                  | Result                            |
+| ------------------------------------------ | --------------------------------- |
+| A path exists                              | Return shortest distance and path |
+| No path exists                             | Return infinity / no path         |
+| A relevant reachable negative cycle exists | No finite shortest distance       |
+
+For the negative-cycle case, the qualification matters: a negative cycle must be reachable from the source and able to reach the target. Otherwise, it does not make the source-to-target shortest distance unbounded.
+
+## 14. SPSP versus SSSP: an important implementation distinction
+
+You don't necessarily need a separate implementation of every SSSP algorithm to solve SPSP.
+
+Many SSSP algorithms can be adapted to stop once the destination's shortest distance is guaranteed.
+
+| Algorithm         | SSSP behavior                                             | SPSP optimization                                                                                          |
+| ----------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| BFS               | Process the entire reachable component                    | Stop when target is discovered                                                                             |
+| Dijkstra          | Process until no reachable candidates remain              | Stop when target is extracted with its finalized minimum distance                                          |
+| Bellman-Ford      | Perform up to $V-1$ relaxation passes                 | Generally still needs global passes and negative-cycle checks relevant to the target                       |
+| DAG shortest path | Process vertices in topological order                     | Can avoid processing vertices after the target's position, with appropriate handling of its incoming paths |
+| A\*               | Not normally used as a general all-destinations algorithm | Naturally designed around a specific destination                                                           |
+
+The distinction is that early termination is not equally straightforward for every algorithm.
+
+For example, Bellman-Ford cannot simply stop when it first discovers the destination because a later relaxation pass might improve its distance.
+
+## 15. Where SPSP fits in your DSA documentation
+
+I recommend organizing it this way:
+
+```
+algorithms/
+└── graph-algorithms/
+    └── shortest-path-algorithms/
+        │
+        ├── overview.mdx
+        │
+        ├── problem-types/
+        │   ├── single-source-shortest-path.mdx
+        │   ├── single-pair-shortest-path.mdx
+        │   └── all-pairs-shortest-path.mdx
+        │
+        ├── single-source-shortest-path/
+        │   ├── bfs-shortest-path/
+        │   ├── dijkstra/
+        │   ├── bellman-ford/
+        │   └── dag-shortest-path/
+        │
+        ├── single-pair-shortest-path/
+        │   ├── overview.mdx
+        │   ├── early-termination.mdx
+        │   ├── bidirectional-bfs.mdx
+        │   ├── bidirectional-dijkstra.mdx
+        │   └── a-star.mdx
+        │
+        └── all-pairs-shortest-path/
+            └── floyd-warshall/
+```
+
+Notice that I would keep the standard BFS and Dijkstra implementations under SSSP, then explain how to adapt them for SPSP.
+
+This avoids duplicating the same algorithm explanations and implementations.
+
+## 16. Key takeaways
+
+1. SPSP is a problem formulation, not an algorithm.
+2. It finds the shortest path between one specified source and one specified destination.
+3. BFS is suitable for unweighted graphs; Dijkstra is suitable for nonnegative weighted graphs.
+4. Bidirectional search explores from both endpoints to reduce unnecessary exploration.
+5. A\* uses a heuristic to guide the search toward the destination.
+6. Bellman-Ford handles negative edge weights, while DAG shortest path exploits acyclic graph structure.
+7. SPSP algorithms often reuse SSSP algorithms with destination-specific optimizations.
+
+Recommended learning order: Since you've already studied BFS and are learning SSSP, I suggest studying Dijkstra next, followed by bidirectional BFS and then A\*. These will show you how shortest-path search evolves from ordinary graph traversal into destination-oriented search.

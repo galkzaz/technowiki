@@ -1,0 +1,657 @@
+# Configuration Sources in Distributed Systems
+
+The topic `configuration-sources` explains where an application obtains its configuration values and how those values reach the running application.
+
+In a Spring Boot microservices architecture, configuration may come from packaged defaults, external files, environment variables, command-line arguments, a remote configuration service, or a secret store.
+
+These sources serve different purposes. Some provide fallback values, some adapt the application to its deployment environment, some centralize configuration management, and others protect sensitive credentials.
+
+## 1. `configuration-sources`
+
+### 1.1 The big picture
+
+Imagine deploying the same `order-service.jar` to development, testing, and production.
+
+The application needs a port, a database URL, a payment-service timeout, and a database password. These values may come from different sources.
+
+Configuration sources
+
+Defaults · Files · Environment · CLI · Remote service · Secret store
+
+Configuration resolution
+
+Load, combine, override, and validate values
+
+Application configuration
+
+The effective values consumed by Spring beans
+
+For example, a service might obtain:
+
+| Property                               | Possible source       |
+| -------------------------------------- | --------------------- |
+| Default logging level                  | `application.yml`     |
+| Production database URL                | Environment variable  |
+| Temporary port override                | Command-line argument |
+| Payment timeout shared across services | Config Server         |
+| Database password                      | Secret store          |
+
+The exact combination depends on the application's configuration framework and deployment design.
+
+### 1.2 Configuration source versus configuration property
+
+These are different concepts.
+
+A configuration property is the setting itself:
+
+```
+clients.payment-service.timeout=2s
+```
+
+A configuration source is where that setting comes from, such as an application file, environment variable, or remote configuration service.
+
+The same property can appear in multiple sources with different values. The application must resolve which value wins.
+
+### 1.3 Configuration precedence
+
+In Spring Boot, configuration sources are represented by property sources. When several sources define the same property, Spring Boot applies a defined precedence order.
+
+For the common sources discussed here, a useful simplified rule is:
+
+```
+Lower priority
+    application defaults
+          |
+    configuration files
+          |
+    environment variables
+          |
+    command-line arguments
+          |
+Higher priority
+```
+
+This is an illustration, not the complete Spring Boot precedence list. Profile-specific files, test properties, imported configuration, and other sources introduce additional rules. Remote configuration precedence also depends on how it is imported and configured.
+
+Consider this property:
+
+```
+server:
+  port: 8080
+```
+
+If an environment variable supplies `SERVER_PORT=8085`, and a command-line argument supplies `--server.port=8090`, the command-line value wins in a normal Spring Boot launch.
+
+The effective port is `8090`.
+
+Important: precedence is a framework rule, not a universal rule for all configuration systems. Also, a higher-priority source does not necessarily replace an entire configuration file; resolution generally happens at the property level.
+
+## 2. `application-defaults`
+
+### What are application defaults?
+
+Application defaults are values supplied by the application developer to make the application usable when no environment-specific override is provided.
+
+For Spring Boot, these defaults commonly live in `src/main/resources/application.yml` or `application.properties`.
+
+```
+# application.yml
+server:
+  port: 8080
+
+spring:
+  application:
+    name: order-service
+
+clients:
+  product-service:
+    timeout: 2s
+    max-retries: 2
+
+logging:
+  level:
+    root: INFO
+```
+
+These values are packaged into the application artifact.
+
+### Why are defaults useful?
+
+Defaults provide predictable behavior:
+
+- Developers can run the application with minimal setup.
+- Tests can use sensible settings without repeating every property.
+- Optional features can have explicit default states.
+- Operators only need to override values that differ in their environment.
+
+For example, a default timeout of two seconds might be appropriate for local development and testing. Production could override it after considering real latency and failure-handling requirements.
+
+### What belongs in defaults?
+
+Good candidates include:
+
+- Logging levels suitable for ordinary execution.
+- Non-sensitive feature defaults.
+- Conservative client timeouts and retry counts.
+- Optional feature enablement settings.
+- Safe application-level limits.
+
+Avoid putting production credentials, environment-specific hostnames, or assumptions about the deployment topology into defaults.
+
+Also, do not confuse an application default with a framework default. Spring Boot itself supplies defaults for some settings, while your application's `application.yml` supplies others.
+
+Key idea: defaults make the application runnable, but deployment configuration determines how it behaves in a particular environment.
+
+## 3. `configuration-files`
+
+Configuration files store settings in files that the application or its runtime environment can read.
+
+Common formats include YAML, Java properties, JSON, and TOML. Spring Boot commonly uses YAML and `.properties` files.
+
+### 3.1 Packaged configuration files
+
+A typical Spring Boot project might contain:
+
+```
+order-service/
+├── src/
+│   └── main/
+│       └── resources/
+│           ├── application.yml
+│           ├── application-dev.yml
+│           └── application-prod.yml
+└── pom.xml
+```
+
+The files have different purposes:
+
+| File                   | Purpose                        |
+| ---------------------- | ------------------------------ |
+| `application.yml`      | Shared defaults                |
+| `application-dev.yml`  | Development-specific overrides |
+| `application-prod.yml` | Production-specific overrides  |
+
+For example:
+
+```
+# application.yml
+spring:
+  application:
+    name: order-service
+
+clients:
+  payment-service:
+    timeout: 2s
+```
+
+```
+# application-dev.yml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/orders_dev
+```
+
+```
+# application-prod.yml
+spring:
+  datasource:
+    url: jdbc:postgresql://orders-db:5432/orders
+```
+
+When the `prod` profile is active, Spring Boot loads the base configuration and the applicable production-specific configuration. The latter can override matching properties from the base file.
+
+Activate the profile with:
+
+```
+java -jar order-service.jar --spring.profiles.active=prod
+```
+
+The resulting configuration includes the common settings and the production overrides.
+
+### 3.2 External configuration files
+
+A file does not have to be packaged inside the JAR. An operator can mount or provide a separate file at deployment time.
+
+For example:
+
+```
+/opt/order-service/
+├── order-service.jar
+└── config/
+    └── application.yml
+```
+
+Launch the application with:
+
+```
+java -jar order-service.jar \
+  --spring.config.additional-location=file:/opt/order-service/config/
+```
+
+Spring Boot can use the external file alongside its normal configuration locations. The `additional-location` option adds locations rather than replacing the default locations; the exact resolution behavior follows Spring Boot's Config Data rules.
+
+This separation is useful because operators can change deployment settings without rebuilding the JAR.
+
+### 3.3 Advantages and limitations
+
+Advantages
+
+- Easy to read, review, and maintain.
+- Suitable for structured and hierarchical settings.
+- Works well with version control and code review.
+- Supports environment-specific configuration.
+- Can be mounted into containers.
+
+Limitations
+
+- The application needs access to the file.
+- Changes may require a restart or explicit refresh.
+- Different environments can drift apart.
+- Files containing credentials need strict access controls and secure storage.
+
+A particularly useful distinction is between a file stored in the application repository and a file supplied by the deployment platform. Both are configuration files, but they have different ownership and lifecycle requirements.
+
+## 4. `environment-variables`
+
+Environment variables are name-value pairs supplied to a process by its execution environment.
+
+They are especially useful in containers, CI/CD pipelines, Kubernetes deployments, and cloud platforms.
+
+### 4.1 Example
+
+Suppose your application defines:
+
+```
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/orders
+
+clients:
+  payment-service:
+    timeout: 2s
+```
+
+You can override those values when launching the application:
+
+```
+export SPRING_DATASOURCE_URL="jdbc:postgresql://orders-db:5432/orders"
+export CLIENTS_PAYMENT_SERVICE_TIMEOUT="3s"
+
+java -jar order-service.jar
+```
+
+Spring Boot's relaxed binding maps environment-variable names to property names. For the usual conversion, dots become underscores, and names are uppercase. List-index properties have additional naming rules.
+
+The effective values are now:
+
+```
+spring.datasource.url = jdbc:postgresql://orders-db:5432/orders
+clients.payment-service.timeout = 3s
+```
+
+The application code remains unchanged.
+
+### 4.2 Why environment variables are useful
+
+They allow the deployment environment to inject values without editing application files or rebuilding an artifact.
+
+For Docker Compose, for example:
+
+```
+services:
+  order-service:
+    image: example/order-service:1.0
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://orders-db:5432/orders
+      CLIENTS_PAYMENT_SERVICE_TIMEOUT: 3s
+```
+
+The Compose configuration supplies the variables to the container. It does not, by itself, make their values secret.
+
+### 4.3 Environment variables versus configuration files
+
+| Consideration            | Environment variables                                    | Configuration files                                    |
+| ------------------------ | -------------------------------------------------------- | ------------------------------------------------------ |
+| Simple scalar values     | Excellent                                                | Excellent                                              |
+| Nested structures        | Less convenient                                          | Natural in YAML                                        |
+| Deployment injection     | Common and convenient                                    | Often mounted or copied                                |
+| Large configuration sets | Can become difficult to manage                           | Usually easier to organize                             |
+| Change tracking          | Depends on deployment tooling                            | Can use file version history                           |
+| Secret handling          | Values may leak through process or diagnostic interfaces | Files may leak through permissions, backups, or images |
+
+Neither mechanism is inherently secure. Environment variables can be exposed through process inspection, diagnostic dumps, or operational tooling. Files can be exposed through overly broad permissions or accidental inclusion in artifacts.
+
+For sensitive values, use a suitable secret-management mechanism and avoid printing values in logs.
+
+### 4.4 An important lifecycle detail
+
+Environment variables are ordinarily established when a process starts. Changing a variable in your terminal or deployment configuration does not automatically change the environment of an already-running Java process.
+
+You typically need to restart or replace the process to receive the new value, unless the application has another mechanism for obtaining and applying configuration dynamically.
+
+Key idea: environment variables are a convenient way to inject deployment-specific settings, not a centralized configuration management system by themselves.
+
+## 5. `command-line-arguments`
+
+Command-line arguments are values passed to the application when launching it.
+
+They are useful for explicit overrides, local debugging, tests, and deployment automation.
+
+### 5.1 Example in Spring Boot
+
+Suppose `application.yml` contains:
+
+```
+server:
+  port: 8080
+
+clients:
+  payment-service:
+    timeout: 2s
+```
+
+Start the application with different values:
+
+```
+java -jar order-service.jar \
+  --server.port=8090 \
+  --clients.payment-service.timeout=4s
+```
+
+The command-line arguments override the corresponding file values under normal Spring Boot configuration rules.
+
+The application now uses port `8090` and a payment-service timeout of four seconds.
+
+### 5.2 When should you use command-line arguments?
+
+They are particularly useful for:
+
+- Temporarily overriding a setting during local development.
+- Running the same JAR with different ports.
+- Selecting a Spring profile.
+- Passing non-sensitive options through a deployment script.
+- Reproducing a configuration issue during debugging.
+
+For example:
+
+```
+java -jar order-service.jar \
+  --spring.profiles.active=dev \
+  --server.port=8085
+```
+
+### 5.3 Advantages and limitations
+
+Advantages
+
+- Explicit and easy to inspect at launch.
+- Convenient for temporary overrides.
+- No need to edit a configuration file.
+- Supported directly by Spring Boot.
+
+Limitations
+
+- Long command lines become difficult to maintain.
+- Values may be visible in shell history, process listings, deployment metadata, or diagnostic output.
+- Changes normally require a new application launch.
+- Large collections of arguments are harder to manage than structured configuration files.
+
+Avoid passing passwords, tokens, or private keys directly as command-line arguments. Prefer an appropriate secret store or protected credential-delivery mechanism.
+
+### 5.4 Relationship to environment variables
+
+Both mechanisms inject configuration from outside the packaged application, but they serve slightly different roles.
+
+- Environment variables are often supplied by the deployment environment.
+- Command-line arguments are often explicit launch-time overrides.
+
+In a normal Spring Boot launch, command-line properties have higher precedence than environment variables for the same property. This can be useful for temporary overrides, but it can also produce surprising results if a deployment script passes an outdated argument.
+
+## 6. `remote-configuration-services`
+
+A remote configuration service provides configuration to applications over a network.
+
+Instead of each service independently maintaining all its settings, a shared service can distribute configuration from an authoritative source.
+
+For your Spring Cloud microservices architecture, the primary example is Spring Cloud Config Server.
+
+### 6.1 Architecture
+
+Configuration repository
+
+Git · Versioned configuration
+
+Spring Cloud Config Server
+
+Retrieves and serves application configuration
+
+Product
+
+Order
+
+Payment
+
+Each client requests configuration for its application name and active profile.
+
+A possible repository layout is:
+
+```
+config-repo/
+├── application.yml
+├── product-service.yml
+├── order-service.yml
+├── order-service-dev.yml
+├── order-service-prod.yml
+└── payment-service.yml
+```
+
+Spring Cloud Config can serve common settings, service-specific settings, and profile-specific overrides. Its environment endpoints resolve configuration from the configured backend according to the server's rules.
+
+### 6.2 How does a client obtain configuration?
+
+At a high level:
+
+1. The service starts with enough local configuration to locate Config Server.
+2. The Spring configuration system requests the remote configuration.
+3. Config Server retrieves the appropriate settings from its repository or backend.
+4. Spring Boot combines the returned properties with other applicable sources.
+5. The application initializes using the resolved values.
+
+For modern Spring Boot applications, the usual approach is to use `spring.config.import`.
+
+For example:
+
+```
+spring:
+  application:
+    name: order-service
+  config:
+    import: "configserver:http://config-server:8888"
+```
+
+The Config Server client dependency must also be present. The URL shown here is illustrative; a production deployment should protect the configuration endpoint and normally use HTTPS.
+
+The `spring.config.import` mechanism is part of Spring Boot's Config Data system. Legacy bootstrap-based configuration is still relevant for specific compatibility and configuration scenarios, so the appropriate approach depends on the Spring Boot and Spring Cloud versions in use.
+
+### 6.3 What if Config Server is unavailable?
+
+Consider two cases:
+
+- Existing instance: it may continue operating with the configuration already loaded.
+- New instance: it may fail to start if required remote configuration cannot be obtained.
+
+The behavior depends on whether remote configuration is mandatory, whether an optional import is used, and which fallback settings exist.
+
+For example, an optional import can allow an application to start without remote configuration:
+
+```
+spring:
+  config:
+    import: "optional:configserver:http://config-server:8888"
+```
+
+However, this is safe only when the remaining configuration is sufficient for correct operation. Making a required production configuration optional can cause a service to start with incomplete or inappropriate settings.
+
+### 6.4 Centralized configuration does not mean automatic live updates
+
+A Git commit does not automatically guarantee that every running service adopts the new values.
+
+Configuration retrieval and configuration refresh are separate operations.
+
+Possible mechanisms include:
+
+- Application restart or rolling deployment.
+- Explicit refresh mechanisms supported by the Spring Cloud stack.
+- Event-driven refresh using Spring Cloud Bus.
+- Deployment automation that updates and replaces service instances.
+
+Not every property or Spring bean supports dynamic refresh. The behavior must be verified for the specific component being configured.
+
+### 6.5 Benefits and trade-offs
+
+| Benefits                              | Trade-offs                                           |
+| ------------------------------------- | ---------------------------------------------------- |
+| Shared source of truth                | Additional infrastructure to operate                 |
+| Versioned changes and auditability    | Clients may depend on remote availability at startup |
+| Less duplicated configuration         | Incorrect shared changes can have broad impact       |
+| Easier environment management         | Authentication and authorization are essential       |
+| Integration with deployment workflows | Refresh and rollout behavior require design          |
+
+Key idea: a remote configuration service centralizes distribution and management. It does not remove the need for local bootstrap settings, secret management, validation, availability planning, or controlled rollouts.
+
+## 7. `secret-stores`
+
+A secret store is a system designed to store, protect, and provide access to sensitive values such as passwords, tokens, API keys, and private cryptographic keys.
+
+It overlaps with configuration management, but its primary concern is protecting sensitive information throughout its lifecycle.
+
+### 7.1 Why not store secrets with ordinary configuration?
+
+Imagine this configuration is committed to a Git repository:
+
+```
+spring:
+  datasource:
+    url: jdbc:postgresql://orders-db:5432/orders
+    username: orders_app
+    password: "production-password-here"
+```
+
+Even if the repository is private, the password can spread into Git history, developer clones, backups, CI logs, and other locations.
+
+A safer design separates the secret from the ordinary settings:
+
+```
+spring:
+  datasource:
+    url: jdbc:postgresql://orders-db:5432/orders
+    username: orders_app
+    password: ${ORDERS_DB_PASSWORD}
+```
+
+The application obtains `ORDERS_DB_PASSWORD` through a protected delivery mechanism. The placeholder is not the secret itself.
+
+### 7.2 How a secret store fits into the architecture
+
+Config Server
+
+Timeouts, feature flags, service settings
+
+Secret store
+
+Credentials, tokens, private keys
+
+Order Service
+
+Receives ordinary settings and authorized access to required secrets
+
+The service can obtain ordinary settings from Config Server and retrieve its database credential from a secret-management mechanism.
+
+The secret does not necessarily have to pass through Config Server. Keeping the two paths separate can reduce the number of components that have access to sensitive data.
+
+### 7.3 Common secret-store options
+
+| Option                         | Typical role                                                                                 |
+| ------------------------------ | -------------------------------------------------------------------------------------------- |
+| HashiCorp Vault                | Central secret management, access policies, dynamic credentials, and secret rotation         |
+| Cloud secret manager           | Managed storage and access control for application secrets                                   |
+| Kubernetes Secrets             | Deliver secret values to Kubernetes workloads, subject to appropriate security configuration |
+| External secrets integration   | Synchronize secrets from an external manager into a platform such as Kubernetes              |
+| Hardware security module (HSM) | Protect cryptographic keys and perform supported cryptographic operations                    |
+
+Kubernetes Secrets deserve special attention: the resource type alone does not guarantee strong confidentiality. Access permissions, encryption at rest, cluster security, and restrictions on workload access remain important.
+
+### 7.4 Secret rotation
+
+Suppose your order service uses a database password stored in Vault.
+
+```
+Secret manager
+     |
+     | 1. Provide authorized credential
+     v
+Order service
+     |
+     | 2. Connect using credential
+     v
+Orders database
+```
+
+When the password changes, the application must obtain and apply the new credential. Depending on the database and connection pool, that may require rebuilding connections or restarting the application.
+
+Some secret managers can issue dynamic, short-lived database credentials. These reduce reliance on long-lived passwords, but the application must support renewal, expiration, and connection lifecycle handling.
+
+### 7.5 Secret-management practices
+
+- Apply least-privilege access to each service.
+- Use TLS to protect secret delivery in transit.
+- Protect stored secrets with appropriate encryption and access controls.
+- Avoid exposing secret values in logs, exceptions, metrics, or diagnostics.
+- Rotate credentials and revoke compromised values.
+- Audit access and changes.
+- Prefer short-lived credentials where practical.
+- Ensure CI/CD pipelines do not expose secrets in build output or deployment logs.
+
+Key idea: a secret store is not just another file location. It provides specialized controls for sensitive values, including authorization, auditing, rotation, and sometimes dynamic credential issuance.
+
+## 8. How the configuration sources work together
+
+Here is a practical arrangement for your Spring Cloud microservices project.
+
+Application defaults
+
+Safe baseline values packaged with the JAR
+
+Configuration files
+
+Shared and profile-specific settings
+
+Remote configuration service
+
+Centrally managed settings and versioned changes
+
+Environment variables and CLI
+
+Deployment-specific values and explicit overrides
+
+Secret store
+
+Protected credentials and cryptographic material
+
+Conceptual view: these sources are not necessarily processed in this exact order. Spring Boot resolves its property sources according to the applicable precedence rules, while secret delivery may follow a separate path.
+
+### Recommended division of responsibilities
+
+| Requirement                         | Preferred source                                   |
+| ----------------------------------- | -------------------------------------------------- |
+| Safe defaults                       | `application.yml`                                  |
+| Environment-specific overrides      | Profile-specific files or deployment configuration |
+| Container-specific settings         | Environment variables or mounted files             |
+| Temporary launch override           | Command-line arguments                             |
+| Shared microservice settings        | Spring Cloud Config Server or an equivalent system |
+| Database passwords and API keys     | Secret manager or protected platform secret        |
+| Private signing and encryption keys | Appropriate cryptographic key-management system    |
+
+One final distinction: these are not six mutually exclusive alternatives. A production service can use all six categories, each for the purpose it handles best.
+
+For your `software-engineering/design-architecture/distributed-systems` documentation, I would keep `configuration-sources` as the parent topic, with these six pages underneath it. Then cover Spring Cloud Config Server, configuration precedence, secret integration, and refresh behavior in their own implementation-focused sections.

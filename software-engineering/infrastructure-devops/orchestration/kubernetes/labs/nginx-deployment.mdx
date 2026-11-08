@@ -1,0 +1,451 @@
+Let’s see how we can do the following:
+- Deploy a simple web server based on NGINX in our Kubernetes cluster
+- Apply some changes to the Deployment:
+- Change the current state by deleting the Pod and verify that the ReplicaSet creates a new one
+    - Change the desired state by scaling the web server to three Pods and verify that
+    the ReplicaSet fills the gap by starting up two new Pods
+    - Route external traffic to the web server using a Service with a node port
+
+## Creating a Kubernetes cluster
+To create a Kubernetes cluster using minikube, we need to run a few commands:
+- Unset the `KUBECONFIG` environment variable to ensure that the kubectl context is created
+in the default config file, `~/.kube/config`.
+- Create the cluster using the `minikube start` command, where we can also specify what
+version of Kubernetes to use and the amount of hardware resources we want to allocate
+to the cluster:
+- To be able to complete the examples in the remaining chapters of this book, allocate 10
+GB of memory (that is, 10,240 MB) to the cluster. The samples should also work if only 6
+GB (6,144 MB) is allocated to the minikube cluster, albeit more slowly.
+- Allocate the number of CPU cores and disk space you find suitable; 4 CPU cores and 30
+GB of disk space are used in the following example.
+{/* - Specify what version of Kubernetes will be used. In this book, we will use v1.32.0. */}
+- Specify that we will use the Docker driver as described previously.
+- Specify the required port mappings. Ports `8080` and `8443` will be used by the Ingress controller, and ports `30080` and `30443` will be used by Services of the NodePort type.
+- Specify the minikube profile to be used for the coming minikube commands. We will use
+handson-spring-boot-cloud as the profile name.
+- After the cluster has been created, we will use the add-on manager in minikube to enable
+an Ingress controller and a metrics server that comes out of the box with minikube. The
+Ingress controller and the metrics server will be used in the next chapters.
+
+Run the following commands to create the Kubernetes cluster:
+```sh
+unset KUBECONFIG
+
+minikube start \
+--profile=labs-nginx-deployment \
+--memory=10240 \
+--cpus=4 \
+--disk-size=30g \
+--driver=docker \
+--ports=8080:80 --ports=8443:443 \
+--ports=30080:30080 --ports=30443:30443
+
+minikube profile labs-nginx-deployment
+minikube addons enable ingress
+minikube addons enable metrics-server
+```
+After the preceding commands are complete, you should be able to communicate with the cluster.
+Try the `kubectl get nodes` command. It should respond with something that looks similar to
+the following:
+```
+NAME                    STATUS   ROLES           AGE   VERSION
+labs-nginx-deployment   Ready    control-plane   23m   v1.35.1
+```
+Once created, the cluster will initialize itself in the background, starting up a number of system
+Pods in the kube-system and the ingress-nginx namespace. We can monitor its progress by
+issuing the following command:
+```sh
+kubectl get pods --all-namespaces
+```
+Once the startup is complete, the preceding command should report the status for all Pods as
+`Running` and the `READY` count should be `1/1`, meaning that a single container in each Pod is up
+and running:
+```
+NAMESPACE       NAME                                            READY   STATUS      RESTARTS      AGE
+ingress-nginx   ingress-nginx-admission-create-8qqck            0/1     Completed   0             23m
+ingress-nginx   ingress-nginx-admission-patch-d8lpl             0/1     Completed   1             23m
+ingress-nginx   ingress-nginx-controller-596f8778bc-wkgcm       1/1     Running     0             23m
+kube-system     coredns-7d764666f9-lfwj7                        1/1     Running     0             23m
+kube-system     etcd-labs-nginx-deployment                      1/1     Running     0             23m
+kube-system     kube-apiserver-labs-nginx-deployment            1/1     Running     0             23m
+kube-system     kube-controller-manager-labs-nginx-deployment   1/1     Running     0             23m
+kube-system     kube-proxy-s7hlg                                1/1     Running     0             23m
+kube-system     kube-scheduler-labs-nginx-deployment            1/1     Running     0             23m
+kube-system     metrics-server-9d74bb658-642gq                  0/1     Running     0             52s
+kube-system     storage-provisioner                             1/1     Running     1 (23m ago)   23m
+```
+Note that two Pods are reported as Completed, and not Running. They are Pods created by Job
+objects, used to execute a container a fixed number of times such as a batch job. Run the `kubectl get jobs --namespace=ingress-nginx` command to reveal the two Job objects.
+```NAME                             STATUS     COMPLETIONS   DURATION   AGE
+ingress-nginx-admission-create   Complete   1/1           13s        24m
+ingress-nginx-admission-patch    Complete   1/1           14s        24m
+```
+## Create a namespace
+First, create a namespace, development, and update the kubectl context to use this namespace by default:
+```sh
+kubectl create namespace development
+kubectl config set-context $(kubectl config current-context) --namespace=development
+```
+
+## Create Kubernetes manifests
+We can now create a Deployment of NGINX in the namespace using the kubernetes/labs-nginx-deployment/nginx-deployment.yaml file. This file looks as follows:
+```yml
+# Specifies the Kubernetes API group and version used to create the Deployment resource.
+apiVersion: apps/v1
+
+# Declares the type of Kubernetes resource we want to create.
+kind: Deployment
+
+# Contains identifying information about the Deployment.
+metadata:
+  # Assigns the name "nginx-deploy" to this Deployment.
+  name: nginx-deploy
+
+# Defines the desired state of the Deployment.
+spec:
+  # Specifies that Kubernetes should maintain one replica (Pod) of the application.
+  replicas: 1
+
+  # Defines which Pods this Deployment manages.
+  selector:
+    # Selects Pods whose labels match app: nginx-app.
+    matchLabels:
+      # The Deployment manages Pods with this label.
+      app: nginx-app
+
+  # Defines the template Kubernetes uses to create new Pods.
+  template:
+    # Contains metadata for the Pods created by this Deployment.
+    metadata:
+      # Defines the labels that will be assigned to every created Pod.
+      labels:
+        # This label must match the Deployment's selector above.
+        app: nginx-app
+
+    # Defines the specification of the Pod.
+    spec:
+      # Lists the containers that will run inside the Pod.
+      containers:
+        # Begins the definition of the first container.
+        - name: nginx-container
+          # Specifies the container image to download and run.
+          # "latest" refers to the latest published Nginx image tag.
+          image: nginx:latest
+
+          # Declares the network ports exposed by the container.
+          ports:
+            # Begins the definition of a container port.
+            - containerPort: 80
+              # Nginx listens for HTTP traffic on port 80 inside the container.
+```
+Let’s explain this source code in more detail:
+- The kind and apiVersion attributes are used to specify that we are declaring a Deployment object.
+- The metadata section is used to describe the Deployment object. For example, we give it
+the name nginx-deploy.
+
+Next comes a spec section that defines our desired state for the Deployment object:
+- replicas: 1 specifies we want to have one Pod up and running.
+- The selector section specifies how the Deployment will find the Pods it manages. In this case, the Deployment will look for Pods that have the app label set to nginx-app.
+- The template section is used to specify how Pods will be created.
+- The metadata section specifies the label, app: nginx-app, which is used to identify the Pods, thereby matching the selector.
+- The spec section specifies details for the creation of the single container in the Pod, that is, name, image, and what ports it uses.
+
+## Deploy the application
+Create the Deployment with the following commands:
+```sh
+cd kb/software-engineering/infrastructure-devops/orchestration/kubernetes/labs/nginx-deployment/nginx-deployment.yaml
+kubectl apply -f nginx-deployment.yaml
+```
+
+Let’s see what we got with the `kubectl get all` command:
+```sh
+kubectl get all -n development
+```
+
+```
+NAME                                READY   STATUS    RESTARTS   AGE
+pod/nginx-deploy-6c9468d86c-t2wn4   1/1     Running   0          99s
+
+NAME                           READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/nginx-deploy   1/1     1            1           99s
+
+NAME                                      DESIRED   CURRENT   READY   AGE
+replicaset.apps/nginx-deploy-6c9468d86c   1         1         1       99s
+```
+As expected, we got a Deployment, ReplicaSet, and Pod object. After a short while, which mainly
+depends on the time it takes to download the NGINX Docker image, the Pod will be up and running,
+reported as `1/1` in the `READY` column, meaning that the desired state is equal to the current state!
+
+## Change the current state
+Now, we will change the current state by deleting the Pod. 
+
+Before deleting the Pod, run this command in another terminal:
+```sh
+kubectl get pod --watch
+```
+The use of the `--watch` option makes the command hang, waiting for state changes of Pods in the current namespace. 
+
+Delete the Pod using the following command:
+```sh
+kubectl delete pod --selector app=nginx-app
+```
+Since the Pod has a random name (nginx-deploy-6c9468d86c-t2wn4 in the preceding example),
+the Pod is selected based on the app label, which is set to `nginx-app` in the Pod.
+
+Note how kubectl get pod `--watch` reports how the current Pod is terminated and, at the same
+time, a new Pod is started up. It is the ReplicaSet that detects the difference between the desired
+and current state and almost immediately starts up a new Pod to compensate for the deviation.
+The reported events should look like the following screenshot:
+```
+NAME                            READY   STATUS    RESTARTS   AGE
+nginx-deploy-6c9468d86c-t2wn4   1/1     Running   0          5m32s
+nginx-deploy-6c9468d86c-t2wn4   1/1     Terminating   0          5m42s
+nginx-deploy-6c9468d86c-t2wn4   1/1     Terminating   0          5m42s
+nginx-deploy-6c9468d86c-q5jst   0/1     Pending       0          0s
+nginx-deploy-6c9468d86c-q5jst   0/1     Pending       0          0s
+nginx-deploy-6c9468d86c-q5jst   0/1     ContainerCreating   0          0s
+nginx-deploy-6c9468d86c-t2wn4   0/1     Completed           0          5m43s
+nginx-deploy-6c9468d86c-t2wn4   0/1     Completed           0          5m43s
+nginx-deploy-6c9468d86c-t2wn4   0/1     Completed           0          5m43s
+nginx-deploy-6c9468d86c-q5jst   1/1     Running             0          3s
+```
+In the screenshot, we can see that the Pod with a name ending with `t2wn4` was stopped by the
+delete command and that the ReplicaSet immediately started up a new Pod with a name ending
+with `q5jst`.
+
+Change the desired state by setting the number of desired Pods to 2 replicas in the `nginx-deployment.yaml` Deployment file. 
+
+Apply the change in the desired state by simply repeating the kubectl apply command, as we mentioned previously.
+
+```sh
+kubectl apply -f nginx-deployment.yaml
+```
+
+Again, note that the kubectl get pod `--watch` command reports new Pods being launched by
+the ReplicaSet to get the current state equivalent to the new desired state – that is, 2 Pods.
+After a few seconds, two NGINX Pods will be reported as up and running. 
+```
+NAME                            READY   STATUS    RESTARTS   AGE
+nginx-deploy-6c9468d86c-q5jst   1/1     Running   0          4m37s
+nginx-deploy-6c9468d86c-hlhs9   0/1     Pending   0          0s
+nginx-deploy-6c9468d86c-hlhs9   0/1     Pending   0          0s
+nginx-deploy-6c9468d86c-hlhs9   0/1     ContainerCreating   0          0s
+nginx-deploy-6c9468d86c-hlhs9   1/1     Running             0          3s
+```
+Stop the command with Ctrl + C.
+
+Run the kubectl get all command and expect a response that looks similar to the following:
+```sh
+kubectl get all -n development
+```
+```
+NAME                                READY   STATUS    RESTARTS   AGE
+pod/nginx-deploy-6c9468d86c-hlhs9   1/1     Running   0          2m17s
+pod/nginx-deploy-6c9468d86c-q5jst   1/1     Running   0          7m3s
+
+NAME                           READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/nginx-deploy   2/2     2            2           12m
+
+NAME                                      DESIRED   CURRENT   READY   AGE
+replicaset.apps/nginx-deploy-6c9468d86c   2         2         2       12m
+```
+Note the 2 Pods and that the Deployment object reports 2/2. This is interpreted as 2 ready
+and 2 desired Pods, meaning that all desired Pods are ready to be used.
+
+## Access the application
+To enable external communication with the web servers, create a Service using the `nginx-service.yaml` file. It looks like the following:
+```yml
+# Specifies the Kubernetes API group and version used to create the Service resource.
+apiVersion: v1
+
+# Declares the type of Kubernetes resource we want to create.
+kind: Service
+
+# Contains identifying information about the Service.
+metadata:
+  # Assigns the name "nginx-service" to this Service.
+  name: nginx-service
+
+# Defines the desired configuration of the Service.
+spec:
+  # Specifies the Service type.
+  # NodePort exposes the Service on a static port on each Kubernetes node.
+  type: NodePort
+
+  # Defines which Pods receive traffic from this Service.
+  selector:
+    # Selects Pods with the label app: nginx-app.
+    # This matches the label defined in the nginx Deployment.
+    app: nginx-app
+
+  # Defines the network ports used by the Service.
+  ports:
+    # Begins the definition of a Service port.
+    - # The port on which the target Pod/container receives traffic.
+      # Kubernetes forwards traffic to port 80 inside the selected Pod.
+      targetPort: 80
+
+      # The port exposed internally by the Service within the cluster.
+      # Other Pods can access the Service using nginx-service:80.
+      port: 80
+
+      # The port exposed on each Kubernetes node.
+      # You can access the Nginx Service using:
+      # http://<NodeIP>:30080
+      nodePort: 30080
+```
+The `kind` and `apiVersion` attributes are used to specify that we are declaring a Service object.
+
+The metadata section is used to describe the Service object – for example, to give it a name:
+`nginx-service`.
+
+Next comes a spec section, which defines the desired state of the Service object:
+- With the `type` field, we specify that we want `NodePort` – that is, a Service that is accessible
+externally on a dedicated port on each node in the cluster. This means that an external
+caller can reach the Pods behind this Service using this port on any of the nodes in the
+cluster, independent of which nodes the Pods actually run on.
+- The `selector` is used by the Service to find available Pods, which, in our case, are Pods
+labeled with `app: nginx-app`.
+- Finally, ports are declared as follows:
+    - `port: 80` specifies which port the Service will be accessible on – that is, internally
+    in the cluster.
+    - `targetPort: 80` specifies the port in the Pod where the requests will be forwarded
+    to.
+    - `nodePort: 30080` specifies which port the Service will be externally accessible
+    on using any of the nodes in the cluster. By default, a node port must be in the
+    range of `30000` to `32767`.
+
+    :::note
+    This port range is used to minimize the risk of colliding with other ports in use. In
+    a production system, a load balancer is typically placed in front of the Kubernetes
+    cluster, shielding the external users both from the knowledge of these ports and the
+    IP numbers of the nodes in the Kubernetes cluster.
+    :::
+
+Create the Service with the following command:
+```sh
+kubectl apply -f nginx-service.yaml
+```
+To see what we get, run the `kubectl get svc` command. Expect a response like the following:
+```
+NAME            TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+nginx-service   NodePort   10.107.173.72   <none>        80:30080/TCP   25s
+```
+
+:::info
+
+kubectl supports short names for many of the API objects as an alternative to their
+full name. For example, svc was used in the preceding command instead of the full
+name, service. Run the kubectl api-resources command to see all available
+short names.
+
+:::
+
+```sh
+# Display Services.
+kubectl get services
+
+# Display the Service details.
+kubectl describe service nginx-service
+
+# Display the Pods selected by the Service.
+kubectl get pods -l app=nginx-app
+```
+
+Note for Minikube: You can access the Service using:
+```sh
+minikube service nginx-service
+```
+
+This opens the Service using the appropriate Minikube access URL.
+
+To access the web server through the Service’s node port, we need to know the IP address or
+hostname of the single node in our cluster. When using the Docker driver, the hostname is always `localhost`.
+The node port, `30080`, is forwarded from the Docker engine by the –ports option in the minikube
+start command. This means that
+the Service can be reached at the address `localhost:30080`.
+
+With this information, we can direct a web browser on macOS and Windows to the deployed
+web server using the address http://localhost:30080. Expect a response such as the following:
+```
+Welcome to nginx!
+If you see this page, nginx is successfully installed and working. Further configuration is required for the web server, reverse proxy, API gateway, load balancer, content cache, or other features.
+
+For online documentation and support please refer to nginx.org.
+To engage with the community please visit community.nginx.org.
+For enterprise grade support, professional services, additional security features and capabilities please refer to f5.com/nginx.
+
+Thank you for using nginx.
+```
+
+Great! But what about the internal cluster IP address and port?
+
+One way to verify that the web server is also reachable internally in the cluster is to launch a
+small Pod that we can use to run curl from the inside. The curl command will use the internal
+cluster IP address and port. We don’t need to use the internal IP address; instead, we can use a
+DNS name that is created for the Service in the internal DNS server. The short name of the DNS
+name is the same as the name of the Service – that is, `nginx-service`.
+
+Run the following command:
+```sh
+kubectl run -i --rm --restart=Never curl-client --image=curlimages/curl --command -- curl -s 'http://nginx-service:80'
+```
+The command looks a bit complex, but it will do the following:
+1. Create a Pod with a small container based on the Docker image, curlimages/curl, which
+contains the curl command.
+2. Run the `curl -s 'http://nginx-service:80'` command inside the container and redirect
+the output to the terminal using the -i option.
+3. Delete the Pod using the --rm option.
+
+Expect the output from the preceding command to contain the following information (we are
+only showing parts of the response here):
+```
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+
+....
+
+</body>
+</html>
+pod "curl-client" deleted from development namespace
+```
+This means that the web server is also accessible internally in the cluster!
+
+#### 12. Clean up
+
+Delete the lab's Kubernetes resources:
+
+```sh
+kubectl delete namespace development
+```
+
+Stop Minikube but preserve its cluster:
+
+```sh
+minikube stop -p labs-nginx-deployment
+```
+
+Or delete the entire profile and cluster:
+
+```sh
+minikube delete -p labs-nginx-deployment
+```
+
+Deleting the profile removes its cluster resources and configuration. It is not the same as merely stopping the cluster.
+
+
+## Summary
+
+We tried out Kubernetes by creating a local single-node cluster using minikube. The minikube
+cluster runs as a Docker container using the Docker driver. To make ports accessible outside of
+the Docker engine, we can use the `--ports` option on the minikube start command. 
+
+Using the
+Kubernetes CLI tool known as **kubectl**, we deployed a simple web server based on **NGINX**. We
+tried out resilience capabilities by deleting the web server, and we observed it being recreated
+automatically. We learned how to manually scale it by requesting that 2 Pods run on the web
+server. We created a Service with a node port and verified that we could access it both externally
+and from the inside of the cluster.

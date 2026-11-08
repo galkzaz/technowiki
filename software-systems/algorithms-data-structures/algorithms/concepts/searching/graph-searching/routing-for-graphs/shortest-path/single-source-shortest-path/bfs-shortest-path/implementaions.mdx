@@ -1,0 +1,1500 @@
+{/* ## BFS Single-Source Shortest Path (SSSP) Implementation in C */}
+
+## C
+
+Let's implement BFS for the Single-Source Shortest Path (SSSP) problem using C.
+
+The implementation will:
+
+1. Represent the graph using an adjacency list.
+2. Use an array-based queue.
+3. Calculate the shortest distance from the source to every reachable vertex.
+4. Maintain a predecessor array to reconstruct shortest paths.
+5. Handle disconnected vertices.
+6. Print the shortest distance and actual path to every reachable vertex.
+
+We'll use an unweighted, undirected graph. Every edge has an equal cost of 1.
+
+### Example graph
+
+Consider this graph:
+
+```
+             A
+           /   \
+          B     C
+         / \     \
+        D   E     F
+             \
+              G
+```
+
+The edges are:
+
+```
+A -- B
+A -- C
+B -- D
+B -- E
+C -- F
+E -- G
+```
+
+Starting from `A`, we expect:
+
+| Vertex | Shortest distance | Shortest path |
+| ------ | ----------------- | ------------- |
+| A      | 0                 | A             |
+| B      | 1                 | A → B         |
+| C      | 1                 | A → C         |
+| D      | 2                 | A → B → D     |
+| E      | 2                 | A → B → E     |
+| F      | 2                 | A → C → F     |
+| G      | 3                 | A → B → E → G |
+
+### Complete C implementation
+
+```c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
+#define MAX_VERTICES 100
+#define INF -1
+
+// -------------------------------------
+// Graph representation: Adjacency List
+// -------------------------------------
+
+typedef struct Node {
+    int vertex;
+    struct Node* next;
+} Node;
+
+typedef struct {
+    int numVertices;
+    Node* adjLists[MAX_VERTICES];
+} Graph;
+
+// Create a new adjacency-list node
+Node* createNode(int vertex) {
+    Node* newNode = malloc(sizeof(Node));
+
+    if (newNode == NULL) {
+        perror("Memory allocation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    newNode->vertex = vertex;
+    newNode->next = NULL;
+
+    return newNode;
+}
+
+// Create a graph
+Graph* createGraph(int vertices) {
+    if (vertices <= 0 || vertices > MAX_VERTICES) {
+        fprintf(stderr, "Invalid number of vertices\n");
+        exit(EXIT_FAILURE);
+    }
+
+    Graph* graph = malloc(sizeof(Graph));
+
+    if (graph == NULL) {
+        perror("Memory allocation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    graph->numVertices = vertices;
+
+    for (int i = 0; i < vertices; i++) {
+        graph->adjLists[i] = NULL;
+    }
+
+    return graph;
+}
+
+// Add an undirected edge
+void addEdge(Graph* graph, int src, int dest) {
+
+    // src -> dest
+    Node* newNode = createNode(dest);
+    newNode->next = graph->adjLists[src];
+    graph->adjLists[src] = newNode;
+
+    // dest -> src
+    newNode = createNode(src);
+    newNode->next = graph->adjLists[dest];
+    graph->adjLists[dest] = newNode;
+}
+
+// -------------------------------------
+// Queue implementation using an array
+// -------------------------------------
+
+typedef struct {
+    int items[MAX_VERTICES];
+    int front;
+    int rear;
+} Queue;
+
+void initializeQueue(Queue* q) {
+    q->front = 0;
+    q->rear = -1;
+}
+
+bool isEmpty(Queue* q) {
+    return q->rear < q->front;
+}
+
+void enqueue(Queue* q, int value) {
+    if (q->rear == MAX_VERTICES - 1) {
+        fprintf(stderr, "Queue overflow\n");
+        exit(EXIT_FAILURE);
+    }
+
+    q->items[++q->rear] = value;
+}
+
+int dequeue(Queue* q) {
+    if (isEmpty(q)) {
+        fprintf(stderr, "Queue is empty\n");
+        exit(EXIT_FAILURE);
+    }
+
+    return q->items[q->front++];
+}
+
+// -------------------------------------
+// Shortest-path reconstruction
+// -------------------------------------
+
+void printPath(int pred[], int source, int target) {
+
+    int path[MAX_VERTICES];
+    int length = 0;
+    int current = target;
+
+    // Follow predecessors from target to source
+    while (current != -1 && length < MAX_VERTICES) {
+
+        path[length++] = current;
+
+        if (current == source) {
+            break;
+        }
+
+        current = pred[current];
+    }
+
+    // Target is unreachable or chain is invalid
+    if (length == 0 || path[length - 1] != source) {
+        printf("No path");
+        return;
+    }
+
+    // Print path in source-to-target order
+    for (int i = length - 1; i >= 0; i--) {
+        printf("%c", 'A' + path[i]);
+
+        if (i > 0) {
+            printf(" -> ");
+        }
+    }
+}
+
+// -------------------------------------
+// BFS Single-Source Shortest Path
+// -------------------------------------
+
+void bfsSSSP(Graph* graph, int source) {
+
+    int V = graph->numVertices;
+
+    bool visited[MAX_VERTICES];
+    int dist[MAX_VERTICES];
+    int pred[MAX_VERTICES];
+
+    Queue q;
+    initializeQueue(&q);
+
+    // Step 1: Initialize arrays
+    for (int i = 0; i < V; i++) {
+        visited[i] = false;
+        dist[i] = INF;
+        pred[i] = -1;
+    }
+
+    // Step 2: Initialize the source
+    visited[source] = true;
+    dist[source] = 0;
+
+    enqueue(&q, source);
+
+    // Step 3: BFS traversal
+    while (!isEmpty(&q)) {
+
+        int u = dequeue(&q);
+
+        printf("Processing vertex: %c\n", 'A' + u);
+
+        Node* temp = graph->adjLists[u];
+
+        while (temp != NULL) {
+
+            int v = temp->vertex;
+
+            // Discover an unvisited neighbor
+            if (!visited[v]) {
+
+                // Mark as discovered
+                visited[v] = true;
+
+                // Calculate shortest distance
+                dist[v] = dist[u] + 1;
+
+                // Record predecessor
+                pred[v] = u;
+
+                // Add vertex to queue
+                enqueue(&q, v);
+            }
+
+            temp = temp->next;
+        }
+    }
+
+    // Step 4: Print shortest-path results
+    printf("\nShortest paths from %c:\n", 'A' + source);
+
+    for (int v = 0; v < V; v++) {
+
+        printf("%c: ", 'A' + v);
+
+        if (dist[v] == INF) {
+            printf("Unreachable\n");
+        } else {
+            printf("Distance = %d, Path = ", dist[v]);
+
+            printPath(pred, source, v);
+
+            printf("\n");
+        }
+    }
+}
+
+// -------------------------------------
+// Free graph memory
+// -------------------------------------
+
+void freeGraph(Graph* graph) {
+
+    for (int i = 0; i < graph->numVertices; i++) {
+
+        Node* current = graph->adjLists[i];
+
+        while (current != NULL) {
+            Node* temp = current;
+            current = current->next;
+            free(temp);
+        }
+    }
+
+    free(graph);
+}
+
+// -------------------------------------
+// Main
+// -------------------------------------
+
+int main(void) {
+
+    // Seven vertices: A, B, C, D, E, F, G
+    Graph* graph = createGraph(7);
+
+    // Build the undirected graph
+    addEdge(graph, 0, 1);  // A -- B
+    addEdge(graph, 0, 2);  // A -- C
+    addEdge(graph, 1, 3);  // B -- D
+    addEdge(graph, 1, 4);  // B -- E
+    addEdge(graph, 2, 5);  // C -- F
+    addEdge(graph, 4, 6);  // E -- G
+
+    // Run BFS starting from A (vertex 0)
+    bfsSSSP(graph, 0);
+
+    // Release allocated memory
+    freeGraph(graph);
+
+    return 0;
+}
+
+```
+
+### 3. Understanding the implementation
+
+Let's examine the implementation by its main components.
+
+#### 3.1 Graph representation: Adjacency list
+
+We use an adjacency list to represent the graph.
+
+```
+typedef struct Node {
+    int vertex;
+    struct Node* next;
+} Node;
+
+typedef struct {
+    int numVertices;
+    Node* adjLists[MAX_VERTICES];
+} Graph;
+```
+
+Each vertex has a linked list containing its neighbors.
+
+For our example, the adjacency list is:
+
+```
+A: C → B
+B: E → D → A
+C: F → A
+D: B
+E: G → B
+F: C
+G: E
+```
+
+Why is the order different from the order in which we added edges?
+
+Because `addEdge()` inserts each new node at the beginning of the linked list:
+
+```
+newNode->next = graph->adjLists[src];
+graph->adjLists[src] = newNode;
+```
+
+This is an $O(1)$ insertion operation.
+
+The order of neighbors affects the order in which BFS discovers vertices, but it does not affect their shortest distances.
+
+#### 3.2 Queue implementation
+
+BFS requires a FIFO queue.
+
+```
+typedef struct {
+    int items[MAX_VERTICES];
+    int front;
+    int rear;
+} Queue;
+```
+
+We maintain two indexes:
+
+- `front`: position of the next element to remove.
+- `rear`: position of the last inserted element.
+
+Enqueue:
+
+```
+void enqueue(Queue* q, int value) {
+    q->items[++q->rear] = value;
+}
+```
+
+Dequeue:
+
+```
+int dequeue(Queue* q) {
+    return q->items[q->front++];
+}
+```
+
+For example:
+
+```
+ENQUEUE(A)
+ENQUEUE(B)
+ENQUEUE(C)
+
+Queue:
+FRONT → [A, B, C] ← REAR
+```
+
+After removing A:
+
+```
+Queue:
+        FRONT → [B, C] ← REAR
+```
+
+Implementation note: This is a simple linear array queue. It is sufficient here because each vertex is enqueued at most once, so the total number of enqueues cannot exceed `MAX_VERTICES`. A circular queue is preferable for a reusable general-purpose queue because it reuses consumed array positions.
+
+#### Distance, predecessor, and visited arrays
+
+Inside `bfsSSSP()`:
+
+```
+bool visited[MAX_VERTICES];
+int dist[MAX_VERTICES];
+int pred[MAX_VERTICES];
+```
+
+These arrays have different responsibilities.
+
+| Array       | Purpose                                                   | Example             |
+| ----------- | --------------------------------------------------------- | ------------------- |
+| `visited[]` | Prevents discovering a vertex more than once              | `visited[B] = true` |
+| `dist[]`    | Stores shortest distance from source                      | `dist[B] = 1`       |
+| `pred[]`    | Records the previous vertex on the selected shortest path | `pred[B] = A`       |
+
+We initialize them:
+
+```
+for (int i = 0; i < V; i++) {
+    visited[i] = false;
+    dist[i] = INF;
+    pred[i] = -1;
+}
+```
+
+Here, `INF` is defined as `-1` because valid BFS distances cannot be negative.
+
+Then we initialize the source:
+
+```
+visited[source] = true;
+dist[source] = 0;
+
+enqueue(&q, source);
+```
+
+Why mark the source visited immediately?
+
+Because we don't want another vertex to discover and enqueue the source again, particularly in an undirected graph where edges can be traversed in both directions.
+
+#### 3.4 The BFS traversal loop
+
+This is the central part of the algorithm:
+
+```
+while (!isEmpty(&q)) {
+
+    int u = dequeue(&q);
+
+    Node* temp = graph->adjLists[u];
+
+    while (temp != NULL) {
+
+        int v = temp->vertex;
+
+        if (!visited[v]) {
+
+            visited[v] = true;
+            dist[v] = dist[u] + 1;
+            pred[v] = u;
+
+            enqueue(&q, v);
+        }
+
+        temp = temp->next;
+    }
+}
+```
+
+Let's examine it.
+
+First: Dequeue the next vertex
+
+```
+int u = dequeue(&q);
+```
+
+The queue determines which vertex we process next.
+
+Second: Examine its neighbors
+
+```
+Node* temp = graph->adjLists[u];
+
+while (temp != NULL) {
+```
+
+We traverse the linked list of neighbors.
+
+Third: Check whether the neighbor has been discovered
+
+```
+if (!visited[v]) {
+```
+
+We only process undiscovered vertices.
+
+Fourth: Update shortest-path information
+
+```
+visited[v] = true;
+dist[v] = dist[u] + 1;
+pred[v] = u;
+```
+
+This is where BFS becomes a shortest-path algorithm rather than just a traversal.
+
+For example, if we discover `E` while processing `B`:
+
+```
+dist[B] = 1
+
+dist[E] = dist[B] + 1
+        = 2
+
+pred[E] = B
+```
+
+Fifth: Enqueue the discovered vertex
+
+```
+enqueue(&q, v);
+```
+
+It will be processed later.
+
+Notice that we mark the vertex as visited before enqueueing it. This guarantees that each vertex enters the queue at most once.
+
+### 4. Step-by-step execution
+
+Let's trace the actual C implementation.
+
+Because neighbors are inserted at the beginning of adjacency lists, the traversal order is:
+
+```
+A → C → B → F → E → D → G
+```
+
+The queue evolves as follows:
+
+| Operation  | Processed vertex | Queue (front to rear) | Newly discovered |
+| ---------- | ---------------- | --------------------- | ---------------- |
+| Initialize | —                | A                     | A                |
+| Dequeue A  | A                | C, B                  | C, B             |
+| Dequeue C  | C                | B, F                  | F                |
+| Dequeue B  | B                | F, E, D               | E, D             |
+| Dequeue F  | F                | E, D                  | —                |
+| Dequeue E  | E                | D, G                  | G                |
+| Dequeue D  | D                | G                     | —                |
+| Dequeue G  | G                | Empty                 | —                |
+
+The final arrays are:
+
+| Vertex | `visited[]` | `dist[]` | `pred[]` |
+| ------ | ----------- | -------- | -------- |
+| A      | true        | 0        | -1       |
+| B      | true        | 1        | A        |
+| C      | true        | 1        | A        |
+| D      | true        | 2        | B        |
+| E      | true        | 2        | B        |
+| F      | true        | 2        | C        |
+| G      | true        | 3        | E        |
+
+Notice that the traversal order differs from the order of the earlier walkthrough, but the shortest distances and paths are identical.
+
+### 5. Path reconstruction
+
+After BFS finishes, we have the predecessor array.
+
+For example:
+
+```
+pred[G] = E
+pred[E] = B
+pred[B] = A
+pred[A] = -1
+```
+
+We want to reconstruct the path from `A` to `G`.
+
+The function `printPath()` does this:
+
+```
+void printPath(int pred[], int source, int target) {
+
+    int path[MAX_VERTICES];
+    int length = 0;
+    int current = target;
+
+    while (current != -1 && length < MAX_VERTICES) {
+
+        path[length++] = current;
+
+        if (current == source) {
+            break;
+        }
+
+        current = pred[current];
+    }
+
+    if (length == 0 || path[length - 1] != source) {
+        printf("No path");
+        return;
+    }
+
+    for (int i = length - 1; i >= 0; i--) {
+        printf("%c", 'A' + path[i]);
+
+        if (i > 0) {
+            printf(" -> ");
+        }
+    }
+}
+```
+
+The reconstruction process is:
+
+```
+Start at G
+
+path[0] = G
+path[1] = E
+path[2] = B
+path[3] = A
+```
+
+The temporary array contains:
+
+```
+[G, E, B, A]
+```
+
+We print it backward:
+
+```
+A → B → E → G
+```
+
+This is a common technique for path reconstruction in graph algorithms: follow predecessors backward, then reverse the resulting sequence.
+
+### 6. Expected output
+
+Compile and execute the program:
+
+```
+gcc -Wall -Wextra -std=c11 bfs_sssp.c -o bfs_sssp
+./bfs_sssp
+```
+
+The output should be:
+
+```
+Processing vertex: A
+Processing vertex: C
+Processing vertex: B
+Processing vertex: F
+Processing vertex: E
+Processing vertex: D
+Processing vertex: G
+
+Shortest paths from A:
+A: Distance = 0, Path = A
+B: Distance = 1, Path = A -> B
+C: Distance = 1, Path = A -> C
+D: Distance = 2, Path = A -> B -> D
+E: Distance = 2, Path = A -> B -> E
+F: Distance = 2, Path = A -> C -> F
+G: Distance = 3, Path = A -> B -> E -> G
+```
+
+### 7. Handling disconnected vertices
+
+Let's add another vertex `H` that is not connected to the existing graph:
+
+```
+Graph* graph = createGraph(8);
+```
+
+Don't add any edges involving vertex `H`.
+
+BFS starts from `A`, so `H` will never be discovered.
+
+Its values remain:
+
+```
+visited[H] = false
+dist[H] = -1
+pred[H] = -1
+```
+
+The output for H becomes:
+
+```
+H: Unreachable
+```
+
+This demonstrates an important property of SSSP: it calculates shortest paths only to vertices reachable from the specified source.
+
+### 8. Complexity analysis
+
+Assuming an adjacency-list representation:
+
+| Operation                    | Complexity                              |
+| ---------------------------- | --------------------------------------- |
+| Graph initialization         | $O(V)$                              |
+| Add an edge                  | $O(1)$ per adjacency-list insertion |
+| Initialize BFS arrays        | $O(V)$                              |
+| Enqueue/dequeue              | $O(1)$ per operation                |
+| Traverse all adjacency lists | $O(V+E)$                            |
+| Reconstruct one path         | $O(V)$                              |
+
+Overall BFS complexity:
+
+$$
+\boxed{O(V+E)}
+$$
+
+Auxiliary space:
+
+$$
+\boxed{O(V)}
+$$
+
+This includes the queue and the three BFS arrays. The graph itself requires $O(V+E)$ space.
+
+### 9. Important implementation observations
+
+There are three things worth remembering from this implementation.
+
+1\. BFS traversal and BFS shortest path share the same core algorithm.
+
+The traversal becomes a shortest-path algorithm by maintaining:
+
+```
+dist[v] = dist[u] + 1;
+pred[v] = u;
+```
+
+2\. We don't need edge relaxation like Dijkstra.
+
+BFS discovers vertices in increasing order of distance. The first discovery is already optimal, so we never need to improve an existing distance.
+
+3\. This implementation solves SSSP, not SPSP.
+
+It continues until the queue is empty:
+
+```
+while (!isEmpty(&q))
+```
+
+If we wanted SPSP with early termination, we would add a target parameter and return as soon as the target is discovered.
+
+### 10. Suggested exercises
+
+To make sure you understand the implementation, I recommend these modifications:
+
+1. Change the graph to a directed graph by removing the reverse-edge insertion in `addEdge()`.
+2. Add an outer loop to perform BFS over all disconnected components.
+3. Modify the function to accept a target and implement early termination (SPSP).
+4. Print the BFS distance array after every dequeue operation.
+5. Change the graph to an adjacency matrix and compare the complexity.
+
+The most valuable next exercise is adding debug output for the queue, distance array, and predecessor array after every iteration. It will help you understand exactly how BFS builds the shortest-path tree.
+
+## Java
+
+We'll implement BFS for an unweighted, undirected graph. The implementation will calculate the shortest distance from one source vertex to every reachable vertex.
+
+We'll also include debugging output that displays, after every dequeue operation:
+
+1. The vertex being processed.
+2. The current queue.
+3. The distance array.
+4. The predecessor array.
+
+To make the implementation easier to understand, we'll use arrays and a custom queue, rather than Java's `Queue`, `ArrayDeque`, or other collection classes.
+
+### Graph example
+
+We'll use the same graph from the previous walkthrough:
+
+```
+             A
+           /   \
+          B     C
+         / \     \
+        D   E     F
+             \
+              G
+```
+
+Edges:
+
+```
+A -- B
+A -- C
+B -- D
+B -- E
+C -- F
+E -- G
+```
+
+We'll represent vertices using integer indices:
+
+| Vertex | Index |
+| ------ | ----- |
+| A      | 0     |
+| B      | 1     |
+| C      | 2     |
+| D      | 3     |
+| E      | 4     |
+| F      | 5     |
+| G      | 6     |
+
+The expected shortest distances from `A` are:
+
+| Vertex | Distance | Shortest path |
+| ------ | -------- | ------------- |
+| A      | 0        | A             |
+| B      | 1        | A → B         |
+| C      | 1        | A → C         |
+| D      | 2        | A → B → D     |
+| E      | 2        | A → B → E     |
+| F      | 2        | A → C → F     |
+| G      | 3        | A → B → E → G |
+
+### Complete Java implementation
+
+The implementation consists of four parts:
+
+- `Graph`: adjacency-list graph representation.
+- `Node`: linked-list node for an adjacency list.
+- `IntQueue`: simple array-based queue.
+- `bfsSSSP()`: BFS algorithm that calculates distances and predecessors.
+
+```Java
+
+public class BFSShortestPath {
+
+    private static final int MAX_VERTICES = 100;
+    private static final int UNREACHABLE = -1;
+
+    // A node in an adjacency list
+    static class Node {
+        int vertex;
+        Node next;
+
+        Node(int vertex) {
+            this.vertex = vertex;
+            this.next = null;
+        }
+    }
+
+    // Graph represented using adjacency lists
+    static class Graph {
+        int numVertices;
+        Node[] adjLists;
+
+        Graph(int numVertices) {
+            if (numVertices <= 0 || numVertices > MAX_VERTICES) {
+                throw new IllegalArgumentException(
+                    "Invalid number of vertices"
+                );
+            }
+
+            this.numVertices = numVertices;
+            this.adjLists = new Node[numVertices];
+        }
+
+        // Add an undirected edge
+        void addEdge(int src, int dest) {
+            validateVertex(src);
+            validateVertex(dest);
+
+            // Add dest to src's adjacency list
+            Node node = new Node(dest);
+            node.next = adjLists[src];
+            adjLists[src] = node;
+
+            // Add src to dest's adjacency list
+            node = new Node(src);
+            node.next = adjLists[dest];
+            adjLists[dest] = node;
+        }
+
+        private void validateVertex(int vertex) {
+            if (vertex < 0 || vertex >= numVertices) {
+                throw new IllegalArgumentException(
+                    "Invalid vertex: " + vertex
+                );
+            }
+        }
+    }
+
+    // Custom array-based queue
+    static class IntQueue {
+        private int[] items;
+        private int front;
+        private int rear;
+
+        IntQueue(int capacity) {
+            items = new int[capacity];
+            front = 0;
+            rear = -1;
+        }
+
+        boolean isEmpty() {
+            return rear < front;
+        }
+
+        void enqueue(int value) {
+            if (rear + 1 >= items.length) {
+                throw new IllegalStateException("Queue is full");
+            }
+
+            items[++rear] = value;
+        }
+
+        int dequeue() {
+            if (isEmpty()) {
+                throw new IllegalStateException("Queue is empty");
+            }
+
+            return items[front++];
+        }
+
+        // Return a readable representation of the queue
+        String toString(char[] labels) {
+            StringBuilder result = new StringBuilder("[");
+            
+            for (int i = front; i <= rear; i++) {
+                if (i > front) {
+                    result.append(", ");
+                }
+
+                result.append(labels[items[i]]);
+            }
+
+            result.append("]");
+            return result.toString();
+        }
+    }
+
+    // BFS Single-Source Shortest Path
+    static void bfsSSSP(Graph graph, int source, boolean debug) {
+
+        if (source < 0 || source >= graph.numVertices) {
+            throw new IllegalArgumentException("Invalid source");
+        }
+
+        int n = graph.numVertices;
+
+        boolean[] visited = new boolean[n];
+        int[] distance = new int[n];
+        int[] predecessor = new int[n];
+
+        char[] labels = new char[n];
+
+        // Initialize arrays
+        for (int i = 0; i < n; i++) {
+            distance[i] = UNREACHABLE;
+            predecessor[i] = -1;
+            labels[i] = (char) ('A' + i);
+        }
+
+        // Initialize BFS
+        IntQueue queue = new IntQueue(n);
+
+        visited[source] = true;
+        distance[source] = 0;
+
+        queue.enqueue(source);
+
+        if (debug) {
+            System.out.println("Initial state:");
+            printQueue(queue, labels);
+            printArray("Distance", distance, labels, false);
+            printArray("Predecessor", predecessor, labels, true);
+            System.out.println();
+        }
+
+        // BFS traversal
+        while (!queue.isEmpty()) {
+
+            // Remove the next vertex from the queue
+            int u = queue.dequeue();
+
+            System.out.println(
+                "Dequeued vertex: " + labels[u]
+            );
+
+            // Explore all neighbors of u
+            Node current = graph.adjLists[u];
+
+            while (current != null) {
+
+                int v = current.vertex;
+
+                if (!visited[v]) {
+
+                    // Mark visited when enqueued
+                    visited[v] = true;
+
+                    // Calculate shortest distance
+                    distance[v] = distance[u] + 1;
+
+                    // Remember the previous vertex
+                    predecessor[v] = u;
+
+                    // Add neighbor to queue
+                    queue.enqueue(v);
+                }
+
+                current = current.next;
+            }
+
+            // Print distance after every dequeue operation
+            printArray("Distance", distance, labels, false);
+
+            // Print complete debug state
+            if (debug) {
+                printQueue(queue, labels);
+                printArray("Predecessor", predecessor, labels, true);
+            }
+
+            System.out.println();
+        }
+
+        // Print final shortest paths
+        System.out.println("Final shortest paths from "
+                           + labels[source] + ":");
+
+        for (int v = 0; v < n; v++) {
+
+            System.out.print(labels[v] + ": ");
+
+            if (distance[v] == UNREACHABLE) {
+                System.out.println("Unreachable");
+            } else {
+                System.out.print("Distance = " + distance[v]);
+                System.out.print(", Path = ");
+
+                printPath(predecessor, source, v, labels);
+                System.out.println();
+            }
+        }
+    }
+
+    // Print the queue
+    static void printQueue(IntQueue queue, char[] labels) {
+        System.out.println("Queue: " + queue.toString(labels));
+    }
+
+    // Print distance or predecessor array
+    static void printArray(
+        String name,
+        int[] array,
+        char[] labels,
+        boolean showLabels
+    ) {
+        System.out.print(name + ": [");
+
+        for (int i = 0; i < array.length; i++) {
+
+            if (i > 0) {
+                System.out.print(", ");
+            }
+
+            if (array[i] == UNREACHABLE) {
+                System.out.print("∞");
+            } else if (showLabels) {
+                System.out.print(labels[array[i]]);
+            } else {
+                System.out.print(array[i]);
+            }
+        }
+
+        System.out.println("]");
+    }
+
+    // Reconstruct a shortest path using predecessors
+    static void printPath(
+        int[] predecessor,
+        int source,
+        int target,
+        char[] labels
+    ) {
+        int[] path = new int[predecessor.length];
+        int length = 0;
+
+        int current = target;
+
+        while (current != -1 && length < path.length) {
+            path[length++] = current;
+            current = predecessor[current];
+        }
+
+        // Check that the path reaches the source
+        if (length == 0 || path[length - 1] != source) {
+            System.out.print("No path");
+            return;
+        }
+
+        // Print in source-to-target order
+        for (int i = length - 1; i >= 0; i--) {
+            System.out.print(labels[path[i]]);
+
+            if (i > 0) {
+                System.out.print(" -> ");
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+
+        Graph graph = new Graph(7);
+
+        // Construct the graph
+        graph.addEdge(0, 1); // A -- B
+        graph.addEdge(0, 2); // A -- C
+        graph.addEdge(1, 3); // B -- D
+        graph.addEdge(1, 4); // B -- E
+        graph.addEdge(2, 5); // C -- F
+        graph.addEdge(4, 6); // E -- G
+
+        // Run BFS with debugging enabled
+        bfsSSSP(graph, 0, true);
+    }
+}
+
+```
+
+### Understanding the implementation
+
+#### A. The distance array
+
+```Java
+int[] distance = new int[n];
+```
+
+It stores the number of edges in the shortest known path from the source to each vertex.
+
+Initially:
+
+```
+distance = [0, -1, -1, -1, -1, -1, -1]
+```
+
+Here:
+
+- `0` means the source has distance zero from itself.
+- `-1` means the vertex has not yet been reached.
+- Once discovered, a vertex receives its shortest distance.
+
+For readability, the debug output displays `-1` as `∞`.
+
+#### B. The predecessor array
+
+```Java
+int[] predecessor = new int[n];
+```
+
+It stores the vertex from which each vertex was first discovered.
+
+Initially:
+
+```
+predecessor = [-1, -1, -1, -1, -1, -1, -1]
+```
+
+For example, after BFS discovers `G` through `E`:
+
+```
+predecessor[G] = E
+```
+
+The predecessor array lets us reconstruct the actual shortest path, not just its length.
+
+#### C. Why do we mark a vertex visited when enqueueing it?
+
+```Java
+if (!visited[v]) {
+
+    visited[v] = true;
+
+    distance[v] = distance[u] + 1;
+    predecessor[v] = u;
+
+    queue.enqueue(v);
+}
+```
+
+This is an important BFS rule.
+
+We mark a vertex visited when it enters the queue, rather than waiting until it is dequeued.
+
+Consider this graph:
+
+```
+      A
+     / \
+    B   C
+     \ /
+      D
+```
+
+Both `B` and `C` are connected to `D`.
+
+When BFS processes `B`, it discovers `D` and marks it visited. When BFS later processes `C`, it sees that `D` is already visited.
+
+Therefore, `D` is enqueued only once.
+
+It also ensures that the first assigned distance is the shortest distance in an unweighted graph.
+
+### 4. Debug output: queue, distance, and predecessor
+
+Let's walk through the output.
+
+Because adjacency-list nodes are inserted at the head, neighbors are visited in reverse insertion order.
+
+For this graph, the adjacency lists are:
+
+```
+A: C -> B
+B: E -> D -> A
+C: F -> A
+D: B
+E: G -> B
+F: C
+G: E
+```
+
+Consequently, BFS processes vertices in this order:
+
+```
+A -> C -> B -> F -> E -> D -> G
+```
+
+The exact order can change if we change the adjacency-list insertion order. The shortest distances do not change.
+
+#### Initial state
+
+The source is `A`.
+
+```
+Queue:       [A]
+Distance:    [0, ∞, ∞, ∞, ∞, ∞, ∞]
+Predecessor: [-1, -1, -1, -1, -1, -1, -1]
+```
+
+#### Iteration 1: Dequeue A
+
+Neighbors of `A`: `C`, `B`.
+
+Both are discovered and added to the queue.
+
+```
+Dequeued: A
+
+Queue:       [C, B]
+Distance:    [0, 1, 1, ∞, ∞, ∞, ∞]
+Predecessor: [-1, A, A, -1, -1, -1, -1]
+```
+
+Notice:
+
+```
+distance[B] = distance[A] + 1 = 1
+distance[C] = distance[A] + 1 = 1
+```
+
+#### Iteration 2: Dequeue C
+
+Neighbors of `C`: `F`, `A`.
+
+`A` is already visited, so only `F` is discovered.
+
+```
+Dequeued: C
+
+Queue:       [B, F]
+Distance:    [0, 1, 1, ∞, ∞, 2, ∞]
+Predecessor: [-1, A, A, -1, -1, C, -1]
+```
+
+#### Iteration 3: Dequeue B
+
+Neighbors of `B`: `E`, `D`, `A`.
+
+`E` and `D` are discovered. `A` is already visited.
+
+```
+Dequeued: B
+
+Queue:       [F, E, D]
+Distance:    [0, 1, 1, 2, 2, 2, ∞]
+Predecessor: [-1, A, A, B, B, C, -1]
+```
+
+#### Iteration 4: Dequeue F
+
+Neighbor of `F`: `C`.
+
+`C` is already visited.
+
+```
+Dequeued: F
+
+Queue:       [E, D]
+Distance:    [0, 1, 1, 2, 2, 2, ∞]
+Predecessor: [-1, A, A, B, B, C, -1]
+```
+
+No new vertices were discovered.
+
+#### Iteration 5: Dequeue E
+
+Neighbors of `E`: `G`, `B`.
+
+`B` is already visited, so `G` is discovered.
+
+```
+Dequeued: E
+
+Queue:       [D, G]
+Distance:    [0, 1, 1, 2, 2, 2, 3]
+Predecessor: [-1, A, A, B, B, C, E]
+```
+
+#### Iteration 6: Dequeue D
+
+Neighbor of `D`: `B`.
+
+`B` is already visited.
+
+```
+Dequeued: D
+
+Queue:       [G]
+Distance:    [0, 1, 1, 2, 2, 2, 3]
+Predecessor: [-1, A, A, B, B, C, E]
+```
+
+#### Iteration 7: Dequeue G
+
+Neighbor of `G`: `E`.
+
+`E` is already visited.
+
+```
+Dequeued: G
+
+Queue:       []
+Distance:    [0, 1, 1, 2, 2, 2, 3]
+Predecessor: [-1, A, A, B, B, C, E]
+```
+
+The queue is now empty, so BFS terminates.
+
+### 5. Summary of all iterations
+
+| Iteration | Dequeued | Queue after processing | Newly discovered |
+| --------- | -------- | ---------------------- | ---------------- |
+| 1         | A        | C, B                   | C, B             |
+| 2         | C        | B, F                   | F                |
+| 3         | B        | F, E, D                | E, D             |
+| 4         | F        | E, D                   | —                |
+| 5         | E        | D, G                   | G                |
+| 6         | D        | G                      | —                |
+| 7         | G        | Empty                  | —                |
+
+The final arrays are:
+
+```
+Vertex:      [A, B, C, D, E, F, G]
+Distance:    [0, 1, 1, 2, 2, 2, 3]
+Predecessor: [-1, A, A, B, B, C, E]
+```
+
+### 6. Reconstructing the shortest path
+
+Suppose we want the shortest path from `A` to `G`.
+
+We start from `G` and follow the predecessor array:
+
+```
+predecessor[G] = E
+predecessor[E] = B
+predecessor[B] = A
+predecessor[A] = -1
+```
+
+Following predecessors gives:
+
+```
+G <- E <- B <- A
+```
+
+Reverse the sequence:
+
+```
+A -> B -> E -> G
+```
+
+The shortest distance is:
+
+```
+distance[G] = 3
+```
+
+That means the path contains three edges.
+
+### 7. Complexity analysis
+
+Let:
+
+- $V$ = number of vertices.
+- $E$ = number of edges.
+
+| Operation           | Complexity   |
+| ------------------- | ------------ |
+| Graph construction  | $O(V+E)$ |
+| BFS traversal       | $O(V+E)$ |
+| Initialize arrays   | $O(V)$   |
+| Path reconstruction | $O(V)$   |
+| Auxiliary space     | $O(V)$   |
+| Total graph storage | $O(V+E)$ |
+
+Each vertex is enqueued at most once, and each adjacency-list entry is examined once.
+
+Therefore:
+
+$$
+\boxed{O(V+E)}
+$$
+
+Important: This implementation solves SSSP because it continues until the queue is empty. It calculates distances for all reachable vertices, not just one destination.
+
+### 8. Important implementation notes
+
+A few details are worth keeping in mind when adapting this code:
+
+- Directed graph: Remove the second insertion in `addEdge()`. Keep only the `src → dest` adjacency entry.
+- Disconnected graph: Vertices that BFS cannot reach retain distance `-1`, displayed as `∞`.
+- Multiple shortest paths: BFS stores one predecessor per vertex. If multiple shortest paths exist, the chosen path depends on neighbor traversal order.
+- Weighted graph: This implementation assumes equal edge costs. For arbitrary nonnegative weights, use Dijkstra's algorithm.
+- Queue capacity: The queue has capacity `V`. This is sufficient because each vertex is enqueued at most once.
+
+For your DSA documentation, I'd organize this as:
+
+```
+algorithms/
+└── graph-algorithms/
+    └── shortest-path-algorithms/
+        └── single-source-shortest-path/
+            ├── overview.mdx
+            ├── bfs-sssp.mdx
+            ├── bfs-sssp-java.mdx
+            ├── bfs-sssp-c.mdx
+            └── dijkstra.mdx
+```
+
+The next useful exercise is to modify this implementation to solve BFS Single-Pair Shortest Path (SPSP): accept a target vertex and stop as soon as that target is discovered.

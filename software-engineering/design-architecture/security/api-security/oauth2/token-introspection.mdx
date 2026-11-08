@@ -1,0 +1,738 @@
+{/* # OAuth 2.0 Token Introspection */}
+
+When an OAuth 2.0 client makes a request to the resource server, the resource server needs some way to verify the access token. The OAuth 2.0 core spec doesn’t define a specific method of how the resource server should verify access tokens, just mentions that it requires coordination between the resource and authorization servers. In some cases, especially with small services, both endpoints are part of the same system, and can share token information internally such as in a database. In larger systems where the two endpoints are on different servers, this has led to proprietary and non-standard protocols for communicating between the two servers.
+
+The OAuth 2.0 Token Introspection extension defines a protocol that returns information about an access token, intended to be used by resource servers or other internal servers.
+
+An alternative to token introspection is to use a structured token format that is recognized by both the authorization server and resource server. The JWT Profile for OAuth 2.0 Access Tokens is a recent RFC that describes a standardized format for access tokens using JWTs. This enables a resource server to validate access tokens without a network call, by validating the signature and parsing the claims within the structured token itself.
+
+## Overview
+
+**Token introspection** is an OAuth 2.0 mechanism that allows a client authorized to perform introspection—typically a Resource Server—to ask an Authorization Server whether a particular access token is currently active and to retrieve information about that token.
+
+The relevant specification is [RFC 7662 — OAuth 2.0 Token Introspection](https://www.rfc-editor.org/rfc/rfc7662).
+
+Imagine an online shop where a customer sends an access token to retrieve their orders. The Resource Server needs to determine whether the token is valid, expired, revoked, and associated with the permissions required for the request.
+
+There are two common approaches to token validation:
+
+| Approach            | How it works                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Local validation    | The Resource Server validates a self-contained token, such as a JWT, using its signature and claims.            |
+| Token introspection | The Resource Server sends the token to the Authorization Server and receives an answer about its current state. |
+
+### Why is introspection useful?
+
+- **Revocation awareness**: A Resource Server can learn that a token has been revoked, subject to caching and propagation delays.
+- **Centralized validation**: The Authorization Server remains the source of truth for the token's current status.
+- **Token metadata**: The Resource Server can obtain information such as the subject, scopes, expiration time, and audience, when provided.
+- **Opaque tokens**: Introspection works particularly well when access tokens are random identifiers that contain no readable claims.
+
+### The main components
+```
+                         Client
+
+            Sends an access token with an API request
+                           ↓
+                      GET /orders
+---------------------------------------------------------------
+                      Resource Server
+Checks whether the token is active and sufficiently privileged
+---------------------------------------------------------------
+                          ↓↑
+            POST introspection request / receive response
+
+                 Authorization Server
+
+Checks the token and returns its status and available metadata
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant RS as Resource Server
+    participant AS as Authorization Server
+
+    C->>RS: GET /orders
+    Note right of C: Sends access token<br/>in Authorization: Bearer header
+
+    RS->>AS: POST /introspect
+    Note right of RS: Includes access token<br/>and client authentication
+
+    AS->>AS: Check token status
+    AS-->>RS: Introspection response<br/>{ active: true, scope: "read orders" }
+
+    RS->>RS: Check active status and permissions
+
+    alt Token active and authorized
+        RS-->>C: 200 OK — Return orders
+    else Token inactive or unauthorized
+        RS-->>C: 401 Unauthorized or 403 Forbidden
+    end
+```
+The key distinction is that an active token is not automatically authorized to access every resource. Introspection answers a token-status question; the Resource Server must still enforce scopes, audience restrictions, roles, and application-specific access rules.
+
+## Introspection Endpoint
+The token introspection endpoint needs to be able to return information about a token, so you will most likely build it in the same place that the token endpoint lives. The two endpoints need to either share a database, or if you have implemented self-encoded tokens, they will need to share the secret.
+
+The introspection endpoint is an HTTP endpoint exposed by the Authorization Server. Authorized callers use it to query the state of a token.
+
+For example, a Keycloak realm might expose an endpoint resembling:
+
+```
+https://auth.example.com/realms/shop/protocol/openid-connect/token/introspect
+```
+
+The exact URL depends on the Authorization Server and its configuration.
+
+### Responsibilities
+
+The endpoint typically:
+
+1. Authenticates the caller, such as a registered Resource Server.
+2. Checks whether the caller is permitted to introspect the token.
+3. Examines the supplied token.
+4. Determines whether the token is active.
+5. Returns the activity status and any supported token metadata.
+
+### Who can call it?
+
+Usually, the endpoint requires client authentication. For example, a confidential backend client might authenticate using its registered client ID and secret, or another supported client-authentication method.
+
+A browser-based SPA should not be given a confidential client secret. In a common architecture, the backend Resource Server performs introspection instead.
+
+Security principle: The token being inspected and the credentials used to call the introspection endpoint serve different purposes.
+
+- Access token: the token whose status is being checked.
+- Client credentials: identify and authenticate the party asking the question.
+
+## Introspection Request
+
+An introspection request tells the Authorization Server which token to inspect.
+
+According to RFC 7662, the request uses HTTP `POST` with form-encoded parameters.
+
+### Example: online shop
+
+Suppose the customer presents this access token:
+
+```
+eyJhbGciOi...example-access-token
+```
+
+The Resource Server sends the following request:
+
+```
+POST /realms/shop/protocol/openid-connect/token/introspect HTTP/1.1
+Host: auth.example.com
+Authorization: Basic <resource-server-credentials>
+Content-Type: application/x-www-form-urlencoded
+
+token=eyJhbGciOi...example-access-token
+&token_type_hint=access_token
+```
+
+The line breaks in the body are for readability; the actual form body is URL-encoded.
+
+It is expected that this endpoint is not made publicly available to developers. Applications should not be allowed to use this endpoint since the response may contain privileged information that developers should not have access to. One way to protect the endpoint is to put it on an internal server that is not accessible from the outside world, or it could be protected with HTTP basic auth.
+```
+POST /token_info HTTP/1.1
+Host: authorization-server.com
+Authorization: Basic Y4NmE4MzFhZGFkNzU2YWRhN
+ 
+token=c1MGYwNDJiYmYxNDFkZjVkOGI0MSAgLQ
+```
+
+### Request parameters
+
+| Parameter             | Required?                                   | Purpose                                                                                       |
+| --------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `token`               | Yes                                         | The token to inspect.                                                                         |
+| `token_type_hint`     | No                                          | Suggests the type of token, such as `access_token` or `refresh_token`.                        |
+| Client authentication | Depends on server policy; commonly required | Authenticates the caller, using an HTTP authentication mechanism or another supported method. |
+
+`token_type_hint` is only a hint. It does not prove that the supplied token is an access token, nor does it replace token validation.
+
+### What happens inside the Authorization Server?
+
+1. Authenticate the caller
+
+Verify the Resource Server's client credentials and permissions.
+
+2. Locate and inspect the token
+
+Determine whether the token is recognized and check relevant state, such as expiration and revocation.
+
+3. Produce the response
+
+Return `active` and, when appropriate, token metadata.
+
+The exact internal lookup mechanism is implementation-dependent. The Authorization Server might use a token database, distributed cache, or other internal state.
+
+<details>
+<summary>Keycloak OAuth 2.0 Token Introspection handling</summary>
+
+The main Keycloak source code for OAuth 2.0 Token Introspection handling is here:
+
+1. `TokenIntrospectionEndpoint.java` — Main implementation
+
+Handles the introspection HTTP request, authenticates the calling client, validates parameters, selects the introspection provider, and returns the result.
+
+[View source on GitHub](https://github.com/keycloak/keycloak/blob/main/services/src/main/java/org/keycloak/protocol/oidc/endpoints/TokenIntrospectionEndpoint.java)
+
+2. `TokenEndpoint.java` — Endpoint routing
+
+Shows how Keycloak routes the `/introspect` path to `TokenIntrospectionEndpoint`.
+
+[View source on GitHub](https://github.com/keycloak/keycloak/blob/main/services/src/main/java/org/keycloak/protocol/oidc/endpoints/TokenEndpoint.java)
+
+3. Keycloak introspection documentation
+
+Documents the endpoint URL, token validation purpose, and confidential-client requirement.
+
+[Read official documentation](https://www.keycloak.org/securing-apps/oidc-layers)
+
+**Recommended reading order**
+
+In `TokenIntrospectionEndpoint.java`, focus on these methods:
+
+1. `introspect()` — the complete request-handling flow.
+2. `authorizeClient()` — authenticating and authorizing the introspection caller.
+3. `checkParameterDuplicated()` — rejecting duplicate request parameters.
+4. `checkSsl()` and `checkRealm()` — request security and realm checks.
+
+Then follow the call to:
+
+```Java
+provider.introspect(token, event);
+```
+
+This is the key transition to the provider responsible for examining the token and producing the introspection response. The endpoint class handles request orchestration; the provider handles the token-specific introspection logic.
+
+</details>
+
+
+## Introspection Response
+
+The endpoint normally returns a JSON object describing the token.
+
+### Example response
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  "active": true,
+  "scope": "read orders",
+  "client_id": "shop-api",
+  "username": "customer123",
+  "token_type": "Bearer",
+  "exp": 1791907200,
+  "iat": 1791903600,
+  "sub": "user-123",
+  "aud": ["orders-api"],
+  "iss": "https://auth.example.com/realms/shop"
+}
+```
+
+These values are illustrative. The actual claims and their formats depend on the Authorization Server and token.
+
+### Important response fields
+The Token Introspection Endpoint should respond with a JSON object with the properties listed below. Only the “active” property is required, the rest are optional. Some of the properties in the Introspection spec are specifically for JWT tokens, so we will only cover the basic ones here. You can also add additional properties in the response if you have additional information about a token that may be useful.
+
+| Field        | Meaning                                                                                         |
+| ------------ | ----------------------------------------------------------------------------------------------- |
+| `active`     | **Required**.<br />This is a boolean value of whether or not the presented token is currently active. The value should be “true” if the token has been issued by this authorization server, has not been revoked by the user, and has not expired.<br />Whether the Authorization Server considers the token currently active.                          |
+| `scope`      | Permissions or scopes associated with the token, often represented as a space-separated string. |
+| `client_id`  | The OAuth client associated with the token.                                                     |
+| `username`   | A human-readable identifier for the user who authorized this token.                                                 |
+| `sub`        | The subject the token represents, when applicable.                                              |
+| `exp`        | Token expiration time as Unix time, when provided.                                              |
+| `iat`        | Time the token was issued, when provided.                                                       |
+| `aud`        | Intended audience or audiences, when provided.                                                  |
+| `iss`        | Issuer identifier, when provided.                                                               |
+| `token_type` | Token type information, when provided.                                                          |
+
+Not every field is mandatory in every response. In particular, an implementation should not assume `username`, `aud`, or `iss` is always present.
+
+### Error Response
+
+If the introspection endpoint is publicly accessible, the endpoint must first validate the authentication. If the authentication is invalid, the endpoint should respond with an HTTP 401 status code and an invalid_client response.
+```
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json; charset=utf-8
+ 
+{
+  "error": "invalid_client",
+  "error_description": "The client authentication was invalid"
+}
+```
+Any other error is considered an “inactive” token.
+
+-The token requested does not exist or is invalid
+-The token expired
+-The token was issued to a different client than is making this request
+
+In any of these cases, it is not considered an error response, and the endpoint returns simply an inactive flag.
+```
+
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+ 
+{
+  "active": false
+}
+```
+### What should the Resource Server do with the response?
+
+The Resource Server should:
+
+1. Check that the introspection request succeeded and the response is valid.
+2. Check that `active` is `true`.
+3. Validate relevant metadata against the API's requirements, such as the expected audience and expiration.
+4. Verify that the token contains the necessary scopes or permissions.
+5. Apply application-specific authorization rules.
+6. Return the protected resource only if all necessary checks pass.
+
+For example, an endpoint requiring `orders:read` should not grant access just because `active` is `true`.
+
+Important distinction: An HTTP `200 OK` from the introspection endpoint means the introspection request was processed successfully. It does not necessarily mean the inspected token is active.
+
+<details>
+<summary>Spring Boot OAuth 2.0 Introspection Response handling</summary>
+
+For Spring Boot OAuth 2.0 Introspection Response handling, the most relevant code is in Spring Security's GitHub repository.
+
+For Spring Boot OAuth 2.0 Introspection Response handling, the most relevant code is in Spring Security's GitHub repository.
+
+**Recommended GitHub source files**
+
+1. `SpringOpaqueTokenIntrospector.java`
+
+Processes the introspection response, checks the `active` claim, converts response claims, and creates an authenticated principal.
+
+[View source on GitHub](https://github.com/spring-projects/spring-security/blob/main/oauth2/oauth2-resource-server/src/main/java/org/springframework/security/oauth2/server/resource/introspection/SpringOpaqueTokenIntrospector.java)
+
+2. `OpaqueTokenAuthenticationProvider.java`
+
+Handles authentication using the introspected token and converts the result into Spring Security's authentication representation.
+
+[View source on GitHub](https://github.com/spring-projects/spring-security/blob/main/oauth2/oauth2-resource-server/src/main/java/org/springframework/security/oauth2/server/resource/introspection/OpaqueTokenAuthenticationProvider.java)
+
+3. Spring Boot auto-configuration
+
+Shows how Spring Boot creates the introspector from the configured endpoint URI and client credentials.
+
+[View source on GitHub](https://github.com/spring-projects/spring-boot/blob/main/module/spring-boot-security-oauth2-resource-server/src/main/java/org/springframework/boot/security/oauth2/server/resource/autoconfigure/servlet/OAuth2ResourceServerOpaqueTokenConfiguration.java)
+
+4. Official Spring Security documentation
+
+Explains how `active: true` is handled and how scopes are mapped to `SCOPE_` authorities.
+
+[Read documentation](https://docs.spring.io/spring-security/reference/servlet/oauth2/resource-server/opaque-token.html)
+
+
+**What to examine in the code**
+
+In `SpringOpaqueTokenIntrospector.java`, follow this sequence:
+
+1. `introspect(String token)` — orchestrates the introspection operation.
+2. `makeRequest(...)` — sends the HTTP request and receives the JSON response.
+3. `adaptToNimbusResponse(...)` — checks the response status and the `active` claim.
+4. `convertClaimsSet(...)` — converts the response claims into a claim accessor.
+5. `defaultAuthenticationConverter(...)` — creates the authenticated principal and maps scopes to authorities.
+
+The next file, `OpaqueTokenAuthenticationProvider.java`, shows how that principal becomes an authenticated Spring Security `Authentication`.
+
+Recommended reading order: Start with `SpringOpaqueTokenIntrospector.java`, then follow the result into `OpaqueTokenAuthenticationProvider.java`. This gives you the clearest view of the journey from Keycloak's JSON introspection response to an authenticated request in your Spring Boot Resource Server.
+
+</details>
+
+## Active Tokens
+
+An active token is one the Authorization Server currently considers valid for use, according to its token state and policies.
+
+Example:
+
+```json
+{
+  "active": true,
+  "scope": "read orders",
+  "sub": "user-123",
+  "aud": ["orders-api"],
+  "exp": 1791907200
+}
+```
+
+The Resource Server can consider the token for authorization, but it must still check whether it is suitable for the requested operation.
+
+### What can make a token active?
+
+Depending on the Authorization Server's implementation and policies, an active token is generally one that:
+
+- Is recognized as a valid token.
+- Has not expired.
+- Has not been revoked or otherwise invalidated.
+- Is valid under the server's applicable token-state rules.
+
+### Example: reading orders
+
+A customer requests:
+
+```
+GET /orders
+Authorization: Bearer <access-token>
+```
+
+The Resource Server introspects the token and receives:
+
+```
+{
+  "active": true,
+  "scope": "read orders",
+  "aud": ["orders-api"]
+}
+```
+
+The endpoint requires `read orders`, and `orders-api` is the expected audience. Assuming all other required checks pass, the Resource Server can proceed with the request.
+
+However, consider a different endpoint:
+
+```
+DELETE /orders/42
+```
+
+If that operation requires a separate permission, such as `delete orders`, the same active token might not be sufficient.
+
+Active means usable in principle, not universally authorized.
+
+## Inactive Tokens
+
+An inactive token is a token that the Authorization Server does not consider active.
+
+Typical reasons include:
+
+- The token has expired.
+- The token has been revoked.
+- The token is unknown or invalid.
+- The token is otherwise no longer valid under the Authorization Server's policies.
+
+### Example response
+
+```
+{
+  "active": false
+}
+```
+
+RFC 7662 specifies that the Authorization Server should not disclose additional token information when the token is inactive. This helps avoid revealing information about unknown, invalid, or unauthorized tokens.
+
+### What should the Resource Server do?
+
+If the response is successfully received and valid, but `active` is `false`, the Resource Server should reject the request as unauthorized.
+
+For example:
+
+```
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer error="invalid_token"
+Content-Type: application/json
+
+{
+  "error": "invalid_token",
+  "message": "The access token is inactive."
+}
+```
+
+This is an illustrative API response, not a required response body for every implementation.
+
+### Inactive versus introspection failure
+
+These two outcomes must not be confused.
+
+| Outcome                                        | Meaning                                                       | Recommended handling                                                                                         |
+| ---------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `active: true`                                 | The token is currently considered active.                     | Continue with authorization checks.                                                                          |
+| `active: false`                                | The token is not currently considered active.                 | Reject the request as unauthorized.                                                                          |
+| Timeout or connection failure                  | The Resource Server could not obtain a reliable answer.       | Apply an explicit failure policy; fail closed for protected resources in typical security-sensitive systems. |
+| `401` or `403` from the introspection endpoint | The caller's authentication or authorization may have failed. | Handle the introspection call failure; do not interpret it as an ordinary inactive-token response.           |
+| Malformed response                             | The Resource Server cannot reliably interpret the result.     | Reject or fail the protected request rather than treating the token as valid.                                |
+
+The exact HTTP status and error format depend on the Authorization Server. For example, a `401` from the introspection endpoint can indicate that the Resource Server's client credentials are wrong, not that the customer's access token is inactive.
+
+**A subtle security point**
+
+If the Authorization Server is unavailable, the Resource Server generally should not assume that a token is valid merely because it was valid previously. An explicitly designed cache policy may allow recently verified results to be reused, but that introduces a trade-off between availability and prompt revocation enforcement.
+
+## Caching Introspection Results
+
+Introspection adds a network request to token validation. If every API request triggers an introspection call, latency and load can increase significantly.
+
+Caching introspection results means storing the result of a previous introspection call for a limited period so that subsequent requests can reuse it.
+
+### Without caching
+
+Suppose a customer makes 100 API requests using the same access token.
+
+```
+100 API requests
+       |
+       v
+Resource Server
+       |
+       +----> 100 introspection requests
+                    |
+                    v
+             Authorization Server
+```
+
+This can create unnecessary network traffic and additional load on the Authorization Server.
+
+### With caching
+
+```
+API request
+     |
+     v
+Resource Server
+     |
+     v
+Look up token in cache
+     |
+     +---- Cache hit ----> Reuse cached result
+     |
+     +---- Cache miss ---> Call introspection endpoint
+                                  |
+                                  v
+                          Cache the result
+                                  |
+                                  v
+                           Continue checks
+```
+
+If the token is already in the cache and the cached result is still usable, the Resource Server can avoid another introspection request.
+
+### How should the cache work?
+
+A robust implementation should consider the following design decisions.
+
+1. Cache key
+
+Key results by the token itself or by a secure, collision-resistant digest of the token. Avoid logging raw tokens or exposing them in cache diagnostics.
+
+2. Cache lifetime (TTL)
+
+Set a limited time-to-live. Do not allow a cached active result to outlive the token's expiration time.
+
+For example, if the token expires in 30 seconds, an active result must not be cached for 5 minutes.
+
+3. Inactive-result caching
+
+Inactive results can also be cached briefly to avoid repeatedly introspecting the same invalid token. Keep the TTL short enough to avoid unnecessarily delaying recognition of a token that later becomes valid, if the authorization system permits such state changes.
+
+4. Revocation behavior
+
+A cached active result may remain in use after the Authorization Server revokes the token. Shorter TTLs reduce this window, but they increase the number of introspection calls.
+
+5. Failure handling
+
+Do not automatically cache timeouts, connection failures, malformed responses, or authentication errors as `active: true`. These are failures to obtain a trustworthy result, not evidence of token validity.
+
+6. Cache isolation
+
+Ensure results are not reused across incompatible issuers, environments, or token-validation contexts. If metadata or permissions are audience-specific, account for that in the cache design.
+
+### Choosing a cache TTL
+
+There is no universally correct TTL. Choose it according to how quickly your application must recognize revocation.
+
+| Cache TTL              | Advantages                                   | Disadvantages                                 |
+| ---------------------- | -------------------------------------------- | --------------------------------------------- |
+| 0 seconds (no caching) | Fresh introspection result for each request  | Highest latency and Authorization Server load |
+| 5–15 seconds           | Fast revocation recognition with fewer calls | Small revocation delay remains                |
+| 1–5 minutes            | Lower latency and substantially fewer calls  | Revoked tokens might remain usable longer     |
+| Long-lived cache       | Minimal introspection traffic                | Greater risk of using revoked tokens          |
+
+These are illustrative starting points, not values mandated by RFC 7662.
+
+### Example: token revocation and caching
+
+Assume a Resource Server caches an active result for 60 seconds.
+
+|               |                                   |
+| ---------------------- | -------------------------------------------- |
+| 10:00:00 | **Token introspected**<br />The Authorization Server returns `active: true`. The Resource Server caches the result.  | 
+| 10:00:20          | **Token revoked**<br />The Authorization Server revokes the token, but the Resource Server still has the cached active result. | 
+| 10:00:30           | **Another API request arrives**<br />The cache still says active, so the Resource Server may accept the token if the other authorization checks pass.  | 
+| 10:01:00       | **Cache entry expires**<br />The next request triggers fresh introspection, which can reveal that the token is inactive.                | 
+
+In this example, revocation is not necessarily recognized immediately. With a 60-second TTL, the potential stale-result window is approximately 60 seconds after the last successful active check, assuming no other invalidation mechanism.
+
+### Important design guidelines
+
+- Cap the cache TTL at the token's remaining lifetime.
+- Use shorter TTLs for APIs with strict revocation requirements.
+- Consider explicit cache invalidation or a revocation-event mechanism if the system supports it.
+- Keep the cache bounded to prevent untrusted tokens from exhausting memory.
+- Treat introspection-service outages separately from legitimate inactive-token responses.
+- Avoid logging access tokens or storing them in plaintext where a digest-based cache key is sufficient.
+
+## Security Considerations
+
+Using a token introspection endpoint means that any resource server will be relying on the endpoint to determine whether an access token is currently active or not. This means the introspection endpoint is solely responsible for deciding whether API requests will succeed. As such, the endpoint must perform all applicable checks against a token’s state, such as checking whether the token has expired, verifying signatures, etc.
+
+### Token Fishing
+
+If the introspection endpoint is left open and un-throttled, it presents a means for an attacker to poll the endpoint fishing for a valid token. To prevent this, the server must either require authentication of the clients using the endpoint, or only make the endpoint available to internal servers through other means such as a firewall.
+
+Note that the resources servers are also a potential target of a fishing attack, and should take countermeasures such as rate limiting to prevent this.
+
+### Caching
+
+Consumers of the introspection endpoint may wish to cache the response of the endpoint for performance reasons. As such, it is important to consider the performance and security trade-offs when deciding to cache the values. For example, shorter cache expiration times will result in higher security since the resource servers will have to query the introspection endpoint more frequently, but will result in an increased load on the endpoint. Longer expiration times leave a window open where a token may actually be expired or revoked, but still be able to be used at a resource server for the remaining duration of the cache time.
+
+One way to mitigate this problem is for consumers to never cache the value beyond the expiration time of the token, which would have been returned in the “exp” parameter of the introspection response.
+
+### Limiting Information
+
+The introspection endpoint does not necessarily need to return the same information for all queries of the same token. For example, two different resource servers (if they authenticate themselves when making the introspection request) may get different views of the state of the token. 
+
+The main idea is that the Authorization Server can return different introspection responses for the same token, depending on which Resource Server is asking.
+
+This is useful when one access token can be used to access multiple APIs, but you don't want each API to learn about the others.
+
+Imagine an online shop with three Resource Servers:
+
+- Orders API — manages customer orders.
+- Payments API — processes payments.
+- Shipping API — manages deliveries.
+
+A customer has one access token that can be used with all three APIs.
+
+Without information limiting, an introspection response might reveal all the token's metadata to every Resource Server, including its permissions and other intended audiences.
+
+For example:
+
+```
+{
+  "active": true,
+  "sub": "user-123",
+  "scope": "read orders process payments read shipping",
+  "aud": [
+    "orders-api",
+    "payments-api",
+    "shipping-api"
+  ]
+}
+```
+
+The Orders API can now learn that the token is also usable with the Payments and Shipping APIs.
+
+That information may be unnecessary for processing an order.
+
+**How limiting information works**
+
+The Authorization Server authenticates each Resource Server and tailors the introspection response to that caller.
+```mermaid
+---
+config:
+  theme: base
+  themeVariables:
+    fontFamily: ''
+    fontSize: 16px
+    primaryColor: '#E5F3FF'
+    primaryTextColor: '#111827'
+    primaryBorderColor: '#D1D5DB'
+    lineColor: '#8F8F8F'
+    secondaryColor: '#E8F1FF'
+    tertiaryColor: '#DCFCE7'
+    clusterBkg: '#F3F3F3'
+    clusterBorder: '#D1D5DB'
+  flowchart:
+    htmlLabels: true
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 50
+    padding: 12
+    useMaxWidth: true
+  layout: fixed
+---
+flowchart TB
+    A["Client obtains one access token"] --> B["Orders API"] & C["Payments API"] & D["Shipping API"]
+    B -- Introspection request --> E["Authorization Server"]
+    C -- Introspection request --> E
+    D -- Introspection request --> E
+    E -- active: true<br>scope: process payments --> C
+    E -- active: true<br>scope: read shipping --> D
+    E -- active: true<br>scope: read orders --> B
+    n1["Anchor"]
+
+    n1@{ shape: anchor}
+     B:::server
+     C:::server
+     D:::server
+     E:::auth
+    classDef server fill:#E8F1FF,stroke:#2563EB,color:#111827
+    classDef auth fill:#DCFCE7,stroke:#16A34A,color:#111827
+```
+This can be used to limit the information about the token that is returned to a particular resource server. 
+
+This makes it possible to have tokens that can be used at multiple resource servers without other servers ever knowing it is possible to be used at any other server.
+## Putting everything together
+
+Here is the complete token-introspection flow for your Spring Boot online shop Resource Server.
+```mermaid
+flowchart TD
+    A["1. Client sends API request<br/>GET /orders with a Bearer token"]
+    B["2. Resource Server checks cache"]
+    C{"Cached result available<br/>and still usable?"}
+    D["Cache hit<br/>Reuse cached result"]
+    E["Cache miss<br/>Call introspection endpoint"]
+    F["3. Evaluate token status<br/>Is the result valid and active = true?"]
+    G["Inactive or introspection error<br/>Reject request or fail safely"]
+    H["Active<br/>Continue authorization checks"]
+    I["4. Enforce access policy<br/>Check scopes, audience, roles,<br/>and ownership rules"]
+    J{"Authorized?"}
+    K["5. Return protected orders"]
+    L["Reject request<br/>401 Unauthorized or 403 Forbidden"]
+
+    A --> B
+    B --> C
+    C -->|Yes| D
+    C -->|No| E
+    D --> F
+    E --> F
+    F -->|Inactive or invalid result| G
+    F -->|Active| H
+    H --> I
+    I --> J
+    J -->|Yes| K
+    J -->|No| L
+
+    classDef request fill:#e8f1ff,stroke:#2563eb,color:#111827
+    classDef cache fill:#f3e8ff,stroke:#9333ea,color:#111827
+    classDef success fill:#dcfce7,stroke:#16a34a,color:#111827
+    classDef failure fill:#fee2e2,stroke:#dc2626,color:#111827
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#111827
+
+    class A,B request
+    class C,J decision
+    class D,H,K success
+    class E cache
+    class F,I request
+    class G,L failure
+```
+
+## Key takeaways
+
+1. Overview: Introspection lets a Resource Server query the Authorization Server about a token's current status.
+2. Introspection endpoint: A protected endpoint that authenticates the caller and examines the supplied token.
+3. Introspection request: An HTTP `POST` containing the `token` parameter, commonly authenticated using Resource Server client credentials.
+4. Introspection response: A JSON object with `active` and potentially other token metadata.
+5. Active tokens: Eligible for further authorization checks, but not automatically authorized for every operation.
+6. Inactive tokens: Must not be accepted as valid access tokens.
+7. Caching: Reduces latency and server load, but can delay the recognition of revocation.
+
+The most important architectural trade-off is centralized, up-to-date token validation versus the latency, availability, and load costs of making remote introspection requests. A carefully bounded cache balances those competing requirements.

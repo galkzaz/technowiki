@@ -1,0 +1,621 @@
+# BFS Shortest Paths: From Distances to Real Routes
+
+BFS is not just a graph traversal algorithm. In an unweighted graph, it can also find a shortest path between a source and a destination.
+
+For example, imagine you want to travel from city `A` to city `G`. There may be several possible routes, but you want the route with the fewest flights.
+
+BFS solves this by exploring cities in increasing order of the number of flights needed to reach them.
+
+We'll build up the idea using these concepts:
+
+- The distance array records the minimum number of edges needed to reach each vertex.
+- The parent array records how each vertex was first reached.
+- Together, these arrays let us calculate the shortest distance and reconstruct an actual shortest path.
+
+## 1. Why BFS finds shortest paths in unweighted graphs
+
+An unweighted graph treats every edge equally. If an edge represents a flight, each flight counts as one step, regardless of how long the flight takes.
+
+Consider this graph:
+
+```
+          A
+        /   \
+       B     C
+      / \     \
+     D   E     F
+          \
+           G
+```
+
+Starting from `A`, BFS explores the graph in levels:
+
+```
+Level 0:          A
+                 distance 0
+
+Level 1:        B   C
+               distance 1
+
+Level 2:      D   E   F
+             distance 2
+
+Level 3:          G
+                 distance 3
+```
+
+BFS processes every vertex at distance 0 before distance 1, every vertex at distance 1 before distance 2, and so on.
+
+Suppose BFS discovers `G` through:
+
+```
+A -> B -> E -> G
+```
+
+That path contains three edges.
+
+Could a path with only two edges reach `G`? No. If such a path existed, BFS would have discovered `G` at level 1 or level 2, before processing level 3.
+
+Therefore, the first discovery of `G` gives its shortest distance from `A`.
+
+### The key reasoning
+
+1. The source has distance 0.
+2. When BFS processes a vertex at distance $d$, any newly discovered neighbor receives distance $d+1$.
+3. The FIFO queue ensures vertices are processed in nondecreasing distance order.
+4. Consequently, a vertex cannot be first discovered through a longer path while a shorter path remains undiscovered.
+
+This is why BFS finds shortest paths measured by number of edges.
+
+## 2. Distance array
+
+The distance array stores the shortest distance from the source to each vertex.
+
+For example:
+
+```
+int distance[MAX_VERTICES];
+```
+
+We initialize every distance to an infinity-like value, indicating that the vertex has not yet been reached:
+
+```
+for (int v = 0; v < num_vertices; v++) {
+    distance[v] = -1;  // -1 means unreachable/not discovered yet
+}
+```
+
+Then we initialize the source:
+
+```
+distance[source] = 0;
+```
+
+When BFS discovers a new neighbor `v` from the current vertex `u`, it assigns:
+
+```
+distance[v] = distance[u] + 1;
+```
+
+Why add one? Because moving from `u` to its neighbor `v` adds exactly one edge to the path.
+
+### Example
+
+Starting from `A`:
+
+| Vertex | Distance from A | Meaning          |
+| ------ | --------------- | ---------------- |
+| A      | 0               | Source           |
+| B      | 1               | One edge away    |
+| C      | 1               | One edge away    |
+| D      | 2               | Two edges away   |
+| E      | 2               | Two edges away   |
+| F      | 2               | Two edges away   |
+| G      | 3               | Three edges away |
+
+Here, `-1` is just a programming convention for “unreachable”; mathematically, we often use $\infty$.
+
+A distance array is useful when you need the minimum number of steps but do not necessarily need to know the exact route.
+
+For example, it can answer:
+
+- How many flights are needed to reach a city?
+- What is the minimum number of moves to reach a cell in a maze?
+- How many edges separate two people in a social network?
+
+## 3. Parent/predecessor array
+
+The distance array tells us how far away a vertex is. The parent array tells us where we came from when we first discovered it.
+
+For example:
+
+```
+int parent[MAX_VERTICES];
+```
+
+Initialize every parent to `-1`:
+
+```
+for (int v = 0; v < num_vertices; v++) {
+    parent[v] = -1;
+}
+```
+
+When BFS discovers `v` from `u`, assign:
+
+```
+parent[v] = u;
+```
+
+Consider our graph. One possible parent array is:
+
+```
+parent[A] = -1
+parent[B] = A
+parent[C] = A
+parent[D] = B
+parent[E] = B
+parent[F] = C
+parent[G] = E
+```
+
+This defines a BFS tree:
+
+```
+          A
+        /   \
+       B     C
+      / \     \
+     D   E     F
+          \
+           G
+```
+
+The original graph might contain additional edges and cycles. The BFS tree contains only the parent relationships chosen during discovery.
+
+### How are distance and parent related?
+
+Whenever BFS discovers `v` from `u`:
+
+```
+visited[v] = true;
+distance[v] = distance[u] + 1;
+parent[v] = u;
+enqueue(&queue, v);
+```
+
+The relationship is:
+
+$$
+distance[v]=distance[parent[v]]+1
+$$
+
+for every discovered vertex other than the source.
+
+The source has distance 0 and no parent.
+
+Important: the parent array records one shortest path. If two different shortest paths reach the same vertex, BFS normally records whichever predecessor discovers it first. That depends on the order in which neighbors are examined.
+
+## 4. Reconstructing a path
+
+Once BFS has filled the parent array, we can reconstruct a shortest path by starting at the destination and following parent pointers backward until we reach the source.
+
+Suppose we want the path from `A` to `G`.
+
+The parent relationships are:
+
+```
+parent[G] = E
+parent[E] = B
+parent[B] = A
+parent[A] = -1
+```
+
+Following those pointers gives:
+
+```
+G <- E <- B <- A
+```
+
+But we want the path in the forward direction:
+
+```
+A -> B -> E -> G
+```
+
+So we need to reverse the sequence.
+
+### Pseudocode
+
+```
+RECONSTRUCT-PATH(source, destination, parent):
+    if destination is unreachable:
+        return "no path"
+
+    path = empty list
+    current = destination
+
+    while current != -1:
+        append current to path
+
+        if current == source:
+            break
+
+        current = parent[current]
+
+    reverse(path)
+    return path
+```
+
+In a real implementation, you should also verify that the chain actually reaches `source`. Otherwise, an unreachable destination or an inconsistent parent array could lead to an invalid result.
+
+### A complete example
+
+Here is the essential BFS logic for computing distances and parents:
+
+```
+BFS(G, source):
+    initialize distance[v] = -1 for every vertex v
+    initialize parent[v] = -1 for every vertex v
+
+    create empty queue Q
+    distance[source] = 0
+    enqueue(Q, source)
+
+    while Q is not empty:
+        u = dequeue(Q)
+
+        for each neighbor v of u:
+            if distance[v] == -1:
+                distance[v] = distance[u] + 1
+                parent[v] = u
+                enqueue(Q, v)
+```
+
+This version uses `distance[v] == -1` as the discovery check, so a separate `visited[]` array is not necessary.
+
+For a path containing $L$ edges, reconstruction takes $O(L)$ time. Since a shortest path in an unweighted graph can be chosen without repeated vertices, $L\le V-1$, so reconstruction takes at most $O(V)$ time.
+
+## 5. Unreachable destinations
+
+Not every vertex in a graph is necessarily reachable from the source.
+
+Consider:
+
+```
+Component 1:       Component 2:
+
+    A --- B            C --- D
+         /
+        E
+```
+
+If BFS starts at `A`, it can reach `B` and `E`, but not `C` or `D`.
+
+After BFS:
+
+| Vertex | Distance from A | Parent |
+| ------ | --------------- | ------ |
+| A      | 0               | -1     |
+| B      | 1               | A      |
+| E      | 2               | B      |
+| C      | -1              | -1     |
+| D      | -1              | -1     |
+
+Because `C` and `D` remain at `-1`, they are unreachable from `A`.
+
+### How should path reconstruction handle this?
+
+Before reconstructing the path to a destination, check its distance:
+
+```
+if (distance[destination] == -1) {
+    printf("No path exists.\n");
+}
+```
+
+Do not treat an unreachable destination as if its distance were zero. Zero means the destination is the source; an unreachable destination has no finite shortest-path distance.
+
+In mathematical terms:
+
+$$
+d(s,v)=\infty
+$$
+
+when no path exists from $s$ to $v$.
+
+This distinction is important in real applications. A flight planner should report that no route is available rather than return a fabricated route or an incorrect flight count.
+
+## 6. Example: minimum number of flights
+
+Let's turn the algorithm into a practical problem.
+
+Imagine these cities and direct flights:
+
+```
+             Cairo
+            /     \
+       Athens     Dubai
+        /   \        \
+   London  Rome      Tokyo
+       \              /
+        \------------/
+```
+
+For this example, treat each direct flight as one edge, regardless of its duration or price. We want the route with the fewest flights from Cairo to Tokyo.
+
+Represent the graph with these connections:
+
+```
+Cairo:   Athens, Dubai
+Athens:  Cairo, London, Rome
+Dubai:   Cairo, Tokyo
+London:  Athens, Tokyo
+Rome:    Athens
+Tokyo:   Dubai, London
+```
+
+Suppose BFS examines neighbors in the order shown.
+
+### Step 1: Start at Cairo
+
+```
+Queue: [Cairo]
+
+distance[Cairo] = 0
+parent[Cairo] = -1
+```
+
+### Step 2: Process Cairo
+
+Discover Athens and Dubai.
+
+```
+Queue: [Athens, Dubai]
+
+distance[Athens] = 1
+parent[Athens] = Cairo
+
+distance[Dubai] = 1
+parent[Dubai] = Cairo
+```
+
+### Step 3: Process Athens
+
+Discover London and Rome.
+
+```
+Queue: [Dubai, London, Rome]
+
+distance[London] = 2
+parent[London] = Athens
+
+distance[Rome] = 2
+parent[Rome] = Athens
+```
+
+### Step 4: Process Dubai
+
+Discover Tokyo.
+
+```
+Queue: [London, Rome, Tokyo]
+
+distance[Tokyo] = 2
+parent[Tokyo] = Dubai
+```
+
+Tokyo has now been discovered at distance 2, so BFS knows a route with two flights exists.
+
+### Step 5: Reconstruct the route
+
+Follow the parent pointers backward:
+
+```
+parent[Tokyo] = Dubai
+parent[Dubai] = Cairo
+```
+
+Reverse the sequence:
+
+```
+Cairo -> Dubai -> Tokyo
+```
+
+Shortest route found
+
+## Cairo → Dubai → Tokyo
+
+2 flights · 2 edges · distance 2
+
+Another route, `Cairo → Athens → London → Tokyo`, uses three flights. BFS finds the two-flight route first because it explores paths in increasing order of edge count.
+
+In this example, the route through Dubai is shortest in number of flights, not necessarily cheapest or fastest in actual travel time.
+
+## BFS vs DFS
+{/* The paragraph is comparing Breadth-First Search (BFS) and Depth-First Search (DFS) in terms of how they explore a graph and whether they find the shortest path. */}
+Breadth-First Search is guaranteed to find the shortest path in the graph from ver‐
+tex s to a desired target vertex, although it may evaluate a rather large number of
+nodes as it operates. Depth-First Search tries to make as much progress as possible,
+and may locate a path more quickly, which may not be the shortest path.
+The paragraph is comparing Breadth-First Search (BFS) and Depth-First Search (DFS) in terms of how they explore a graph and whether they find the shortest path.
+
+### 1. Breadth-First Search (BFS): shortest path first
+
+BFS explores the graph level by level, visiting all vertices one edge away from the source before exploring vertices two edges away.
+
+Consider this graph:
+
+```
+        S
+       / \
+      A   B
+      |   |
+      C   T
+      |
+      T
+```
+
+There are two paths from `S` to `T`:
+
+- `S → B → T` — 2 edges
+- `S → A → C → T` — 3 edges
+
+BFS explores vertices in increasing distance from `S`.
+
+```
+Level 0: S
+Level 1: A, B
+Level 2: C, T
+```
+
+When BFS discovers `T` through `B`, it has found a shortest path containing 2 edges. Any longer path would have to be explored at a later level.
+
+Why is BFS guaranteed to find the shortest path?
+
+Because, in an unweighted graph (or one where all edges have equal cost), BFS explores paths in order of their number of edges. The first time it discovers the target, no shorter path can exist.
+
+However, BFS may explore many vertices before reaching the target, especially when the target is far away or there are many vertices at the preceding levels.
+
+### 2. Depth-First Search (DFS): go as deep as possible
+
+DFS follows one path as far as it can before backtracking.
+
+Using the same graph, suppose DFS chooses `A` before `B`:
+
+```
+S → A → C → T
+```
+
+It might find the target through this path first, using 3 edges, even though a shorter path exists:
+
+```
+S → B → T
+```
+
+DFS does not generally explore vertices in increasing order of distance from the source. Therefore, the first path it finds is not necessarily the shortest path.
+
+DFS might reach the target quickly if it happens to choose a promising path. But it might also explore a long, irrelevant branch before finding the target. So DFS is not guaranteed to be faster than BFS.
+
+### 3. Side-by-side comparison
+
+| Property                             | BFS                                            | DFS                                                                  |
+| ------------------------------------ | ---------------------------------------------- | -------------------------------------------------------------------- |
+| Exploration strategy                 | Level by level                                 | Deep along one path, then backtrack                                  |
+| Shortest path in an unweighted graph | Guaranteed                                     | Not guaranteed                                                       |
+| First path found                     | Shortest in number of edges                    | May be longer than necessary                                         |
+| Memory usage                         | Can be high because it stores a broad frontier | Often lower on broad graphs, but depends on graph and implementation |
+| Typical implementation               | FIFO queue                                     | Stack or recursion                                                   |
+| Useful when                          | Finding minimum moves or fewest edges          | Exploring connectivity, backtracking, or searching deeply            |
+
+### 4. The important distinction
+
+The paragraph says DFS may locate a path more quickly. The word may matters: DFS can find a path quickly in a favorable exploration order, but there is no general guarantee that it will.
+
+Likewise, BFS guarantees a shortest path in an unweighted graph, but that guarantee does not mean it always runs faster or explores fewer vertices than DFS.
+
+One final detail: ordinary BFS does not guarantee the minimum-cost path when edges have different weights. For nonnegative, unequal edge costs, Dijkstra's algorithm is generally the appropriate choice.
+
+## 7. Why ordinary BFS does not solve general weighted shortest-path problems
+
+Ordinary BFS assumes that every edge contributes the same amount to the path length—one step.
+
+Now suppose we have a graph where the numbers represent flight costs:
+
+```
+              100
+          A -------- B
+           \         /
+         2  \       / 2
+             C ----
+```
+
+More explicitly, the edges are:
+
+- `A → B`: cost 100
+- `A → C`: cost 2
+- `C → B`: cost 2
+
+There are two routes from `A` to `B`.
+
+| Route     | Number of edges | Total cost |
+| --------- | --------------- | ---------- |
+| A → B     | 1               | 100        |
+| A → C → B | 2               | 4          |
+
+BFS minimizes the number of edges. It prefers `A → B` because it uses one edge.
+
+But the cheapest route is:
+
+```
+A -> C -> B
+```
+
+with a total cost of 4.
+
+This demonstrates the distinction:
+
+- Unweighted shortest path: minimize the number of edges.
+- Weighted shortest path: minimize the sum of edge weights.
+
+Ordinary BFS cannot generally solve the second problem because it does not prioritize the cumulative cost of a path. It prioritizes the number of edges.
+
+Even if BFS stores a `distance[]` array, adding one for each edge does not make it a weighted shortest-path algorithm. The algorithm itself must account for the actual edge costs and may need to update previously discovered distances.
+
+## 8. When to use 0–1 BFS or Dijkstra's algorithm instead
+
+The appropriate algorithm depends on the edge weights.
+
+Ordinary BFS
+
+All edges have equal cost
+
+Use it when every edge represents one step, or when all edges have the same positive cost.
+
+- Typical time: $O(V+E)$ with adjacency lists.
+- Example: minimum number of flights, maze moves, or unweighted social-network connections.
+
+0–1 BFS
+
+Edge weights are only 0 or 1
+
+Use it when an edge can cost either zero or one. It uses a double-ended queue (deque): add a vertex reached through a zero-cost edge to the front, and one reached through a cost-one edge to the back.
+
+- Typical time: $O(V+E)$.
+- Example: minimize the number of costly transitions when some transitions are free and others cost one.
+
+Dijkstra's algorithm
+
+Nonnegative edge weights
+
+Use it when edges have different nonnegative costs, such as travel time, distance, or ticket price. It repeatedly selects the unsettled vertex with the smallest known distance.
+
+- Typical time: $O((V+E)\log V)$ with adjacency lists and a binary heap, using a standard lazy priority-queue implementation.
+- Example: find the cheapest route when every flight has a different price.
+
+### Quick decision table
+
+| Edge weights                          | Recommended algorithm                             |
+| ------------------------------------- | ------------------------------------------------- |
+| All edges cost 1                      | BFS                                               |
+| All edges have the same positive cost | BFS still works; multiply edge count by that cost |
+| Each edge costs 0 or 1                | 0–1 BFS                                           |
+| Arbitrary nonnegative costs           | Dijkstra                                          |
+| Negative edge weights                 | Bellman–Ford, when its assumptions fit            |
+
+These are the usual choices for single-source shortest-path problems. More specialized graph structures or constraints can allow other algorithms.
+
+## Putting it all together
+
+For an unweighted graph, BFS computes shortest paths by maintaining two pieces of information:
+
+```
+distance[v] = distance[u] + 1
+parent[v]   = u
+```
+
+The first tells you the minimum number of edges from the source. The second lets you reconstruct a route that achieves that distance.
+
+The essential distinction to remember is:
+
+BFS minimizes the number of edges, not arbitrary path costs. Use ordinary BFS for unweighted shortest paths, 0–1 BFS for weights restricted to zero and one, and Dijkstra for general nonnegative weights.

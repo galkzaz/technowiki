@@ -7,6 +7,8 @@ import CodeBlock from "@theme-original/CodeBlock";
 import CodeSnippet from "@site/src/components/CodeSnippet";
 import { QandA, Question, Answer } from "./Question";
 
+import ExcalidrawDiagram from "./ExcalidrawCodeBlock";
+
 export default {
   ...MDXComponents,
   CodeBlock,
@@ -17,4 +19,6 @@ export default {
   QandA,
   Question,
   Answer,
+  // Custom interceptor for code blocks
+  ExcalidrawDiagram,
 };

@@ -1,0 +1,773 @@
+# Observability Pillars
+
+The observability pillars are the main types of telemetry used to understand what is happening inside an application. The traditional model identifies three pillars:
+
+1. Logs — records of events that happened.
+2. Metrics — numerical measurements of system behavior.
+3. Distributed tracing — follows a request across services and shows where time was spent.
+
+Signals correlation connects these signals so you can investigate a problem using evidence from multiple sources. It is not usually counted as a fourth pillar; it is a capability that makes the pillars more useful together.
+
+We'll use a Spring Boot microservices application as our running example.
+
+## 1. Understanding the pillars together
+
+Suppose a customer requests product information, and the API takes 3 seconds to respond.
+
+{/* Customer request
+
+GET /products/42
+
+API Gateway
+
+Receives request and forwards it
+
+Product Composite Service
+
+Calls downstream services
+
+Product Service
+
+## 80 ms
+
+Responds normally
+
+Recommendation Service
+
+## 2.7 s
+
+Slow database query
+
+Illustrative example. The services may execute concurrently, so their durations are not necessarily additive. */}
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/service-communication/observability/observability-pillars.png)
+
+Each pillar helps answer a different question:
+
+| Pillar              | Question                              | What it reveals                                                             |
+| ------------------- | ------------------------------------- | --------------------------------------------------------------------------- |
+| Logs                | What happened?                        | A database query timed out or took too long                                 |
+| Metrics             | How often, how much, or how long?     | Recommendation latency has increased                                        |
+| Distributed tracing | Where did the request spend its time? | The recommendation call dominates the request duration                      |
+| Signals correlation | How are these observations related?   | The slow trace, database log, and latency metric describe the same incident |
+
+The goal is not to choose one pillar. It is to combine them so that each provides context the others cannot.
+
+## 2. Logs (`logs`)
+
+### 2.1 What are logs?
+
+A log is a record of an event that occurred in a software system.
+
+Applications and infrastructure components generate logs to record significant events, errors, state changes, and diagnostic details.
+
+For example, a Spring Boot application might produce:
+
+```
+2026-10-28 12:00:01 INFO  ProductService - Fetching product 42
+2026-10-28 12:00:01 INFO  ProductService - Product retrieved
+2026-10-28 12:00:04 ERROR RecommendationService - Database query timed out
+```
+
+These entries tell us what happened at particular points in time. However, they do not automatically tell us whether the events belong to the same request or whether the database timeout caused the 3-second response.
+
+Those questions require additional context.
+
+### 2.2 Structured logs vs. plain-text logs
+
+There are two common logging styles.
+
+Plain-text logging
+
+```
+ERROR RecommendationService - Database query timed out after 3000 ms
+```
+
+This is readable, but extracting individual fields can require parsing the text.
+
+Structured logging
+
+```
+{
+  "timestamp": "2026-10-28T12:00:04Z",
+  "severity": "ERROR",
+  "service.name": "recommendation-service",
+  "event": "database_query_timeout",
+  "duration_ms": 3000,
+  "trace_id": "a81f92",
+  "span_id": "d21c04"
+}
+```
+
+This example illustrates a structured event. In a real system, timestamps, trace identifiers, and attribute names should follow consistent conventions.
+
+Structured logs make it easier to filter and query events, aggregate errors, and correlate a log entry with a trace.
+
+### 2.3 Log levels
+
+Common log levels include:
+
+| Level   | Typical purpose                                        | Example                                    |
+| ------- | ------------------------------------------------------ | ------------------------------------------ |
+| `TRACE` | Very detailed diagnostic information                   | Internal execution details                 |
+| `DEBUG` | Information useful during development or investigation | Selected query parameters, safely redacted |
+| `INFO`  | Significant normal operations                          | Application started                        |
+| `WARN`  | Unexpected conditions that may need attention          | Retry triggered                            |
+| `ERROR` | An operation failed                                    | Database connection unavailable            |
+
+The exact meaning of levels depends on the logging framework and application conventions.
+
+Not every exception should necessarily be logged as an error at every layer. Logging the same failure in multiple layers can create noise and misleading error counts.
+
+### 2.4 What makes a log useful?
+
+A useful log entry generally includes:
+
+- A timestamp.
+- A severity level.
+- The service or component name.
+- A clear event description.
+- Relevant operation details.
+- A trace ID or request correlation identifier, when available.
+- An exception or stack trace when it helps explain a failure.
+
+For example:
+
+```
+service=recommendation-service
+event=database_query_timeout
+duration_ms=3000
+trace_id=a81f92
+```
+
+This is much more useful than:
+
+```
+Something went wrong
+```
+
+Avoid logging secrets, access tokens, passwords, and unnecessary personal information.
+
+### 2.5 Logs in distributed systems
+
+Each service generates its own logs. Centralized log collection allows operators to search across services rather than connecting to each machine individually.
+
+```
+Gateway logs ---------\
+Composite logs --------+--> Central log backend --> Search
+Product logs ----------+
+Recommendation logs ---/
+```
+
+A centralized log backend might index events by service, severity, timestamp, deployment, and trace ID.
+
+Centralization does not itself guarantee correlation. Consistent metadata and identifiers are still necessary.
+
+### 2.6 Strengths and limitations of logs
+
+Strengths
+
+- Explain individual events and failures.
+- Capture exception messages and stack traces.
+- Support detailed investigation.
+- Can include application-specific business context.
+
+Limitations
+
+- Large volumes can be expensive to store and search.
+- Free-form text is harder to query consistently.
+- Logs may lack the context needed to connect services.
+- Excessive logging can affect application performance.
+- Missing logs cannot reliably prove that an event did not occur.
+
+Use logs when you need to understand the details of an event, not as a substitute for metrics or tracing.
+
+## 3. Metrics (`metrics`)
+
+### 3.1 What are metrics?
+
+A metric is a numerical measurement of system behavior, usually collected repeatedly over time.
+
+Examples include:
+
+- HTTP requests per second.
+- Percentage of requests that fail.
+- Request latency.
+- CPU and memory utilization.
+- Number of active database connections.
+- Message queue depth.
+- JVM garbage-collection duration.
+
+Unlike logs, which record individual events, metrics are generally designed to summarize behavior across many events and make trends easy to identify.
+
+For example:
+
+```
+12:00  request_rate = 850 requests/second
+12:01  request_rate = 870 requests/second
+12:02  request_rate = 910 requests/second
+```
+
+These measurements help you see how the system changes over time.
+
+### 3.2 The main metric types
+
+Metric types vary somewhat between instrumentation libraries and monitoring backends. The following are common concepts.
+
+Counter
+
+A cumulative value that increases as events occur, usually resetting when the instrumented process restarts.
+
+Example: total HTTP requests.
+
+```
+http_requests_total = 15000
+```
+
+A counter is usually more useful as a rate over time than as an isolated lifetime total. Prometheus, for example, provides `rate()` to calculate the average per-second increase over a time window.
+
+Gauge
+
+A value that can increase or decrease.
+
+Example: active database connections.
+
+```
+db_connections_active = 18
+```
+
+Gauges are useful for measurements such as current queue depth, available memory, and active workers.
+
+Histogram
+
+Records observations, commonly request durations or response sizes, and aggregates them into distributions.
+
+Example: HTTP request durations.
+
+```
+http_request_duration_seconds
+```
+
+Histograms are useful for calculating latency percentiles, such as p95 and p99, subject to the histogram representation and backend's query semantics.
+
+Some systems also provide summaries, which calculate statistical information about observations. Their behavior differs from histograms, particularly when aggregating data across instances.
+
+### 3.3 Understanding latency percentiles
+
+Average latency can hide problems affecting a minority of requests.
+
+Suppose 100 requests have these durations:
+
+- 95 requests take 100 ms each.
+- 5 requests take 2,000 ms each.
+
+The average is:
+
+$$
+\frac{95(100)+5(2000)}{100}=195\text{ ms}
+$$
+
+An average of 195 ms may look acceptable, but 5% of customers experience a 2-second delay.
+
+Percentiles help expose this behavior:
+
+| Measurement | Meaning                                                          |
+| ----------- | ---------------------------------------------------------------- |
+| p50         | Median latency; half the observations are at or below this value |
+| p95         | 95% of observations are at or below this value                   |
+| p99         | 99% of observations are at or below this value                   |
+
+For the example above, p95 is approximately 100 ms and p99 is approximately 2,000 ms, assuming the stated durations and the usual nearest-rank interpretation.
+
+The distinction matters because latency problems often affect the tail of the distribution rather than every request.
+
+### 3.4 The four golden signals
+
+A useful starting point for monitoring a request-driven service is the four golden signals:
+
+| Signal     | What it measures                        | Example                          |
+| ---------- | --------------------------------------- | -------------------------------- |
+| Latency    | Time needed to serve requests           | p99 latency = 1.8 seconds        |
+| Traffic    | Demand on the system                    | 2,000 requests/second            |
+| Errors     | Rate of failed or incorrect requests    | 3% HTTP 5xx responses            |
+| Saturation | How close a resource is to its capacity | Connection pool nearly exhausted |
+
+These signals help answer four basic operational questions:
+
+1. Is the service slow?
+2. How much demand is it receiving?
+3. Is it failing?
+4. Is it running out of resources?
+
+The four golden signals are a useful monitoring model, not an exhaustive list of metrics. A queue-driven service, for example, may also need consumer lag, queue age, and message-processing throughput.
+
+### 3.5 Metrics in a Spring Boot application
+
+Spring Boot Actuator and Micrometer provide common building blocks for application metrics.
+
+For example, a service may expose:
+
+```
+http_server_requests_seconds_count
+http_server_requests_seconds_sum
+jvm_memory_used_bytes
+jvm_gc_pause_seconds_count
+```
+
+The exact metric names depend on the Spring Boot version, instrumentation, and registry configuration.
+
+A Prometheus-based setup might work like this:
+
+```
+Spring Boot application
+        |
+        | Exposes metrics
+        v
+Actuator + Micrometer
+        |
+        | Prometheus scrape
+        v
+Prometheus time-series database
+        |
+        +--> Alerts
+        |
+        +--> Grafana dashboards
+```
+
+Prometheus stores time-series measurements. Grafana can visualize those measurements alongside logs and traces from compatible data sources.
+
+### 3.6 Metric labels and cardinality
+
+Metrics often have labels, also called dimensions or attributes, that allow you to break measurements down by category.
+
+For example:
+
+```
+http_requests_total{
+  service="product-service",
+  method="GET",
+  status="200"
+}
+```
+
+This allows you to compare requests by service, method, or status.
+
+But labels such as unique user IDs, request IDs, or raw URLs can create huge numbers of time series. This is called a high-cardinality problem.
+
+Use bounded labels for metrics and use traces or logs when you need individual-request detail.
+
+### 3.7 Strengths and limitations of metrics
+
+Strengths
+
+- Efficiently summarize system behavior.
+- Support dashboards, alerts, and trend analysis.
+- Help quantify reliability objectives.
+- Make it easy to compare services and time periods.
+
+Limitations
+
+- Aggregation can hide individual failures.
+- Metrics alone often cannot explain the root cause.
+- Poor label choices can cause cardinality and cost problems.
+- Sampling or aggregation choices may conceal important details.
+
+Use metrics to detect and quantify patterns, then use traces and logs to investigate specific examples.
+
+## 4. Distributed tracing (`distributed-tracing`)
+
+### 4.1 What is distributed tracing?
+
+Distributed tracing records the path of an operation as it travels through multiple components of a distributed system.
+
+It helps you understand:
+
+- Which services participated in a request.
+- How long each operation took.
+- Which downstream dependency was slow or failed.
+- Where errors occurred.
+- How operations were related across service boundaries.
+
+A distributed trace is made up of spans. A span represents an operation with a start time, duration, context, and optional attributes and events.
+
+### 4.2 Trace and span
+
+Consider a request to retrieve a product and its recommendations.
+
+```
+Trace ID: a81f92
+|
++-- Span: API Gateway                 300 ms
+    |
+    +-- Span: Product Composite       270 ms
+        |
+        +-- Span: Product Service      40 ms
+        |
+        +-- Span: Recommendation      210 ms
+            |
+            +-- Span: MySQL query     180 ms
+```
+
+The durations above are illustrative. Child spans can overlap, so their durations do not necessarily sum to the parent span's duration.
+
+A trace represents the broader execution. A span represents one operation within that execution.
+
+Important span fields include:
+
+| Field                   | Purpose                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| Trace ID                | Connects spans belonging to the same trace                                                          |
+| Span ID                 | Identifies one span                                                                                 |
+| Parent span ID          | Represents the parent operation, when applicable                                                    |
+| Start time and duration | Establish when the operation ran and how long it lasted                                             |
+| Attributes              | Describe the operation, such as service name, HTTP method, or status                                |
+| Events                  | Record timestamped events within the span                                                           |
+| Status                  | Indicates whether the operation succeeded or encountered an error, according to the instrumentation |
+
+### 4.3 How trace context moves between services
+
+Each service must be able to continue the trace context when it makes a downstream call.
+
+{/* For HTTP communication, the process commonly looks like this:
+
+API Gateway
+
+Starts or continues trace A
+
+Propagates trace context in HTTP headers
+
+Product Composite
+
+Creates a child span in trace A
+
+Propagates context to downstream calls
+
+Product Service
+
+Child operation
+
+Recommendation Service
+
+Child operation */}
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/service-communication/observability/How-trace-context-moves-between-services.png)
+The W3C Trace Context standard defines the `traceparent` header, which carries information needed to continue a trace. Instrumentation libraries typically handle this propagation automatically for supported integrations.
+
+If a service does not propagate context correctly, the trace may appear broken or split into unrelated traces.
+
+### 4.4 Understanding a waterfall trace
+
+A tracing interface often displays spans on a timeline. This is commonly called a waterfall view.
+
+```
+Time (ms)     0       100      200      300      400
+
+Gateway       [------------------------------]
+Composite       [--------------------------]
+Product           [----]
+Recommendation       [---------------------]
+MySQL                  [-----------------]
+```
+
+This simplified view shows that the database operation occupies a large part of the recommendation call.
+
+A waterfall helps distinguish several situations:
+
+- A slow operation inside one service.
+- Time spent waiting for a downstream service.
+- Parallel operations that overlap.
+- Retries that extend the request duration.
+- A request that fails before reaching some dependencies.
+
+Be careful when interpreting span duration. A span that covers an outgoing HTTP request may include network time and waiting for the response, not just remote server processing.
+
+### 4.5 Distributed tracing and errors
+
+A trace can associate an error with the operation where it occurred.
+
+For example:
+
+```
+Trace: a81f92
+  Gateway                  OK
+  Product Composite        OK
+  Product Service          OK
+  Recommendation Service  ERROR
+    MySQL query            ERROR
+```
+
+This narrows down the investigation, but the trace might not contain the exact database error message or the query's full diagnostic context.
+
+You may need the service logs, database metrics, or a database execution plan to establish the cause.
+
+### 4.6 Tracing asynchronous operations
+
+Distributed traces are not limited to synchronous HTTP calls.
+
+For a message-driven workflow:
+
+```
+Order Service
+    |
+    | Publish event
+    v
+RabbitMQ
+    |
+    | Deliver message
+    v
+Notification Service
+    |
+    v
+Email provider
+```
+
+Instrumentation can create producer and consumer spans and propagate trace context in message headers.
+
+Because message processing may happen much later, the producer and consumer spans need not overlap in time. Some workflows use span links or separate traces to represent these relationships appropriately.
+
+### 4.7 Sampling and trace cost
+
+Recording every span for every request can be expensive.
+
+Common strategies include:
+
+- Head-based sampling: Decide whether to sample near the beginning of a trace.
+- Tail-based sampling: Decide after collecting more trace information, potentially retaining errors or slow traces.
+- Always-on sampling: Record all traces, when volume and cost permit.
+
+Head-based sampling is comparatively simple but may miss rare failures. Tail-based sampling can retain more interesting traces but requires additional collector capacity and buffering.
+
+Metrics should still measure request rates and error rates independently of whether a particular trace was sampled.
+
+### 4.8 OpenTelemetry and tracing backends
+
+OpenTelemetry provides APIs, SDKs, instrumentation, context propagation, and export mechanisms for distributed traces.
+
+A typical arrangement is:
+
+```
+Spring Boot services
+       |
+       v
+OpenTelemetry instrumentation
+       |
+       v
+OpenTelemetry Collector
+       |
+       v
+Trace backend (e.g., Jaeger or Tempo)
+       |
+       v
+Trace search and visualization
+```
+
+This is one possible architecture, not a requirement. Some applications export directly to a backend, and framework integrations differ.
+
+Use distributed tracing when you need to understand the path, timing, and relationships of work across components.
+
+## 5. Signals correlation (`signals-correlation`)
+
+### 5.1 What is signals correlation?
+
+Signals correlation is the ability to connect related telemetry from different sources so that an engineer can investigate a system problem using a unified view.
+
+For example, suppose:
+
+- A metric shows that request latency increased.
+- A trace shows that the recommendation service is slow.
+- A log records a database connection timeout.
+
+Correlation helps you connect these observations and understand that they may describe the same incident.
+
+Without correlation, you may have three separate tools containing useful information but no easy way to move between them.
+
+### 5.2 A practical example
+
+Imagine that a customer request takes 3 seconds.
+
+{/* 1\. Metrics reveal the symptom
+
+Recommendation Service · p99 latency
+
+# 2.8 seconds
+
+Normal baseline: 150 ms
+
+2\. A trace identifies the slow operation
+
+Recommendation request
+
+2,800 ms
+
+MySQL query
+
+2,600 ms
+
+3\. A correlated log provides more detail
+
+trace_id=a81f92 · span_id=d21c04
+
+`Database connection acquisition timed out`
+
+Result
+
+The evidence points toward database connection acquisition or pool saturation. Further investigation of pool metrics, database health, and connection usage can help confirm the cause. */}
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/service-communication/observability/signals-correlation.png)
+Notice the distinction: correlation helps build a consistent explanation, but it does not automatically prove causality. The database timeout might be a contributing symptom rather than the original cause.
+
+### 5.3 How are signals correlated?
+
+There are several important mechanisms.
+
+#### A. Trace IDs and span IDs
+
+A trace ID identifies a distributed trace. A span ID identifies an operation within it.
+
+If application logs include these identifiers, an engineer can jump from a trace to relevant log entries.
+
+For example:
+
+```
+{
+  "service.name": "recommendation-service",
+  "trace_id": "a81f92",
+  "span_id": "d21c04",
+  "severity": "ERROR",
+  "message": "Database connection acquisition timed out"
+}
+```
+
+The identifiers must be generated and propagated correctly. Merely adding a field named `trace_id` to a log does not establish a valid relationship unless its value matches the actual trace.
+
+#### B. Shared resource attributes
+
+Metrics, logs, and traces should identify the services and environments that produced them.
+
+Common attributes include:
+
+- `service.name`
+- `service.version`
+- `deployment.environment.name`
+- Cloud, container, or Kubernetes resource information, when relevant.
+
+These attributes help compare the behavior of different services, deployments, and environments.
+
+For example, if latency rises only for version `2.4.0`, deployment metadata can help narrow the investigation to that release.
+
+Use consistent attribute conventions across instrumentation libraries and backends.
+
+#### C. Timestamps and time windows
+
+Metrics typically summarize measurements over time windows. Logs and traces contain timestamps associated with individual events and operations.
+
+An engineer might begin with a latency spike between 12:00 and 12:05, then search for error logs and slow traces from that period.
+
+Time-based correlation is useful, but it is weaker than matching trace identifiers. Many unrelated requests may occur within the same time window, and clock skew can complicate cross-host comparisons.
+
+#### D. Exemplars
+
+An exemplar is a reference from an aggregated metric observation to a particular trace or related observation.
+
+For example, a latency histogram may show an unusually high bucket count or a slow measurement with a trace reference. An operator can follow that reference to inspect an individual request.
+
+Exemplars provide a useful bridge between aggregate metrics and individual traces when the instrumentation, storage, and visualization tools support them.
+
+#### E. Consistent context propagation
+
+Trace context must travel with the work it describes.
+
+For HTTP requests, this commonly involves W3C Trace Context headers. For asynchronous messaging, the context can be propagated through message headers.
+
+If propagation breaks at a service boundary, logs and spans may no longer connect into the expected end-to-end view.
+
+### 5.4 Correlation vs. causation
+
+This is an important distinction.
+
+Suppose a dashboard shows:
+
+```
+CPU usage increased
+Request latency increased
+Database errors increased
+```
+
+These measurements are correlated in time. That does not establish which event caused the others.
+
+Possible explanations include:
+
+- A database problem caused requests to wait and retries increased CPU usage.
+- A CPU-intensive deployment delayed database operations and requests.
+- An increase in incoming traffic caused both resource saturation and database errors.
+
+To identify the cause, investigate trace timing, application logs, resource measurements, deployment changes, and other relevant evidence. A controlled test may be necessary to validate the hypothesis.
+
+### 5.5 Challenges in signal correlation
+
+| Challenge                    | Why it matters                                    | Mitigation                                                     |
+| ---------------------------- | ------------------------------------------------- | -------------------------------------------------------------- |
+| Missing trace context        | Logs cannot be linked reliably to traces          | Configure and test propagation                                 |
+| Inconsistent service names   | Cross-service searches become difficult           | Standardize resource attributes                                |
+| Different timestamp accuracy | Events may appear out of order                    | Synchronize clocks and use trace relationships                 |
+| Sampled-out traces           | A log may reference a trace that was not retained | Use appropriate sampling and preserve error metrics            |
+| Different retention policies | Logs may expire before traces or vice versa       | Align retention with investigation requirements                |
+| Excessive cardinality        | Queries and storage become expensive              | Use bounded metric labels and appropriate trace/log attributes |
+| Restricted access            | Engineers cannot inspect all relevant evidence    | Establish secure, role-appropriate access                      |
+
+### 5.6 A useful design principle
+
+Make telemetry correlation an architectural requirement rather than something added after an incident.
+
+For each important service, consider whether you can:
+
+1. Find its error rate and latency.
+2. Open a slow or failed trace.
+3. Identify the service and operation responsible.
+4. Open relevant logs from that trace.
+5. Compare the behavior across deployment versions.
+6. Investigate the underlying dependency using its metrics and diagnostic tools.
+
+If this workflow breaks at any step, you may have a gap in instrumentation, context propagation, data retention, or access configuration.
+
+## 6. Comparing all four concepts
+
+| Aspect              | Logs                             | Metrics                                  | Distributed tracing                     | Signals correlation                        |
+| ------------------- | -------------------------------- | ---------------------------------------- | --------------------------------------- | ------------------------------------------ |
+| Primary purpose     | Record events                    | Measure behavior                         | Follow operations across components     | Connect related evidence                   |
+| Typical granularity | Individual events                | Aggregated measurements or distributions | Individual operations and request paths | Cross-signal relationships                 |
+| Best for            | Error details and event context  | Trends, rates, thresholds, percentiles   | Latency breakdowns and dependency paths | Moving from symptom to explanation         |
+| Example             | Connection acquisition timed out | p99 latency is 2.8 seconds               | MySQL span took 2.6 seconds             | Open the log from the slow database span   |
+| Main limitation     | Can be noisy and expensive       | Often lacks individual-event details     | Can be sampled or incomplete            | Depends on consistent context and metadata |
+
+## 7. How the pillars fit into your observability TOC
+
+For your documentation structure, I would organize the section as follows:
+
+```
+observability/
+├── what-is-observability.mdx
+├── observability-in-distributed-systems.mdx
+├── observability-vs-monitoring.mdx
+├── observability-vs-diagnostics.mdx
+├── observability-vs-telemetry.mdx
+├── observability-challenges.mdx
+└── observability-pillars/
+    ├── _category_.json
+    ├── index.mdx
+    ├── logs.mdx
+    ├── metrics.mdx
+    ├── distributed-tracing.mdx
+    └── signals-correlation.mdx
+```
+
+The `observability-pillars` section should explain the concepts independently of particular tools. Framework-specific implementations belong in a subsequent section.
+
+For example:
+
+- Logs: structured logging, correlation IDs, log levels, centralized logging.
+- Metrics: metric types, percentiles, cardinality, SLIs and SLOs.
+- Distributed tracing: traces, spans, context propagation, sampling, asynchronous tracing.
+- Signals correlation: trace-to-log links, exemplars, resource attributes, cross-signal investigation.
+
+That separation will help you introduce the concepts first, then explain how Spring Boot Actuator, Micrometer, OpenTelemetry, Prometheus, tracing backends, and Grafana implement or support them.

@@ -1,0 +1,522 @@
+# Maze Game — Version 2: Multiple Predefined Mazes
+
+We'll extend Version 1 into a small maze game in C where the player chooses a maze, enters a path, and receives feedback. The application will then solve the selected maze using DFS.
+
+We'll keep the same core concepts: an adjacency matrix, vertex labels, path validation, `visited[]`, `parent[]`, and recursive DFS.
+
+## 1. What's new in Version 2?
+
+- Three predefined mazes instead of one.
+- A menu to select a maze.
+- Different graph structures and routes for each maze.
+- Shared validation and DFS functions that work with whichever maze is selected.
+- A replay option so the player can try another maze without restarting the program.
+
+The key design improvement is that the DFS algorithm doesn't need to change for each maze. We change the graph data, then reuse the same algorithm.
+
+## 2. The three mazes
+
+### Maze 1 — Two routes
+
+Vertices: S, A, B, C, D, E, T
+
+```
+
+       B -------- D
+      /            \
+S --- A              T
+      \            /
+       C -------- E
+  
+```
+
+Possible paths: `S A B D T` or `S A C E T`.
+
+### Maze 2 — Three branches
+
+Vertices: S, A, B, C, D, E, F, T
+
+```
+
+       B -------- D
+      /            \
+S --- A              F --- T
+      \            /
+       C -------- E
+  
+```
+
+Possible paths include `S A B D F T` and `S A C E F T`.
+
+### Maze 3 — A loop with a shortcut
+
+Vertices: S, A, B, C, D, E, T
+
+```
+
+S --- A -------- B --- T
+      |          |
+      C -------- D --- E
+                  \   /
+                    T
+  
+```
+
+This maze includes a cycle and multiple routes. The graph's edge list in the code below is authoritative if a simplified ASCII layout is ambiguous.
+
+## 3. Complete C program
+
+Save this as `maze_game_v2.c`. The program uses one reusable graph representation with space for up to 10 vertices. Each maze supplies its own labels and corridors.
+
+```c
+
+#include <stdio.h>
+#include <string.h>
+
+#define MAX_VERTICES 10
+#define MAX_PATH 32
+#define MAX_LINE 256
+
+// A maze is a graph with labels and an adjacency matrix.
+typedef struct {
+    char name[40];
+    int vertexCount;
+    char labels[MAX_VERTICES];
+    int graph[MAX_VERTICES][MAX_VERTICES];
+} Maze;
+
+// Shared DFS state for the currently selected maze.
+int visited[MAX_VERTICES];
+int parent[MAX_VERTICES];
+
+// Find the internal ID for a vertex label.
+// Return -1 when the label does not exist.
+int labelToIndex(const Maze *maze, char label)
+{
+    for (int i = 0; i < maze->vertexCount; i++) {
+        if (maze->labels[i] == label) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+// Add a corridor in both directions because these mazes
+// are undirected.
+void addCorridor(Maze *maze, char from, char to)
+{
+    int u = labelToIndex(maze, from);
+    int v = labelToIndex(maze, to);
+
+    if (u == -1 || v == -1) {
+        printf("Internal error: unknown corridor endpoint.\n");
+        return;
+    }
+
+    maze->graph[u][v] = 1;
+    maze->graph[v][u] = 1;
+}
+
+// Prepare a maze before adding its corridors.
+void initializeMaze(Maze *maze, const char *name,
+                    const char *labels, int vertexCount)
+{
+    // Clear all fields, including the adjacency matrix.
+    memset(maze, 0, sizeof(*maze));
+
+    snprintf(maze->name, sizeof(maze->name), "%s", name);
+    maze->vertexCount = vertexCount;
+
+    for (int i = 0; i < vertexCount; i++) {
+        maze->labels[i] = labels[i];
+    }
+}
+
+// Maze 1: two alternative routes.
+void buildMaze1(Maze *maze)
+{
+    initializeMaze(maze, "Two Routes", "SAB CDET", 7);
+
+    // Replace the labels with the exact vertex sequence.
+    // Spaces are not vertices.
+    const char labels[] = {'S', 'A', 'B', 'C', 'D', 'E', 'T'};
+    for (int i = 0; i < 7; i++) {
+        maze->labels[i] = labels[i];
+    }
+
+    addCorridor(maze, 'S', 'A');
+    addCorridor(maze, 'A', 'B');
+    addCorridor(maze, 'A', 'C');
+    addCorridor(maze, 'B', 'D');
+    addCorridor(maze, 'C', 'E');
+    addCorridor(maze, 'D', 'T');
+    addCorridor(maze, 'E', 'T');
+}
+
+// Maze 2: two branches join before the target.
+void buildMaze2(Maze *maze)
+{
+    const char labels[] = {'S', 'A', 'B', 'C',
+                           'D', 'E', 'F', 'T'};
+
+    initializeMaze(maze, "Three Branches", labels, 8);
+
+    addCorridor(maze, 'S', 'A');
+    addCorridor(maze, 'A', 'B');
+    addCorridor(maze, 'A', 'C');
+    addCorridor(maze, 'B', 'D');
+    addCorridor(maze, 'C', 'E');
+    addCorridor(maze, 'D', 'F');
+    addCorridor(maze, 'E', 'F');
+    addCorridor(maze, 'F', 'T');
+}
+
+// Maze 3: a cycle and several possible routes.
+void buildMaze3(Maze *maze)
+{
+    const char labels[] = {'S', 'A', 'B', 'C',
+                           'D', 'E', 'T'};
+
+    initializeMaze(maze, "Loop and Shortcut", labels, 7);
+
+    addCorridor(maze, 'S', 'A');
+    addCorridor(maze, 'A', 'B');
+    addCorridor(maze, 'B', 'T');
+
+    addCorridor(maze, 'A', 'C');
+    addCorridor(maze, 'C', 'D');
+    addCorridor(maze, 'B', 'D');
+
+    addCorridor(maze, 'D', 'E');
+    addCorridor(maze, 'E', 'T');
+    addCorridor(maze, 'D', 'T');
+}
+
+// Display the selected maze.
+// These diagrams are schematic; the graph data defines
+// exactly which corridors exist.
+void displayMaze(const Maze *maze, int mazeNumber)
+{
+    printf("\n========== MAZE %d: %s ==========\n",
+           mazeNumber, maze->name);
+
+    if (mazeNumber == 1) {
+        printf("       B -------- D\n");
+        printf("      /            \\\n");
+        printf("S --- A              T\n");
+        printf("      \\            /\n");
+        printf("       C -------- E\n");
+    } else if (mazeNumber == 2) {
+        printf("       B -------- D\n");
+        printf("      /            \\\n");
+        printf("S --- A              F --- T\n");
+        printf("      \\            /\n");
+        printf("       C -------- E\n");
+    } else {
+        printf("S --- A --- B --- T\n");
+        printf("      |     |   / |\n");
+        printf("      C --- D --- E\n");
+        printf("\nMaze 3 contains a loop and multiple routes.\n");
+    }
+
+    printf("\nStart: S    Target: T\n");
+    printf("Vertices: ");
+
+    for (int i = 0; i < maze->vertexCount; i++) {
+        printf("%c ", maze->labels[i]);
+    }
+
+    printf("\n");
+}
+
+// Validate a proposed path.
+// A valid path must start at S, end at T, use real
+// corridors, and not revisit any vertex.
+int validatePath(const Maze *maze,
+                 const int path[], int length)
+{
+    int seen[MAX_VERTICES] = {0};
+
+    int start = labelToIndex(maze, 'S');
+    int target = labelToIndex(maze, 'T');
+
+    if (length < 2) {
+        printf("Wrong: the path is too short.\n");
+        return 0;
+    }
+
+    if (path[0] != start) {
+        printf("Wrong: the path must start at S.\n");
+        return 0;
+    }
+
+    if (path[length - 1] != target) {
+        printf("Wrong: the path must end at T.\n");
+        return 0;
+    }
+
+    for (int i = 0; i < length; i++) {
+        int current = path[i];
+
+        if (seen[current]) {
+            printf("Wrong: vertex %c is repeated.\n",
+                   maze->labels[current]);
+            return 0;
+        }
+
+        seen[current] = 1;
+
+        // Check the edge from the previous vertex.
+        if (i > 0) {
+            int previous = path[i - 1];
+
+            if (maze->graph[previous][current] == 0) {
+                printf("Wrong: no corridor from %c to %c.\n",
+                       maze->labels[previous],
+                       maze->labels[current]);
+                return 0;
+            }
+        }
+    }
+
+    printf("Correct! Your path is valid:\n");
+
+    for (int i = 0; i < length; i++) {
+        printf("%c", maze->labels[path[i]]);
+
+        if (i < length - 1) {
+            printf(" -> ");
+        }
+    }
+
+    printf("\n");
+    return 1;
+}
+
+// DFS finds one path from current to the target.
+// parent[] records the previous vertex on that path.
+int dfs(const Maze *maze, int current, int target)
+{
+    visited[current] = 1;
+
+    // Base case: we reached the target.
+    if (current == target) {
+        return 1;
+    }
+
+    // Examine all vertices for possible neighbors.
+    for (int neighbor = 0;
+         neighbor < maze->vertexCount;
+         neighbor++) {
+
+        if (maze->graph[current][neighbor] == 1 &&
+            !visited[neighbor]) {
+
+            parent[neighbor] = current;
+
+            // Explore this branch recursively.
+            if (dfs(maze, neighbor, target)) {
+                return 1;
+            }
+        }
+    }
+
+    // No solution was found through this branch.
+    return 0;
+}
+
+// Reset DFS state, run the search, and reconstruct its path.
+void solveMaze(const Maze *maze)
+{
+    int start = labelToIndex(maze, 'S');
+    int target = labelToIndex(maze, 'T');
+
+    for (int i = 0; i < maze->vertexCount; i++) {
+        visited[i] = 0;
+        parent[i] = -1;
+    }
+
+    printf("\n========== DFS SOLUTION ==========\n");
+
+    if (start == -1 || target == -1 ||
+        !dfs(maze, start, target)) {
+        printf("No path exists from S to T.\n");
+        return;
+    }
+
+    // Reconstruct the route backwards from T to S.
+    int reversePath[MAX_VERTICES];
+    int length = 0;
+
+    for (int current = target;
+         current != -1;
+         current = parent[current]) {
+        reversePath[length++] = current;
+    }
+
+    printf("DFS found: ");
+
+    // Reverse the stored sequence to print S -> T.
+    for (int i = length - 1; i >= 0; i--) {
+        printf("%c", maze->labels[reversePath[i]]);
+
+        if (i > 0) {
+            printf(" -> ");
+        }
+    }
+
+    printf("\n");
+}
+
+// Read a path such as: S A B D T
+void playGame(const Maze *maze)
+{
+    char line[MAX_LINE];
+    int path[MAX_PATH];
+    int length = 0;
+
+    printf("\nEnter your path (example: S A B D T): ");
+
+    if (fgets(line, sizeof(line), stdin) == NULL) {
+        printf("Could not read your input.\n");
+        return;
+    }
+
+    char *token = strtok(line, " \t\r\n");
+
+    while (token != NULL) {
+        // Labels must be one character long.
+        if (strlen(token) != 1) {
+            printf("Wrong input: use single-letter labels.\n");
+            return;
+        }
+
+        int vertex = labelToIndex(maze, token[0]);
+
+        if (vertex == -1) {
+            printf("Wrong input: unknown vertex '%s'.\n", token);
+            return;
+        }
+
+        if (length >= MAX_PATH) {
+            printf("Wrong input: path is too long.\n");
+            return;
+        }
+
+        path[length++] = vertex;
+        token = strtok(NULL, " \t\r\n");
+    }
+
+    validatePath(maze, path, length);
+}
+
+int main(void)
+{
+    Maze mazes[3];
+
+    // Build every predefined maze once.
+    buildMaze1(&mazes[0]);
+    buildMaze2(&mazes[1]);
+    buildMaze3(&mazes[2]);
+
+    while (1) {
+        int choice;
+
+        printf("\n========== MAZE GAME ==========\n");
+        printf("1. Maze 1 - Two Routes\n");
+        printf("2. Maze 2 - Three Branches\n");
+        printf("3. Maze 3 - Loop and Shortcut\n");
+        printf("0. Exit\n");
+        printf("Choose a maze: ");
+
+        if (scanf("%d", &choice) != 1) {
+            printf("Invalid menu input. Exiting.\n");
+            return 1;
+        }
+
+        // Consume the newline left by scanf so fgets
+        // can read the player's entire path next.
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF) {
+            /* Discard remaining characters on the line. */
+        }
+
+        if (choice == 0) {
+            printf("Goodbye!\n");
+            break;
+        }
+
+        if (choice < 1 || choice > 3) {
+            printf("Please choose 0, 1, 2, or 3.\n");
+            continue;
+        }
+
+        Maze *selected = &mazes[choice - 1];
+
+        displayMaze(selected, choice);
+        playGame(selected);
+        solveMaze(selected);
+    }
+
+    return 0;
+}
+
+```
+
+## 4. Compile and run
+
+On Linux, open a terminal in the directory containing the source file:
+
+```
+gcc -std=c11 -Wall -Wextra -pedantic maze_game_v2.c -o maze_game
+./maze_game
+```
+
+The menu will look like this:
+
+```
+========== MAZE GAME ==========
+1. Maze 1 - Two Routes
+2. Maze 2 - Three Branches
+3. Maze 3 - Loop and Shortcut
+0. Exit
+Choose a maze:
+```
+
+Enter `1`, `2`, or `3` to play the selected maze.
+
+## 5. Test each maze
+
+## Try a test case
+
+Choose a maze and select a sample path to copy into your terminal.
+
+Maze 1 — Two Routes
+
+Maze 2 — Three Branches
+
+Maze 3 — Loop and Shortcut
+
+Example pathsS A B D TS A C E TS B D TPath to enter
+
+&#x20;Copy path
+
+A few useful checks:
+
+- Maze 1: `S A B D T` and `S A C E T` should both be accepted.
+- Maze 2: `S A B D F T` and `S A C E F T` should both be accepted.
+- Maze 3: `S A B T` and `S A C D T` should both be accepted.
+- For any maze, try a non-existent connection, a repeated vertex, or a path that doesn't start at `S` to test rejection.
+
+## 6. Important design lessons
+
+One graph algorithm, multiple data sets. Each maze has its own adjacency matrix, but `validatePath()` and `dfs()` work with a pointer to whichever maze is selected.
+
+The maze's graph is the source of truth. The ASCII diagrams are just visual guides. If you modify a corridor in `buildMaze1()`, `buildMaze2()`, or `buildMaze3()`, update its diagram too.
+
+DFS finds one valid route. Its answer depends on the order in which neighbors are examined. It doesn't guarantee the shortest path.
+
+Next improvement: We could let the player retry the same maze after an incorrect answer, track the number of attempts, and award a score for solving it without help. After that, random maze generation would be a natural Version 3.
+
+Would you like a reminder to continue with Version 3, or a follow-up to add retries and scoring to Version 2?

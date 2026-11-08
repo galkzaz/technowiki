@@ -857,7 +857,7 @@ int algorithm1(char c, const std::string &str) {
     return count;
 }
 ```
-```java
+```Java
  public static int algorithm1(char c, String str) {
      int count = 0;
      for (int i = 0; i < str.length(); i++) {
@@ -1497,7 +1497,7 @@ duplicate values exist in each array), producing the intersection of the two inp
 +
 This results in a runtime complexity of O(mn), where m and n are the sizes of the first and second input arrays. If the input arrays are the same size as n elements, this results in a runtime of O(n2).
 +
-```java
+```Java
  public static List<Integer> algorithm1(int[] a, int[] b) {
      List<Integer> result = new ArrayList<>(a.length);
      for (int x : a) {

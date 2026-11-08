@@ -1,0 +1,1850 @@
+{/* # Dijkstra's Algorithm for Single-Source Shortest Path (SSSP) */}
+
+Suppose you want to fly a private plane on the shortest path from St. Johnsbury, VT,
+to Waco, TX. Assume you know the distances between the airports for all pairs of
+cities and towns that are reachable from each other in one nonstop flight of your
+plane. The best-known algorithm to solve this problem, Dijkstra’s Algorithm, finds
+the shortest path from St. Johnsbury to all other airports, although the search may
+be halted once the shortest path to Waco is known.
+
+In this example, we minimize the distance traversed. In other applications we might replace distance with time (e.g., deliver a packet over a network as quickly as possible) or with cost (e.g., find the cheapest way to fly from St. Johnsbury to Waco). Solutions to these problems also correspond to shortest paths.
+
+Dijkstra's algorithm solves the Single-Source Shortest Path (SSSP) problem in a weighted graph when all edge weights are nonnegative.
+
+It finds the minimum-cost path from one source vertex to every other reachable vertex.
+
+You can think of it as an extension of BFS:
+
+- BFS finds shortest paths when every edge has the same cost (typically 1).
+- Dijkstra finds shortest paths when edges have different, nonnegative costs.
+
+The key difference is that BFS uses a **FIFO queue**, while Dijkstra uses a **min-priority queue** to process the vertex with the smallest currently known distance.
+
+
+:::info
+
+A min-priority queue is an abstract data type that stores a collection of elements with assigned priorities, where the element with the smallest numerical value (highest priority) is always retrieved or removed first.
+
+:::
+
+## The problem Dijkstra solves
+
+Consider this weighted graph:
+
+```
+             4
+        A -------- B
+        |          |
+      10|          |3
+        |          |
+        C -------- D
+             2
+```
+
+Edges:
+
+```
+A -- B : 4
+A -- C : 10
+B -- D : 3
+C -- D : 2
+```
+
+Suppose the source vertex is `A`.
+
+We want to find the shortest path from `A` to every other vertex.
+
+There are two possible paths from `A` to `D`:
+
+```
+Path 1: A -> B -> D
+Cost:   4 + 3 = 7
+
+Path 2: A -> C -> D
+Cost:   10 + 2 = 12
+```
+
+Therefore, the shortest path is:
+
+```
+A -> B -> D
+```
+
+with a total cost of `7`.
+
+The final result should be:
+
+| Vertex | Shortest distance | Shortest path |
+| ------ | ----------------- | ------------- |
+| A      | 0                 | A             |
+| B      | 4                 | A → B         |
+| C      | 10                | A → C         |
+| D      | 7                 | A → B → D     |
+
+Notice that the shortest path to `D` is not necessarily the path with the fewest edges. We are minimizing the sum of edge weights, not the number of edges.
+
+## Core idea
+
+Dijkstra repeatedly selects the unprocessed vertex with the smallest tentative distance from the source.
+
+It then examines that vertex's outgoing edges to see whether going through it gives us a shorter route to its neighbors.
+
+This process is called relaxation.
+
+There are three important concepts:
+
+1. Distance array: stores the currently known shortest distance from the source.
+2. Predecessor array: remembers how we reached each vertex.
+3. Min-priority queue: selects the vertex with the smallest tentative distance.
+
+### Distance array
+
+For each vertex `v`:
+
+```
+dist[v] = shortest distance currently known from source to v
+```
+
+Initially:
+
+```
+dist[A] = 0
+dist[B] = ∞
+dist[C] = ∞
+dist[D] = ∞
+```
+
+We use infinity because we have not discovered a path to those vertices yet.
+
+### Predecessor array
+
+```
+pred[v] = previous vertex on the currently best-known path to v
+```
+
+For example, if the best path to `D` is:
+
+```
+A -> B -> D
+```
+
+then:
+
+```
+pred[D] = B
+pred[B] = A
+```
+
+### Min-priority queue
+
+Dijkstra’s Algorithm relies on a data structure known as a priority queue (PQ). A `PQ` maintains a collection of items, each of which has an associated integer priority
+that represents the importance of an item. A PQ allows one to insert an item, `x`, with its associated priority, `p`. Lower values of `p` represent items of higher importance. 
+
+The fundamental operation of a PQ is `getMin`, which returns the item in PQ whose priority value is lowest (or in other words, is the most important item). Another operation, `decreasePriority`, may be provided by a PQ that allows us to locate a specific item in the PQ and reduce its associated priority value (which increases its importance) while leaving the item in the PQ.
+
+The priority queue stores vertices according to their tentative distances.
+
+For example:
+
+```
+(B, 4)
+(C, 10)
+(D, 7)
+```
+
+The next vertex selected is the one with the smallest priority.
+
+Unlike a normal queue, the vertex inserted first is not necessarily removed first.
+
+## The relaxation operation
+
+Relaxation is the central operation in Dijkstra's algorithm.
+
+Suppose we are processing vertex `u`, and we examine an edge:
+
+```
+u ---- weight ----> v
+```
+
+We already know a tentative distance to `u`:
+
+```
+dist[u]
+```
+
+If we travel from the source to `u`, then take the edge from `u` to `v`, the resulting path cost is:
+
+$$
+candidate = dist[u] + w(u,v)
+$$
+
+We compare this candidate with the currently known distance to `v`.
+
+If the new path is shorter:
+
+$$
+dist[u] + w(u,v) < dist[v]
+$$
+
+we update:
+
+$$
+dist[v] = dist[u] + w(u,v)
+$$
+
+and:
+
+$$
+pred[v] = u
+$$
+
+In pseudocode:
+
+```
+if dist[u] + weight(u, v) < dist[v]:
+
+    dist[v] = dist[u] + weight(u, v)
+
+    pred[v] = u
+```
+
+For example:
+
+```
+dist[A] = 0
+weight(A, B) = 4
+dist[B] = ∞
+```
+
+We calculate:
+
+```
+candidate = 0 + 4 = 4
+```
+
+Since `4 < ∞`, we update:
+
+```
+dist[B] = 4
+pred[B] = A
+```
+
+The important point is that relaxation can happen more than once for the same vertex. A later route might be shorter than the route discovered earlier.
+
+## Input/Output
+The input is a directed, weighted graph `G = (V, E)` and a source vertex `s ∈ V`. Each
+edge `e = (u, v)` has an associated non-negative weight in the graph.
+
+Dijkstra’s Algorithm produces two computed arrays. 
+1. The primary result is the array `dist[]` of values representing the distance from source vertex `s` to each vertex
+in the graph. 
+2. The secondary result is the array `pred[]` that can be used to rediscover the actual shortest paths from vertex `s` to each vertex in the graph.
+
+The edge weights are non-negative (i.e., greater than or equal zero); if this assumption is not true, then `dist[]` may contain invalid results. Even worse, Dijkstra’s Algorithm will loop forever if a cycle exists whose sum of all weights is less than zero.
+## Step-by-step walkthrough 1
+
+Let's execute Dijkstra on our example, starting from `A`.
+```
+             4
+        A -------- B
+        |          |
+      10|          |3
+        |          |
+        C -------- D
+             2
+```
+
+For clarity, we'll treat the graph as directed, with these edges:
+
+```
+A --4--> B
+A --10-> C
+B --3--> D
+C --2--> D
+```
+
+This is important: `D` has no outgoing edges in this example.
+
+### Initial state
+
+Set the source distance to zero and all other distances to infinity.
+
+```
+Distance:
+          A   B   C   D
+        [ 0,  ∞,  ∞,  ∞ ]
+
+Predecessor:
+        [ -,  -,  -,  - ]
+```
+
+Insert the source into the min-priority queue:
+
+```
+Priority Queue:
+[(A, 0)]
+```
+
+The notation `(A, 0)` means vertex `A` has priority zero.
+
+### Iteration 1: Extract A
+
+Remove the vertex with the smallest distance.
+
+```
+Extracted: A
+Distance:  0
+```
+
+Examine all outgoing edges from `A`.
+
+Edge A → B (weight 4)
+
+```
+candidate = dist[A] + 4
+          = 0 + 4
+          = 4
+```
+
+Since `4 < ∞`, update:
+
+```
+dist[B] = 4
+pred[B] = A
+```
+
+Edge A → C (weight 10)
+
+```
+candidate = dist[A] + 10
+          = 0 + 10
+          = 10
+```
+
+Since `10 < ∞`, update:
+
+```
+dist[C] = 10
+pred[C] = A
+```
+
+State after processing `A`:
+
+```
+Distance:
+          A   B   C   D
+        [ 0,  4, 10,  ∞ ]
+
+Predecessor:
+        [ -,  A,  A,  - ]
+
+Priority Queue:
+        [(B, 4), (C, 10)]
+```
+
+### Iteration 2: Extract B
+
+The queue contains:
+
+```
+(B, 4)
+(C, 10)
+```
+
+The smallest distance is `4`, so we extract `B`.
+
+```
+Extracted: B
+Distance:  4
+```
+
+Examine the outgoing edge:
+
+Edge B → D (weight 3)
+
+```
+candidate = dist[B] + 3
+          = 4 + 3
+          = 7
+```
+
+Since `7 < ∞`, update:
+
+```
+dist[D] = 7
+pred[D] = B
+```
+
+State:
+
+```
+Distance:
+          A   B   C   D
+        [ 0,  4, 10,  7 ]
+
+Predecessor:
+        [ -,  A,  A,  B ]
+
+Priority Queue:
+        [(D, 7), (C, 10)]
+```
+
+### Iteration 3: Extract D
+
+The queue contains:
+
+```
+(D, 7)
+(C, 10)
+```
+
+Extract `D`, because it has the smallest distance.
+
+```
+Extracted: D
+Distance:  7
+```
+
+There are no outgoing edges from `D`, so no relaxation occurs.
+
+State:
+
+```
+Distance:
+          A   B   C   D
+        [ 0,  4, 10,  7 ]
+
+Predecessor:
+        [ -,  A,  A,  B ]
+
+Priority Queue:
+        [(C, 10)]
+```
+
+### Iteration 4: Extract C
+
+Extract `C`:
+
+```
+Extracted: C
+Distance:  10
+```
+
+Examine its outgoing edge:
+
+Edge C → D (weight 2)
+
+```
+candidate = dist[C] + 2
+          = 10 + 2
+          = 12
+```
+
+Compare the candidate with the existing distance:
+
+```
+candidate     = 12
+dist[D]       = 7
+```
+
+Since `12` is not smaller than `7`, we do nothing.
+
+We do not change either `dist[D]` or `pred[D]`.
+
+The queue becomes empty, and Dijkstra terminates.
+
+### Final result
+
+Shortest distances calculated
+
+```
+Distance:
+          A   B   C   D
+        [ 0,  4, 10,  7 ]
+
+Predecessor:
+        [ -,  A,  A,  B ]
+```
+
+| Destination | Distance | Shortest path |
+| ----------- | -------- | ------------- |
+| A           | 0        | A             |
+| B           | 4        | A → B         |
+| C           | 10       | A → C         |
+| D           | 7        | A → B → D     |
+
+Notice what happened with `D`:
+
+- The algorithm found a route to `D` through `B`, with cost `7`.
+- Later, it considered a route through `C`, with cost `12`.
+- It kept the better route, which was `7`.
+
+This illustrates the purpose of relaxation: keep improving tentative distances whenever a cheaper path is discovered.
+
+## Step-by-step walkthrough 2
+
+![](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/dijkstra/walkthrough2.png)
+```
+                       11
+              (1) ------------> (4)
+             ^                      \
+           6/                        \ 3
+           /                          \
+          /                            v
+         (0)------18---->(3) <--4--- (5)
+           \             ^          /
+             \ 8      9/           /                 
+              \     /             /                   
+               v  /              /                  
+               (2) <------------/
+                       7
+```                   
+First, let's list all the directed edges:
+
+| Edge  | Weight |
+| ----- | ------ |
+| 0 → 1 | 6      |
+| 0 → 2 | 8      |
+| 0 → 3 | 18     |
+| 1 → 4 | 11     |
+| 2 → 3 | 9      |
+| 4 → 5 | 3      |
+| 5 → 2 | 7      |
+| 5 → 3 | 4      |
+
+We have:
+
+- Vertices: $V = {0,1,2,3,4,5}$
+- Number of vertices: 6
+- Number of edges: 8
+- Source vertex: 0
+- All weights are nonnegative, so Dijkstra is applicable.    
+
+**Adjacency list**
+
+```
+0: (1, 6), (2, 8), (3, 18)
+1: (4, 11)
+2: (3, 9)
+3: —
+4: (5, 3)
+5: (2, 7), (3, 4)
+```
+
+### Initialize the algorithm
+
+We initialize three arrays.
+
+1. Distance array: Stores the shortest-known distance from source 0.
+2. Predecessor array: Stores the previous vertex in the current shortest path.
+3. Visited array: Indicates whether a vertex has been finalized.
+
+Initially:
+
+| Vertex | Distance | Predecessor | Visited |
+| ------ | -------- | ----------- | ------- |
+| 0      | 0        | -1          | false   |
+| 1      | ∞        | -1          | false   |
+| 2      | ∞        | -1          | false   |
+| 3      | ∞        | -1          | false   |
+| 4      | ∞        | -1          | false   |
+| 5      | ∞        | -1          | false   |
+
+```
+distance[] = [0, ∞, ∞, ∞, ∞, ∞]
+
+predecessor[] = [-1, -1, -1, -1, -1, -1]
+
+visited[] = [F, F, F, F, F, F]
+```
+
+The priority queue initially contains only the source:
+
+```
+PQ = [(0, 0)]
+
+Format: (vertex, distance)
+```
+
+We now start processing.
+
+### 1. Iteration 1 — Extract vertex 0
+
+Extract minimum: (0, 0)
+
+Vertex 0 has the smallest distance, so we extract it from the priority queue.
+
+```
+visited[0] = true
+```
+
+Now examine all outgoing edges of vertex 0.
+
+#### Edge 0 → 1 (weight 6)
+
+Calculate the candidate distance:
+
+$$
+newLen = distance[0] + weight(0,1) = 0 + 6 = 6
+$$
+
+Compare:
+
+$$
+6 < distance[1] = \infty
+$$
+
+The condition is true.
+
+Update:
+
+```
+distance[1] = 6
+predecessor[1] = 0
+```
+
+Operation:
+
+```
+insert(1, 6)
+```
+
+#### Edge 0 → 2 (weight 8)
+
+$$
+newLen = distance[0] + weight(0,2) = 0 + 8 = 8
+$$
+
+Compare:
+
+$$
+8 < \infty
+$$
+
+Update:
+
+```
+distance[2] = 8
+predecessor[2] = 0
+```
+
+Operation:
+
+```
+insert(2, 8)
+```
+
+#### Edge 0 → 3 (weight 18)
+
+$$
+newLen = distance[0] + weight(0,3) = 0 + 18 = 18
+$$
+
+Compare:
+
+$$
+18 < \infty
+$$
+
+Update:
+
+```
+distance[3] = 18
+predecessor[3] = 0
+```
+
+Operation:
+
+```
+insert(3, 18)
+```
+
+#### State after iteration 1
+
+Priority queue
+
+```
+        1:6
+       /   \
+     2:8   3:18
+```
+
+Arrays
+
+| Vertex | Distance | Predecessor | Visited |
+| ------ | -------- | ----------- | ------- |
+| 0      | 0        | -1          | T       |
+| 1      | 6        | 0           | F       |
+| 2      | 8        | 0           | F       |
+| 3      | 18       | 0           | F       |
+| 4      | ∞        | -1          | F       |
+| 5      | ∞        | -1          | F       |
+
+The next vertex is 1 because its distance (6) is the smallest.
+
+### 4. Iteration 2 — Extract vertex 1
+
+Extract minimum: (1, 6)
+
+Finalize vertex 1:
+
+```
+visited[1] = true
+```
+
+Examine its outgoing edges:
+
+```
+1 → 4 : weight 11
+```
+
+Calculate:
+
+$$
+newLen = distance[1] + weight(1,4)
+$$
+
+$$
+newLen = 6 + 11 = 17
+$$
+
+Compare:
+
+$$
+17 < distance[4] = \infty
+$$
+
+The condition is true.
+
+Update:
+
+```
+distance[4] = 17
+predecessor[4] = 1
+```
+
+Operation:
+
+```
+insert(4, 17)
+```
+
+#### State after iteration 2
+
+Priority queue:
+
+```
+          2:8
+         /   \
+      3:18   4:17
+```
+
+Arrays:
+
+| Vertex | Distance | Predecessor | Visited |
+| ------ | -------- | ----------- | ------- |
+| 0      | 0        | -1          | T       |
+| 1      | 6        | 0           | T       |
+| 2      | 8        | 0           | F       |
+| 3      | 18       | 0           | F       |
+| 4      | 17       | 1           | F       |
+| 5      | ∞        | -1          | F       |
+
+The next vertex is 2 because its distance is 8.
+
+### 5. Iteration 3 — Extract vertex 2
+
+Extract minimum: (2, 8)
+
+Finalize vertex 2:
+
+```
+visited[2] = true
+```
+
+Examine its outgoing edge:
+
+```
+2 → 3 : weight 9
+```
+
+Calculate:
+
+$$
+newLen = distance[2] + weight(2,3)
+$$
+
+$$
+newLen = 8 + 9 = 17
+$$
+
+Compare:
+
+$$
+17 < distance[3] = 18
+$$
+
+The condition is true!
+
+This is an important step because we have discovered a shorter path to vertex 3.
+
+Previously:
+
+```
+distance[3] = 18
+predecessor[3] = 0
+```
+
+Now:
+
+```
+distance[3] = 17
+predecessor[3] = 2
+```
+
+**Which priority queue operation?**
+
+Vertex 3 is already inside the priority queue with priority 18.
+
+Therefore, we don't insert another entry.
+
+We execute:
+
+```
+decreaseKey(3)
+```
+
+Before:
+
+```
+          4:17
+         /
+       3:18
+```
+
+After decreasing the distance of vertex 3:
+
+```
+          4:17
+         /
+       3:17
+```
+
+Both priorities are now equal. No swap is necessary.
+
+Decrease-key operation executed
+
+#### State after iteration 3
+
+| Vertex | Distance | Predecessor | Visited |
+| ------ | -------- | ----------- | ------- |
+| 0      | 0        | -1          | T       |
+| 1      | 6        | 0           | T       |
+| 2      | 8        | 0           | T       |
+| 3      | 17       | 2           | F       |
+| 4      | 17       | 1           | F       |
+| 5      | ∞        | -1          | F       |
+
+Priority queue:
+
+```
+          4:17
+         /
+       3:17
+```
+
+Important observation: Vertices 3 and 4 have the same minimum distance (17). Either can be extracted first. For this walkthrough, we'll extract vertex 4 first.
+
+### 6. Iteration 4 — Extract vertex 4
+
+Extract minimum: (4, 17)
+
+Finalize vertex 4:
+
+```
+visited[4] = true
+```
+
+Examine its outgoing edge:
+
+```
+4 → 5 : weight 3
+```
+
+Calculate:
+
+$$
+newLen = distance[4] + weight(4,5)
+$$
+
+$$
+newLen = 17 + 3 = 20
+$$
+
+Compare:
+
+$$
+20 < distance[5] = \infty
+$$
+
+The condition is true.
+
+Update:
+
+```
+distance[5] = 20
+predecessor[5] = 4
+```
+
+Operation:
+
+```
+insert(5, 20)
+```
+
+#### State after iteration 4
+
+Priority queue:
+
+```
+       3:17
+      /
+    5:20
+```
+
+Arrays:
+
+| Vertex | Distance | Predecessor | Visited |
+| ------ | -------- | ----------- | ------- |
+| 0      | 0        | -1          | T       |
+| 1      | 6        | 0           | T       |
+| 2      | 8        | 0           | T       |
+| 3      | 17       | 2           | F       |
+| 4      | 17       | 1           | T       |
+| 5      | 20       | 4           | F       |
+
+The next vertex is 3.
+
+### 7. Iteration 5 — Extract vertex 3
+
+Extract minimum: (3, 17)
+
+Finalize vertex 3:
+
+```
+visited[3] = true
+```
+
+Examine its outgoing edges.
+
+```
+3: —
+```
+
+Vertex 3 has no outgoing edges.
+
+Therefore, there are no relaxation operations.
+
+#### State after iteration 5
+
+Priority queue:
+
+```
+[5:20]
+```
+
+Arrays:
+
+| Vertex | Distance | Predecessor | Visited |
+| ------ | -------- | ----------- | ------- |
+| 0      | 0        | -1          | T       |
+| 1      | 6        | 0           | T       |
+| 2      | 8        | 0           | T       |
+| 3      | 17       | 2           | T       |
+| 4      | 17       | 1           | T       |
+| 5      | 20       | 4           | F       |
+
+### 8. Iteration 6 — Extract vertex 5
+
+Extract minimum: (5, 20)
+
+Finalize vertex 5:
+
+```
+visited[5] = true
+```
+
+Examine its outgoing edges.
+
+#### Edge 5 → 2 (weight 7)
+
+Calculate:
+
+$$
+newLen = distance[5] + weight(5,2)
+$$
+
+$$
+newLen = 20 + 7 = 27
+$$
+
+Compare:
+
+$$
+27 < distance[2] = 8
+$$
+
+False.
+
+No update.
+
+Additionally, vertex 2 is already finalized.
+
+#### Edge 5 → 3 (weight 4)
+
+Calculate:
+
+$$
+newLen = distance[5] + weight(5,3)
+$$
+
+$$
+newLen = 20 + 4 = 24
+$$
+
+Compare:
+
+$$
+24 < distance[3] = 17
+$$
+
+False.
+
+No update. Vertex 3 is also already finalized.
+
+The priority queue is now empty, so Dijkstra terminates.
+
+#### State after iteration 6
+
+| Vertex | Distance | Predecessor | Visited |
+| ------ | -------- | ----------- | ------- |
+| 0      | 0        | -1          | T       |
+| 1      | 6        | 0           | T       |
+| 2      | 8        | 0           | T       |
+| 3      | 17       | 2           | T       |
+| 4      | 17       | 1           | T       |
+| 5      | 20       | 4           | T       |
+
+### 9. Complete execution summary
+
+Here is the complete execution in one table.
+
+| Iteration | Extracted vertex | Distance | Important operation | Queue after processing |
+| --------- | ---------------- | -------- | ------------------- | ---------------------- |
+| 1         | 0                | 0        | Insert 1, 2, 3      | 1:6, 2:8, 3:18         |
+| 2         | 1                | 6        | Insert 4:17         | 2:8, 4:17, 3:18        |
+| 3         | 2                | 8        | Decrease 3:18 → 17  | 3:17, 4:17             |
+| 4         | 4                | 17       | Insert 5:20         | 3:17, 5:20             |
+| 5         | 3                | 17       | No outgoing edges   | 5:20                   |
+| 6         | 5                | 20       | No improvements     | Empty                  |
+
+### 10. Final shortest distances and paths
+
+Dijkstra completed
+
+| Destination | Shortest distance | Predecessor | Shortest path |
+| ----------- | ----------------- | ----------- | ------------- |
+| 0           | 0                 | -1          | 0             |
+| 1           | 6                 | 0           | 0 → 1         |
+| 2           | 8                 | 0           | 0 → 2         |
+| 3           | 17                | 2           | 0 → 2 → 3     |
+| 4           | 17                | 1           | 0 → 1 → 4     |
+| 5           | 20                | 4           | 0 → 1 → 4 → 5 |
+
+Final arrays:
+
+```
+distance[]    = [0, 6, 8, 17, 17, 20]
+
+predecessor[] = [-1, 0, 0, 2, 1, 4]
+
+visited[]     = [T, T, T, T, T, T]
+```
+
+#### Reconstructing the shortest paths
+
+We reconstruct a path by following the predecessor array backward from the destination.
+
+For example, destination 3:
+
+```
+predecessor[3] = 2
+predecessor[2] = 0
+predecessor[0] = -1
+```
+
+Backward:
+
+```
+3 ← 2 ← 0
+```
+
+Reverse it:
+
+```
+0 → 2 → 3
+```
+
+Total cost:
+
+$$
+8+9=\boxed{17}
+$$
+
+For destination 5:
+
+```
+5 ← 4 ← 1 ← 0
+```
+
+Reverse it:
+
+```
+0 → 1 → 4 → 5
+```
+
+Total cost:
+
+$$
+6+11+3=\boxed{20}
+$$
+
+### Important observations from this example
+
+This graph demonstrates several important Dijkstra concepts:
+
+1. Indirect paths can be shorter than direct paths.
+
+   For vertex 3, the direct path costs 18, but the indirect path through vertex 2 costs 17.
+2. Decrease-key is necessary when a better path is discovered.
+
+   Vertex 3 improves from 18 to 17 during iteration 3.
+3. Equal tentative distances are possible.
+
+   Vertices 3 and 4 both have distance 17. Their extraction order can vary without affecting the final shortest distances.
+4. Finalized vertices are not processed again.
+
+   When vertex 5 examines edges to vertices 2 and 3, both have already been finalized.
+5. Directed edges matter.
+
+   The edge `5 → 2` does not imply that `2 → 5` exists.
+
+The most important learning point: Dijkstra does not simply select the next vertex based on its immediate edge weight. It selects the vertex with the smallest accumulated distance from the source, and continuously improves tentative distances through relaxation.
+
+## Why does Dijkstra select the smallest distance first?
+
+This is the key idea behind the algorithm.
+
+Dijkstra’s Algorithm conceptually operates in a greedy fashion by expanding a set of vertices, `S`, for which the shortest path from a designated source vertex, `s`, to every vertex `v ∈ S` is known, but only using paths that include vertices in `S`. Initially, S equals the set `{s}`. To expand `S`, as shown in next Figure, Dijkstra’s Algorithm finds the vertex `v ∈ V – S` (i.e., the vertices outside the shaded region) whose distance to `s` is smallest, and follows v’s edges to see whether a shorter path exists to some other vertex. After processing `v2`, for example, the algorithm determines that the distance from `s` to `v3` containing only vertices in `S` is really `17` through the path `<s, v2, v3>`. Once `S` equals `V`, the algorithm completes and the final result is depicted in Figure.
+
+![](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/dijkstra/greedy-expanding-the-set-S.png)
+
+consider this graph
+```
+             4
+        A -------- B
+        |          |
+      10|          |3
+        |          |
+        C -------- D
+             2
+```
+Suppose we have extracted a vertex `B` with distance `4`, and the smallest distance remaining in the priority queue is `10`.
+
+```
+Processed: B (distance 4)
+
+Unprocessed:
+C (distance 10)
+```
+
+Could we later discover a path to `B` with a distance smaller than `4`?
+
+If all edge weights are nonnegative, no.
+
+Any alternative path to `B` that goes through another unprocessed vertex must first reach that vertex with a cost of at least `4`. Adding a nonnegative edge weight cannot produce a cost smaller than `4`.
+
+Therefore, once a vertex is extracted as the minimum-distance vertex, its shortest distance is finalized.
+
+This is called the greedy property of Dijkstra's algorithm.
+
+The important distinction
+
+- Tentative distance: The best distance found so far. It might improve.
+- Finalized distance: The shortest distance, guaranteed not to improve.
+
+Dijkstra finalizes a vertex when it is extracted from the min-priority queue with its current minimum distance.
+
+This guarantee depends on all edge weights being nonnegative.
+
+## Dijkstra's algorithm pseudocode
+
+### pseudocode
+Here is the general algorithm using an adjacency list and a min-priority queue.
+
+```
+DIJKSTRA(G, source):
+
+    for each vertex v in G:
+        // highlight-next-line
+        dist[v] = ∞                               
+        pred[v] = NIL
+
+    dist[source] = 0
+
+    PQ = empty min-priority queue
+
+    insert (source, 0) into PQ
+
+    while PQ is not empty:
+
+        (u, currentDistance) = extractMin(PQ)
+
+        if currentDistance > dist[u]:
+            continue
+
+        for each edge (u, v) with weight w:
+
+            candidate = dist[u] + w
+
+            if candidate < dist[v]:
+
+                dist[v] = candidate
+                pred[v] = u
+
+                insert (v, candidate) into PQ
+
+    return dist, pred
+```
+
+A few details deserve attention.
+
+1\. Why insert a pair `(vertex, distance)`?
+
+The priority queue needs to know which vertex has the smallest tentative distance. The distance is its priority.
+
+2\. Why might we insert a vertex more than once?
+
+When a shorter route is found, we insert the new distance. Some priority queues support decrease-key, which updates an existing entry instead.
+
+The pseudocode uses the simpler approach of inserting a new entry.
+
+3\. Why check `currentDistance > dist[u]`?
+
+Suppose the queue contains an old entry:
+
+```
+(D, 12)
+```
+
+Then another route improves `D` to `7`, and we insert:
+
+```
+(D, 7)
+```
+
+When `(D, 7)` is extracted, the algorithm processes it.
+
+Later, `(D, 12)` may be extracted. It is outdated, so the condition skips it.
+
+This is commonly called lazy deletion or skipping stale priority-queue entries.
+
+### pseudocode 2
+THis pseudocode you provided describes Dijkstra's algorithm using a priority queue with decrease-key.
+
+it inserts every vertex into the priority queue initially, including vertices whose distance is infinity.
+
+```
+singleSourceShortest(G, s)
+
+    PQ = empty Priority Queue
+
+    // Initialize distances and predecessors
+    foreach v in V do
+        // highlight-next-line
+        dist[v] = ∞          (1)
+        pred[v] = -1
+
+    // Source has distance zero
+    dist[s] = 0
+
+    // Insert every vertex into the priority queue
+    // highlight-next-line
+    foreach v in V do          (2)
+        insert(v, dist[v]) into PQ
+
+    // Process vertices in increasing distance order
+    while PQ is not empty do
+        // highlight-next-line
+        u = getMin(PQ)          (3)
+
+        // Examine outgoing edges of u
+        foreach neighbor v of u do
+
+            w = weight of edge (u, v)
+
+            newLen = dist[u] + w
+            // highlight-next-line
+            if newLen < dist[v] then          (4)
+
+                decreasePriority(PQ, v, newLen)
+
+                dist[v] = newLen
+                pred[v] = u
+
+    return dist, pred
+```
+
+- (1) Initially all vertices are considered to be unreachable.
+- (2) Populate `PQ` with vertices by shortest path distance.
+- (3) Remove vertex that has shortest distance to source.
+- (4) If discovered a shorter path from `s` to `v`, record and update PQ.
+
+The source vertex, `s`, is known in advance and `dist[v]` is set to `∞` for all vertices
+other than `s`, whose `dist[s] = 0`. These vertices are all inserted into the priority
+queue, `PQ`, with priority equal to `dist[v]`; thus s will be the first vertex removed
+from `PQ`. At each iteration, Dijkstra’s Algorithm removes a vertex from `PQ` that is
+closest to `s` of all remaining unvisited vertices in `PQ`. The vertices in `PQ` are potentially updated to reflect a closer distance, given the visited vertices seen so far, as
+shown in Figure. After V iterations, `dist[v]` contains the shortest distance
+from `s` to all vertices `v ∈ V`.
+
+![](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/dijkstra/example1.png)
+## 7. Why must edge weights be nonnegative?
+
+Dijkstra's correctness depends on this condition:
+
+$$
+w(u,v) \geq 0
+$$
+
+Consider a graph with a negative edge:
+
+```
+A --2--> B
+A --5--> C
+C --(-10)--> B
+```
+
+When Dijkstra processes `B`, it may finalize its distance as `2`.
+
+But another route exists:
+
+```
+A -> C -> B
+
+Cost = 5 + (-10) = -5
+```
+
+The supposedly finalized distance of `2` is actually wrong.
+
+The problem is that a negative edge can make a later route cheaper, even after a vertex has been processed.
+
+Therefore:
+
+| Algorithm         | Negative edges?                             | Negative cycles?                     |
+| ----------------- | ------------------------------------------- | ------------------------------------ |
+| BFS               | Not applicable to arbitrary weighted graphs | Not applicable                       |
+| Dijkstra          | No                                          | No                                   |
+| Bellman-Ford      | Yes                                         | Can detect reachable negative cycles |
+| DAG shortest path | Yes                                         | A DAG cannot contain cycles          |
+
+When to use which algorithm:
+
+- Unweighted graph or equal edge costs → BFS.
+- Weighted graph with nonnegative weights → Dijkstra.
+- Weighted graph with negative edges → Bellman-Ford, unless the graph is a DAG.
+- Weighted DAG → Topological-order shortest path algorithm.
+
+## 8. Data structures used by Dijkstra
+
+| Data structure                     | Purpose                                                 |
+| ---------------------------------- | ------------------------------------------------------- |
+| Adjacency list                     | Stores outgoing edges and their weights                 |
+| Distance array                     | Stores tentative shortest distances                     |
+| Predecessor array                  | Stores the previous vertex on each shortest path        |
+| Min-priority queue                 | Selects the vertex with the smallest tentative distance |
+| Visited/finalized array (optional) | Tracks vertices whose distances are finalized           |
+
+The most important difference from BFS is the priority queue.
+
+**BFS vs. Dijkstra**
+
+- BFS
+
+    FIFO queue
+
+    ```
+    Front
+    |
+    v
+    [A, B, C, D]
+            ^
+            Rear
+    ```
+
+    Processes vertices in order of discovery.
+
+- Dijkstra
+
+    Min-priority queue
+
+    ```
+    Smallest
+        |
+        v
+    [(B,4),
+    (D,7),
+    (C,10)]
+    ```
+
+    Processes vertices in order of tentative distance.
+
+| Property                           | BFS                        | Dijkstra            |
+| ---------------------------------- | -------------------------- | ------------------- |
+| Graph                              | Unweighted / equal weights | Nonnegative weights |
+| Data structure                     | FIFO queue                 | Min-priority queue  |
+| Distance                           | Number of edges            | Sum of edge weights |
+| Relaxation                         | No general relaxation      | Yes                 |
+| Can improve a discovered distance? | No                         | Yes                 |
+
+## 9. Complexity analysis
+
+Dijkstra's complexity depends on the graph representation and priority queue implementation.
+
+| Implementation                           | Time complexity      |
+| ---------------------------------------- | -------------------- |
+| Adjacency matrix + linear minimum search | $O(V^2)$         |
+| Adjacency list + binary min-heap         | $O((V+E)\log V)$ |
+| Adjacency list + Fibonacci heap          | $O(E+V\log V)$   |
+
+For a typical implementation using an adjacency list and binary min-heap:
+
+$$
+O((V+E)\log V)
+$$
+
+For a connected sparse graph, where $E$ is relatively close to $V$, this is commonly simplified to:
+
+$$
+O(V\log V)
+$$
+
+Space complexity:
+
+$$
+\boxed{O(V+E)}
+$$
+
+This includes the graph representation, distance and predecessor arrays, and priority queue.
+
+### Adjacency list + binary min-heap  
+
+The paragraph analyzes the complexity of the Dijkstra implementation that initially inserts all vertices into an indexed min-priority queue and uses `decreaseKey()` to update priorities.
+
+This is exactly the approach described in your earlier pseudocode.
+
+Let's break down the analysis and connect it to our Java implementations.
+
+#### 1. Complexity of constructing the initial priority queue
+
+The pseudocode initializes the priority queue:
+
+```
+foreach v in V do
+    insert(v, dist[v]) into PQ
+```
+
+There are $V$ vertices, so we perform $V$ insertions.
+
+For a binary min-heap, each insertion takes:
+
+$$
+O(\log V)
+$$
+
+Therefore, the total initialization cost is:
+
+$$
+V \times O(\log V)
+$$
+
+$$
+O(V\log V)
+$$
+
+For example, if the graph contains 6 vertices:
+
+```
+PQ = empty
+
+insert(0, 0)
+insert(1, ∞)
+insert(2, ∞)
+insert(3, ∞)
+insert(4, ∞)
+insert(5, ∞)
+```
+
+We perform six insertions.
+
+The important point is that the complexity is based on the number of vertices, not the number of edges.
+
+#### 2. Complexity of the while loop
+
+The main loop:
+
+```
+while PQ is not empty do
+
+    u = extractMin(PQ)
+
+    foreach neighbor v of u do
+
+        newLen = dist[u] + weight(u, v)
+
+        if newLen < dist[v] then
+            decreaseKey(PQ, v, newLen)
+```
+
+There are two important operations to analyze.
+
+##### A. Extract minimum
+
+```
+u = extractMin(PQ)
+```
+
+Each vertex is extracted at most once.
+
+Why?
+
+Because after extraction, the vertex is removed from the priority queue. It cannot be extracted again.
+
+Therefore, there are at most $V$ extractions.
+
+Each extraction from a binary min-heap costs:
+
+$$
+O(\log V)
+$$
+
+Total extraction cost:
+
+$$
+O(V\log V)
+$$
+
+##### B. Decrease-key
+
+```
+decreaseKey(PQ, v, newLen)
+```
+
+This operation is called when we discover a shorter path to an existing vertex.
+
+Each edge is examined once when its source vertex is extracted (assuming adjacency lists).
+
+Therefore, the number of edge examinations is:
+
+$$
+E
+$$
+
+However, not every edge examination necessarily results in a `decreaseKey()` operation. It happens only when the new distance is smaller.
+
+Consequently:
+
+$$
+\text{`Number of decreaseKey operations`} \leq E
+$$
+
+Each decrease-key operation in a binary min-heap costs:
+
+$$
+O(\log V)
+$$
+
+Total decrease-key cost:
+
+$$
+\boxed{O(E\log V)}
+$$
+
+#### 3. Combine the costs
+
+Let's put everything together.
+
+| Operation          | Number of operations | Cost per operation | Total cost       |
+| ------------------ | -------------------- | ------------------ | ---------------- |
+| Initial insertions | $V$              | $O(\log V)$    | $O(V\log V)$ |
+| Extract minimum    | $V$              | $O(\log V)$    | $O(V\log V)$ |
+| Decrease-key       | At most $E$      | $O(\log V)$    | $O(E\log V)$ |
+| Edge examination   | $E$              | $O(1)$         | $O(E)$       |
+
+Adding them:
+
+$$
+T(V,E)=O(V\log V)+O(V\log V)+O(E\log V)+O(E)
+$$
+
+Simplifying:
+
+$$
+T(V,E)=O(2V\log V+E\log V+E)
+$$
+
+Since the logarithmic terms dominate the corresponding linear terms:
+
+$$
+\boxed{T(V,E)=O((V+E)\log V)}
+$$
+
+This is the standard time complexity of Dijkstra's algorithm using an indexed binary min-heap and an adjacency list.
+
+#### 4. Apply the complexity analysis to our example graph
+
+Our graph contains:
+
+$$
+V=6,\qquad E=8
+$$
+
+The theoretical operation counts are:
+
+| Operation          | Maximum number |
+| ------------------ | -------------- |
+| Initial insertions | 6              |
+| Extract minimum    | 6              |
+| Edge examinations  | 8              |
+| Decrease-key       | 8              |
+
+Notice that the number of decrease-key operations is an upper bound. In our actual walkthrough, only one decrease-key operation occurred: vertex 3 improved from 18 to 17.
+
+The actual execution was:
+
+```
+Initial:
+    Insert 0, 1, 2, 3, 4, 5
+
+Iteration 1:
+    Extract 0
+    Relax 0→1, 0→2, 0→3
+
+Iteration 2:
+    Extract 1
+    Relax 1→4
+
+Iteration 3:
+    Extract 2
+    Relax 2→3
+    Decrease-key(3, 17)
+
+Iteration 4:
+    Extract 4
+    Relax 4→5
+
+Iteration 5:
+    Extract 3
+    No outgoing edges
+
+Iteration 6:
+    Extract 5
+    Relax 5→2, 5→3
+```
+
+The graph's small size makes the algorithm easy to follow, but the complexity formula describes how the work grows for larger graphs.
+
+#### 5. Compare this with our three Java implementations
+
+This is where the distinction between the three versions becomes important.
+
+| Complexity        | Version 1: Linear Scan    | Version 2: Java PriorityQueue | Version 3: Indexed Min-Heap  |
+| ----------------- | ------------------------- | ----------------------------- | ---------------------------- |
+| Initialization    | $O(V)$                | $O(1)$                    | $O(1)$                   |
+| Minimum selection | $O(V)$ per extraction | $O(\log E)$               | $O(\log V)$              |
+| Priority update   | $O(1)$ array update   | $O(\log E)$ insertion     | $O(\log V)$ decrease-key |
+| Overall time      | $O(V^2+E)$            | $O((V+E)\log V)$\*        | $O((V+E)\log V)$         |
+| Auxiliary space   | $O(V)$                | $O(V+E)$                  | $O(V)$                   |
+
+\*For Version 2, this is the conventional bound for simple graphs; its lazy-deletion heap can contain O(E) entries.
+
+There is one important distinction between the textbook's implementation and our Version 3:
+
+The textbook inserts all vertices initially, whereas our Version 3 inserts only the source and adds vertices as they are discovered.
+
+This changes the initialization cost:
+
+- Textbook: $O(V\log V)$ using repeated insertions.
+- Our Version 3: $O(\log V)$ for inserting the source.
+
+However, both have the same overall asymptotic complexity:
+
+$$
+O((V+E)\log V)
+$$
+
+##### An additional optimization: heap construction
+
+If the textbook uses a bottom-up `buildHeap()` operation instead of inserting vertices one by one, initialization can be reduced to:
+
+$$
+O(V)
+$$
+
+This is because building a binary heap from an existing array can be performed in linear time.
+
+#### 6. When does this complexity become particularly useful?
+
+Consider two graph types:
+
+Sparse graph: Relatively few edges.
+
+$$
+E=O(V)
+$$
+
+Dijkstra with a binary min-heap:
+
+$$
+O(V\log V)
+$$
+
+Dense graph: Number of edges approaches the maximum possible.
+
+$$
+E=O(V^2)
+$$
+
+Dijkstra with a binary min-heap:
+
+$$
+O(V^2\log V)
+$$
+
+For dense graphs, the linear-scan implementation has complexity $O(V^2)$, which can actually be better.
+
+This is why the priority-queue implementation is not automatically faster for every graph.
+
+#### 7. Final takeaway
+
+The paragraph's complexity analysis is correct for the classical implementation using:
+
+- An adjacency list to represent the graph.
+- A binary min-priority queue.
+- All vertices inserted initially.
+- `extractMin()` to select the next vertex.
+- `decreaseKey()` to update existing priorities.
+
+The final complexity is:
+
+$$
+\boxed{O((V+E)\log V)}
+$$
+
+The most important thing to understand is that each vertex is extracted at most once, while each edge is examined at most once. These two facts allow us to bound the number of heap operations and derive the overall complexity.
+
+## 10. Important edge cases
+
+| Situation                 | Expected behavior                                                |
+| ------------------------- | ---------------------------------------------------------------- |
+| Source equals destination | Distance is `0`; path contains only the source                   |
+| Unreachable vertex        | Distance remains infinity                                        |
+| Disconnected graph        | Process only vertices reachable from the source                  |
+| Zero-weight edge          | Supported                                                        |
+| Multiple shortest paths   | Stores one shortest path through the predecessor array           |
+| Negative edge             | Dijkstra is not valid                                            |
+| Negative cycle            | Dijkstra is not valid                                            |
+| Large edge weights        | Use a sufficiently large numeric type and guard against overflow |
+
+One implementation detail: in Java, use `long` for distances when edge weights and path costs might exceed the range of `int`.
+
+## 11. SSSP versus SPSP using Dijkstra
+
+Dijkstra naturally solves SSSP by continuing until the priority queue is empty.
+
+However, it can also solve Single-Pair Shortest Path (SPSP).
+
+Suppose we only need the shortest path from `A` to `D`.
+
+Instead of processing every reachable vertex, we can stop when `D` is extracted from the priority queue with its current minimum distance.
+
+Do not stop when `D` is first discovered.
+
+It might be improved by another route before it is extracted.
+
+| Problem | Dijkstra termination                                  |
+| ------- | ----------------------------------------------------- |
+| SSSP    | Priority queue becomes empty                          |
+| SPSP    | Target is extracted with its current minimum distance |
+
+This is the weighted-graph equivalent of BFS's early termination optimization, but the stopping condition is different.
+
+## 12. Where Dijkstra fits in your DSA learning structure
+
+I recommend organizing the shortest-path section as follows:
+
+```
+algorithms/
+└── graph-algorithms/
+    └── shortest-path-algorithms/
+        │
+        ├── overview.mdx
+        │
+        ├── shortest-path-fundamentals/
+        │   ├── weighted-graphs.mdx
+        │   ├── path-cost.mdx
+        │   ├── relaxation.mdx
+        │   └── distance-and-predecessor-arrays.mdx
+        │
+        ├── single-source-shortest-path/
+        │   ├── overview.mdx
+        │   ├── bfs-sssp.mdx
+        │   ├── dijkstra/
+        │   │   ├── overview.mdx
+        │   │   ├── algorithm.mdx
+        │   │   ├── priority-queue-optimization.mdx
+        │   │   ├── java-implementation.mdx
+        │   │   └── c-implementation.mdx
+        │   ├── bellman-ford.mdx
+        │   └── dag-shortest-path.mdx
+        │
+        ├── single-pair-shortest-path/
+        │   ├── overview.mdx
+        │   ├── bfs-early-termination.mdx
+        │   ├── bidirectional-bfs.mdx
+        │   ├── bidirectional-dijkstra.mdx
+        │   └── a-star.mdx
+        │
+        └── all-pairs-shortest-path/
+            └── floyd-warshall.mdx
+```
+
+## 13. Recommended learning sequence
+
+I suggest following this order:
+
+1. Weighted graphs and path costs.
+2. Relaxation and distance/predecessor arrays.
+3. BFS for unweighted SSSP (you've already covered this).
+4. Dijkstra using a simple linear minimum search.
+5. Min-priority queue and binary heap.
+6. Dijkstra optimized with a min-heap.
+7. Path reconstruction.
+8. Bellman-Ford and negative edge weights.
+
+One particularly useful exercise: Implement Dijkstra twice in Java:
+
+- Version 1: Find the minimum-distance unprocessed vertex using a linear scan of the distance array.
+- Version 2: Use a min-priority queue.
+
+Both versions should produce identical distances and paths. Comparing their implementations will help clarify exactly why the priority queue improves performance.

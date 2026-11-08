@@ -1,0 +1,754 @@
+# Helm Parent Charts and Subcharts
+
+In Helm, a Parent Chart is a chart that declares dependencies on other charts, which are called Subcharts.
+
+This allows you to organize and deploy multiple related Kubernetes applications through a single Helm chart.
+
+For example, imagine an e-commerce application consisting of:
+
+- Product Service
+- Review Service
+- Recommendation Service
+- MongoDB
+- RabbitMQ
+
+Instead of installing each chart independently, you can create a parent chart that manages them as dependencies.
+
+This is particularly useful when deploying microservices architectures.
+
+# 1. Why do we need Parent Charts and Subcharts?
+
+Consider deploying an e-commerce application using independent Helm charts.
+
+```
+helm-project/
+│
+├── product-service/
+├── review-service/
+├── recommendation-service/
+├── mongodb/
+└── rabbitmq/
+```
+
+You would need to install each chart separately:
+
+```sh
+helm install product ./product-service
+helm install review ./review-service
+helm install recommendation ./recommendation-service
+helm install mongodb ./mongodb
+helm install rabbitmq ./rabbitmq
+```
+
+This works, but introduces some management overhead:
+
+- You must execute multiple installation commands.
+- You must manage multiple releases.
+- You must coordinate chart versions.
+- You must maintain environment-specific configuration across multiple charts.
+- You must coordinate upgrades.
+
+Instead, you can introduce a parent chart:
+
+```
+ecommerce-platform/
+│
+├── Chart.yaml
+├── values.yaml
+└── charts/
+    ├── product-service/
+    ├── review-service/
+    ├── recommendation-service/
+    ├── mongodb/
+    └── rabbitmq/
+```
+
+Now you can install the entire application using one command:
+
+```sh
+helm install ecommerce ./ecommerce-platform
+```
+
+The parent chart declares the dependencies, and Helm processes the dependent charts as part of the parent release.
+
+# 2. What are Parent Charts and Subcharts?
+
+Let's define the terminology.
+
+**Parent Chart**
+
+A Helm chart that declares dependencies on other charts.
+
+It is also commonly called a top-level chart or umbrella chart when used to group an entire application.
+
+**Subchart**
+
+A chart included as a dependency of another chart.
+
+A subchart can be:
+
+- An application chart.
+- Another chart that itself has dependencies.
+- A library chart.
+
+The relationship looks like this:
+
+![](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/concepts/deployment-and-release/helm/advanced-helm/Parent-Charts-Subcharts-relation.png)
+
+{/* Parent Chart: ecommerce-platform
+
+Coordinates the application's chart dependencies
+
+Dependencies
+
+Product Service
+
+Subchart
+
+Review Service
+
+Subchart
+
+Recommendation Service
+
+Subchart
+
+MongoDB
+
+Subchart
+
+RabbitMQ
+
+Subchart
+
+Kubernetes Cluster
+
+Resources from all enabled application subcharts */}
+
+The parent chart provides a unified deployment entry point.
+
+However, each application subchart maintains its own templates, configuration, and chart version.
+
+# 3. Creating a Parent Chart
+
+Let's build a practical example using your microservices architecture.
+
+## 3.1 Project structure
+
+We will use this structure:
+
+```
+helm-project/
+│
+├── charts/
+│   │
+│   ├── ecommerce-platform/
+│   │   ├── Chart.yaml
+│   │   ├── values.yaml
+│   │   │
+│   │   └── charts/
+│   │       ├── product-service/
+│   │       ├── review-service/
+│   │       ├── recommendation-service/
+│   │       ├── mongodb/
+│   │       └── rabbitmq/
+│   │
+│   └── common-library/
+│
+└── environments/
+    ├── development.yaml
+    └── production.yaml
+```
+
+Here:
+
+- `ecommerce-platform` is the parent chart.
+- The five charts inside its `charts/` directory are subcharts.
+- `common-library` is a separate reusable library chart that application charts can depend on.
+
+The `charts/` directory inside a chart is where Helm stores its dependencies.
+
+## 3.2 Define the parent Chart.yaml
+
+`ecommerce-platform/Chart.yaml`
+
+```
+apiVersion: v2
+
+name: ecommerce-platform
+
+description: Complete E-commerce Application
+
+type: application
+
+version: 1.0.0
+
+appVersion: "1.0.0"
+
+dependencies:
+
+  - name: product-service
+    version: 1.0.0
+    repository: "file://charts/product-service"
+
+  - name: review-service
+    version: 1.0.0
+    repository: "file://charts/review-service"
+
+  - name: recommendation-service
+    version: 1.0.0
+    repository: "file://charts/recommendation-service"
+
+  - name: mongodb
+    version: 1.0.0
+    repository: "file://charts/mongodb"
+
+  - name: rabbitmq
+    version: 1.0.0
+    repository: "file://charts/rabbitmq"
+```
+
+The `dependencies` section declares which charts belong to the parent chart.
+
+Each dependency specifies:
+
+| Field        | Meaning                                          |
+| ------------ | ------------------------------------------------ |
+| `name`       | Subchart name.                                   |
+| `version`    | Required subchart version or version constraint. |
+| `repository` | Location of the subchart.                        |
+
+The repository can be:
+
+- A local directory using `file://`.
+- A remote Helm repository.
+- An OCI registry.
+
+The versions above are illustrative; actual dependency versions must match the charts you use.
+
+## 3.3 Download and prepare dependencies
+
+If dependencies are declared in `Chart.yaml`, execute:
+
+```
+cd ecommerce-platform
+
+helm dependency update
+```
+
+Helm resolves the dependencies and downloads or packages them into:
+
+```
+ecommerce-platform/
+│
+├── Chart.yaml
+├── Chart.lock
+├── values.yaml
+│
+└── charts/
+    ├── product-service-1.0.0.tgz
+    ├── review-service-1.0.0.tgz
+    ├── recommendation-service-1.0.0.tgz
+    ├── mongodb-1.0.0.tgz
+    └── rabbitmq-1.0.0.tgz
+```
+
+`Chart.lock` records the resolved dependency versions.
+
+For reproducible builds, commit `Chart.lock` to version control and use:
+
+```
+helm dependency build
+```
+
+This rebuilds dependencies according to the lock file.
+
+# 4. Configuring Subcharts Through the Parent Chart
+
+This is one of the most important concepts.
+
+Each subchart has its own `values.yaml`.
+
+For example:
+
+`product-service/values.yaml`
+
+```yml
+replicaCount: 1
+
+image:
+  repository: mycompany/product-service
+  tag: "1.0.0"
+
+service:
+  type: ClusterIP
+  port: 8080
+```
+
+`review-service/values.yaml`
+
+```yml
+replicaCount: 1
+
+image:
+  repository: mycompany/review-service
+  tag: "1.0.0"
+
+service:
+  type: ClusterIP
+  port: 8080
+```
+
+The parent chart can override these values.
+
+`ecommerce-platform/values.yaml`
+
+```yml
+# Product Service configuration
+product-service:
+  replicaCount: 2
+
+  image:
+    tag: "1.2.0"
+
+# Review Service configuration
+review-service:
+  replicaCount: 2
+
+  image:
+    tag: "1.1.0"
+
+# Recommendation Service configuration
+recommendation-service:
+  replicaCount: 1
+
+# MongoDB configuration
+mongodb:
+  enabled: true
+
+# RabbitMQ configuration
+rabbitmq:
+  enabled: true
+```
+
+Notice the structure:
+
+```
+product-service:
+  replicaCount: 2
+```
+
+The top-level key corresponds to the dependency name.
+
+This is how the parent passes configuration to its subchart.
+
+![Parent-to-subchart values flow](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/concepts/deployment-and-release/helm/advanced-helm/Parent-to-subchart-values-flow.png)
+{/* Parent-to-subchart values flow
+
+Parent values.yaml
+
+```
+product-service:
+  replicaCount: 2
+  image:
+    tag: "1.2.0"
+```
+
+Values passed to dependency
+
+Product Service subchart
+
+```
+replicaCount: 2
+
+image:
+  repository: mycompany/product-service
+  tag: "1.2.0"
+```
+
+Rendered Product Service Deployment
+
+2 replicas using image version 1.2.0 */}
+
+The parent does not need to modify the subchart templates. It only supplies configuration.
+
+# 5. Subchart Isolation and Scope
+
+There is an important rule in Helm:
+
+A subchart cannot directly access the parent's values.
+
+For example, suppose the parent has:
+
+```yml
+# Parent values.yaml
+global:
+  environment: production
+
+database:
+  host: mongodb
+```
+
+Inside a subchart, you cannot directly access:
+
+```
+{{ .Values.database.host }}
+```
+
+unless the subchart itself has a `database` value.
+
+Why?
+
+Because Helm provides scope isolation between parent charts and subcharts.
+
+This prevents one subchart from accidentally depending on another chart's internal configuration.
+
+## 5.1 Using global values
+
+Helm provides a special `global` section for sharing common configuration with subcharts.
+
+Parent `values.yaml`:
+
+```yml
+global:
+  environment: production
+
+  imageRegistry: registry.example.com
+
+  database:
+    host: mongodb
+    port: 27017
+```
+
+Now, inside a subchart:
+
+```
+{{ .Values.global.environment }}
+```
+
+Or:
+
+```
+{{ .Values.global.database.host }}
+```
+
+These values are accessible to the parent and its subcharts.
+
+The structure is:
+
+```
+Parent Chart
+│
+├── values.yaml
+│   └── global
+│       ├── environment
+│       ├── imageRegistry
+│       └── database
+│
+├── Product Service
+│   └── .Values.global.environment
+│
+├── Review Service
+│   └── .Values.global.environment
+│
+└── Recommendation Service
+    └── .Values.global.environment
+```
+
+Global values are useful for common settings such as:
+
+- Container image registries.
+- Environment identifiers.
+- Shared image pull secrets.
+- Common domain names.
+- Shared configuration conventions.
+
+However, don't put every application setting under `global`. Keep service-specific configuration inside its own subchart values.
+
+# 6. Enabling and Disabling Subcharts
+
+Sometimes you don't want to deploy every application component in every environment.
+
+For example:
+
+- Development might use a local MongoDB.
+- Production might use an externally managed database.
+- Testing might disable RabbitMQ.
+
+You can control dependencies through conditions.
+
+First, modify the parent `Chart.yaml`:
+
+```yml
+dependencies:
+  - name: mongodb
+    version: 1.0.0
+    repository: "file://charts/mongodb"
+    condition: mongodb.enabled
+
+  - name: rabbitmq
+    version: 1.0.0
+    repository: "file://charts/rabbitmq"
+    condition: rabbitmq.enabled
+```
+
+Then configure the parent `values.yaml`:
+
+```yml
+mongodb:
+  enabled: true
+
+rabbitmq:
+  enabled: false
+```
+
+Helm enables MongoDB and disables RabbitMQ.
+
+You can override these settings for different environments.
+
+development.yaml
+
+```yml
+mongodb:
+  enabled: true
+
+rabbitmq:
+  enabled: true
+```
+
+production.yaml
+
+```yml
+mongodb:
+  enabled: false
+
+rabbitmq:
+  enabled: true
+```
+
+Deploy using:
+
+```sh
+helm upgrade --install ecommerce ./ecommerce-platform \
+  -f production.yaml
+```
+
+The `enabled` flag controls whether Helm renders that dependency as part of the parent release.
+
+It does not automatically manage an external MongoDB instance when the subchart is disabled.
+
+# 7. Parent Charts Can Have Nested Subcharts
+
+A parent chart can depend on another chart that itself has dependencies.
+
+For example, an infrastructure chart might group databases and messaging components.
+
+```
+ecommerce-platform/
+│
+├── Chart.yaml
+├── values.yaml
+│
+└── charts/
+    │
+    ├── product-service/
+    │
+    ├── review-service/
+    │
+    └── infrastructure/
+        │
+        ├── Chart.yaml
+        │
+        └── charts/
+            ├── mongodb/
+            └── rabbitmq/
+```
+
+The hierarchy becomes:
+
+![](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/concepts/deployment-and-release/helm/advanced-helm/Nested-Subcharts-example.png)
+{/* ecommerce-platform
+
+Top-level parent
+
+Product
+
+Subchart
+
+Review
+
+Subchart
+
+Infrastructure
+
+Nested parent
+
+MongoDB
+
+Nested subchart
+
+RabbitMQ
+
+Nested subchart */}
+
+This is useful when you want to group components by responsibility.
+
+However, avoid creating too many nesting levels. Excessive nesting makes configuration and release management harder to understand.
+
+# 8. Parent Chart vs Library Chart
+
+Since we have discussed Library Charts, it is important to distinguish them.
+
+| Feature                         | Parent Chart                                        | Library Chart                                 |
+| ------------------------------- | --------------------------------------------------- | --------------------------------------------- |
+| Purpose                         | Group and deploy related charts                     | Share reusable Helm templates                 |
+| Chart type                      | `application`                                       | `library`                                     |
+| Can be installed independently? | Yes                                                 | No                                            |
+| Can contain subcharts?          | Yes                                                 | Can be a dependency                           |
+| Deploys Kubernetes resources    | Through its application subcharts and own templates | No, provides reusable templates               |
+| Contains dependencies           | Commonly                                            | Possible, but not its primary purpose         |
+| Typical use                     | Deploy a complete microservices application         | Reuse common Deployment and Service templates |
+
+A useful way to think about them:
+
+- Parent Chart: What applications should be deployed together?
+- Library Chart: What deployment templates should applications reuse?
+
+You can combine both approaches.
+
+# 9. Parent Chart vs Independent Releases
+
+This is an important architectural consideration, especially for microservices.
+
+There are two common deployment strategies.
+
+## Strategy A: One parent release
+
+```sh
+helm install ecommerce ./ecommerce-platform
+```
+
+All enabled subcharts are managed through one Helm release.
+
+Advantages:
+
+- One deployment entry point.
+- Centralized environment configuration.
+- Convenient for small applications and development environments.
+
+Limitations:
+
+- Upgrades operate on the parent release.
+- Components have less independent release lifecycle management.
+- A parent rollback can affect multiple components.
+
+## Strategy B: Independent releases
+
+```sh
+helm upgrade --install product ./product-service
+helm upgrade --install review ./review-service
+helm upgrade --install recommendation ./recommendation-service
+```
+
+Each service has its own release.
+
+Advantages:
+
+- Independent deployment and rollback.
+- Independent versioning.
+- Teams can manage services separately.
+- Changes to one service do not require upgrading the parent release.
+
+Limitations:
+
+- More releases to manage.
+- Requires deployment orchestration.
+- Shared configuration needs additional coordination.
+
+| Consideration           | Parent release           | Independent releases |
+| ----------------------- | ------------------------ | -------------------- |
+| Deployment              | Together                 | Separately           |
+| Release history         | One parent release       | One per service      |
+| Rollback                | Parent release           | Individual service   |
+| Version management      | Coordinated dependencies | Independent          |
+| Microservice autonomy   | Lower                    | Higher               |
+| Development environment | Very convenient          | More setup           |
+
+My recommendation for your Spring Boot microservices architecture:
+
+Use independent Helm releases for Product, Review, Recommendation, and Product Composite services when they need independent deployment and scaling.
+
+Use a parent chart when you want a convenient deployment of the complete system in a local development or integration-testing environment.
+
+You can also use a library chart across all those independent application charts to avoid duplicated Kubernetes templates.
+
+# 10. Practical Helm Commands
+
+| Command                                        | Purpose                                            |
+| ---------------------------------------------- | -------------------------------------------------- |
+| `helm dependency list ./ecommerce-platform`    | Lists chart dependencies.                          |
+| `helm dependency update ./ecommerce-platform`  | Resolves and downloads dependencies.               |
+| `helm dependency build ./ecommerce-platform`   | Rebuilds dependencies from Chart.lock.             |
+| `helm template ecommerce ./ecommerce-platform` | Renders the parent and enabled subchart templates. |
+| `helm lint ./ecommerce-platform`               | Validates the parent chart.                        |
+| `helm install ecommerce ./ecommerce-platform`  | Installs the parent release.                       |
+| `helm upgrade ecommerce ./ecommerce-platform`  | Upgrades the parent release.                       |
+| `helm uninstall ecommerce`                     | Uninstalls the parent release.                     |
+| `helm get manifest ecommerce`                  | Displays the combined rendered resources.          |
+
+For debugging, I particularly recommend:
+
+```
+helm template ecommerce ./ecommerce-platform \
+  -f environments/development.yaml \
+  --debug
+```
+
+This lets you inspect the resources generated by all enabled subcharts before installing them.
+
+# 11. Recommended Helm Chart Organization
+
+For your Kubernetes and microservices documentation, I recommend organizing the chart-related topics as follows:
+
+```
+helm/
+│
+├── fundamentals/
+│   ├── overview.mdx
+│   ├── architecture.mdx
+│   └── chart-types.mdx
+│
+├── charts/
+│   ├── chart-structure.mdx
+│   ├── application-charts.mdx
+│   ├── library-charts.mdx
+│   ├── parent-charts.mdx
+│   ├── subcharts.mdx
+│   ├── chart-dependencies.mdx
+│   ├── umbrella-charts.mdx
+│   └── chart-versioning.mdx
+│
+├── templating/
+│   ├── go-templates.mdx
+│   ├── named-templates.mdx
+│   ├── include-and-template.mdx
+│   └── template-functions.mdx
+│
+├── configuration/
+│   ├── values-yaml.mdx
+│   ├── values-precedence.mdx
+│   ├── global-values.mdx
+│   └── dependency-conditions.mdx
+│
+└── labs/
+    ├── create-application-chart.mdx
+    ├── create-library-chart.mdx
+    ├── create-parent-chart.mdx
+    └── deploy-microservices-with-helm.mdx
+```
+
+One final distinction worth remembering:
+
+A parent chart is not a special Helm chart type. It is an ordinary `application` chart that declares dependencies on other charts. The term umbrella chart commonly describes a parent chart used to deploy a complete application stack.
+
+Official documentation: [Helm Charts and Dependencies](https://helm.sh/docs/topics/charts/?utm_source=chatgpt.com) and [Subcharts and Global Values](https://helm.sh/docs/chart_template_guide/subcharts_and_globals/?utm_source=chatgpt.com).

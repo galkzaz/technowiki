@@ -16,7 +16,7 @@ to replace all bullets with bold ****
 
 <TabItem value="Class(Before)" label="Class(Before)">
 
-```java
+```Java
 
 ```
 
@@ -24,7 +24,7 @@ to replace all bullets with bold ****
 
 <TabItem value="Class(After)" label="Class(After)">
 
-```java
+```Java
 
 ```
 
@@ -181,3 +181,36 @@ create a multi tab for the following problems in C,C++,Java,JS,Rust, which cover
 - partitioning(Partitioning (Move Elements Based on Condition) like Move all non-zero elements to the front.
 always add empty line after <TabItem> tag
 always use naming conventions for variables, functions, and classes for every language
+
++-------------------------------------------------------------------+          
+| +---------------------------------------------------------------+ |          
+| |                                                               | |          
+| |                                                               | |          
+| |                                                               | |          
+| |                                                               | |          
+| |                                                               | |          
+| |                                                               | |          
+| +---------------------------------------------------------------+ |          
+|                                                                   |          
+| +--------------------------------------------------------------+  |          
+| |                                                              |  |          
+| |                                                              |  |          
+| |                                                              |  |          
+| |                                                              |  |          
+| |                                                              |  |          
+| |                                                              |  |          
+| |                                                              |  |          
+| |                                                              |  |          
+| +--------------------------------------------------------------+  |          
+| +---------------------------------------------------------------+ |          
+| |                                                               | |          
+| |                                                               | |          
+| |                                                               | |          
+| |                                                               | |          
+| |                                                               | |          
+| |                                                               | |          
+| |                                                               | |          
+| +---------------------------------------------------------------+ |          
++-------------------------------------------------------------------+          
+                                                                                
+                                                                                

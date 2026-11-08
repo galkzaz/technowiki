@@ -1,0 +1,835 @@
+---
+title: Implementation
+---
+
+Different Ways to Implement Bellman–Ford
+
+Bellman–Ford can be implemented in several ways. The underlying algorithm remains the same: repeatedly relax edges to calculate shortest paths and detect negative-weight cycles.
+
+However, implementations differ in:
+
+- How the graph is represented.
+- How distances are updated.
+- How relaxation iterations are organized.
+- How performance is optimized.
+- How shortest paths are reconstructed.
+- How negative cycles are detected.
+
+For studying Data Structures and Algorithms, I recommend understanding the following eight implementation variations.
+
+## 1. Standard Bellman–Ford (Edge List)
+
+Fundamental implementation
+
+This is the traditional implementation and the best starting point.
+
+The graph is represented as a collection of edges.
+
+Each edge stores:
+
+```
+class Edge {
+    int source;
+    int destination;
+    int weight;
+}
+```
+
+The algorithm iterates through the complete edge list \\(V-1\\) times.
+
+```
+for (int i = 1; i < V; i++) {
+
+    for (Edge edge : edges) {
+
+        int u = edge.source;
+        int v = edge.destination;
+        int w = edge.weight;
+
+        if (dist[u] != INF &&
+            dist[u] + w < dist[v]) {
+
+            dist[v] = dist[u] + w;
+            predecessor[v] = u;
+        }
+    }
+}
+```
+
+Characteristics:
+
+| Property             | Value       |
+| -------------------- | ----------- |
+| Graph representation | Edge list   |
+| Relaxation           | In-place    |
+| Time                 | \\(O(VE)\\) |
+| Auxiliary space      | \\(O(V)\\)  |
+| Negative edges       | Supported   |
+| Negative cycles      | Detectable  |
+
+When to use: General-purpose shortest-path problems, competitive programming, and educational implementations.
+
+## 2. Bellman–Ford with Early Termination
+
+Performance optimization
+
+This variation improves the standard implementation by avoiding unnecessary iterations.
+
+Consider a graph where all shortest distances have already been discovered after three iterations, but the graph contains 100 vertices.
+
+The standard implementation may perform another 96 iterations.
+
+We can avoid this by tracking whether any distance was updated during an iteration.
+
+```
+for (int i = 1; i < V; i++) {
+
+    boolean updated = false;
+
+    for (Edge edge : edges) {
+
+        int u = edge.source;
+        int v = edge.destination;
+        int w = edge.weight;
+
+        if (dist[u] != INF &&
+            dist[u] + w < dist[v]) {
+
+            dist[v] = dist[u] + w;
+            predecessor[v] = u;
+
+            updated = true;
+        }
+    }
+
+    // No updates means distances have stabilized.
+    if (!updated) {
+        break;
+    }
+}
+```
+
+Characteristics:
+
+- Same worst-case complexity: \\(O(VE)\\).
+- Can significantly reduce execution time on graphs that converge early.
+- Still requires negative-cycle detection after relaxation.
+
+When to use: General applications where you want to improve the standard implementation without changing its underlying algorithm.
+
+## 3. Bellman–Ford with Two Distance Arrays (Synchronous Relaxation)
+
+Dynamic programming implementation
+
+This implementation uses two arrays instead of updating the distance array in place.
+
+The idea is to calculate each iteration using only the results from the previous iteration.
+
+We maintain:
+
+- `previous[]`: distances from the previous iteration.
+- `current[]`: distances being calculated in the current iteration.
+
+The recurrence is:
+
+\\[ D_k(v)=\min\left(D\_{k-1}(v), D\_{k-1}(u)+w(u,v)\right) \\]
+
+For every edge \\(u \rightarrow v\\), we use `previous[u]`, not a distance that was updated earlier in the current iteration.
+
+### Java implementation
+
+```
+static boolean bellmanFordSynchronous(
+        int V,
+        Edge[] edges,
+        int source,
+        long[] dist) {
+
+    long INF = Long.MAX_VALUE / 4;
+
+    long[] previous = new long[V];
+    long[] current = new long[V];
+
+    Arrays.fill(previous, INF);
+    previous[source] = 0;
+
+    for (int i = 1; i < V; i++) {
+
+        // Preserve distances from previous iteration.
+        System.arraycopy(previous, 0, current, 0, V);
+
+        boolean updated = false;
+
+        for (Edge edge : edges) {
+
+            int u = edge.source;
+            int v = edge.destination;
+
+            if (previous[u] == INF) {
+                continue;
+            }
+
+            long candidate = previous[u] + edge.weight;
+
+            if (candidate < current[v]) {
+                current[v] = candidate;
+                updated = true;
+            }
+        }
+
+        // Swap the arrays.
+        long[] temp = previous;
+        previous = current;
+        current = temp;
+
+        if (!updated) {
+            break;
+        }
+    }
+
+    System.arraycopy(previous, 0, dist, 0, V);
+
+    // Negative-cycle detection.
+    for (Edge edge : edges) {
+
+        int u = edge.source;
+        int v = edge.destination;
+
+        if (dist[u] != INF &&
+            dist[u] + edge.weight < dist[v]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+```
+
+### Difference between in-place and synchronous relaxation
+
+Consider:
+
+```
+A → B → C → D
+```
+
+Assume all edge weights are 1, and the edges are processed in this order.
+
+In-place relaxation:
+
+```
+Pass 1:
+A = 0
+B = 1
+C = 2
+D = 3
+```
+
+All three edges can propagate their updates during the same pass.
+
+Synchronous relaxation:
+
+```
+Pass 1:
+A = 0
+B = 1
+C = ∞
+D = ∞
+
+Pass 2:
+A = 0
+B = 1
+C = 2
+D = ∞
+
+Pass 3:
+A = 0
+B = 1
+C = 2
+D = 3
+```
+
+The synchronous version propagates shortest-path information by at most one additional edge per iteration.
+
+| Feature                     | In-place              | Synchronous               |
+| --------------------------- | --------------------- | ------------------------- |
+| Distance arrays             | One                   | Two                       |
+| Updates visible immediately | Yes                   | No                        |
+| Pass behavior               | Depends on edge order | Independent of edge order |
+| Worst-case time             | \\(O(VE)\\)           | \\(O(VE)\\)               |
+| Auxiliary space             | \\(O(V)\\)            | \\(O(V)\\)                |
+
+When to use: The synchronous implementation is especially useful for understanding Bellman–Ford's dynamic programming recurrence and for parallel implementations.
+
+## 4. Bellman–Ford Using an Adjacency List
+
+Instead of storing all edges in a single edge array, we can represent the graph using an adjacency list.
+
+For example:
+
+```
+A → (B, 6), (C, 7)
+
+B → (C, 8), (D, 5), (E, -4)
+
+C → (D, -3), (E, 9)
+
+D → (B, -2)
+
+E → (D, 7)
+```
+
+Each vertex stores its outgoing edges.
+
+### Java implementation
+
+```
+import java.util.*;
+
+class BellmanFordAdjList {
+
+    static class Edge {
+        int destination;
+        int weight;
+
+        Edge(int destination, int weight) {
+            this.destination = destination;
+            this.weight = weight;
+        }
+    }
+
+    static boolean bellmanFord(
+            List<List<Edge>> graph,
+            int source,
+            long[] dist) {
+
+        int V = graph.size();
+        long INF = Long.MAX_VALUE / 4;
+
+        Arrays.fill(dist, INF);
+        dist[source] = 0;
+
+        // V - 1 relaxation passes.
+        for (int i = 1; i < V; i++) {
+
+            boolean updated = false;
+
+            for (int u = 0; u < V; u++) {
+
+                if (dist[u] == INF) {
+                    continue;
+                }
+
+                for (Edge edge : graph.get(u)) {
+
+                    int v = edge.destination;
+                    long candidate = dist[u] + edge.weight;
+
+                    if (candidate < dist[v]) {
+                        dist[v] = candidate;
+                        updated = true;
+                    }
+                }
+            }
+
+            if (!updated) {
+                break;
+            }
+        }
+
+        // Negative-cycle detection.
+        for (int u = 0; u < V; u++) {
+
+            if (dist[u] == INF) {
+                continue;
+            }
+
+            for (Edge edge : graph.get(u)) {
+
+                int v = edge.destination;
+
+                if (dist[u] + edge.weight < dist[v]) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+}
+```
+
+Complexity:
+
+\\[ O(VE) \\]
+
+The adjacency list stores the graph in:
+
+\\[ O(V+E) \\]
+
+This is a good implementation when working with sparse graphs.
+
+Note that this version still uses Bellman–Ford's repeated full-graph relaxation. An adjacency list does not turn it into Dijkstra's algorithm.
+
+## 5. Bellman–Ford Using an Adjacency Matrix
+
+Another possibility is representing the graph using a two-dimensional array.
+
+For example:
+
+```
+     A   B   C   D
+A    0   6   7   ∞
+B    ∞   0   8   5
+C    ∞   ∞   0  -3
+D    ∞  -2   ∞   0
+```
+
+Here:
+
+```
+matrix[u][v]
+```
+
+represents the weight of the edge from `u` to `v`.
+
+If there is no edge, we use a special value such as `INF`.
+
+### Relaxation
+
+```
+for (int i = 1; i < V; i++) {
+
+    boolean updated = false;
+
+    for (int u = 0; u < V; u++) {
+
+        if (dist[u] == INF) {
+            continue;
+        }
+
+        for (int v = 0; v < V; v++) {
+
+            if (matrix[u][v] == INF) {
+                continue;
+            }
+
+            long candidate = dist[u] + matrix[u][v];
+
+            if (candidate < dist[v]) {
+                dist[v] = candidate;
+                updated = true;
+            }
+        }
+    }
+
+    if (!updated) {
+        break;
+    }
+}
+```
+
+Complexity:
+
+Every iteration examines \\(V^2\\) matrix positions.
+
+There are \\(V-1\\) iterations.
+
+\\[ \boxed{O(V^3)} \\]
+
+Space complexity:
+
+\\[ O(V^2) \\]
+
+When to use: Primarily for educational purposes or when the graph is already stored as a matrix. It is generally inefficient for sparse graphs.
+
+## 6. Queue-Based Bellman–Ford (SPFA)
+
+Alternative relaxation strategy
+
+A more interesting variation is called SPFA (Shortest Path Faster Algorithm).
+
+It is based on Bellman–Ford but changes how vertices are selected for relaxation.
+
+### The problem with standard Bellman–Ford
+
+Standard Bellman–Ford examines every edge during every iteration.
+
+Consider:
+
+```
+A → B → C → D → E
+```
+
+If only A's distance changes, it may be unnecessary to examine edges belonging to unrelated vertices.
+
+SPFA addresses this by maintaining a queue of vertices whose distances have recently changed.
+
+### How SPFA works
+
+1. Initialize distances.
+2. Put the source vertex in a queue.
+3. Remove a vertex from the queue.
+4. Examine its outgoing edges.
+5. If an edge improves a destination's distance, update it.
+6. Add the destination to the queue if it is not already there.
+7. Continue until the queue becomes empty.
+8. Detect negative cycles.
+
+### Java implementation
+
+```
+import java.util.*;
+
+class SPFA {
+
+    static class Edge {
+        int destination;
+        int weight;
+
+        Edge(int destination, int weight) {
+            this.destination = destination;
+            this.weight = weight;
+        }
+    }
+
+    static boolean spfa(
+            List<List<Edge>> graph,
+            int source,
+            long[] dist) {
+
+        int V = graph.size();
+        long INF = Long.MAX_VALUE / 4;
+
+        boolean[] inQueue = new boolean[V];
+
+        // Number of times a vertex has been enqueued.
+        int[] enqueueCount = new int[V];
+
+        Queue<Integer> queue = new ArrayDeque<>();
+
+        Arrays.fill(dist, INF);
+        dist[source] = 0;
+
+        queue.offer(source);
+        inQueue[source] = true;
+        enqueueCount[source]++;
+
+        while (!queue.isEmpty()) {
+
+            int u = queue.poll();
+            inQueue[u] = false;
+
+            for (Edge edge : graph.get(u)) {
+
+                int v = edge.destination;
+
+                long candidate = dist[u] + edge.weight;
+
+                if (candidate < dist[v]) {
+
+                    dist[v] = candidate;
+
+                    if (!inQueue[v]) {
+
+                        queue.offer(v);
+                        inQueue[v] = true;
+
+                        enqueueCount[v]++;
+
+                        // Detect a reachable negative cycle.
+                        if (enqueueCount[v] >= V) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+}
+```
+
+The enqueue-count test shown here is a commonly used SPFA negative-cycle detection technique under the standard enqueue-count invariant.
+
+### Complexity
+
+| Property                      | Complexity                              |
+| ----------------------------- | --------------------------------------- |
+| Typical practical performance | Often faster than standard Bellman–Ford |
+| Worst-case time               | \\(O(VE)\\)                             |
+| Auxiliary space               | \\(O(V)\\)                              |
+
+Important: SPFA is not guaranteed to be faster. Some graphs cause it to perform poorly, and its worst-case complexity remains \\(O(VE)\\).
+
+When to use: When you want to experiment with queue-driven relaxation and the graph's structure may allow many unnecessary edge scans to be skipped.
+
+## 7. Bellman–Ford with Negative-Cycle Reconstruction
+
+So far, our implementations can tell us whether a reachable negative cycle exists.
+
+But sometimes we want to know which vertices form the negative cycle.
+
+We can accomplish this using the predecessor array.
+
+### How it works
+
+Suppose we detect that an edge can still be relaxed after \\(V-1\\) iterations.
+
+Instead of immediately returning `false`:
+
+1. Relax the edge and update its destination's predecessor.
+2. Start from that destination.
+3. Follow predecessor pointers \\(V\\) times.
+4. We are now guaranteed to be inside a cycle.
+5. Continue following predecessors until we return to the same vertex.
+
+### Java implementation
+
+The following method assumes `dist` and `predecessor` have already been initialized and relaxed for \\(V-1\\) passes.
+
+```
+static List<Integer> findNegativeCycle(
+        int V,
+        Edge[] edges,
+        long[] dist,
+        int[] predecessor) {
+
+    int x = -1;
+
+    // Perform an additional relaxation pass.
+    for (Edge edge : edges) {
+
+        int u = edge.source;
+        int v = edge.destination;
+        int w = edge.weight;
+
+        if (dist[u] != INF &&
+            dist[u] + w < dist[v]) {
+
+            dist[v] = dist[u] + w;
+            predecessor[v] = u;
+
+            x = v;
+        }
+    }
+
+    // No negative cycle was detected.
+    if (x == -1) {
+        return Collections.emptyList();
+    }
+
+    // Move V times to guarantee entering the cycle.
+    for (int i = 0; i < V; i++) {
+        x = predecessor[x];
+    }
+
+    // Reconstruct the cycle.
+    List<Integer> cycle = new ArrayList<>();
+
+    int current = x;
+
+    do {
+        cycle.add(current);
+        current = predecessor[current];
+    } while (current != x);
+
+    cycle.add(x);
+
+    // Reverse to display edges in forward direction.
+    Collections.reverse(cycle);
+
+    return cycle;
+}
+```
+
+For example, it might return:
+
+```
+B → C → D → B
+```
+
+The actual result depends on the graph and edge ordering.
+
+When to use: Debugging graph algorithms, identifying problematic cycles, and constraint-solving applications.
+
+## 8. Bellman–Ford with a Super Source (Detect Cycles Anywhere)
+
+All-graph negative-cycle detection
+
+The standard Bellman–Ford algorithm only detects negative cycles reachable from its source.
+
+What if we want to detect negative cycles anywhere in the graph, including disconnected components?
+
+We can introduce a virtual vertex called a super source.
+
+Suppose our graph contains:
+
+```
+Component 1:
+
+A → B → C
+
+
+Component 2:
+
+D → E → F
+```
+
+Assume there is a negative cycle in the second component.
+
+If we run Bellman–Ford starting at A, we cannot reach D, E, or F.
+
+Therefore, the negative cycle will remain undetected.
+
+### Solution: Add a super source
+
+Create a new vertex S and connect it to every original vertex with a zero-weight edge.
+
+```
+          S
+       / / \ \ \
+      0 0   0 0 0
+     /  |   | |  \
+    A   B   C D   E
+             \   /
+              F
+```
+
+Now every vertex is reachable from S.
+
+We run Bellman–Ford from S.
+
+If a negative cycle exists anywhere in the original graph, it will be reachable from S and detected.
+
+### Java implementation
+
+```
+static boolean hasNegativeCycleAnywhere(
+        int V,
+        Edge[] edges) {
+
+    // Initialize every vertex to zero.
+    long[] dist = new long[V];
+
+    // Equivalent to adding a super source
+    // with zero-weight edges to every vertex.
+    Arrays.fill(dist, 0);
+
+    // Perform V relaxation passes.
+    for (int i = 0; i < V; i++) {
+
+        boolean updated = false;
+
+        for (Edge edge : edges) {
+
+            int u = edge.source;
+            int v = edge.destination;
+
+            long candidate = dist[u] + edge.weight;
+
+            if (candidate < dist[v]) {
+
+                dist[v] = candidate;
+                updated = true;
+
+                // An update on the V-th pass
+                // indicates a negative cycle.
+                if (i == V - 1) {
+                    return true;
+                }
+            }
+        }
+
+        if (!updated) {
+            return false;
+        }
+    }
+
+    return false;
+}
+```
+
+Notice that we have not explicitly added a new vertex or new edges. Initializing every distance to zero is mathematically equivalent to adding the super source.
+
+Complexity:
+
+\\[ O(VE) \\]
+
+This is particularly useful for detecting negative cycles in disconnected graphs and checking systems of difference constraints.
+
+## 9. Comparison of all implementations
+
+Here is a consolidated comparison.
+
+| # | Implementation                | Main idea                       | Worst-case time                  |
+| - | ----------------------------- | ------------------------------- | -------------------------------- |
+| 1 | Standard edge list            | Relax every edge repeatedly     | \\(O(VE)\\)                      |
+| 2 | Early termination             | Stop when no distance changes   | \\(O(VE)\\)                      |
+| 3 | Two distance arrays           | Synchronous dynamic programming | \\(O(VE)\\)                      |
+| 4 | Adjacency list                | Traverse outgoing edges         | \\(O(VE)\\)                      |
+| 5 | Adjacency matrix              | Scan all vertex pairs           | \\(O(V^3)\\)                     |
+| 6 | SPFA                          | Queue-based relaxation          | \\(O(VE)\\)                      |
+| 7 | Negative-cycle reconstruction | Extract the actual cycle        | \\(O(VE)\\) including relaxation |
+| 8 | Super-source approach         | Detect cycles in all components | \\(O(VE)\\)                      |
+
+An important distinction: these are not eight completely different shortest-path algorithms.
+
+Some are different graph representations, some change the relaxation strategy, and others add functionality to the standard algorithm.
+
+## 10. Which implementations should you learn?
+
+For your Java DSA study, I recommend organizing them into three groups.
+
+### Group A: Core Bellman–Ford
+
+Learn these first:
+
+1. Standard Edge List: Understand the fundamental algorithm.
+2. Early Termination: Understand how to avoid unnecessary iterations.
+3. Synchronous Relaxation: Understand the dynamic programming recurrence.
+
+### Group B: Graph representation variations
+
+Learn these next:
+
+4. Adjacency List: Understand implementation using a common graph representation.
+5. Adjacency Matrix: Understand the relationship between graph density and performance.
+
+### Group C: Advanced variations
+
+Finally:
+
+6. SPFA: Understand queue-based optimization.
+7. Negative-Cycle Reconstruction: Learn to identify the actual negative cycle.
+8. Super Source: Learn to detect negative cycles across disconnected components.
+
+### My recommended Java implementation collection
+
+I would organize your Bellman–Ford implementations like this:
+
+```
+bellman-ford/
+│
+├── basic/
+│   ├── BellmanFordEdgeList.java
+│   ├── BellmanFordEarlyTermination.java
+│   └── BellmanFordSynchronous.java
+│
+├── graph-representations/
+│   ├── BellmanFordAdjacencyList.java
+│   └── BellmanFordAdjacencyMatrix.java
+│
+├── advanced/
+│   ├── SPFA.java
+│   ├── NegativeCycleDetection.java
+│   └── NegativeCycleReconstruction.java
+│
+└── applications/
+    └── NegativeCycleAnywhere.java
+```
+
+My recommendation: Master implementations 1, 2, 3, 6, and 7 first. They cover the most important algorithmic concepts: relaxation, dynamic programming, performance optimization, queue-based processing, and negative-cycle detection.
+
+One particularly useful exercise is to create separate normal and debug implementations for the standard and synchronous versions. Print the distance array after every pass and compare how edge ordering affects their intermediate results.

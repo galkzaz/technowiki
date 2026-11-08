@@ -1,0 +1,1384 @@
+# Distributed Tracing in Distributed Systems
+
+Distributed tracing helps you understand how a request travels through multiple services, how long each operation takes, and where failures or delays occur.
+
+For a microservices architecture, distributed tracing is especially useful when a request passes through an API Gateway, a composite service, several downstream services, databases, and message brokers.
+
+We'll use this example throughout:
+
+```
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Product Composite Service
+  |                     |
+  v                     v
+Product Service    Recommendation Service
+  |                     |
+  v                     v
+MongoDB                 MySQL
+```
+
+Suppose the client requests product information, but the response takes three seconds. The gateway appears healthy, the composite service returns a response, and the product service is fast. Where did the remaining time go?
+
+Distributed tracing lets us follow the request through its execution path and investigate that question.
+
+## Overview (`distributed-tracing`)
+
+### What is distributed tracing?
+
+Distributed tracing is a technique for recording and analyzing the execution of an operation as it crosses multiple components of a distributed system.
+
+A trace connects related operations into a logical execution record. Each operation is represented by a span, which contains information such as:
+
+- The operation's name.
+- Its start time and duration.
+- Its relationship to other operations.
+- The service that performed it.
+- Relevant attributes and events.
+- Its status, including errors when applicable.
+
+For example:
+
+```
+Trace: retrieve product 42
+|
++-- API Gateway                    320 ms
+    |
+    +-- Product Composite          290 ms
+        |
+        +-- Product Service         40 ms
+        |
+        +-- Recommendation Service  220 ms
+            |
+            +-- MySQL query         180 ms
+```
+
+These durations are illustrative. Child operations may overlap, so span durations must not automatically be added together.
+
+A trace can reveal that the recommendation service is slow and that its database operation accounts for much of that delay. Logs and database metrics can then help determine the underlying cause.
+
+### Why is tracing necessary?
+
+Without distributed tracing, each service may know only about its own operations.
+
+The gateway knows how long the incoming HTTP request took. The recommendation service knows how long its database query took. Neither measurement, by itself, necessarily explains the complete request path.
+
+Tracing provides a way to connect these local views.
+
+| Problem                       | How tracing helps                                                                           |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| Slow API response             | Breaks down elapsed time across operations                                                  |
+| Downstream failure            | Identifies the operation where an error occurred                                            |
+| Hidden dependency             | Reveals calls made to other services                                                        |
+| Excessive retries             | Shows repeated operations within the request path                                           |
+| Deployment regression         | Helps compare traces before and after a release                                             |
+| Asynchronous processing delay | Connects message production and consumption when context and relationships are instrumented |
+
+### What tracing does not tell you automatically
+
+Tracing is not a replacement for logs, metrics, profiling, or debugging.
+
+A trace might show that a database span took two seconds, but it may not explain whether the cause was:
+
+- A slow query.
+- Connection pool exhaustion.
+- Database lock contention.
+- Network delay.
+- A database server under heavy load.
+
+Tracing identifies where time was spent and how operations relate. Other evidence is often needed to explain why.
+
+### Distributed tracing and OpenTelemetry
+
+OpenTelemetry (OTel) is a widely used framework for instrumenting applications, propagating trace context, and exporting trace data.
+
+A typical architecture looks like this:
+
+{/* Instrumented services
+
+Spring Boot · Gateway · Workers · Database clients
+
+OpenTelemetry APIs, SDKs, and instrumentation
+
+Create spans and propagate context
+
+OpenTelemetry Collector (optional)
+
+Receive, process, and export traces
+
+Trace backend
+
+Store, search, and analyze traces */}
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/service-communication/observability/distributed-tracing/Distributed-tracing-and-OpenTelemetry.png)
+
+The application generates and propagates trace information. A collector can receive and process that information, while a tracing backend stores and presents it.
+
+These components are separate responsibilities. You do not necessarily need a Collector, and OpenTelemetry itself is not a trace-storage or visualization backend.
+
+## Traces, spans, and trace context (`traces-spans-and-trace-context`)
+
+These three concepts are the foundation of distributed tracing.
+
+the tracing information from a complete workflow is
+called a **trace** or a **trace tree**, and sub-parts of the tree – for example, the basic units of work – are
+called **spans**. Spans can consist of sub-spans forming the trace tree. Metadata can be added to
+a trace and its spans as key-value pairs called **tags**. The Zipkin UI can visualize a trace tree and
+its spans as follows:
+![Example of a trace with its spans](/docs/assets/software-engineering/design-architecture/distributed-systems/service-communication/observability/distributed-tracing/trace-example-Zipkin-visualize.png)
+
+### What is a trace?
+
+A trace represents a logically connected execution of work.
+
+For example, a request to retrieve a product and its recommendations can create one trace containing operations performed by the gateway and downstream services.
+
+A trace has a unique trace ID, which allows its spans to be associated with the same execution.
+
+Conceptually:
+
+```
+Trace ID: 4bf92f3577b34da6a3ce929d0e0e4736
+
+  Gateway span
+      |
+      v
+  Composite span
+      |
+      +----> Product span
+      |
+      +----> Recommendation span
+```
+
+A trace is not necessarily identical to an HTTP request. It can represent a larger workflow, and asynchronous workflows may use span links or separate traces to represent relationships between operations.
+
+### What is a span?
+
+A span represents an individual operation within a trace.
+
+Examples include:
+
+- Handling an incoming HTTP request.
+- Calling another service.
+- Executing a database query.
+- Publishing a message.
+- Processing a message.
+- Calling an external payment provider.
+
+A span commonly contains the following information:
+
+| Field               | Meaning                                                           |
+| ------------------- | ----------------------------------------------------------------- |
+| Trace ID            | Identifies the trace                                              |
+| Span ID             | Uniquely identifies the span within its trace                     |
+| Parent span ID      | Identifies the parent span, when the span has one                 |
+| Operation name      | Describes the work performed                                      |
+| Start time          | When the operation began                                          |
+| End time / duration | When the operation ended and how long it lasted                   |
+| Attributes          | Metadata describing the operation                                 |
+| Events              | Timestamped events associated with the span                       |
+| Status              | Indicates whether the operation succeeded or encountered an error |
+
+For example, a database span might have:
+
+```
+Operation: SELECT recommendations
+Service: recommendation-service
+Duration: 180 ms
+Status: OK
+```
+
+Another span might record:
+
+```
+Operation: GET /recommendations
+Service: recommendation-service
+Duration: 220 ms
+Status: ERROR
+```
+
+The database operation may be successful while the overall HTTP operation fails later for another reason. Span status describes the individual operation, not necessarily the entire trace.
+
+### What is trace context?
+
+Trace context is the information required to identify a trace and connect operations to the correct execution.
+
+In the common OpenTelemetry tracing model, a span context includes:
+
+- A trace ID.
+- A span ID.
+- A trace flags field, including the sampled flag.
+- An optional trace state containing vendor-specific tracing information.
+
+For example:
+
+```
+Trace ID: 4bf92f3577b34da6a3ce929d0e0e4736
+Span ID:  00f067aa0ba902b7
+Sampled:  yes
+```
+
+The IDs identify the trace and the current span. The sampled flag indicates the sampling decision carried in the context; it does not guarantee that a backend successfully stored the trace.
+
+Trace context is used to create relationships between spans across process boundaries.
+
+### Trace versus span versus span context
+
+| Concept      | Think of it as                          | Example                           |
+| ------------ | --------------------------------------- | --------------------------------- |
+| Trace        | The overall execution                   | Retrieve product 42               |
+| Span         | One operation                           | Query the recommendation database |
+| Span context | Identity and tracing state for one span | Trace ID plus database span ID    |
+
+A trace may contain many spans. Each span has its own span ID, but spans in the same trace share a trace ID.
+
+A span context is not the entire span. It does not contain all the span's attributes, events, or timing data.
+
+### Trace IDs and span IDs are not business IDs
+
+A trace ID identifies one tracing execution. It is not automatically the same as:
+
+- A customer ID.
+- An order ID.
+- A product ID.
+- An HTTP request ID generated by an application.
+
+A single order may be involved in many traces. Conversely, one trace may perform work involving multiple business entities.
+
+Keep business identifiers and tracing identifiers separate, and avoid placing sensitive values in span attributes without a clear need.
+
+## Trace lifecycle (`trace-lifecycle`)
+
+The trace lifecycle describes how tracing information is created, propagated, recorded, exported, stored, and eventually analyzed.
+
+### The lifecycle from start to finish
+
+{/* 1\. Start or continue a trace
+
+Extract incoming context or create a new trace
+
+2\. Create spans
+
+Record operation start times and relationships
+
+3\. Instrument operations
+
+Record attributes, events, and errors
+
+4\. End spans
+
+Record completion time and final status
+
+5\. Process and export
+
+Apply sampling, batching, and export policies
+
+6\. Store and analyze
+
+Search traces, inspect waterfalls, and correlate signals */}
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/service-communication/observability/distributed-tracing/trace-lifecycle.png)
+
+The exact order of sampling, processing, and export depends on the implementation. For example, head-based sampling can decide whether to record a trace near its start, while tail-based sampling may make a decision after spans have been collected.
+
+### Creating a trace
+
+A trace can begin in different ways.
+
+- **Incoming request with no valid trace context**
+
+  The service starts a new trace and creates a root span.
+
+  ```
+  Client -> Gateway
+            |
+            +-- Trace T
+                +-- Gateway span
+  ```
+
+- **Incoming request with existing trace context**
+
+The service continues the existing trace, creating a span associated with the incoming trace ID.
+
+  ```
+  Existing trace T
+      |
+      +-- Upstream span
+            |
+            v
+        Gateway span
+  ```
+
+In distributed tracing, a service usually extracts the incoming context and creates a new span rather than reusing the upstream span ID.
+
+If the incoming context is invalid, the instrumentation may start a new trace, depending on the propagator and configuration.
+
+### Recording the operation
+
+When an instrumented operation starts, the tracing library creates a span and records its start time.
+
+While the operation runs, instrumentation can record:
+
+- Attributes, such as HTTP method and normalized route.
+- Events, such as a retry being initiated.
+- Exceptions or error-related information, where appropriate.
+- Links to other spans when work is related but not represented by a direct parent-child relationship.
+
+The span is ended when the operation finishes. Ending a span records its completion and duration; it does not necessarily mean the data has already reached the tracing backend.
+
+### Exporting and storing the trace
+
+A completed span may be passed to a span processor, which determines how it is handled.
+
+For example:
+
+```
+Application
+    |
+    v
+Completed span
+    |
+    v
+Span processor
+    |
+    v
+Exporter
+    |
+    v
+Collector (optional)
+    |
+    v
+Tracing backend
+```
+
+In OpenTelemetry, a simple span processor can export spans as they end, while a batch span processor groups spans for more efficient export.
+
+If the exporter or collector is unavailable, telemetry may be delayed or lost, depending on buffering, retries, and the configured failure behavior.
+
+### When is a trace complete?
+
+A trace does not generally have one universal completion callback that waits for every operation in the entire distributed system.
+
+Instead, individual spans end independently. A backend groups spans using their trace IDs and presents the available relationships.
+
+For synchronous requests, the root server span often ends when the request handling finishes. In asynchronous workflows, consumers may continue processing long after the producer has ended its span.
+
+Therefore, a trace shown in the backend may initially be incomplete while more spans arrive. Some spans may never arrive because of sampling, instrumentation gaps, process crashes, or export failures.
+
+### Trace lifecycle and resource management
+
+Tracing has operational overhead, so applications must manage:
+
+- The number of spans created.
+- How much information each span records.
+- Sampling policies.
+- Export buffers and batch sizes.
+- Collector capacity.
+- Backend retention.
+- Shutdown and flushing behavior.
+
+For example, a service should allow its tracing provider to flush and shut down cleanly where the runtime lifecycle permits. Otherwise, buffered spans may be lost when the process exits.
+
+## Parent-child span relationships (`parent-child-span-relationships`)
+
+### What is a parent-child relationship?
+
+A parent-child relationship describes how one operation initiated or encompasses another operation.
+
+Suppose the composite service handles an incoming request and calls two downstream services.
+
+```
+Composite span
+    |
+    +----> Product Service span
+    |
+    +----> Recommendation Service span
+```
+
+The composite span is the parent of both downstream client spans in this illustrative instrumentation model.
+
+The child spans represent the downstream operations, while the parent span represents the broader operation that initiated them.
+
+### Parent-child relationships are not the same as service dependencies
+
+A service dependency describes which components communicate with one another. A span relationship describes how operations are related within a trace.
+
+For example, the recommendation service may be called by many different services. Its span is not always a child of the same kind of operation.
+
+Also, not every logical relationship should be represented as a direct parent-child relationship. Asynchronous messaging, fan-in operations, and work triggered by multiple upstream operations may be better represented using span links.
+
+### Sequential child spans
+
+Suppose the composite service calls the product service first, then the recommendation service.
+
+```
+Time (ms)     0        100       200       300
+
+Composite     [-----------------------------]
+Product         [------]
+Recommendation          [------------------]
+```
+
+The product call takes 60 ms, and the recommendation call begins after it completes.
+
+In this case, their execution intervals do not overlap. The total duration includes both operations plus additional processing and communication overhead.
+
+### Parallel child spans
+
+Now suppose the composite service calls both services concurrently.
+
+```
+Time (ms)     0        100       200       300
+
+Composite     [-----------------------------]
+Product         [------]
+Recommendation  [------------------------]
+```
+
+Both calls start around the same time.
+
+The composite operation's elapsed time is approximately the duration of the slower child, plus other overhead and any waiting required before the parent can finish.
+
+This is why you should not calculate total request latency by simply adding every child span's duration.
+
+### Errors and parent-child relationships
+
+Suppose the recommendation call fails.
+
+```
+Composite span              ERROR
+    |
+    +----> Product span       OK
+    |
+    +----> Recommendation     ERROR
+```
+
+The composite span may also be marked as an error if the failure prevents the operation from succeeding.
+
+However, this depends on application semantics. If recommendations are optional and the composite service successfully returns a partial response, the overall request may be considered successful even though a child operation failed.
+
+Tracing records operation behavior; your application and instrumentation determine how that behavior is represented.
+
+### Root spans
+
+A root span is a span without a parent span in its trace.
+
+For example:
+
+```
+Trace T
+  |
+  +-- Gateway server span       <- root
+       |
+       +-- Composite client span
+            |
+            +-- Product client span
+```
+
+A trace may have additional root spans when separate traces are related through links rather than direct parent-child relationships.
+
+For instance, a message consumer may begin a new trace linked to the producer's context, depending on the tracing model.
+
+### Common mistakes
+
+- Assuming that every span in a trace executes sequentially.
+- Treating a parent span's duration as the sum of child durations.
+- Assuming every child failure must cause the root span to fail.
+- Treating service dependency relationships as equivalent to span parentage.
+- Ignoring links when modeling asynchronous or fan-in workflows.
+
+Understanding the span tree is essential for interpreting latency and error propagation correctly.
+
+## Span context propagation (`span-context-propagation`)
+
+This topic focuses on the information that tracing instrumentation uses to associate a new span with its current execution context.
+
+### The problem it solves
+
+Imagine that the composite service is handling trace `T` and creates a child span for the recommendation call.
+
+```
+Composite operation
+  Trace ID: T
+  Span ID:  C
+```
+
+When the recommendation client creates its span, it needs to know that it belongs to trace `T` and that the composite operation is its parent.
+
+Conceptually:
+
+```
+Composite client span
+  Trace ID: T
+  Span ID:  C
+        |
+        v
+Recommendation server span
+  Trace ID: T
+  Span ID:  R
+  Parent Span ID: C
+```
+
+The actual span IDs are generated by the tracing implementation.
+
+### The role of the current context
+
+Tracing libraries commonly maintain a current execution context, which allows instrumentation to discover the active span.
+
+For example, when an HTTP server receives a request, instrumentation may:
+
+1. Extract the incoming trace context.
+2. Create a server span.
+3. Make that span's context current while processing the request.
+4. Create child spans for downstream operations.
+5. Restore the previous context when the operation completes.
+
+This is a conceptual description; exact implementation details depend on the language, framework, and instrumentation library.
+
+### Context propagation inside one process
+
+Context may need to move between threads, tasks, or asynchronous callbacks even when no network request is involved.
+
+Consider:
+
+```
+Request thread
+    |
+    v
+Create span A
+    |
+    v
+Submit task to executor
+    |
+    v
+Worker thread executes task
+```
+
+If the worker thread does not receive the correct context, the span created in the worker may become a separate root span or be associated with the wrong parent.
+
+This is especially relevant when applications use:
+
+- Thread pools.
+- Executor services.
+- Asynchronous futures.
+- Reactive pipelines.
+- Scheduled tasks.
+- Coroutine-based execution.
+
+Framework instrumentation may propagate context automatically for supported execution mechanisms, but custom executors and unsupported asynchronous boundaries may require additional configuration.
+
+### Span context versus baggage
+
+These are related but different concepts.
+
+| Concept      | Purpose                                                              |
+| ------------ | -------------------------------------------------------------------- |
+| Span context | Carries trace identity and tracing state                             |
+| Baggage      | Carries additional key-value information across execution boundaries |
+
+Baggage might carry a non-sensitive routing or tenant classification when there is a justified use case.
+
+Baggage is not a replacement for span attributes, and it should not be used to transmit secrets or arbitrary user data. Propagated baggage may reach downstream systems, so it requires careful security and privacy controls.
+
+### Why context propagation matters
+
+If context propagation is broken:
+
+- Spans may appear as unrelated traces.
+- The trace tree may have missing parent-child relationships.
+- Logs may contain no usable trace ID.
+- Asynchronous operations may become difficult to associate with the initiating request.
+
+Span context provides the identity and relationship information; propagation carries it to the places where new spans are created.
+
+## Trace context propagation (`trace-context-propagation`)
+
+Span context propagation and trace context propagation are closely related, but they emphasize different aspects.
+
+- Span context propagation focuses on maintaining the active span's identity and execution context, including within an application.
+- Trace context propagation focuses on transferring tracing context across boundaries, especially between separate processes and services.
+
+In practice, these terms sometimes overlap.
+
+### How services exchange trace context
+
+When the gateway calls the composite service, it can send trace context in HTTP headers.
+
+A common standard is W3C Trace Context, which defines headers including:
+
+- `traceparent`
+- `tracestate`
+
+An illustrative `traceparent` header is:
+
+```
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+```
+
+The fields represent:
+
+```
+00                 Version
+4bf92f...e0e4736   Trace ID
+00f067aa0ba902b7   Parent span ID
+01                 Trace flags
+```
+
+The header contains the current outgoing span's context, so the receiver can create a new span in the same trace with the appropriate parent relationship.
+
+The trace flags include the sampled flag. The final `01` in this example indicates that the sampled flag is set; it is not a guarantee of successful recording or storage.
+
+A sample W3C trace context traceparent header looks like this:
+traceparent:"00-2425f26083814f66c985c717a761e810-fbec8704028cfb20-01"
+The value of the traceparent header contains four parts, separated by a “-”:
+- “00” indicates the version used. It will always be “00” using the current specification.
+- “124…810” is the trace ID.
+- “fbe…b20” is the span ID.
+- “01”, the last part, contains various flags. The only flag supported by the current specifi-
+cation is a flag named sampled, with the value “01”. It means that the caller is recording
+the trace data for this request. We will configure our microservices to record trace data
+for all requests, so this flag will always have the value of “01”.
+
+Use of OpenZipkin Brave B3 headers will look like this:
+```
+X-B3-TraceId:"64436ea679e8eb6e6fa028bb3459e703"
+X-B3-SpanId:"120678270898ddd5"
+X-B3-ParentSpanId:"3c431d3d01987c22"
+X-B3-Sampled:"1"
+```
+The header names are self-explanatory, and we can see that headers are not only provided for
+the trace and span ID but also for the parent span’s ID.
+
+### What happens at the receiving service?
+
+Suppose the gateway sends:
+
+```
+trace_id = T
+span_id  = G
+```
+
+The composite service extracts the context and creates its own server span:
+
+```
+Trace T
+  |
+  +-- Gateway span G
+         |
+         +-- Composite server span C
+```
+
+The composite span gets a new span ID, `C`, but retains trace ID `T`. Its parent is `G`.
+
+When the composite service calls the recommendation service, the outgoing client span's context is propagated, allowing the recommendation service to continue the same trace.
+
+### Propagation is not the same as exporting
+
+This distinction is essential.
+
+| Mechanism           | Purpose                                        |
+| ------------------- | ---------------------------------------------- |
+| Context propagation | Carries trace identity between operations      |
+| Span recording      | Captures information about an operation        |
+| Span export         | Sends recorded spans to a collector or backend |
+| Trace storage       | Persists spans so they can be queried later    |
+
+A service may successfully propagate context even when its telemetry exporter is temporarily unavailable. Conversely, a service may export spans successfully while failing to propagate context to downstream calls.
+
+Correct tracing requires both relationships and recorded data to be handled properly.
+
+### Security considerations
+
+Incoming trace headers should not automatically be trusted as authenticated identity.
+
+Trace context is correlation metadata, not an authorization mechanism. Depending on the architecture, systems may need to validate or constrain incoming context, especially at public trust boundaries.
+
+Avoid exposing sensitive information in `tracestate`, baggage, or span attributes.
+
+## Synchronous request tracing (`synchronous-request-tracing`)
+
+### 7.1 What is synchronous request tracing?
+
+Synchronous tracing follows a request through operations that execute as part of a request-response flow.
+
+A caller generally waits for the downstream operation to return before continuing, although a request handler can also launch parallel operations and wait for their results.
+
+For example:
+
+```
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Product Composite
+  |
+  +--> Product Service --> MongoDB
+  |
+  +--> Recommendation Service --> MySQL
+  |
+  v
+HTTP response
+```
+
+The request path is represented by spans created by the gateway, composite service, downstream services, and instrumented dependencies.
+
+### 7.2 Example: a request's timeline
+
+Assume the composite service performs two calls sequentially.
+
+| Operation                       | Duration |
+| ------------------------------- | -------- |
+| Gateway processing and overhead | 20 ms    |
+| Composite processing            | 15 ms    |
+| Product Service call            | 80 ms    |
+| Recommendation Service call     | 250 ms   |
+| Remaining response work         | 15 ms    |
+
+In this simplified sequential example, the total is approximately 380 ms.
+
+If the composite service calls both downstream services concurrently, the two calls overlap. Assuming both start together, the downstream waiting time is approximately 250 ms rather than 330 ms.
+
+Actual traces are needed to establish the timing because network communication, queueing, serialization, and other processing can add overhead.
+
+### 7.3 Instrumenting incoming and outgoing HTTP calls
+
+Automatic instrumentation commonly creates:
+
+- A server span for an incoming HTTP request.
+- A client span for an outgoing HTTP call.
+- Additional spans for supported database operations.
+
+Conceptually:
+
+```
+Gateway
+  SERVER span
+    |
+    +-- CLIENT span -------------------->
+                                    Composite
+                                      SERVER span
+                                        |
+                                        +-- CLIENT span ---->
+                                                          Recommendation
+                                                            SERVER span
+```
+
+Exact span names, attributes, and instrumentation boundaries depend on the framework and conventions in use.
+
+### 7.4 Retries and timeouts
+
+Suppose a service calls another service and retries after a timeout.
+
+```
+Composite operation
+    |
+    +-- Attempt 1: timeout, 1,000 ms
+    |
+    +-- Attempt 2: success, 100 ms
+```
+
+A trace can reveal the repeated calls and the time consumed by each attempt.
+
+This matters because retries can amplify latency and load. A service may appear slow even though the final attempt succeeds.
+
+Instrumentation should preserve the relationships between the logical operation and its individual attempts where the libraries support that representation.
+
+### 7.5 What synchronous tracing helps diagnose
+
+- Which downstream dependency dominates latency.
+- Whether calls execute sequentially or in parallel.
+- Whether retries are contributing to slow responses.
+- Which operation produced an error.
+- Whether the delay is within a service or in a downstream call.
+
+Tracing does not automatically reveal all internal work. Missing database instrumentation or uninstrumented custom code may leave gaps in the trace.
+
+## 8. Asynchronous request tracing (`asynchronous-request-tracing`)
+
+### 8.1 Why asynchronous tracing is different
+
+In asynchronous systems, a component can publish work and finish before another component processes it.
+
+For example:
+
+```
+Order Service
+    |
+    | Publish OrderCreated
+    v
+RabbitMQ
+    |
+    | Deliver later
+    v
+Notification Service
+    |
+    v
+Email Provider
+```
+
+The order service does not necessarily wait for the notification service to finish. The consumer may process the message seconds or minutes later.
+
+Consequently, asynchronous tracing cannot always be represented as one continuously nested call stack.
+
+### 8.2 Producer and consumer spans
+
+A message-driven workflow can include:
+
+- A producer span representing message publication.
+- A consumer span representing message processing.
+- Additional spans for database operations or external calls performed by the consumer.
+
+For example:
+
+```
+Trace A
+  |
+  +-- Order Service
+        |
+        +-- Publish OrderCreated
+                  |
+                  | message headers carry trace context
+                  v
+             Notification Service
+                  |
+                  +-- Process OrderCreated
+                        |
+                        +-- Send email
+```
+
+This is a conceptual view of a connected trace. The exact representation depends on the messaging instrumentation and tracing model.
+
+### 8.3 Propagating context through messages
+
+When publishing a message, the producer can inject trace context into message headers.
+
+The consumer extracts that context and creates spans associated with the appropriate trace or related through a span link.
+
+Conceptually:
+
+```
+Producer:
+  Create producer span
+  Inject context into message headers
+  Publish message
+
+Consumer:
+  Receive message
+  Extract context
+  Create consumer span
+  Process message
+```
+
+For example, a RabbitMQ message may carry W3C Trace Context headers. The message body does not need to contain the trace ID merely for tracing purposes.
+
+The messaging instrumentation must support propagation, or the application must configure it explicitly.
+
+### 8.4 Parent-child relationships versus span links
+
+A consumer span can be modeled as a child of the producer's context in some common tracing setups.
+
+However, a span link can be more appropriate when the consumer's work has a different lifecycle or is related to multiple messages.
+
+Consider a batch consumer that processes 100 messages together. The batch operation has relationships with multiple producer contexts. A single parent span cannot express all those relationships equally well, whereas links can connect the consumer span to multiple relevant spans.
+
+Similarly, some architectures deliberately start a new trace for background work and link it to the originating request.
+
+The choice depends on the execution model and what operators need to understand.
+
+### 8.5 Measuring queueing delay
+
+An important challenge is distinguishing:
+
+- Time spent waiting for a message to be processed.
+- Time spent actually processing the message.
+
+Suppose:
+
+```
+Message published:  12:00:00
+Message received:   12:00:08
+Processing ended:   12:00:09
+```
+
+The message waited approximately eight seconds before processing and took approximately one second to process, assuming the timestamps are comparable and accurate.
+
+This is different from an HTTP request that waits for a downstream call to finish.
+
+For asynchronous workflows, combine traces with queue depth, message age, consumer lag, retry counts, and dead-letter queue metrics. Tracing alone may not provide a complete picture of backlog behavior.
+
+### 8.6 Retries, redelivery, and duplicate processing
+
+Message brokers may redeliver a message, and consumers may retry failed operations.
+
+A tracing setup should help distinguish individual processing attempts and, where appropriate, relate them to the original message or workflow.
+
+Do not assume that each retry creates a new trace or that every redelivery appears as a child span. The result depends on the instrumentation and trace model.
+
+## 9. Cross-service tracing (`cross-service-tracing`)
+
+Cross-service tracing is the practice of connecting operations from multiple independently deployed services into a useful end-to-end view.
+
+### 9.1 The basic mechanism
+
+Cross-service tracing depends on three things:
+
+1. Each relevant service creates spans.
+2. Trace context is propagated between services.
+3. The resulting spans are exported and available to a common tracing backend, or to a system that can query them together.
+
+For example:
+
+```
+API Gateway
+    |
+    | HTTP + trace context
+    v
+Product Composite
+    |
+    | HTTP + trace context
+    v
+Recommendation Service
+    |
+    | database instrumentation
+    v
+MySQL
+```
+
+Without propagation, each service might generate an independent trace. Without instrumentation, some operations may be missing. Without successful export, the backend may show only part of the execution.
+
+### 9.2 Service boundaries introduce complexity
+
+Different services may use different:
+
+- Programming languages.
+- Frameworks.
+- Instrumentation libraries.
+- Deployment environments.
+- Communication protocols.
+- Sampling policies.
+- Telemetry backends.
+
+Standards such as OpenTelemetry and W3C Trace Context help provide interoperability, but the integrations must still be configured correctly.
+
+For example, if a Java gateway propagates W3C context but a downstream service expects a different format and no compatible propagator is enabled, the trace may become disconnected.
+
+### 9.3 Service names and deployment metadata
+
+Cross-service traces are easier to interpret when each span identifies its service consistently.
+
+Useful resource metadata includes:
+
+```
+service.name = recommendation-service
+service.version = 2.4.0
+deployment.environment.name = production
+```
+
+This lets operators distinguish, for example, latency in version `2.4.0` from latency in version `2.3.9`.
+
+A service name should generally remain stable across individual instances. Instance identity can be represented separately when needed.
+
+### 9.4 Cross-service tracing in a Spring Boot system
+
+A typical implementation might combine:
+
+- Spring Boot instrumentation for incoming HTTP requests.
+- Instrumentation for outgoing HTTP clients.
+- OpenTelemetry context propagation.
+- Database instrumentation.
+- An OpenTelemetry exporter or Collector.
+- A tracing backend for search and visualization.
+
+Depending on the Spring Boot and Micrometer versions, tracing may be integrated through Micrometer Tracing or through OpenTelemetry's SDK and instrumentation directly. Avoid blindly installing multiple overlapping instrumentation systems, because that can create duplicate spans or inconsistent context.
+
+### 9.5 Troubleshooting a broken distributed trace
+
+If a trace shows only the gateway and composite service, investigate the following:
+
+1. Does the composite service actually call the downstream service?
+2. Does the outgoing request carry trace context?
+3. Does the downstream instrumentation extract that context?
+4. Is the downstream service recording spans?
+5. Are the spans sampled and exported?
+6. Does the backend receive and retain the data?
+7. Are the services using compatible context-propagation formats?
+
+This sequence separates instrumentation and propagation problems from export and storage problems.
+
+## 10. Trace sampling (`trace-sampling`)
+
+### 10.1 What is trace sampling?
+
+Trace sampling is the process of deciding which traces or spans to record and retain for analysis.
+
+In a high-traffic system, recording every trace can generate substantial volumes of telemetry. Sampling reduces that volume while preserving enough information for troubleshooting and performance analysis.
+
+Suppose an application processes 10,000 requests per second and each request produces five spans.
+
+That creates approximately 50,000 spans per second before considering retries, background work, or other operations.
+
+If a sampling policy retains 1% of traces, it may greatly reduce the exported trace volume, although the exact savings depend on how many spans each trace contains and where sampling occurs.
+
+### 10.2 Head-based sampling
+
+Head-based sampling makes the sampling decision near the beginning of a trace, often when the root span is created.
+
+For example:
+
+```
+New trace
+    |
+    v
+Sampling decision
+    |
+    +----> Sampled: record and export
+    |
+    +----> Not sampled: do not record the trace
+```
+
+A probability-based sampler might retain approximately 10% of traces.
+
+Advantages:
+
+- Low overhead for traces that are not sampled.
+- Simple to configure.
+- Sampling decisions can be propagated to downstream services.
+- Useful for controlling high-volume instrumentation.
+
+Limitations:
+
+- The decision is made before the outcome is known.
+- Rare failures may not be retained.
+- A slow request may be discarded if it was not selected initially.
+
+For distributed consistency, services commonly use the propagated sampling decision instead of independently making conflicting decisions for each span.
+
+### 10.3 Tail-based sampling
+
+Tail-based sampling makes a decision after enough trace information has been collected to evaluate the trace.
+
+For example, a policy might retain traces that:
+
+- Contain an error.
+- Exceed a latency threshold.
+- Have a particular attribute.
+- Match a defined sampling probability.
+
+```
+Collect spans
+     |
+     v
+Group spans by trace
+     |
+     v
+Evaluate completed or sufficiently observed trace
+     |
+     +----> Error or slow trace: retain
+     |
+     +----> Other trace: sample according to policy
+```
+
+Advantages:
+
+- Can prioritize slow or failed traces.
+- Can use information unavailable at the start of a request.
+- Helps retain unusual cases for investigation.
+
+Limitations:
+
+- Requires buffering spans while a decision is made.
+- Consumes collector memory and processing resources.
+- May make decisions before every span has arrived.
+- Requires careful configuration for high-volume systems.
+
+Tail-based sampling is often implemented in an OpenTelemetry Collector or a similar telemetry-processing component.
+
+### 10.4 Head-based vs. tail-based sampling
+
+| Dimension               | Head-based            | Tail-based                             |
+| ----------------------- | --------------------- | -------------------------------------- |
+| Decision timing         | Near trace start      | After collecting trace data            |
+| Uses final outcome      | Generally no          | Yes, when available                    |
+| Resource requirements   | Usually lower         | Higher due to buffering and evaluation |
+| Retaining rare errors   | May miss them         | Can prioritize them                    |
+| High-volume suitability | Often straightforward | Requires careful capacity planning     |
+| Operational complexity  | Relatively simple     | More complex                           |
+
+A system can also combine sampling strategies. For example, it may use head-based sampling to reduce instrumentation volume and a separate policy for selected workloads.
+
+### 10.5 Sampling and error visibility
+
+Suppose 1,000 requests occur, and 10 fail. With random 10% sampling, you might expect approximately one failed trace to be retained on average, assuming the sampling is independent of failure status.
+
+That does not guarantee that exactly one will be retained. You might retain none, one, or several.
+
+This illustrates why sampled traces should not be used as the sole source for calculating exact request or error rates. Metrics should capture those rates independently.
+
+### 10.6 Sampling is not aggregation
+
+Sampling selects which observations are retained. Aggregation combines observations into summaries.
+
+For example:
+
+- Sampling: retain 10% of traces.
+- Aggregation: calculate the total request count and p95 latency over a time window.
+
+These operations have different goals and consequences.
+
+## 11. Trace aggregation (`trace-aggregation`)
+
+### 11.1 What does trace aggregation mean?
+
+The term trace aggregation is used in more than one way, so it is important to distinguish two concepts:
+
+1. Trace assembly and grouping: Combining spans that share a trace ID into a trace view.
+2. Statistical aggregation: Summarizing information from many traces to identify patterns across requests.
+
+In addition, some tracing backends offer specialized trace-derived metrics or aggregation features. These are backend capabilities rather than a single universal tracing operation.
+
+### 11.2 Assembling spans into a trace
+
+A tracing backend may receive spans at different times and from different services.
+
+For example:
+
+```
+Gateway exports span G
+Composite exports span C
+Recommendation exports span R
+```
+
+The backend associates the spans using their trace IDs and parent relationships.
+
+```
+Trace T
+  |
+  +-- Gateway span G
+        |
+        +-- Composite span C
+              |
+              +-- Recommendation span R
+```
+
+This is trace assembly, not statistical aggregation.
+
+The backend may initially have only G and C, then display R when it arrives. If R never arrives, the trace remains incomplete.
+
+### 11.3 Aggregating data across traces
+
+Suppose a service receives 100,000 requests. Inspecting every trace individually is impractical.
+
+Instead, a tracing backend or analytics pipeline may derive statistics such as:
+
+- Request counts by service or operation.
+- Error rates.
+- Latency distributions.
+- Slow-operation frequencies.
+- Dependency call patterns.
+- Counts of traces matching particular conditions.
+
+For example:
+
+| Operation              | Request count | Error rate | p95 latency |
+| ---------------------- | ------------- | ---------- | ----------- |
+| `GET /products/{id}`   | 80,000        | 0.2%       | 120 ms      |
+| `GET /recommendations` | 45,000        | 3.5%       | 900 ms      |
+| `POST /orders`         | 12,000        | 0.8%       | 350 ms      |
+
+These values are illustrative. The aggregation may be calculated from trace data or produced independently by metrics instrumentation.
+
+### 11.4 Trace-derived metrics
+
+Trace-derived metrics summarize trace information into time-series measurements.
+
+For example, a tracing pipeline may generate a metric for the number of spans by service and operation, or a histogram of span durations.
+
+This can be useful when:
+
+- The application does not already emit a suitable metric.
+- You want to explore latency by trace attributes.
+- You need to identify common slow operations.
+- You want to navigate from an aggregate measurement to an individual trace.
+
+However, trace-derived metrics inherit limitations from the traces used to produce them. If only a sample of traces is retained, the derived statistics may not accurately represent every request unless the system accounts for sampling appropriately.
+
+For reliable request counts and error rates, direct metrics instrumentation is often preferable.
+
+### 11.5 Aggregation and distributed timing
+
+Suppose a trace includes these spans:
+
+```
+Composite operation: 300 ms
+  Product call:       80 ms
+  Recommendation:    250 ms
+```
+
+The two child calls may overlap. Adding 80 ms and 250 ms produces 330 ms, but the composite operation lasts only 300 ms in this example.
+
+Aggregating span durations is therefore not the same as calculating end-to-end elapsed time.
+
+Choose the measurement that answers your question:
+
+- End-to-end latency: How long did the overall operation take?
+- Span duration: How long did an individual operation last?
+- Total work: How much cumulative operation time was recorded?
+- Critical path: Which operations determined the overall elapsed time?
+
+These measurements can differ significantly when work executes concurrently.
+
+## 12. Trace analysis (`trace-analysis`)
+
+Trace analysis is the process of interpreting recorded spans to understand latency, errors, dependencies, and execution behavior.
+
+A tracing backend commonly presents a trace as a waterfall, together with a span tree, attributes, events, and error information.
+
+### 12.1 Start with the overall request
+
+When investigating a slow request, first inspect the root or entry-point span.
+
+Look at:
+
+- Total elapsed time.
+- Overall status.
+- Request route or operation name.
+- Service and deployment version.
+- Whether the request is unusually slow compared with similar requests.
+
+Then move into the spans beneath it.
+
+### 12.2 Find the dominant latency
+
+Suppose the trace looks like this:
+
+```
+Product Composite              2,900 ms
+  |
+  +-- Product Service             80 ms
+  |
+  +-- Recommendation Service   2,700 ms
+        |
+        +-- MySQL query        2,500 ms
+```
+
+This suggests that the recommendation path is the main place to investigate.
+
+However, do not assume that the database itself is necessarily the root cause. The query span might include waiting for a connection, network delay, or other work depending on the instrumentation.
+
+Inspect the span's attributes and events, then correlate it with application logs, database metrics, connection-pool measurements, and other evidence.
+
+### 12.3 Distinguish elapsed time from cumulative span time
+
+Consider a request that launches two downstream calls concurrently:
+
+```
+Time (ms)     0        100       200       300
+
+Parent        [-----------------------]
+Call A          [----------]
+Call B          [-----------------]
+```
+
+If Call A takes 100 ms and Call B takes 170 ms, their combined elapsed interval may be 170 ms because they overlap.
+
+The total of their individual durations is 270 ms. That value represents cumulative span duration, not the elapsed time of the parent operation.
+
+When analyzing traces, use the timeline and relationships, not just a sum of displayed durations.
+
+### 12.4 Investigate error paths
+
+For a failed request, examine:
+
+1. Which span is marked as failed?
+2. Is the error recorded on the server span, client span, or both?
+3. Did a downstream service return an error or time out?
+4. Were retries attempted?
+5. Did the overall request fail, or did the application recover and return a valid response?
+6. Are relevant logs available for the same trace?
+
+An error recorded on a client span may describe the caller's experience, while the server span may describe what happened inside the receiving service. Both perspectives can be useful.
+
+### 12.5 Look for patterns across traces
+
+One trace explains one execution. Comparing many traces helps identify recurring behavior.
+
+Examples include:
+
+- One endpoint is consistently slower than others.
+- Requests to a specific dependency are slow only in one region.
+- A new release increased p99 latency.
+- Failures occur mainly when a particular downstream call is made.
+- Requests with retries have substantially higher latency.
+- A small percentage of requests experience much longer database spans.
+
+Use metrics and trace queries to narrow down the population of interest, then inspect representative traces to understand the details.
+
+### 12.6 Trace analysis workflow
+
+1\. Detect the symptom
+
+Use a latency or error metric, alert, or user report.
+
+2\. Select representative traces
+
+Compare a slow or failed request with a normal one.
+
+3\. Inspect the span tree and timeline
+
+Find slow operations, retries, missing spans, and errors.
+
+4\. Correlate with other signals
+
+Inspect logs, resource metrics, database measurements, and deployment events.
+
+5\. Test the hypothesis
+
+Validate the suspected cause, implement a fix, and verify recovery.
+
+### 12.7 Common trace-analysis mistakes
+
+- Assuming a slow span proves that its service is the root cause.
+- Adding overlapping span durations to estimate request latency.
+- Ignoring retries and queueing delays.
+- Treating missing spans as proof that an operation did not happen.
+- Assuming sampled traces represent every request.
+- Ignoring differences between deployments or environments.
+- Treating correlation as proof of causation.
+
+A good trace narrows down the investigation. A correct diagnosis still requires understanding the application and validating the evidence.
+
+## 13. Putting the topics together
+
+The following table summarizes the role of each concept.
+
+| Topic                            | Main question it answers                                                   |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| Overview                         | Why do we trace requests across services?                                  |
+| Traces, spans, and trace context | What are we recording, and how are operations identified?                  |
+| Trace lifecycle                  | How is tracing data created, exported, and analyzed?                       |
+| Parent-child span relationships  | How are related operations organized?                                      |
+| Span context propagation         | How is the active tracing context maintained?                              |
+| Trace context propagation        | How does context move between services and processes?                      |
+| Synchronous request tracing      | How do we follow request-response operations?                              |
+| Asynchronous request tracing     | How do we follow work across message and background-processing boundaries? |
+| Cross-service tracing            | How do independently deployed services form a connected view?              |
+| Trace sampling                   | Which traces should be recorded and retained?                              |
+| Trace aggregation                | How are spans assembled and trace data summarized?                         |
+| Trace analysis                   | How do we use traces to investigate latency and failures?                  |
+
+For your documentation, keep these concepts framework-independent in the distributed-systems section. Then cover the concrete implementations separately:
+
+- Spring Boot Actuator and Micrometer Tracing.
+- OpenTelemetry APIs, SDKs, instrumentation, and context propagation.
+- OpenTelemetry Collector configuration.
+- Trace sampling and trace-derived metrics.
+- Jaeger or Grafana Tempo for trace storage and exploration.
+- Grafana for connecting traces with metrics and logs.
+
+This separation lets you understand the tracing model first and then learn how each tool implements it.&#x20;

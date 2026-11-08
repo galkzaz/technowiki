@@ -1,0 +1,880 @@
+{/* # Graph Searching Algorithms */}
+
+Graph searching is the process of exploring a graph to discover vertices, find a path between vertices, determine reachability, or collect information about the graph's structure.
+
+Two of the most important graph-searching algorithms are:
+
+- **Breadth-First Search (BFS)**: explores the graph level by level, visiting closer vertices before more distant ones.
+- Depth-First Search (DFS): explores one path as deeply as possible before backtracking.
+
+To understand both algorithms, we first need to understand the concepts they share: search state, visited nodes, the search frontier, and parent relationships.
+
+## Graph Search Fundamentals
+
+A graph consists of vertices (nodes) and edges (connections between nodes).
+
+For example, consider this undirected graph:
+
+```
+        A
+       / \
+      B   C
+     / \   \
+    D   E---F
+```
+
+We can represent the connections as:
+
+```
+A: B, C
+B: A, D, E
+C: A, F
+D: B
+E: B, F
+F: C, E
+```
+
+Suppose we want to search for vertex `F`, starting from `A`.
+
+The search begins at `A`, examines its neighbors, and continues exploring the graph according to the chosen algorithm.
+
+A search algorithm generally needs to answer four questions:
+
+1. Where am I now? — the current vertex.
+2. What have I already explored? — the visited state.
+3. What should I explore next? — the frontier.
+4. How did I reach this vertex? — the parent relationship.
+
+These ideas are shared by BFS and DFS, even though the algorithms manage their frontiers differently.
+
+### What can graph searching accomplish?
+
+Graph search is useful for several different tasks:
+
+| Goal                   | Example                                                 |
+| ---------------------- | ------------------------------------------------------- |
+| Reachability           | Can I get from `A` to `F`?                              |
+| Path finding           | What path connects `A` to `F`?                          |
+| Traversal              | Visit every reachable vertex.                           |
+| Connectivity           | Which vertices belong to the same connected component?  |
+| Cycle detection        | Does the graph contain a cycle?                         |
+| Structural analysis    | What is the BFS tree or DFS tree?                       |
+| Dependency exploration | Which tasks or modules are reachable from a given task? |
+
+An important distinction: graph searching is a general technique, not one specific algorithm. BFS, DFS, and several other algorithms use this technique for different purposes.
+
+## Search State
+
+The search state is the information the algorithm maintains while exploring the graph.
+
+For a basic BFS or DFS, the state commonly includes:
+
+- The current vertex.
+- Which vertices have been discovered.
+- The frontier of vertices waiting to be explored.
+- The parent of each discovered vertex.
+- Optionally, distance, discovery time, finishing time, or other metadata.
+
+A useful abstract representation is:
+
+```
+SearchState
+├── visited[v]   : Has v been discovered?
+├── parent[v]    : Which vertex discovered v?
+├── frontier     : Which vertices are waiting?
+└── metadata[v]  : Optional information about v
+```
+
+Here, `v` represents a vertex in the graph.
+
+### Example
+
+Suppose we start searching at `A` and discover `B` and `C`.
+
+```
+        A
+       / \
+      B   C
+```
+
+The search state could be:
+
+```
+visited = {A, B, C}
+
+parent[A] = NONE
+parent[B] = A
+parent[C] = A
+```
+
+The frontier depends on the algorithm:
+
+```
+BFS queue: [B, C]
+
+DFS stack: [C, B]   // one possible convention
+```
+
+The exact DFS stack order depends on how neighbors are inserted. If `B` is popped first, the search explores through `B` before returning to `C`.
+
+### Why does search state matter?
+
+Without maintained state, an algorithm might repeatedly explore the same vertices, waste time, or enter an infinite loop when the graph contains cycles.
+
+For example:
+
+```
+A ----- B
+ \     /
+  \   /
+    C
+```
+
+If the algorithm keeps following edges without recording discovered vertices, it could repeatedly travel around the cycle.
+
+Search state prevents this and allows the algorithm to make progress.
+
+## Visited Nodes
+
+A visited set records vertices that have already been discovered or processed, depending on the implementation's convention.
+
+The most important implementation detail is to distinguish discovered from fully processed.
+
+### Three-color model
+
+A common model, especially for DFS, uses three colors:
+
+| Color | Meaning                                                     |
+| ----- | ----------------------------------------------------------- |
+| White | Not discovered yet.                                         |
+| Gray  | Discovered, but exploration is not complete.                |
+| Black | All relevant outgoing or adjacent edges have been examined. |
+
+The transitions are:
+
+```
+WHITE  ──discover──>  GRAY  ──finish──>  BLACK
+```
+
+For an undirected graph, a gray vertex is active in the current DFS traversal. For a directed graph, gray vertices are especially useful when detecting back edges and cycles.
+
+Consider this DFS progression:
+
+```
+Initially:
+A = WHITE
+B = WHITE
+C = WHITE
+
+Discover A:
+A = GRAY
+
+Discover B from A:
+A = GRAY
+B = GRAY
+
+Finish B:
+A = GRAY
+B = BLACK
+
+Finish A:
+A = BLACK
+B = BLACK
+```
+
+This model is useful for understanding recursive DFS and cycle detection.
+
+### Why mark a vertex as visited?
+
+Consider a cycle:
+
+```
+A ---- B
+|      |
+D ---- C
+```
+
+Starting at `A`, the algorithm may discover `B`, then `C`, then `D`. From `D`, it encounters `A` again.
+
+Because `A` has already been discovered, the algorithm does not recursively explore it again.
+
+Without this check, traversal can loop indefinitely.
+
+### When should a vertex be marked visited?
+
+For ordinary BFS and DFS traversal, mark a vertex as discovered when you add it to the frontier, rather than waiting until you remove it.
+
+For example, BFS:
+
+```
+discover(start):
+    visited[start] = true
+    enqueue(start)
+
+while queue is not empty:
+    u = dequeue()
+
+    for each neighbor v of u:
+        if not visited[v]:
+            visited[v] = true
+            parent[v] = u
+            enqueue(v)
+```
+
+This prevents multiple vertices from adding the same neighbor to the queue.
+
+For DFS, the same principle applies whether you implement DFS recursively or with an explicit stack.
+
+Terminology note: Some books use visited to mean discovered; others reserve it for fully processed vertices. Be clear about which convention your code uses. The three-color model avoids this ambiguity.
+
+## Search Frontier
+
+The search frontier is the collection of discovered vertices that have not yet been fully explored.
+
+Think of it as the algorithm's to-do list.
+
+When the algorithm discovers a vertex, it places that vertex in the frontier. Later, it removes a vertex from the frontier and examines its neighbors.
+
+The frontier is what distinguishes BFS from DFS most clearly.
+
+### BFS uses a queue
+
+BFS uses a FIFO queue: First In, First Out.
+
+The vertex discovered earliest is explored first.
+
+```
+enqueue(v): add v to the back
+dequeue():  remove v from the front
+```
+
+Suppose `A` has neighbors `B` and `C`.
+
+```
+Start:
+Queue = [A]
+
+Process A:
+Queue = [B, C]
+
+Process B:
+Queue = [C, D, E]
+
+Process C:
+Queue = [D, E, F]
+```
+
+BFS explores vertices in layers of increasing distance from the start.
+
+```
+Level 0:       A
+
+Level 1:     B   C
+
+Level 2:   D   E   F
+```
+
+This layer-by-layer behavior is why BFS finds shortest paths in an unweighted graph.
+
+### DFS uses a stack
+
+DFS can use either recursion (the program's call stack) or an explicit LIFO stack: Last In, First Out.
+
+The most recently added vertex is explored first.
+
+```
+push(v): add v to the top
+pop():   remove v from the top
+```
+
+For example:
+
+```
+Stack = [A]
+
+Pop A; discover B and C:
+Stack = [C, B]    // B is on top
+
+Pop B; discover D and E:
+Stack = [C, E, D] // D is on top
+```
+
+The next vertex explored is `D`, so DFS follows that branch before returning to `E` or `C`.
+
+The exact order depends on the order in which neighbors are pushed or examined.
+
+### BFS and DFS frontier comparison
+
+| Property                           | BFS                           | DFS                                  |
+| ---------------------------------- | ----------------------------- | ------------------------------------ |
+| Frontier structure                 | Queue                         | Stack or recursion                   |
+| Removal policy                     | FIFO                          | LIFO                                 |
+| Exploration pattern                | Broad before deep             | Deep before broad                    |
+| Shortest path in unweighted graphs | Yes                           | Not guaranteed                       |
+| Typical use                        | Minimum-edge paths, distances | Cycle detection, structural analysis |
+| Extra frontier space               | Up to $O(V)$              | Up to $O(V)$                     |
+
+Here, $V$ is the number of vertices. The total space used by either algorithm, including visited and parent information, is also $O(V)$.
+
+### The frontier is not the same as the visited set
+
+These two concepts are related but different.
+
+Suppose BFS has discovered `A`, `B`, and `C`, but has processed only `A`.
+
+```
+Visited/discovered: {A, B, C}
+Frontier:           [B, C]
+Processed:          {A}
+```
+
+`B` and `C` are already discovered, so they belong to the visited set. But they still need to be processed, so they also belong to the frontier.
+
+A vertex can therefore be visited but not yet processed.
+
+## Parent Relationships
+
+A parent relationship records which vertex first discovered another vertex during the search.
+
+If the algorithm discovers `B` while exploring `A`, it sets:
+
+```
+parent[B] = A
+```
+
+The starting vertex has no parent:
+
+```
+parent[A] = NONE
+```
+
+For example:
+
+```
+        A
+       / \
+      B   C
+     / \
+    D   E
+```
+
+One possible search tree is:
+
+```
+parent[A] = NONE
+parent[B] = A
+parent[C] = A
+parent[D] = B
+parent[E] = B
+```
+
+These relationships form a search tree, which is different from the original graph.
+
+### Graph versus search tree
+
+The original graph can contain many edges that are not part of the search tree.
+
+For example:
+
+```
+Original graph:
+
+A ----- B
+| \     |
+|  \    |
+C ----- D
+```
+
+A search might produce this tree:
+
+```
+    A
+   / \
+  B   C
+  |
+  D
+```
+
+The original edge `A-D`, for example, might not be included in the tree because `D` was first discovered through `B`.
+
+The parent array records the discovery relationship, not every graph edge.
+
+### Why store parents?
+
+Parent relationships allow us to reconstruct a path after the search finishes.
+
+Suppose:
+
+```
+parent[F] = C
+parent[C] = A
+parent[A] = NONE
+```
+
+Starting from `F`, follow the parents backward:
+
+```
+F -> C -> A -> NONE
+```
+
+Reverse the sequence:
+
+```
+A -> C -> F
+```
+
+That gives a path from `A` to `F`.
+
+### Parent relationships in BFS versus DFS
+
+The meaning of `parent[v]` is the same in both algorithms: it is the vertex that first discovered `v`.
+
+However, the resulting paths can differ.
+
+- BFS: If the graph is unweighted, the parent tree provides shortest paths measured by number of edges.
+- DFS: The parent tree gives a valid discovery path, but that path may not be the shortest.
+
+For example, if both of these paths exist:
+
+```
+A -> B -> F
+
+A -> C -> D -> F
+```
+
+BFS discovers `F` through a shortest path first, while DFS may reach `F` through the longer path, depending on neighbor order.
+
+### Parent relationships and distances
+
+BFS can also maintain a distance array:
+
+```
+distance[A] = 0
+distance[B] = distance[A] + 1
+distance[C] = distance[A] + 1
+distance[D] = distance[B] + 1
+```
+
+For each newly discovered vertex `v`:
+
+```
+distance[v] = distance[u] + 1
+parent[v] = u
+```
+
+This computes the minimum number of edges from the starting vertex to every reachable vertex in an unweighted graph.
+
+## The Role of Edges and Adjacency
+
+Graph search explores vertices by following edges. How those edges are represented affects the implementation and its running time.
+
+### Adjacency lists
+
+Each vertex stores a list of its neighbors.
+
+```
+A: B, C
+B: A, D
+C: A, D
+D: B, C
+```
+
+A traversal examines the adjacency list of each reached vertex.
+
+For a sparse graph, adjacency lists are usually an efficient choice.
+
+### Adjacency matrices
+
+An adjacency matrix uses a two-dimensional array to represent edges.
+
+```
+    A B C D
+A   0 1 1 0
+B   1 0 0 1
+C   1 0 0 1
+D   0 1 1 0
+```
+
+To find the neighbors of a vertex, the algorithm scans its entire matrix row, which takes $O(V)$ time.
+
+Consequently, a traversal using an adjacency matrix can take $O(V^2)$ time, whereas an adjacency-list traversal takes $O(V+E)$ time.
+
+Here, $E$ is the number of edges, with the usual convention that each edge is stored a constant number of times.
+
+### Directed and undirected graphs
+
+For an undirected graph, an edge connects vertices in both directions:
+
+```
+A <-> B
+```
+
+For a directed graph, an edge has a direction:
+
+```
+A -> B
+```
+
+When searching a directed graph, the algorithm follows only outgoing edges. A path from `A` to `B` does not imply that a path from `B` to `A` exists.
+
+This affects reachability, connected components, and cycle detection.
+
+## BFS vs. DFS: A Complete Comparison
+
+Both algorithms share the same core ideas but differ in their exploration strategy.
+
+### Breadth-First Search (BFS)
+
+Explore nearby vertices first.
+
+```
+        A
+       / \
+      B   C
+     / \   \
+    D   E   F
+```
+
+Possible traversal order
+
+```
+A -> B -> C -> D -> E -> F
+```
+
+Core operation
+
+Use a queue and mark vertices when they are enqueued. BFS is particularly useful for minimum-edge paths, level-order exploration, and distances in unweighted graphs.
+
+## Depth-First Search (DFS)
+
+Follow a branch as far as possible, then backtrack.
+
+```
+        A
+       / \
+      B   C
+     / \   \
+    D   E   F
+```
+
+One possible traversal order
+
+```
+A -> B -> D -> E -> C -> F
+```
+
+Core operation
+
+Use recursion or a stack. DFS is useful for cycle detection, connected components, topological sorting of directed acyclic graphs, and analyzing graph structure.
+
+The traversal orders above assume appropriate neighbor ordering; changing that ordering can change the result.
+
+### When should you choose each algorithm?
+
+| Requirement                                              | Suitable approach                        |
+| -------------------------------------------------------- | ---------------------------------------- |
+| Find a shortest path by number of edges                  | BFS                                      |
+| Find all vertices reachable from a start                 | BFS or DFS                               |
+| Explore an entire connected component                    | BFS or DFS                               |
+| Detect cycles                                            | DFS or specialized algorithms            |
+| Topologically order a DAG                                | DFS-based or indegree-based algorithm    |
+| Find a minimum-cost path with nonnegative weighted edges | Dijkstra's algorithm                     |
+| Find a minimum-cost path with negative edge weights      | Bellman–Ford, subject to its assumptions |
+
+BFS and DFS are fundamental building blocks, but not every graph problem can be solved optimally by choosing between them alone.
+
+## The Graph Search Lifecycle
+
+A typical graph search follows a repeatable sequence of steps.
+![Graph Search Lifecycle](/docs/assets/software-systems/data-structures-and-algorithms/algorithms/concepts/searching/graph-searching/graph-search-lifecycle.png)
+
+The central loop is the same for BFS and iterative DFS. The principal difference is how the frontier selects the next vertex.
+
+### Step-by-step example
+
+Consider the graph:
+
+```
+    A
+   / \
+  B   C
+ / \
+D   E
+```
+
+Starting at `A`, a BFS proceeds as follows, assuming neighbors are examined left to right.
+
+| Step | Processed vertex | Queue after processing | Newly discovered |
+| ---- | ---------------- | ---------------------- | ---------------- |
+| 0    | —                | `[A]`                  | `A`              |
+| 1    | `A`              | `[B, C]`               | `B, C`           |
+| 2    | `B`              | `[C, D, E]`            | `D, E`           |
+| 3    | `C`              | `[D, E]`               | None             |
+| 4    | `D`              | `[E]`                  | None             |
+| 5    | `E`              | `[]`                   | None             |
+
+The search is complete when the queue becomes empty.
+
+Notice that the algorithm does not stop merely because it has discovered every vertex it has encountered. It continues until there are no more discovered vertices waiting to be explored, unless an explicit stopping condition is used.
+
+## Graph Search on Disconnected Graphs
+
+A graph is disconnected if some of its vertices cannot be reached from others.
+
+Consider:
+
+```
+Component 1:       Component 2:
+
+A ---- B           X ---- Y
+|                  |
+C                  Z
+```
+
+If BFS starts at `A`, it visits only:
+
+```
+A, B, C
+```
+
+It will never reach `X`, `Y`, or `Z`, because no path connects the two components.
+
+### How do we visit every vertex?
+
+Run a search from each vertex that has not already been discovered.
+
+```
+for each vertex v:
+    if v is not visited:
+        BFS(v)
+```
+
+This pattern is called a full graph traversal or a traversal of all components.
+
+For DFS, the equivalent pattern is:
+
+```
+for each vertex v:
+    if v is WHITE:
+        dfsVisit(v)
+```
+
+This is the foundation of connected-component algorithms for undirected graphs and DFS forest construction.
+
+### Search tree versus search forest
+
+If all vertices are reachable from the starting vertex, the search produces one tree.
+
+If the graph has multiple disconnected components, a full traversal produces a search forest: a collection of trees.
+
+```
+Search forest:
+
+    A          X
+   / \        / \
+  B   C      Y   Z
+```
+
+Each tree has its own root, and each root has no parent.
+
+##  Path Reconstruction
+
+Path reconstruction uses the parent array to recover the path found during the search.
+
+Suppose BFS has produced:
+
+```
+parent[A] = NONE
+parent[B] = A
+parent[C] = A
+parent[D] = B
+parent[E] = B
+parent[F] = C
+```
+
+We want a path from `A` to `F`.
+
+Start at `F` and follow the parent links:
+
+```
+F -> C -> A -> NONE
+```
+
+Reverse the sequence:
+
+```
+A -> C -> F
+```
+
+This is a common approach for route finding, maze solving, and network navigation.
+
+### What if the destination is unreachable?
+
+If `parent[target]` remains `NONE`, that alone may not tell us whether the target is unreachable, because the starting vertex also has no parent.
+
+A robust implementation should use the visited or discovered state to distinguish the two cases:
+
+```
+if not visited[target]:
+    return NO_PATH
+else:
+    reconstruct path using parent[]
+```
+
+For a start vertex equal to the target, the correct path is simply:
+
+```
+[A]
+```
+
+### Important limitation
+
+The parent array stores just one discovered path to each vertex. It does not store all possible paths, and the chosen path depends on the search algorithm and neighbor order.
+
+For BFS on an unweighted graph, the reconstructed path is a shortest path in terms of edge count. For DFS, it is simply a path found by the traversal.
+
+## Time and Space Complexity
+
+Let:
+
+- $V$ = number of vertices.
+- $E$ = number of edges.
+
+With an adjacency-list representation, BFS and DFS have the following complexities:
+
+| Operation or resource      | BFS          | DFS                   |
+| -------------------------- | ------------ | --------------------- |
+| Time complexity            | $O(V+E)$ | $O(V+E)$          |
+| Visited state              | $O(V)$   | $O(V)$            |
+| Parent array               | $O(V)$   | $O(V)$            |
+| Frontier / traversal stack | $O(V)$   | $O(V)$ worst case |
+| Total auxiliary space      | $O(V)$   | $O(V)$            |
+
+These bounds assume the entire reachable graph is traversed and adjacency lists are used.
+
+With an adjacency matrix, examining all potential neighbors can instead lead to $O(V^2)$ time.
+
+For recursive DFS, the call stack can grow to $O(V)$ depth. On very large or deeply connected graphs, iterative DFS may be preferable to avoid exhausting the programming language's call stack.
+
+## Common Applications
+
+Graph searching appears in many areas of computer science.
+
+- **Navigation and routing**
+
+    BFS finds the route with the fewest edges when every transition has equal cost. Weighted road networks typically need algorithms such as Dijkstra's instead.
+
+- Network connectivity
+
+    Discover which computers, routers, or services are reachable from a given node.
+
+- Dependency analysis
+
+    DFS can help detect cycles and support topological sorting, such as finding a valid build order for software modules.
+
+- State-space search
+
+    Treat each possible configuration as a vertex and each valid move as an edge. BFS and DFS can then explore puzzles, games, and planning problems.
+
+### Graph search versus state-space search
+
+In a state-space problem, a vertex represents a state, not necessarily a physical object.
+
+For example, in a maze:
+
+```
+State = (row, column)
+```
+
+A move from one cell to an adjacent cell creates an edge between two states. The same graph-search principles apply, even if the graph is generated dynamically rather than stored in advance.
+
+## Common Mistakes
+
+| Mistake                                                       | Why it causes problems                                   | Better approach                                                 |
+| ------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------- |
+| Marking vertices only after removing them from the frontier   | Multiple vertices may enqueue or push the same neighbor  | Mark discovered vertices when adding them to the frontier       |
+| Confusing visited with processed                              | A discovered vertex may still be waiting for exploration | Define the state convention clearly                             |
+| Assuming DFS finds shortest paths                             | DFS follows depth-first order, not distance order        | Use BFS for unweighted shortest paths                           |
+| Assuming the parent array stores all graph edges              | It records discovery relationships only                  | Keep the original graph separately                              |
+| Searching only from one vertex when the whole graph is needed | Unreachable components remain unexplored                 | Start new searches from undiscovered vertices                   |
+| Ignoring neighbor order                                       | Traversal order and DFS paths may differ                 | Specify a consistent ordering when deterministic output matters |
+| Forgetting cycle handling                                     | Traversal may repeat vertices indefinitely               | Track discovery state                                           |
+| Treating directed edges as bidirectional                      | Search may report false reachability                     | Follow the graph's actual edge directions                       |
+
+One subtle point: when DFS is used for advanced tasks such as cycle detection, topological sorting, or strongly connected components, simply maintaining a Boolean visited array is not always sufficient. Those algorithms may need active-stack information, discovery/finishing times, or other metadata.
+
+## Practical Implementation Considerations
+
+When implementing graph search in C, C++, Java, or Python, separate the graph representation from the search algorithm.
+
+A useful conceptual interface is:
+
+```
+Graph
+├── vertexCount()
+└── neighbors(vertex)
+
+SearchState
+├── visited[]
+├── parent[]
+└── optional distance[]
+
+BFS
+├── initialize state
+├── use queue
+└── explore level by level
+
+DFS
+├── initialize state
+├── use recursion or stack
+└── explore depth first
+```
+
+This separation makes it easier to implement different search strategies using the same graph.
+
+### Recommended implementation order
+
+1. Implement an adjacency-list graph.
+2. Implement BFS using a queue.
+3. Record `visited[]` and `parent[]`.
+4. Add path reconstruction.
+5. Implement recursive DFS with three colors.
+6. Implement iterative DFS with a stack.
+7. Handle disconnected graphs.
+8. Add cycle detection and connected-component analysis.
+9. Test empty graphs, isolated vertices, cycles, self-loops, and disconnected components.
+
+For testing, use a graph where the traversal order is predictable, then add cycles to verify that no vertex is repeatedly explored.
+
+## Final mental model
+
+The most important ideas fit together like this:
+
+```
+                   GRAPH SEARCH
+                        |
+             +----------+----------+
+             |                     |
+         Search State           Graph
+             |                     |
+     +-------+--------+        Vertices
+     |       |        |        and Edges
+   Visited  Parent  Frontier
+                      |
+                 +----+----+
+                 |         |
+                BFS       DFS
+                 |         |
+               Queue     Stack
+                 |         |
+               Levels    Depth
+```
+
+Remember these four concepts:
+
+- Search state tells the algorithm what it currently knows.
+- Visited nodes prevent repeated exploration and help track discovery.
+- Search frontier determines which vertex gets explored next.
+- Parent relationships preserve the discovery tree and allow path reconstruction.
+
+Once these concepts are clear, BFS and DFS become two different ways of managing the same fundamental process: discovering vertices, following edges, and systematically exploring a graph.

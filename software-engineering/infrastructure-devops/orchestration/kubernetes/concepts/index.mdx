@@ -1,0 +1,535 @@
+{/* # Kubernetes: A Practical Introduction */}
+
+Kubernetes is a platform for running and managing containerized applications across one or more machines. It helps you deploy applications, keep them running, scale them when demand changes, and manage communication between their components.
+
+{/* Since you're studying infrastructure and DevOps for distributed systems, a useful way to approach Kubernetes is to connect it to what you already know about Docker, Docker Compose, Spring Boot microservices, configuration management, and service communication. */}
+
+## What is Kubernetes?
+
+![How Kubernetes Clusters Work: A Production-Focused Deep Dive](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/How-Kubernetes-Clusters-Work.jpg)
+
+Kubernetes, often abbreviated as **K8s**, is an open-source container orchestration platform originally developed at Google and now maintained by the Cloud Native Computing Foundation (CNCF).
+
+Imagine that you have a Spring Boot microservices application containing:
+
+- `product-service`
+- `review-service`
+- `recommendation-service`
+- `product-composite-service`
+- An API gateway
+- MongoDB and RabbitMQ
+
+With Docker, you can package each service into a container. But as your application grows, you must also deal with questions such as:
+
+- What happens if a container crashes?
+- How do you run three copies of a service?
+- What happens when a machine fails?
+- How can services discover one another?
+- How do you deploy a new version without interrupting users?
+- How do you distribute traffic between service instances?
+- How do you manage configuration and secrets?
+
+Kubernetes automates many of these operational tasks.
+
+At a high level, as a container orchestrator, Kubernetes makes a cluster of (physical or virtual)
+servers that run containers appear as one big logical server running containers. As an operator,
+we declare a desired state to the Kubernetes cluster by creating objects using the Kubernetes API.
+Kubernetes continuously compares the desired state with the current state. If it detects differences,
+it takes action to ensure that the current state is the same as the desired state.
+
+### The fundamental idea
+
+You describe the state you want, and Kubernetes continually works to make the actual system match that desired state.
+
+For example, you might declare:
+
+> Run three replicas of `product-service`, make them reachable through a stable service endpoint, and replace failed replicas automatically.
+
+Kubernetes monitors the system and takes corrective action when the actual state differs from the desired state.
+
+![The fundamental idea](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/fundamental-idea.png)
+
+This is called **declarative management** combined with **reconciliation**.
+
+You specify what you want; Kubernetes repeatedly observes what exists and acts to correct differences. This is one of the most important ideas to understand before learning individual Kubernetes resources.
+
+### What Kubernetes does and does not do
+
+| Kubernetes does                               | Kubernetes does not automatically do                  |
+| --------------------------------------------- | ----------------------------------------------------- |
+| Schedule containers onto available nodes      | Write your application code                           |
+| Restart or replace failed workloads           | Guarantee that your application has no bugs           |
+| Scale application replicas                    | Make a poorly designed database horizontally scalable |
+| Provide service discovery and load balancing  | Eliminate all network failures                        |
+| Manage rolling updates and rollbacks          | Guarantee zero downtime under every failure           |
+| Manage configuration and secrets as resources | Replace every external secret manager by default      |
+| Coordinate storage integration                | Guarantee that all storage is replicated or backed up |
+
+Kubernetes improves operational reliability, but the application, its dependencies, and the surrounding infrastructure must still be designed correctly.
+
+## What is container orchestration?
+
+Container orchestration is the automated coordination of containers and the infrastructure they run on.
+
+Running one container is relatively straightforward. Operating hundreds of containers across several machines introduces many interdependent tasks.
+
+One of the main purposes of a Kubernetes cluster is to deploy and run containers, but also to
+support zero-downtime rolling upgrades using techniques such as blue/green and canary Deployments. Kubernetes can schedule containers, that is, Pods that contain one or more co-located containers, to the available nodes in the cluster. To be able to monitor the health of running
+containers, Kubernetes assumes that containers implement a liveness probe. If a liveness probe
+reports an unhealthy container, Kubernetes will restart the container. Containers can be scaled
+in the cluster manually or automatically using a horizontal autoscaler. To optimize the use of
+the available hardware resources in a cluster (for example, memory and CPU), containers can be
+configured with quotas that specify the amount of resources a container needs. On the other hand,
+limits regarding how much a container is allowed to consume can be specified on the Pod or for
+a group of Pods on the namespace level. This is of extra importance if several teams share a common Kubernetes cluster.
+
+
+Another main purpose of Kubernetes is to provide Service discovery of the running Pods and their
+containers. Kubernetes Service objects can be defined for Service discovery and will also load balance incoming requests over the available Pods. Service objects can be exposed to the outside of a
+Kubernetes cluster. However, as we will see, an Ingress object is, in many cases, better suited to
+handling externally incoming traffic to a group of Services. To help Kubernetes find out whether
+a container is ready to accept incoming requests, a container can implement a readiness probe.
+
+Internally, a Kubernetes cluster provides one big flat IP network where each Pod gets its own IP
+address and can reach all the other Pods, independent of which node they run on. To support
+multiple network vendors, Kubernetes allows the use of network plugins that comply with the
+Container Network Interface (CNI) specification (https://github.com/containernetworking/cni). Pods are not isolated by default; they accept all incoming requests. CNI plugins that support
+the use of network policy definitions can be used to lock down access to Pods – for example, only
+allowing traffic from Pods in the same namespace.
+
+To allow multiple teams to work on the same Kubernetes cluster in a safe way, Role-Based Access Control (RBAC) can be applied (https://kubernetes.io/docs/reference/access-authn-authz/rbac/). For example, administrators can be authorized to access resources on a cluster
+level, while the access of team members can be locked down to resources that are created in a
+namespace owned by the teams.
+
+In total, these concepts provide a platform for running containers that is scalable, secure, highly
+available, and resilient.
+### The problems orchestration solves
+
+- **Scheduling**
+
+    Decide which machine should run each workload based on available CPU, memory, constraints, and other scheduling requirements.
+
+- Self-healing
+
+    Restart failed containers where appropriate and replace failed Pods. Reschedule workloads when possible if a node becomes unavailable.
+
+- Scaling
+
+    Increase or decrease replicas manually or through autoscaling policies.
+
+- Networking and service discovery
+
+    Give workloads stable ways to communicate even when individual Pods are replaced and their IP addresses change.
+
+- Deployment management
+
+    Roll out new application versions progressively and, when appropriate, roll back to a previous version.
+
+### How the architecture works
+
+A Kubernetes cluster is composed of a control plane and worker nodes.
+
+![](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/How-the-architecture works.png)
+{/* ### Control plane
+
+Coordinates the cluster and maintains its desired state.
+
+API server
+
+Entry point for Kubernetes API requests.
+
+Scheduler
+
+Selects nodes for unscheduled Pods.
+
+Controller manager
+
+Runs reconciliation controllers.
+
+etcd
+
+Stores cluster state and configuration data.
+
+Cluster API, scheduling, and control loops
+
+### Worker node A
+
+kubelet · container runtime
+
+Pod: product-service
+
+Pod: review-service
+
+### Worker node B
+
+kubelet · container runtime
+
+Pod: product-service
+
+Pod: recommendation-service */}
+
+The key components are:
+
+- **API server**: exposes the Kubernetes API and validates requests.
+- Scheduler: selects a suitable worker node for each unscheduled Pod.
+- Controller manager: runs controllers that reconcile resources with their desired state.
+- etcd: a consistent key-value store holding Kubernetes cluster data.
+- kubelet: an agent on each worker node that makes sure assigned Pods run as specified.
+- Container runtime: runs containers, commonly using `containerd` or CRI-O.
+- kube-proxy or an alternative networking implementation: supports Service networking. Modern clusters can implement some of these networking functions through their CNI solution instead of kube-proxy.
+
+The control plane does not normally run every application container itself. It coordinates the worker nodes that run your workloads.
+
+## Kubernetes vs. Docker
+
+The first important distinction is that Docker and Kubernetes are not direct substitutes.
+
+Docker is an ecosystem of containerization tools. Docker Engine builds and runs containers, while Kubernetes manages application workloads across a cluster. Kubernetes can use container runtimes such as `containerd` without requiring Docker Engine on every worker node.&#x20;
+
+- **Docker**
+
+    Packages applications into images and provides tools to build, run, and manage containers.
+
+    Think: “How do I package and run this application?”
+
+- **Kubernetes**
+
+    Coordinates workloads, replicas, networking, scheduling, recovery, and deployments across a cluster.
+
+    Think: “How do I operate this application reliably across machines?”
+
+### Example: running a Spring Boot service
+
+With Docker, you might build and run a container:
+
+```sh
+docker build -t product-service:1.0 .
+docker run -p 8080:8080 product-service:1.0
+```
+
+This is enough to start one container on the current machine.
+
+With Kubernetes, you normally build the image first and then declare how it should run in the cluster.
+
+For example, a Deployment manifest:
+
+```yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: product-service
+  template:
+    metadata:
+      labels:
+        app: product-service
+    spec:
+      containers:
+        - name: product-service
+          image: product-service:1.0
+          ports:
+            - containerPort: 8080
+```
+
+This asks Kubernetes to maintain three Pod replicas running the specified container image. A separate Service resource can provide a stable network endpoint for them.
+
+The image must also be accessible to the nodes, such as through a container registry or a properly configured local development cluster.
+
+### The difference in responsibilities
+
+| Responsibility                   | Docker tools                                                      | Kubernetes                                  |
+| -------------------------------- | ----------------------------------------------------------------- | ------------------------------------------- |
+| Build a container image          | Yes                                                               | No, not by itself                           |
+| Run a container                  | Yes                                                               | Through a container runtime on a node       |
+| Manage replicas across nodes     | Not Docker Engine alone                                           | Yes                                         |
+| Reconcile desired replica count  | Not Docker Engine alone                                           | Yes                                         |
+| Stable cluster service discovery | Limited to Docker networking features                             | Yes, through Services and cluster DNS       |
+| Multi-node scheduling            | Not Docker Engine alone                                           | Yes                                         |
+| Rolling application updates      | Depends on tooling; not a native multi-node Docker Engine feature | Supported through workload controllers      |
+| Persistent data                  | Volumes and storage drivers                                       | Persistent volumes and storage integrations |
+
+Docker also has orchestration-related products and features, so the distinction is not that Docker can never orchestrate workloads. The important distinction is between Docker's container tools and Kubernetes as a full cluster-management platform.
+
+## Kubernetes vs. Docker Compose
+
+This comparison is especially useful because Compose and Kubernetes both use declarative configuration, and both can describe multi-container applications.
+
+Docker Compose is a tool for defining and running an application made of multiple services. You commonly define the stack in `compose.yaml` and manage it with `docker compose up`, `docker compose down`, and related commands.&#x20;
+
+### The same application in both systems
+
+Imagine a development stack:
+
+```
+product-composite
+    ├── product-service
+    ├── review-service
+    └── recommendation-service
+
+product-service ─── MongoDB
+review-service  ─── MongoDB
+all services    ─── RabbitMQ
+```
+
+In Compose, you define the services, networks, volumes, environment variables, and dependency relationships in one YAML configuration.
+
+In Kubernetes, you typically define multiple resources: Deployments, Services, ConfigMaps, Secrets, PersistentVolumeClaims, and possibly Jobs, Ingress resources, or Gateway API resources.
+
+### Side-by-side comparison
+
+| Feature                | Docker Compose                                                           | Kubernetes                                                    |
+| ---------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| Primary purpose        | Define and run multi-container applications                              | Operate containerized workloads across a cluster              |
+| Typical environment    | Local development, testing, CI, and suitable simpler deployments         | Local learning, staging, and production clusters              |
+| Configuration          | `compose.yaml`                                                           | Kubernetes resource manifests, Helm charts, Kustomize, etc.   |
+| Deployment target      | Docker hosts; ordinary Compose is not a multi-node scheduler             | Multi-node cluster or single-node cluster                     |
+| Scaling                | Can scale services, subject to configuration and application constraints | Replica management and autoscaling controllers                |
+| Recovery               | Container restart policies and Docker host behavior                      | Pod and workload controllers, node monitoring, and scheduling |
+| Service discovery      | Service names on Compose networks                                        | Kubernetes Services and cluster DNS                           |
+| Rolling deployment     | Limited compared with Kubernetes' workload rollout model                 | Built-in Deployment rollout mechanisms                        |
+| Operational complexity | Generally lower                                                          | Generally higher                                              |
+
+### A conceptual difference in YAML
+
+A simplified Compose definition:
+
+```
+services:
+  product-service:
+    image: product-service:1.0
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER_PORT: "8080"
+
+  review-service:
+    image: review-service:1.0
+    environment:
+      SERVER_PORT: "8080"
+```
+
+Compose handles creating and connecting these services according to the configuration.
+
+The equivalent Kubernetes setup generally separates the workload specification from its network endpoint:
+
+```
+product-service Deployment
+    └── product-service Pods
+
+product-service Service
+    └── Routes traffic to eligible Pods
+```
+
+That separation is valuable when individual Pods are replaced or when replica counts change.
+
+### Can Docker Compose be used in production?
+
+Yes. Compose is not inherently a development-only tool; Docker documents its use in production and staging as well.&#x20;
+
+The question is whether its operational model fits your requirements.
+
+Use Compose when a single host or relatively simple deployment model is sufficient. Consider Kubernetes when you need cluster-level scheduling, multi-node resilience, automated replica management, standardized deployment workflows, and a broader platform for operating distributed applications.
+
+One subtle point: Kubernetes does not automatically make a database highly available just because you run its containers in a cluster. Data replication, backup, failover, storage, and consistency still need deliberate design.
+
+## Kubernetes vs. other orchestrators
+
+Kubernetes is widely used, but it is not the only way to manage containerized workloads.
+
+- **Docker Swarm**
+
+    A simpler clustering and orchestration option integrated into Docker Engine. It can be attractive for relatively straightforward deployments, though its ecosystem and platform capabilities are smaller than Kubernetes'.
+
+- **HashiCorp Nomad**
+
+    A workload scheduler designed for containers and other workload types. It can be useful when you want a different operational model or need to schedule non-containerized jobs alongside containers.
+
+- **Amazon ECS**
+
+    A managed container orchestration service closely integrated with AWS infrastructure and services. A natural option when you want to deploy containers on AWS without operating a Kubernetes control plane yourself.
+
+- **Apache Mesos**
+
+    A distributed resource-management system historically used for large-scale cluster workloads. It is more of a legacy comparison today than the default choice for a new container platform.
+
+### Choosing between them
+
+| Consideration                  | Kubernetes                                                | Docker Swarm               | Nomad                                        | Amazon ECS                       |
+| ------------------------------ | --------------------------------------------------------- | -------------------------- | -------------------------------------------- | -------------------------------- |
+| Platform portability           | High, across supported environments                       | More limited ecosystem     | High, depending on integrations              | Primarily AWS-oriented           |
+| Built-in workload abstractions | Extensive                                                 | Simpler                    | Flexible job model                           | AWS task and service model       |
+| Ecosystem                      | Very large                                                | Smaller                    | Smaller                                      | Strong AWS integration           |
+| Operational effort             | Can be substantial                                        | Generally lower            | Often simpler than Kubernetes in some setups | AWS manages much of the platform |
+| Good fit                       | Complex platforms, broad ecosystem, multi-team operations | Simpler container clusters | Flexible workload scheduling                 | AWS-centric deployments          |
+
+These are general tendencies rather than absolute rules. The operational effort of a managed Kubernetes service can differ greatly from that of a self-managed cluster.
+
+Practical recommendation: If your organization already operates extensively on AWS and needs conventional container services, evaluate ECS before assuming Kubernetes is necessary. If you need a widely supported platform with a rich ecosystem of deployment, networking, policy, and observability tools, Kubernetes is often a strong choice.
+
+## When should you use Kubernetes?
+
+The right question is not simply whether your application is large. It is whether you need the operational capabilities Kubernetes provides and whether their benefits justify the additional complexity.
+
+**Use Kubernetes when...**
+
+- You operate many services or workloads
+
+    You need a consistent way to deploy, configure, monitor, and manage numerous services across environments.
+
+- You need multi-node resilience
+
+    You want workloads distributed across machines, with replacements scheduled when capacity and constraints permit.
+
+- Your traffic varies
+
+    You need multiple replicas, horizontal scaling, and potentially automatic scaling based on metrics.
+
+- You need controlled deployments
+
+    You want rolling updates, deployment status, rollback mechanisms, and standardized release processes.
+
+- You need a shared platform for several teams
+
+    Teams can deploy workloads using consistent policies for networking, resource requests, access control, and observability.
+
+Production Kubernetes requires planning for availability, security, capacity, upgrades, storage, and operational ownership. A managed Kubernetes service reduces some of this work but does not eliminate application and platform responsibilities.&#x20;
+
+
+### When Kubernetes may be unnecessary
+
+Kubernetes may be excessive if:
+
+- You operate one application or a few services on a single server.
+- Your traffic and deployment requirements are predictable.
+- Docker Compose meets your availability and maintenance requirements.
+- Your team cannot justify the time and expertise needed to operate the platform.
+- A platform-as-a-service or managed container service meets your needs with less operational effort.
+
+For example, a Spring Boot REST API and PostgreSQL database serving a small internal application might work perfectly well with Compose on a maintained server. Moving it to Kubernetes adds concepts, infrastructure, security configuration, and monitoring requirements without necessarily delivering meaningful value.
+
+{/* ### An interactive decision guide
+
+## Which deployment approach fits?
+
+1\. How many services do you operate?
+
+One or two services
+
+Several cooperating services
+
+Many services or workloads
+
+2\. Where must the application run?
+
+One host is sufficient
+
+Across multiple machines with cluster scheduling
+
+3\. How much scaling do you need?
+
+Little or no scaling
+
+Several replicas and occasional scaling
+
+Dynamic scaling and frequent workload changes
+
+4\. What platform can your team maintain?
+
+We prefer minimal operational overhead
+
+We can maintain a deployment platform
+
+We need a shared platform for multiple teams */}
+
+
+## How Kubernetes fits into your DevOps architecture
+
+Kubernetes is one layer of a larger application delivery system, not a replacement for the entire DevOps toolchain.
+
+![](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/DevOps-toolchain.png)
+{/* Application development
+
+Spring Boot microservices
+
+Build and publish
+
+CI pipeline → container images → image registry
+
+Kubernetes
+
+Deployments · Services · configuration · scaling · recovery
+
+Observability and operations
+
+Metrics · logs · distributed traces · alerts */}
+
+These layers have distinct responsibilities:
+
+| Technology or concern                        | Role                                                          |
+| -------------------------------------------- | ------------------------------------------------------------- |
+| Docker or Buildpacks                         | Build container images                                        |
+| Container registry                           | Store and distribute images                                   |
+| Kubernetes                                   | Manage workloads and their runtime environment                |
+| Helm or Kustomize                            | Package or customize Kubernetes resource definitions          |
+| CI/CD system                                 | Automate testing, building, and delivery                      |
+| Spring Cloud Config or Kubernetes ConfigMaps | Supply application configuration through different mechanisms |
+| Secret manager                               | Protect credentials, certificates, and other sensitive data   |
+| Prometheus, Grafana, OpenTelemetry           | Support metrics, dashboards, and distributed observability    |
+
+Kubernetes provides ConfigMaps and Secrets, but it does not mandate a centralized application configuration system. For example, you can run Spring Cloud Config alongside Kubernetes, or use Kubernetes-native configuration, depending on your architecture. Kubernetes Secrets also require appropriate access controls and security configuration; they are not a complete replacement for a dedicated secrets-management platform.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://kubernetes.io\&sz=32)
+
+Kubernetes+1
+
+
+
+## practical learning path
+
+For your `infrastructure-devops/orchestration/kubernetes` section, I recommend learning the topics in this order:
+
+1. Fundamentals
+
+    Cluster architecture, control plane, nodes, desired state, reconciliation, and kubectl.
+
+1. Core resources
+
+    Pods, Deployments, ReplicaSets, Services, Namespaces, Labels, and Selectors.
+
+1. Configuration and storage
+
+    ConfigMaps, Secrets, environment variables, volumes, PersistentVolumes, and PersistentVolumeClaims.
+
+1. Networking
+
+    Pod networking, DNS, Service types, Ingress, Gateway API, and network policies.
+
+1. Reliability and scaling
+
+    Probes, resource requests and limits, rollout strategies, HPA, disruption budgets, and node failures.
+
+1. Security
+
+    RBAC, ServiceAccounts, security contexts, image security, NetworkPolicies, and secrets management.
+
+1. Packaging and automation
+
+    Helm, Kustomize, CI/CD, GitOps, and environment promotion.
+
+1. Operations and observability
+
+    Logs, metrics, traces, events, cluster troubleshooting, upgrades, backups, and capacity planning.
+
+For hands-on practice, start with Minikube or kind to run a local cluster. Deploy one Spring Boot service, expose it through a Service, increase the replica count, and observe what happens when you delete a Pod. The official [Kubernetes documentation](https://kubernetes.io/docs/home/?utm_source=chatgpt.com) provides tutorials and setup options for learning and production.&#x20;
+
+### Final takeaway
+
+- Docker packages and runs containers.
+- Docker Compose defines and runs a multi-container application, often on one host.
+- Kubernetes manages containerized workloads across a cluster through declarative resources and continuous reconciliation.
+- Other orchestrators may be better fits when their operational model or cloud integration matches your needs.
+- Use Kubernetes when its reliability, scaling, scheduling, and platform capabilities justify the additional complexity, not merely because your application uses microservices.

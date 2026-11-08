@@ -1,0 +1,1841 @@
+---
+title: Bellman–Ford
+---
+{/* # Bellman–Ford Algorithm */}
+
+The Bellman–Ford algorithm is a graph algorithm used to find the shortest paths from a single source vertex to all other vertices in a weighted graph.
+
+Its most important feature is that it can handle negative edge weights, unlike Dijkstra's algorithm, which does not work correctly with negative-weight edges in general.
+
+Bellman–Ford can also detect negative-weight cycles that are reachable from the source vertex.
+
+It is classified as:
+
+| Property             | Description                         |
+| -------------------- | ----------------------------------- |
+| Algorithm category   | Graph algorithm                     |
+| Problem type         | Single-Source Shortest Path (SSSP)  |
+| Graph type           | Directed or undirected              |
+| Edge weights         | Positive, zero, or negative         |
+| Negative edges       | Supported                           |
+| Negative cycles      | Detectable                          |
+| Main technique       | Edge relaxation                     |
+| Programming approach | Dynamic programming                 |
+| Time complexity      | \\(O(VE)\\)                         |
+| Space complexity     | \\(O(V)\\), excluding graph storage |
+
+Where:
+
+- \\(V\\) = number of vertices.
+- \\(E\\) = number of edges.
+
+## 1. Why do we need Bellman–Ford?
+
+Let's first understand the problem it solves.
+
+Suppose we have a weighted directed graph representing cities and travel costs.
+
+![Conceptual illustration of a weighted directed graph. We will use a precisely defined graph below for the algorithm walkthrough.](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/bellman-ford/example1.png)
+
+Imagine that:
+
+- Vertices represent cities.
+- Edges represent routes.
+- Edge weights represent travel costs.
+
+We want to find the minimum-cost path from a starting city to every other city.
+
+### The problem with Dijkstra's algorithm
+
+Dijkstra's algorithm repeatedly selects the unvisited vertex with the smallest known distance and finalizes it.
+
+This greedy strategy works when all edge weights are non-negative.
+
+However, consider:
+
+```
+A ---- 5 ----> B
+ \             |
+  \            | -10
+   \           |
+    2          v
+     \-------> C
+```
+
+There are two possible paths from A to C:
+
+1. Direct path: A → C = 2
+2. Indirect path: A → B → C = 5 + (-10) = -5
+
+The shortest path is:
+
+```
+A → B → C = -5
+```
+
+A greedy algorithm that finalizes C too early can miss this better path.
+
+Bellman–Ford solves this problem by repeatedly examining all edges, rather than permanently finalizing vertices based on their current distances.
+
+## 2. The core concept: Edge Relaxation
+
+The most important concept in Bellman–Ford is called relaxation.
+
+Relaxation means checking whether a particular edge provides a shorter path to its destination vertex.
+
+Suppose we have:
+
+```
+A -------- 4 --------> B
+```
+
+Assume:
+
+```
+distance[A] = 3
+distance[B] = 10
+```
+
+The current known distance to B is 10.
+
+Going through A gives us:
+
+```
+distance[A] + weight(A, B)
+
+= 3 + 4
+
+= 7
+```
+
+Since 7 is smaller than 10, we update B's distance.
+
+```
+distance[B] = 7
+```
+
+This is called relaxing the edge A → B.
+
+### Relaxation formula
+
+For an edge:
+
+\\[ u \xrightarrow{w} v \\]
+
+The relaxation condition is:
+
+\\[ dist[u]+w\<dist[v] \\]
+
+If the condition is true:
+
+\\[ dist[v]=dist[u]+w \\]
+
+We also update the predecessor:
+
+\\[ pred[v]=u \\]
+
+The predecessor allows us to reconstruct the shortest path later.
+
+### Important detail
+
+If the source vertex has not been reached yet, its distance is infinity.
+
+Therefore, we must not relax an edge from a vertex whose distance is infinity.
+
+In implementation:
+
+```
+if (dist[u] != INF && dist[u] + weight < dist[v]) {
+    dist[v] = dist[u] + weight;
+    predecessor[v] = u;
+}
+```
+
+## 3. How does Bellman–Ford work?
+
+Bellman–Ford uses a simple but powerful observation:
+
+The shortest path between two vertices in a graph without reachable negative cycles can contain at most V - 1 edges.
+
+Why?
+
+A shortest path does not need to visit the same vertex twice.
+
+If it did, it would contain a cycle. With no negative cycles, removing that cycle would either improve the path or leave its cost unchanged.
+
+A simple path containing \\(V\\) vertices has at most:
+
+\\[ V-1 \text{ edges} \\]
+
+Therefore, Bellman–Ford needs at most \\(V-1\\) iterations of edge relaxation.
+
+### The algorithm's main steps
+
+1. Initialize all distances to infinity.
+2. Set the source vertex distance to zero.
+3. Repeat \\(V-1\\) times:
+   - Examine every edge.
+   - Relax each edge if it produces a shorter distance.
+4. Perform one additional pass over all edges.
+   - If any edge can still be relaxed, a reachable negative-weight cycle exists.
+
+### Pseudocode
+
+#### Two steps
+```
+BellmanFord(Graph, source):
+
+    for each vertex v:
+        dist[v] = INFINITY
+        predecessor[v] = NIL
+
+    dist[source] = 0
+
+    // Relax all edges V - 1 times
+    for i = 1 to V - 1:
+
+        for each edge (u, v, weight) in Graph:
+
+            if dist[u] != INFINITY:
+
+                if dist[u] + weight < dist[v]:
+
+                    dist[v] = dist[u] + weight
+                    predecessor[v] = u
+
+    // Detect negative-weight cycles
+    for each edge (u, v, weight) in Graph:
+
+        if dist[u] != INFINITY:
+
+            if dist[u] + weight < dist[v]:
+
+                return NEGATIVE_CYCLE_EXISTS
+
+    return dist, predecessor
+```
+##### Step 1: Initialize distances and predecessors
+
+```
+    for each vertex v:
+        dist[v] = INFINITY
+        predecessor[v] = NIL
+
+    dist[source] = 0
+```
+
+Initially, we assume that every vertex is unreachable from the source.
+
+Therefore:
+
+- Every distance is set to infinity.
+- Every predecessor is set to `-1`, meaning no predecessor has been discovered.
+- The source distance is set to zero because the distance from the source to itself is zero.
+
+For example, consider this graph:
+
+```
+       4
+   A ------> B
+   |
+  2|
+   |
+   v
+   C ------> D
+       3
+```
+
+Suppose `A` is the source.
+
+Initial arrays:
+
+| Vertex   | A   | B   | C   | D   |
+| -------- | --- | --- | --- | --- |
+| `dist[]` | 0   | ∞   | ∞   | ∞   |
+| `pred[]` | -1  | -1  | -1  | -1  |
+
+##### Step 2: Relax all edges
+
+```
+    // Relax all edges V - 1 times
+    for i = 1 to V - 1:
+
+        for each edge (u, v, weight) in Graph:
+
+            if dist[u] != INFINITY:
+
+                if dist[u] + weight < dist[v]:
+```
+
+This is the main part of Bellman–Ford.
+
+The algorithm examines every edge and checks whether reaching its destination through its source produces a shorter path.
+
+The relaxation formula is:
+
+If:
+
+\\[ dist[u] + weight < dist[v] \\]
+
+Then we have found a shorter path, so we update the distance.
+
+For example:
+
+```
+A --4--> B
+```
+
+Initially:
+
+```
+dist[A] = 0
+dist[B] = ∞
+```
+
+Examining edge `(A, B)`:
+
+\\[ dist[u] + weight = 0 + 4 = 4 \\]
+
+Since:
+
+\\[ 4 < \infty \\]
+
+We update:
+
+```
+dist[B] = 4
+pred[B] = A
+```
+
+The arrays become:
+
+| Vertex   | A   | B   | C   | D   |
+| -------- | --- | --- | --- | --- |
+| `dist[]` | 0   | 4   | ∞   | ∞   |
+| `pred[]` | -1  | A   | -1  | -1  |
+
+The algorithm repeats this process for all edges.
+
+Why repeat the process?
+
+Because a shortest path may contain multiple edges.
+
+For example:
+
+```
+A --4--> B --3--> C --2--> D
+```
+
+To discover the shortest distance to `D`, the algorithm must propagate distance information through the intermediate vertices.
+
+Bellman–Ford guarantees that at most \\(V-1\\) complete relaxation passes are sufficient when no reachable negative cycle exists.
+
+### Step 3: Update distances and predecessors
+
+```
+                    dist[v] = dist[u] + weight
+                    predecessor[v] = u
+```
+
+Whenever relaxation succeeds:
+
+- `dist[v]` stores the improved distance.
+- `pred[v]` stores the vertex from which we reached `v`.
+
+The predecessor array allows us to reconstruct the shortest path after the algorithm finishes.
+
+##### Step 4: Detect a negative-weight cycle
+
+Your pseudocode contains this condition:
+```
+    // Detect negative-weight cycles
+    for each edge (u, v, weight) in Graph:
+
+        if dist[u] != INFINITY:
+
+            if dist[u] + weight < dist[v]:
+
+                return NEGATIVE_CYCLE_EXISTS
+```
+
+#### One step
+```
+singleSourceShortest(G, s)
+
+    // Step 1: Initialization
+    foreach vertex v in V do
+        dist[v] = ∞
+        pred[v] = -1
+
+    dist[s] = 0
+
+    // Step 2: Relax all edges
+    for i = 1 to V do
+
+        foreach edge (u, v) in E do
+
+            newLen = dist[u] + weight(u, v)
+
+            if newLen < dist[v] then
+
+                // Step 3: Negative cycle detection
+                if i = V then
+                    report "Negative Cycle"
+
+                // Step 4: Update shortest path
+                dist[v] = newLen
+                pred[v] = u
+```
+`newLen`: Candidate distance to vertex `v` through edge `(u, v)`
+
+**Detect a negative-weight cycle**
+
+```
+if i = V then
+    report "Negative Cycle"
+```
+
+This is the most important part to understand.
+
+Bellman–Ford normally needs at most:
+
+\\[ V-1 \\]
+
+relaxation passes.
+
+Why?
+
+A shortest path without cycles can contain at most \\(V-1\\) edges.
+
+For example, with four vertices:
+
+```
+A --> B --> C --> D
+```
+
+The path contains three edges:
+
+\\[ V-1 = 4-1 = 3 \\]
+
+After three complete passes, all shortest distances should have been discovered.
+
+Therefore, Bellman–Ford performs an additional pass to check whether any distance can still be improved.
+
+If a distance can still be improved during pass \\(V\\), a reachable negative-weight cycle must exist.
+
+**Why does it report a negative cycle in the first loop?**
+
+This is an important distinction: it does not report a negative cycle during the first pass (`i = 1`).
+
+It reports a negative cycle when a relaxation succeeds during the additional pass (`i = n`).
+
+The condition:
+
+```
+if i = V then
+    report "Negative Cycle"
+```
+
+is nested inside:
+
+```
+if newLen < dist[v] then
+```
+
+That means both conditions must be true:
+
+1. We are executing pass `n`.
+2. We can still improve a distance.
+
+
+##### Example: Graph without a negative cycle
+
+```
+A --4--> B --3--> C --2--> D
+```
+
+There are four vertices:
+
+\\[ V = 4 \\]
+
+Therefore, we need at most:
+
+\\[ V-1 = 3 \\]
+
+passes.
+
+Assume the edges are processed in the order shown above.
+
+| Pass    | A   | B   | C   | D   |
+| ------- | --- | --- | --- | --- |
+| Initial | 0   | ∞   | ∞   | ∞   |
+| 1       | 0   | 4   | 7   | 9   |
+| 2       | 0   | 4   | 7   | 9   |
+| 3       | 0   | 4   | 7   | 9   |
+
+By the end of the first pass, all distances have already been discovered because the edges happen to be processed in path order.
+
+The next passes make no changes.
+
+During the fourth pass:
+
+```
+i = 4 = n
+```
+
+No relaxation succeeds.
+
+Therefore:
+
+```
+No negative cycle detected.
+```
+
+##### Example: Graph with a negative cycle
+
+Consider this graph:
+
+```
+       2
+   A ------> B
+   ^         |
+   |         |
+ -4|         | 1
+   |         v
+   +---------C
+```
+
+The cycle is:
+
+```
+A -> B -> C -> A
+```
+
+Its total weight is:
+
+\\[ 2 + 1 - 4 = -1 \\]
+
+Negative cycle
+
+Every time we travel around this cycle, the total path cost decreases by one.
+
+Let's assume `A` is the source and the edges are processed in this order:
+
+```
+A -> B (2)
+B -> C (1)
+C -> A (-4)
+```
+
+There are three vertices:
+
+\\[ V = 3 \\]
+
+So the algorithm performs two normal passes and one detection pass.
+
+Initial state
+
+| Vertex   | A   | B   | C   |
+| -------- | --- | --- | --- |
+| `dist[]` | 0   | ∞   | ∞   |
+
+Pass 1
+
+| Edge  | Calculation | Result |
+| ----- | ----------- | ------ |
+| A → B | 0 + 2 = 2   | B = 2  |
+| B → C | 2 + 1 = 3   | C = 3  |
+| C → A | 3 - 4 = -1  | A = -1 |
+
+After pass 1:
+
+| Vertex   | A   | B   | C   |
+| -------- | --- | --- | --- |
+| `dist[]` | -1  | 2   | 3   |
+
+Notice that we returned to `A` with a cost of `-1`, even though the distance to the source was initially zero.
+
+Pass 2
+
+| Edge  | Calculation | Result |
+| ----- | ----------- | ------ |
+| A → B | -1 + 2 = 1  | B = 1  |
+| B → C | 1 + 1 = 2   | C = 2  |
+| C → A | 2 - 4 = -2  | A = -2 |
+
+After pass 2:
+
+| Vertex   | A   | B   | C   |
+| -------- | --- | --- | --- |
+| `dist[]` | -2  | 1   | 2   |
+
+Pass 3: Negative-cycle detection
+
+Now:
+
+\\[ i = 3 = V \\]
+
+We examine the first edge:
+
+```
+A -> B (2)
+```
+
+Calculate:
+
+\\[ newLen = dist[A] + 2 \\]
+
+\\[ newLen = -2 + 2 = 0 \\]
+
+But:
+
+\\[ 0 < dist[B] = 1 \\]
+
+Negative cycle detected!
+
+The algorithm reports a negative cycle because it found another shorter path during the additional pass.
+
+Notice that we don't even need to examine all edges once a successful relaxation is found.
+
+## Example
+Although the sample graph in Figure 6-14 contains a cycle involving vertices
+\{1,3,2}, the edge weights are positive, so Bellman–Ford will work.
+![Bellman–Ford example](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/bellman-ford/example2.png)
+## 4. Step-by-step example
+
+Let's use a graph that contains both positive and negative edge weights.
+
+### Graph definition
+
+We have five vertices:
+
+```
+A, B, C, D, E
+```
+
+And nine directed edges:
+
+| Edge  | Weight |
+| ----- | ------ |
+| A → B | 6      |
+| A → C | 7      |
+| B → C | 8      |
+| B → D | 5      |
+| B → E | -4     |
+| C → D | -3     |
+| C → E | 9      |
+| D → B | -2     |
+| E → D | 7      |
+
+The graph can be represented as:
+
+![](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/bellman-ford/Step-by-step-example1.svg)
+
+
+{/* ```             6
+        A ---------> B
+        |          /| \
+      7 |      -2 / |  \ -4
+        |        /  |   \
+        v       /   |    v
+        C ----> D   |    E
+         \   -3     |    |
+          \         |    | 7
+           \--- 9 --+    |
+                \        |
+                 \-------|
+``` */}
+
+For our example, the source vertex is A.
+
+We want to calculate the shortest distance from A to every other vertex.
+
+### Step 1: Initialize distances
+
+Initially, we do not know how to reach any vertex except the source.
+
+Therefore:
+
+\\[\
+dist[A]=0\
+\\]
+
+All other distances are infinity.
+
+| Vertex | Distance | Predecessor |
+| ------ | -------- | ----------- |
+| A      | 0        | NIL         |
+| B      | ∞        | NIL         |
+| C      | ∞        | NIL         |
+| D      | ∞        | NIL         |
+| E      | ∞        | NIL         |
+
+We can visualize this as:
+
+```
+A = 0
+B = ∞
+C = ∞
+D = ∞
+E = ∞
+```
+
+### Step 2: First iteration (Pass 1)
+
+We examine every edge in the order listed in our graph.
+
+**Edge 1: A → B (weight 6)**
+
+Check:
+
+\\[ dist[A]+6\<dist[B] \\]
+
+\\[ 0+6<\infty \\]
+
+True.
+
+Update:
+
+```
+dist[B] = 6
+pred[B] = A
+```
+
+Current distances:
+
+```
+A = 0
+B = 6
+C = ∞
+D = ∞
+E = ∞
+```
+
+Edge 2: A → C (weight 7)
+
+\\[ 0+7<\infty \\]
+
+True.
+
+Update:
+
+```
+dist[C] = 7
+pred[C] = A
+```
+
+Current distances:
+
+```
+A = 0
+B = 6
+C = 7
+D = ∞
+E = ∞
+```
+
+Edge 3: B → C (weight 8)
+
+\\[ 6+8<7 \\]
+
+\\[ 14<7 \\]
+
+False. No update.
+
+Edge 4: B → D (weight 5)
+
+\\[ 6+5<\infty \\]
+
+True.
+
+Update:
+
+```
+dist[D] = 11
+pred[D] = B
+```
+
+Edge 5: B → E (weight -4)
+
+This is where negative weights become interesting.
+
+\\[ 6+(-4)<\infty \\]
+
+\\[ 2<\infty \\]
+
+True.
+
+Update:
+
+```
+dist[E] = 2
+pred[E] = B
+```
+
+Notice that a negative edge reduces the total path cost.
+
+Edge 6: C → D (weight -3)
+
+\\[ 7+(-3)<11 \\]
+
+\\[ 4<11 \\]
+
+True.
+
+Update:
+
+```
+dist[D] = 4
+pred[D] = C
+```
+
+We have found a better route to D:
+
+```
+A → C → D
+
+7 + (-3) = 4
+```
+
+Edge 7: C → E (weight 9)
+
+\\[ 7+9<2 \\]
+
+False.
+
+No update.
+
+Edge 8: D → B (weight -2)
+
+\\[ 4+(-2)<6 \\]
+
+\\[ 2<6 \\]
+
+True.
+
+Update:
+
+```
+dist[B] = 2
+pred[B] = D
+```
+
+This is important: we have discovered a better path to B through D.
+
+```
+A → C → D → B
+
+7 + (-3) + (-2) = 2
+```
+
+Edge 9: E → D (weight 7)
+
+\\[ 2+7<4 \\]
+
+False.
+
+No update.
+
+### End of Pass 1
+
+Our distances are now:
+
+![](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/bellman-ford/Step-by-step-example1-step2.svg)
+
+| Vertex | Distance | Predecessor |
+| ------ | -------- | ----------- |
+| A      | 0        | NIL         |
+| B      | 2        | D           |
+| C      | 7        | A           |
+| D      | 4        | C           |
+| E      | 2        | B           |
+
+Notice something important.
+
+Although we processed all edges once, the algorithm has not necessarily found the shortest distance to every vertex.
+
+For example:
+
+```
+dist[E] = 2
+```
+
+But we now know that B has a shorter distance of 2, and B → E has weight -4.
+
+Therefore, the actual shortest distance to E is:
+
+\\[ 2+(-4)=-2 \\]
+
+We will discover this during the next pass.
+
+### Step 3: Second iteration (Pass 2)
+
+We start examining all edges again.
+
+Most edges will not produce improvements.
+
+However, consider:
+
+Edge B → E (weight -4)
+
+Currently:
+
+```
+dist[B] = 2
+dist[E] = 2
+```
+
+Relaxation:
+
+\\[ 2+(-4)<2 \\]
+
+\\[ -2<2 \\]
+
+True.
+
+Update:
+
+```
+dist[E] = -2
+pred[E] = B
+```
+
+We have found a better path:
+
+```
+A → C → D → B → E
+
+7 + (-3) + (-2) + (-4) = -2
+```
+
+The remaining edges do not produce any improvements.
+
+### End of Pass 2
+
+![](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/bellman-ford/Step-by-step-example1-step3.svg)
+| Vertex | Distance | Predecessor |
+| ------ | -------- | ----------- |
+| A      | 0        | NIL         |
+| B      | 2        | D           |
+| C      | 7        | A           |
+| D      | 4        | C           |
+| E      | -2       | B           |
+
+### Step 4: Third iteration (Pass 3)
+
+We examine all nine edges again.
+
+No edge produces a shorter distance.
+
+Therefore, no distance changes.
+
+This tells us that the shortest distances have stabilized.
+
+However, Bellman–Ford still performs its negative-cycle detection check.
+
+### Step 5: Negative-cycle detection
+
+We examine every edge one additional time.
+
+For each edge, we check:
+
+\\[ dist[u]+w\<dist[v] \\]
+
+If any edge satisfies this condition, a reachable negative-weight cycle exists.
+
+In our example, no edge can be relaxed.
+
+Therefore: No reachable negative-weight cycle
+
+The algorithm terminates successfully.
+
+### Complete iteration summary
+
+| Pass                 | A          | B | C | D | E  |
+| -------------------- | ---------- | - | - | - | -- |
+| Initialization       | 0          | ∞ | ∞ | ∞ | ∞  |
+| 1                    | 0          | 2 | 7 | 4 | 2  |
+| 2                    | 0          | 2 | 7 | 4 | -2 |
+| 3                    | 0          | 2 | 7 | 4 | -2 |
+| Negative-cycle check | No changes |   |   |   |    |
+
+The example uses in-place relaxation: updates made earlier in a pass can be used by later edges in that same pass. Consequently, the number of passes needed to stabilize can depend on edge ordering.
+
+## 5. Why does Bellman–Ford perform V - 1 iterations?
+
+This is one of the most important theoretical concepts behind the algorithm.
+
+Bellman–Ford needs \(V-1\) relaxation passes, even though sometimes it can find all shortest paths in just one pass.
+
+The key idea is that the number of passes guarantees correctness regardless of the order in which edges are visited.
+
+Consider a graph with five vertices:
+
+```
+A → B → C → D → E
+```
+
+Suppose the shortest path from A to E is:
+
+```
+A → B → C → D → E
+```
+
+This path contains four edges.
+
+With five vertices:
+
+\\[ V-1=5-1=4 \\]
+
+Why does this matter?
+
+Each iteration of Bellman–Ford can propagate shortest-path information by at least one additional edge.
+
+We can understand this using a dynamic programming perspective.
+
+| Stage             | Maximum number of edges in considered shortest paths |
+| ----------------- | ---------------------------------------------------- |
+| Initialization    | 0                                                    |
+| After iteration 1 | 1                                                    |
+| After iteration 2 | 2                                                    |
+| After iteration 3 | 3                                                    |
+| After iteration 4 | 4                                                    |
+
+After \\(V-1\\) iterations, every shortest path that does not involve a negative cycle has been considered.
+
+Important: This table describes the conceptual dynamic programming guarantee. With in-place relaxation, one iteration may propagate information through multiple edges, depending on edge ordering.
+
+### 2. Why are at least \\(V-1\\) sweeps needed?
+Intuitively Bellman–Ford operates by making V sweeps over a graph that check to
+see if any edge (u, v) is able to improve on the computation for dist[v] given
+dist[u] and the weight of the edge over (u, v). At least V − 1 sweeps are needed, for
+example, in the extreme case that the shortest path from s to some vertex v goes
+through all vertices in the graph. Another reason to use V − 1 sweeps is that the edges can be visited in an arbitrary order, and this ensures all reduced paths have
+been found.
+
+Consider this graph with five vertices:
+
+```
+A --2--> B --3--> C --4--> D --5--> E
+```
+
+The source is `A`.
+
+There are five vertices:
+
+\\[ V = 5 \\]
+
+The longest possible simple shortest path can contain:
+
+\\[ V-1 = 4 \text{ edges} \\]
+
+The shortest path from A to E is:
+
+```
+A -> B -> C -> D -> E
+```
+
+Its total cost is:
+
+\\[ 2+3+4+5=14 \\]
+
+Now consider what happens if the edges are visited in reverse order:
+
+```
+E -> D
+D -> C
+C -> B
+B -> A
+```
+
+This is still the same graph. We have only changed the order in which its edges are examined.
+
+Initially:
+
+| Vertex   | A   | B   | C   | D   | E   |
+| -------- | --- | --- | --- | --- | --- |
+| Distance | 0   | ∞   | ∞   | ∞   | ∞   |
+
+Sweep 1
+
+1. `E -> D`: Cannot relax because E is unreachable.
+2. `D -> C`: Cannot relax because D is unreachable.
+3. `C -> B`: Cannot relax because C is unreachable.
+4. `B -> A`: Cannot improve A.
+
+No distances change.
+
+Sweep 2
+
+The same thing happens. No distances change.
+
+Sweep 3
+
+Again, no distances change.
+
+Sweep 4
+
+Again, no distances change.
+
+Wait! We have not discovered any vertex other than A.
+
+This is because the edges were visited in reverse order. Information about a reachable vertex needs to propagate through the graph, but the required outgoing edges were examined before their source distances became available.
+
+Let's reverse the edge order to the opposite direction:
+
+```
+B -> A
+C -> B
+D -> C
+E -> D
+```
+
+This is not a valid direction for the original graph, so let's use the actual edge order from A to E, but process the edge list in reverse insertion order only:
+
+```
+D -> E
+C -> D
+B -> C
+A -> B
+```
+
+Now the passes behave as follows:
+
+Initial state
+
+```
+A = 0, B = ∞, C = ∞, D = ∞, E = ∞
+```
+
+Sweep 1
+
+```
+D -> E    No update
+C -> D    No update
+B -> C    No update
+A -> B    B = 2
+```
+
+After sweep 1
+
+```
+A = 0, B = 2, C = ∞, D = ∞, E = ∞
+```
+
+Sweep 2
+
+```
+D -> E    No update
+C -> D    No update
+B -> C    C = 5
+A -> B    No update
+```
+
+After sweep 2
+
+```
+A = 0, B = 2, C = 5, D = ∞, E = ∞
+```
+
+Sweep 3
+
+```
+D -> E    No update
+C -> D    D = 9
+B -> C    No update
+A -> B    No update
+```
+
+After sweep 3
+
+```
+A = 0, B = 2, C = 5, D = 9, E = ∞
+```
+
+Sweep 4
+
+```
+D -> E    E = 14
+C -> D    No update
+B -> C    No update
+A -> B    No update
+```
+
+After sweep 4
+
+```
+A = 0, B = 2, C = 5, D = 9, E = 14
+```
+
+All shortest distances found
+
+This demonstrates why we need up to four sweeps for five vertices.
+
+### 3. Why does the order of edges matter?
+
+The important point is that Bellman–Ford uses in-place relaxation.
+
+When it updates a distance, that new value can immediately be used by another edge examined later in the same sweep.
+
+For example:
+
+```
+A -> B -> C -> D -> E
+```
+
+If we process edges in this order:
+
+```
+A -> B
+B -> C
+C -> D
+D -> E
+```
+
+One sweep can discover all shortest distances!
+
+But if we process them in reverse order:
+
+```
+D -> E
+C -> D
+B -> C
+A -> B
+```
+
+Only one additional vertex becomes reachable per sweep.
+
+Therefore:
+
+| Edge processing order   | Sweeps needed |
+| ----------------------- | ------------- |
+| Forward order           | 1             |
+| Reverse order           | 4             |
+| General arbitrary order | At most 4     |
+
+For this five-vertex example, four sweeps are sufficient regardless of edge ordering.
+
+This is why Bellman–Ford does not rely on a favorable edge ordering.
+
+### 4. The mathematical reason: paths contain at most \\(V-1\\) edges
+
+Here is the fundamental property behind Bellman–Ford.
+
+If a graph has no reachable negative-weight cycle, a shortest path can be represented as a simple path.
+
+A simple path cannot repeat a vertex.
+
+For a graph containing \\(n\\) vertices:
+
+```
+A -> B -> C -> D -> E
+```
+
+The maximum number of edges is:
+
+\\[ V-1 \\]
+
+Each additional sweep guarantees that paths using one more edge can be discovered, regardless of edge ordering.
+
+Conceptually:
+
+| Number of sweeps | Maximum path edges guaranteed |
+| ---------------- | ----------------------------- |
+| 1                | 1                             |
+| 2                | 2                             |
+| 3                | 3                             |
+| 4                | 4                             |
+| \\(V-1\\)        | \\(V-1\\)                     |
+
+This is the theoretical guarantee. In-place relaxation can discover paths with more edges in a single sweep when the edge order permits it.
+
+### 5. Connection to negative-cycle detection
+
+Now the earlier negative-cycle question becomes easier to understand.
+
+If we have completed \\(V-1\\) sweeps, all shortest paths that do not involve a negative cycle should have been discovered.
+
+So we perform one additional examination of the edges.
+
+- If no edge can improve a distance, no negative cycle reachable from the source exists.
+- If an edge can still improve a distance, a reachable negative-weight cycle exists.
+
+The standard structure is:
+
+```
+Initialize distances
+
+Repeat V - 1 times:
+    Relax every edge
+
+One additional pass:
+    If any edge can still be relaxed:
+        Report negative cycle
+```
+
+One important distinction: The \\(V-1\\) sweeps are a worst-case guarantee, not a requirement to always execute all of them. An optimization can stop early if an entire sweep makes no updates.
+
+The main takeaway: Bellman–Ford needs at most \\(V-1\\) sweeps because a shortest simple path contains at most \\(V-1\\) edges. Edge ordering determines how quickly information propagates, but the \\(V-1\\) bound guarantees correctness even in the worst ordering.
+
+### What happens if we have a graph with 100 vertices?
+
+The maximum number of edges in a simple path is:
+
+\\[ 100-1=99 \\]
+
+Therefore, we need at most 99 complete relaxation passes.
+
+Each pass examines all edges.
+
+This gives us the time complexity:
+
+\\[ O(VE) \\]
+
+## 6. Negative-weight cycle detection
+
+This is one of Bellman–Ford's most valuable features.
+
+First, what is a negative-weight cycle?
+
+A cycle is a path that starts and ends at the same vertex.
+
+For example:
+
+```
+      2
+   A -----> B
+   ^        |
+ 1 |        | -5
+   |        v
+   C <------
+      
+```
+
+The cycle is:
+
+```
+A → B → C → A
+```
+
+Its total weight is:
+
+\\[ 2+(-5)+1=-2 \\]
+
+This is a negative-weight cycle.
+
+### Why are negative cycles problematic?
+
+Imagine that we want to calculate the shortest distance from A to C.
+
+We can travel:
+
+```
+A → B → C
+```
+
+The cost is:
+
+\\[ 2+(-5)=-3 \\]
+
+But we can continue around the cycle:
+
+```
+A → B → C → A → B → C
+```
+
+Every time we traverse the cycle, we reduce the total cost by 2.
+
+| Number of cycle traversals | Total cost to reach A again |
+| -------------------------- | --------------------------- |
+| 0                          | 0                           |
+| 1                          | -2                          |
+| 2                          | -4                          |
+| 3                          | -6                          |
+| 4                          | -8                          |
+| 5                          | -10                         |
+
+We can keep repeating this indefinitely.
+
+Consequently, there is no finite shortest-path distance for vertices reachable through that cycle.
+
+Mathematically:
+
+\\[ \lim\_{k\to\infty}(-2k)=-\infty \\]
+
+### How does Bellman–Ford detect it?
+
+After \\(V-1\\) relaxation passes, we perform another pass.
+
+If an edge can still be relaxed:
+
+\\[ dist[u]+w\<dist[v] \\]
+
+then a reachable negative-weight cycle exists.
+
+Why?
+
+Because without a reachable negative cycle, all shortest paths can be represented using at most \\(V-1\\) edges. An improvement after that means we can continue reducing a path cost by going around a cycle.
+
+Assume the graph has:
+
+\\[ n=3 \\]
+
+vertices: A, B, and C.
+
+Without a negative cycle, a shortest simple path can contain at most:
+
+\\[ V-1=2 \text{ edges} \\]
+
+Therefore:
+
+- First pass: discover paths containing up to one edge.
+- Second pass: discover paths containing up to two edges.
+- Third pass: check whether distances can still improve.
+
+The third pass is the negative-cycle detection pass.
+
+Let's examine the negative cycle from the previous example.
+
+```
+A --2--> B --1--> C
+^                 |
+|_________________|
+       -4
+```
+
+Assume A is the source and process edges in this order:
+
+1. A → B (2)
+2. B → C (1)
+3. C → A (-4)
+
+**Initial state**
+
+| Vertex   | A   | B   | C   |
+| -------- | --- | --- | --- |
+| Distance | 0   | ∞   | ∞   |
+
+**Pass 1**
+
+| Edge  | Calculation | Update |
+| ----- | ----------- | ------ |
+| A → B | 0 + 2 = 2   | B = 2  |
+| B → C | 2 + 1 = 3   | C = 3  |
+| C → A | 3 - 4 = -1  | A = -1 |
+
+Result:
+
+| Vertex   | A   | B   | C   |
+| -------- | --- | --- | --- |
+| Distance | -1  | 2   | 3   |
+
+**Pass 2**
+
+| Edge  | Calculation | Update |
+| ----- | ----------- | ------ |
+| A → B | -1 + 2 = 1  | B = 1  |
+| B → C | 1 + 1 = 2   | C = 2  |
+| C → A | 2 - 4 = -2  | A = -2 |
+
+Result:
+
+| Vertex   | A   | B   | C   |
+| -------- | --- | --- | --- |
+| Distance | -2  | 1   | 2   |
+
+We have now completed the normal \\(V-1=2\\) passes.
+
+**Pass 3: Additional detection pass**
+
+Now examine the first edge:
+
+```
+A -> B (2)
+```
+
+Calculate:
+
+\\[ newLen=dist[A]+2 \\]
+
+\\[ newLen=-2+2=0 \\]
+
+But the current distance to B is:
+
+\\[ dist[B]=1 \\]
+
+Therefore:
+
+\\[ 0<1 \\]
+
+Distance adjustment detected
+
+We can still improve a distance after the normal \\(V-1\\) passes.
+
+This proves that a reachable negative cycle exists.
+
+We don't need to finish examining all edges once we find a successful relaxation.
+
+Important distinction: Bellman–Ford detects negative cycles reachable from the source. A negative cycle in a disconnected part of the graph will not be detected by a run starting from another component.
+
+If you want to detect negative cycles anywhere in the graph, initialize every vertex's distance to zero and perform the same relaxation procedure.
+
+### Why does an adjustment prove a negative cycle exists?
+
+This is the mathematical reasoning.
+
+Suppose there is no reachable negative cycle.
+
+Then a shortest path can be represented as a simple path, which contains at most \\(V-1\\) edges.
+
+After \\(V-1\\) complete relaxation passes, Bellman–Ford has had enough opportunities to discover all such shortest paths.
+
+Consequently, no edge should be able to improve any distance.
+
+However, suppose an additional pass finds:
+
+\\[ dist[u]+w(u,v)\<dist[v] \\]
+
+This means a shorter path still exists.
+
+Since all shortest simple paths should already have been discovered, the improvement must involve a path that repeats a vertex.
+
+A repeated vertex means the path contains a cycle.
+
+For the path to keep improving the distance, that cycle must have a negative total weight.
+
+Therefore, a reachable negative cycle exists.
+
+### Important distinction: Reachable vs. unreachable negative cycles
+
+Bellman–Ford, when initialized with a single source, detects only negative cycles reachable from that source.
+
+Consider:
+
+```
+Component 1:
+
+A -----> B -----> C
+
+
+Component 2:
+
+D --1--> E
+^       |
+|       |
+-4      -2
+|       v
++-------+
+```
+
+Suppose A is the source.
+
+The cycle in Component 2 has total weight:
+
+\\[\
+1+(-2)+(-4)=-5\
+\\]
+
+It is a negative cycle, but it cannot be reached from A.
+
+The algorithm initializes:
+
+```
+dist[A] = 0
+
+dist[B] = INF
+dist[C] = INF
+dist[D] = INF
+dist[E] = INF
+```
+
+Because D and E are unreachable, their edges cannot successfully relax any distances.
+
+Therefore, the algorithm does not report this negative cycle.
+
+This is intentional: it detects negative cycles that affect shortest paths from the specified source.
+
+### Summary: The relationship between V-1 and n passes
+
+| Pass           | Purpose                                 |
+| -------------- | --------------------------------------- |
+| 1 to \\(V-1\\) | Find shortest paths                     |
+| \\(V\\)        | Detect reachable negative-weight cycles |
+
+The distinction is fundamental:
+
+- \\(V-1\\) passes: Enough to find shortest paths when no reachable negative cycle exists.
+- The \\(n\\)-th pass: Checks whether any distance can still be improved.
+- Successful relaxation on the \\(V\\)-th pass: Proves that a reachable negative cycle exists.
+
+One final detail: The book says Bellman–Ford is thwarted only by a negative cycle. This refers to the existence of a finite shortest-path solution: a reachable negative cycle makes the shortest-path problem undefined for affected vertices because path costs can decrease without bound.
+
+## 8. Time and space complexity
+
+Let's analyze the algorithm from a performance perspective.
+
+### Time complexity
+
+Bellman–Ford has two major operations.
+
+Operation 1: Edge relaxation
+
+We perform at most:
+
+\\[ V-1 \\]
+
+iterations.
+
+During each iteration, we examine all \\(E\\) edges.
+
+Therefore:
+
+\\[ O((V-1)\times E) \\]
+
+Simplifying:
+
+\\[ \boxed{O(VE)} \\]
+
+Operation 2: Negative-cycle detection
+
+We examine all edges one additional time:
+
+\\[ O(E) \\]
+
+Combining both operations:
+
+\\[ O(VE+E) \\]
+
+Therefore, the overall time complexity is:
+
+\\[ \boxed{O(VE)} \\]
+
+### Complexity comparison
+
+| Operation                | Time complexity |
+| ------------------------ | --------------- |
+| Initialize distances     | \\(O(V)\\)      |
+| Relaxation passes        | \\(O(VE)\\)     |
+| Negative-cycle detection | \\(O(E)\\)      |
+| Overall                  | \\(O(VE)\\)     |
+
+### Space complexity
+
+The algorithm maintains:
+
+- Distance array: \\(O(V)\\)
+- Predecessor array: \\(O(V)\\)
+- Graph edge list: \\(O(E)\\)
+
+The auxiliary space used by the algorithm, excluding graph storage, is:
+
+\\[ \boxed{O(V)} \\]
+
+Including the edge-list graph representation:
+
+\\[ \boxed{O(V+E)} \\]
+
+## 9. Bellman–Ford vs. Dijkstra
+
+Both algorithms solve the Single-Source Shortest Path problem, but they use different approaches.
+
+| Feature                 | Bellman–Ford                              | Dijkstra                                                   |
+| ----------------------- | ----------------------------------------- | ---------------------------------------------------------- |
+| Problem                 | SSSP                                      | SSSP                                                       |
+| Algorithm technique     | Dynamic programming / repeated relaxation | Greedy                                                     |
+| Negative edges          | Supported                                 | Not generally supported                                    |
+| Negative cycles         | Detects reachable negative cycles         | Cannot handle them correctly                               |
+| Edge relaxation         | Repeatedly examines all edges             | Relaxes edges from selected vertices                       |
+| Time complexity         | \\(O(VE)\\)                               | \\(O((V+E)\log V)\\) with a binary heap and adjacency list |
+| Dense graph performance | \\(O(V^3)\\) when \\(E=O(V^2)\\)          | \\(O(V^2)\\) with a linear-scan implementation             |
+| Typical use             | Graphs with negative edge weights         | Graphs with non-negative edge weights                      |
+
+### When should you choose each algorithm?
+
+**Dijkstra**
+
+Non-negative edge weights
+
+Choose it when all edge weights are non-negative and performance is important
+
+A --4--> B --3--> C
+
+**Bellman–Ford**
+
+Negative edge weights
+
+Choose it when negative edges are possible or when you need to detect reachable negative cycles.
+
+A --4--> B --(-6)--> C
+
+One important detail: an undirected negative-weight edge creates a negative cycle because you can traverse the edge in both directions indefinitely. Therefore, Bellman–Ford will detect a negative cycle if that edge is reachable.
+
+## 10. Real-world applications of Bellman–Ford
+
+Bellman–Ford is useful in problems where the cost of a transition can be negative.
+
+### 1. Financial arbitrage detection
+
+Suppose you exchange currencies:
+
+```
+USD → EUR
+EUR → GBP
+GBP → USD
+```
+
+The exchange rates may allow you to make a profit by completing a cycle of exchanges.
+
+We can transform exchange rates into edge weights using:
+
+\\[ w(u,v)=-\log(rate(u,v)) \\]
+
+For a cycle:
+
+\\[ \sum w(u,v)<0 \\]
+
+indicates that the product of exchange rates around the cycle is greater than 1, meaning an arbitrage opportunity exists.
+
+Bellman–Ford can detect such negative cycles.
+
+### 2. Network routing protocols
+
+The Routing Information Protocol (RIP) uses a distance-vector approach based on the Bellman–Ford principle.
+
+Routers exchange information about the distances to destinations and update their routing tables.
+
+For example:
+
+```
+Router A → Router B → Router D
+
+Cost = 2 + 3 = 5
+```
+
+If router A discovers a cheaper route through another router, it updates its routing information.
+
+Note that RIP uses a distributed adaptation of the distance-vector algorithm, not simply the centralized textbook Bellman–Ford implementation.
+
+### 3. Graphs with negative costs
+
+Consider a scheduling or transportation problem where some transitions provide discounts or credits.
+
+For example:
+
+```
+Normal transportation cost = 20
+Discount / credit          = -5
+```
+
+The shortest path must account for both positive and negative costs.
+
+Bellman–Ford can solve this type of shortest-path problem as long as no reachable negative cycle makes the optimum undefined.
+
+### 4. Dependency and constraint analysis
+
+Bellman–Ford can be used in systems of difference constraints.
+
+For example:
+
+\\[ x_v-x_u\leq c \\]
+
+This constraint can be represented as an edge from \\(u\\) to \\(v\\) with weight \\(c\\).
+
+A negative cycle indicates that the system of constraints is inconsistent.
+
+This application is particularly useful in scheduling, optimization, and constraint-solving problems.
+
+## 11. Important implementation considerations
+
+There are several details worth remembering when implementing Bellman–Ford.
+
+| Consideration        | Explanation                                                                         |
+| -------------------- | ----------------------------------------------------------------------------------- |
+| Directed edges       | Each edge represents a direction.                                                   |
+| Undirected graphs    | Represent each undirected edge using two directed edges.                            |
+| Negative weights     | Fully supported.                                                                    |
+| Negative cycles      | Only reachable negative cycles are detected from the chosen source.                 |
+| Unreachable vertices | Their distances remain infinity.                                                    |
+| Integer overflow     | Use `long` for distances and a safe infinity value.                                 |
+| Early termination    | Stop relaxation if an entire pass makes no changes.                                 |
+| Path reconstruction  | Maintain a predecessor array.                                                       |
+| Edge ordering        | Affects intermediate results, not the correct final result after sufficient passes. |
+
+## 12. The algorithm's relationship with Dynamic Programming
+
+It is useful to understand why Bellman–Ford is considered a dynamic programming algorithm.
+
+The idea is to build shortest-path solutions progressively.
+
+Define:
+
+\\[ D_k(v) \\]
+
+as the minimum cost of reaching vertex \\(v\\) from the source using at most \\(k\\) edges.
+
+Initially:
+
+\\[ D_0(source)=0 \\]
+
+All other distances are infinity.
+
+Then we calculate:
+
+\\[ D_k(v)=\min\left( D\_{k-1}(v), \min\_{(u,v)\in E} \left[D\_{k-1}(u)+w(u,v)\right] \right) \\]
+
+This recurrence considers two possibilities:
+
+1. We already have the best path to \\(v\\) using at most \\(k-1\\) edges.
+2. We find a better path by reaching another vertex \\(u\\), then taking edge \\(u \rightarrow v\\).
+
+After \\(V-1\\) iterations, we have considered every possible shortest simple path.
+
+This is the dynamic programming foundation of Bellman–Ford.
+
+A useful distinction: The recurrence above describes the synchronous dynamic programming version, where each iteration reads the previous iteration's distances. The Java implementation we used performs in-place relaxation, which can propagate multiple edges in one pass.
+
+## 13. Final summary: What you should remember
+
+![](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/bellman-ford/Bellman–Ford-at-a-glance.png)
+{/* ## Bellman–Ford at a glance
+
+Problem
+
+Single-Source Shortest Path
+
+Technique
+
+Dynamic Programming
+
+Time complexity
+
+# O(VE)
+
+Auxiliary space
+
+# O(V)
+
+Three fundamental operations
+
+1. Initialize distances.
+2. Relax all edges \\(V-1\\) times.
+3. Perform one additional pass to detect negative cycles.
+
+The most important relaxation formula
+
+\\[ dist[u]+w(u,v)\<dist[v] \\]
+
+The most important theoretical guarantee
+
+\\[ \text{Maximum shortest-path edges}=V-1 \\] */}
+
+### Suggested learning sequence
+
+To understand shortest-path algorithms thoroughly, I recommend studying them in this order:
+
+1. BFS for shortest paths in unweighted graphs.
+2. Dijkstra for non-negative weighted graphs.
+3. Bellman–Ford for graphs with negative edge weights.
+4. Floyd–Warshall for All-Pairs Shortest Paths (APSP).
+5. Johnson's Algorithm for sparse graphs with negative edges but no negative cycles.
+
+The next useful exercise is to implement a debug version of Bellman–Ford in Java, printing the distance array, predecessor array, and every edge relaxation after each pass, just as you did when studying BFS and Dijkstra.

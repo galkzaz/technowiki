@@ -1,0 +1,950 @@
+# Garbage Collection Optimizations in Java
+
+Garbage collection is not just about finding unreachable objects and reclaiming memory. A production JVM must do this while balancing several competing goals:
+
+- Low latency: Minimize pauses that users experience.
+- High throughput: Spend as much time as possible executing application code rather than GC code.
+- Memory efficiency: Avoid wasting heap space.
+- Scalability: Work efficiently with large heaps and many CPU cores.
+- Predictability: Avoid unexpected long pauses.
+
+To achieve these goals, JVM garbage collectors use a variety of optimizations.
+
+several things can be done with respect to garbage collection to help
+improve the performance of Java applications:
+1. Select the most appropriate garbage collection algorithm based on your use case, heap size,
+and thread count.
+2. Initialize, monitor, and manage your heap sizes. They should not be larger than absolutely needed.
+3. Limit object creation. We will discuss alternatives to this in Chapter 6.
+4. Use appropriate data structures for your applications. This is the subject of Chapter 2.
+5. As indicated earlier in this chapter, avoid, or at least significantly limit, calls to the finalize
+method to reduce garbage collection delays and processing overhead.
+6. Optimize your use of strings, with a special focus on minimizing duplicate strings. We will
+cover this in greater depth in Chapter 7.
+7. Be mindful of allocating memory outside of the JVM’s garbage collection reach (for example,
+native code).
+8. Lastly, employ tools to help you monitor garbage collection in real time. We will review some
+of these tools in Chapter 14
+
+Let's organize them by the problem they solve and understand how they work.
+
+## 1. Overview of GC optimizations
+
+Here are the major optimization techniques you should understand:
+
+| Optimization                      | Main purpose                                             |
+| --------------------------------- | -------------------------------------------------------- |
+| Generational collection           | Collect short-lived objects efficiently                  |
+| Adaptive sizing                   | Adjust heap regions and collection parameters            |
+| Parallel GC                       | Use multiple CPU cores during collection                 |
+| Concurrent GC                     | Perform GC work while application threads run            |
+| Incremental collection            | Divide collection work into smaller units                |
+| Region-based collection           | Collect selected heap regions instead of the entire heap |
+| Remembered sets / card tables     | Avoid scanning the entire heap for references            |
+| Object allocation optimization    | Make object allocation inexpensive                       |
+| Escape analysis                   | Eliminate some allocations or move them to scalar values |
+| String deduplication              | Reduce duplicate string storage                          |
+| Humongous object handling         | Manage very large objects efficiently                    |
+| Class unloading                   | Reclaim metadata for unused classes                      |
+| Reference processing optimization | Handle weak, soft, and phantom references efficiently    |
+
+Some of these optimize the collector itself, while others optimize how the JVM allocates and manages objects.
+
+## 2. Generational GC Optimization
+
+Fundamental optimization
+
+Generational GC is based on the generational hypothesis:
+
+Most objects become unreachable shortly after they are created.
+
+Consider a Spring Boot application processing HTTP requests.
+
+```
+public Response processRequest(Request request) {
+
+    String normalizedName = request.getName().trim();
+
+    List<String> temporaryValues = new ArrayList<>();
+
+    // Process request
+
+    return new Response(normalizedName);
+}
+```
+
+During request processing, many temporary objects may be created.
+
+After processing, many become unreachable.
+
+However, some objects survive much longer:
+
+```
+public class ApplicationCache {
+
+    private static final Map<String, User> USERS =
+            new HashMap<>();
+}
+```
+
+The JVM exploits this difference by organizing the heap into generations.
+
+[Understanding the JVMMemoryPressure metric changes in Amazon OpenSearch Service | AWS Big Data Blog](https://images.openai.com/static-rsc-4/Ww_neVN0UYusMTLjZe3mJHaFfckKZOG_ZcIZMPCUfQiLXk5eaJmeJmiFUi4TqFJryjjPtSViChp6Gy4LJ8rYFqNohkfjr-qWXH4yCyCZdGlo7vBYQDmvNFizz3OhTAce2ZfGqI5VKbMYT96pEcui1hw-HxRuiLftjpLpekFi7ZM?purpose=inline)
+
+[aws.amazon.com](https://aws.amazon.com/blogs/big-data/understanding-the-jvmmemorypressure-metric-changes-in-amazon-opensearch-service/?utm_source=chatgpt.com)
+
+```
+                 Java Heap
++--------------------------------------------+
+|                                            |
+|             Young Generation               |
+|  +----------+  +----------+  +----------+  |
+|  |   Eden   |  | Survivor |  | Survivor |  |
+|  |          |  |    S0    |  |    S1    |  |
+|  +----------+  +----------+  +----------+  |
+|                                            |
+|             Old Generation                |
+|  +--------------------------------------+  |
+|  |        Long-lived objects            |  |
+|  +--------------------------------------+  |
++--------------------------------------------+
+```
+
+### How does this optimize GC?
+
+1. New objects are usually allocated in Eden.
+2. When Eden fills, a young collection identifies unreachable objects.
+3. Surviving objects are evacuated into Survivor spaces.
+4. Objects surviving enough collections may be promoted to Old Generation.
+5. The JVM can collect the Young Generation frequently without repeatedly examining all long-lived objects.
+
+Benefit: Frequent collections can focus on a relatively small portion of the heap.
+
+Trade-off: The JVM must maintain information about references between generations.
+
+## 3. Parallel Garbage Collection
+
+CPU utilization optimization
+
+A traditional single-threaded collector performs collection using one GC worker.
+
+For a large heap, this can take considerable time.
+
+Parallel GC uses multiple GC worker threads to perform collection work simultaneously.
+
+### Single-threaded GC
+
+```
+GC Worker 1:
+[Mark A] → [Mark B] → [Mark C] → [Mark D] → [Sweep]
+```
+
+### Parallel GC
+
+```
+GC Worker 1: [Mark A] → [Mark D]
+GC Worker 2: [Mark B] → [Mark E]
+GC Worker 3: [Mark C] → [Mark F]
+GC Worker 4: [Sweep part 1] → [Sweep part 2]
+```
+
+The work is divided among multiple workers.
+
+For example, if one worker needs 8 seconds to process a collection, four workers might finish considerably faster. The actual speedup depends on workload, synchronization, memory bandwidth, and available CPU resources.
+
+### Java configuration
+
+```
+java -XX:+UseParallelGC -jar application.jar
+```
+
+You can also control the number of GC threads:
+
+```
+java -XX:+UseParallelGC \
+     -XX:ParallelGCThreads=4 \
+     -jar application.jar
+```
+
+### When is it useful?
+
+- Batch processing.
+- Data processing applications.
+- Applications where throughput matters more than individual pause duration.
+- CPU-rich environments.
+
+Important: Parallel GC still performs Stop-the-World collections. Parallel means multiple GC workers, not that application threads continue executing during those pauses.
+
+## 4. Concurrent Garbage Collection
+
+Pause-time optimization
+
+Parallel GC and Concurrent GC solve different problems.
+
+- Parallel GC: Multiple GC workers perform collection work faster during pauses.
+- Concurrent GC: GC workers perform significant collection work while application threads continue running.
+
+### Stop-the-World approach
+
+```
+Application:
+Running ───── Running ───── PAUSED ───── Running ───── Running
+
+GC:
+                            [GC WORK]
+```
+
+### Concurrent approach
+
+```
+Application:
+Running ───── Running ───── Running ───── Running ───── Running
+
+GC:
+          [Marking] ───── [Relocation] ───── [Cleanup]
+```
+
+The concurrent approach reduces the time application threads must stop.
+
+However, the collector must handle application threads modifying references during collection.
+
+This is where write barriers, read barriers, and other tracking mechanisms become important.
+
+### Examples in HotSpot
+
+- G1: Concurrent marking, alongside Stop-the-World evacuation phases.
+- ZGC: Performs most expensive GC work concurrently.
+- Shenandoah: Performs much of its marking and evacuation concurrently.
+
+Trade-off: Concurrent GC consumes CPU resources while the application is running, potentially reducing application throughput.
+
+## 5. Incremental Garbage Collection
+
+Pause-time optimization
+
+Imagine an application with a 32 GB heap.
+
+If the collector tries to process the entire heap in one operation, it may need a long pause.
+
+Incremental GC addresses this by dividing collection work into smaller units and processing them over multiple steps.
+
+Instead of:
+
+```
+One large collection:
+
+[----------------------------------------]
+                 Long pause
+```
+
+The collector performs smaller pieces of work:
+
+```
+Multiple smaller operations:
+
+[----] [----] [----] [----] [----]
+ Pause  Pause  Pause  Pause  Pause
+```
+
+The objective is to reduce the duration of individual pauses.
+
+### How does it work?
+
+The exact implementation varies, but a collector may:
+
+1. Divide the heap into regions or collection units.
+2. Select a subset for collection.
+3. Process that subset.
+4. Continue with other subsets in later cycles.
+
+Important distinction: Incremental and concurrent GC are related but not identical.
+
+- Incremental GC divides GC work into smaller units.
+- Concurrent GC allows GC work to overlap with application execution.
+
+A collector can use both techniques.
+
+## 6. Region-Based Collection
+
+Heap organization optimization
+
+Traditional generational layouts conceptually divide the heap into large areas:
+
+```
++-----------------------+
+| Young Generation      |
++-----------------------+
+| Old Generation        |
++-----------------------+
+```
+
+G1 takes a different approach.
+
+It divides the heap into many equally sized regions. Each region can serve different roles during a collection cycle.
+
+[Java GC Gargabe Collection 알짜만 빼먹기 / 알고리즘 / 종류 / 모니터링 VisualVM](https://images.openai.com/static-rsc-4/9rOkpjlx9YJBj3XHLUTzKf93gQZR5sX47P4U-RWy6PvVDbOxeBQ5qh4IwBbVXr6rFICmnIdXocSZl8REtaTn6AQdQ1m7WGxW6YO7rnwyR8gsA3GZZetij3mcslnv5T8ak9_FEVLk8BUkMxm4JRrHho3wpQJLQdaQpnHQMo3BrPI?purpose=inline)
+
+[aljjabaegi.tistory.com](https://aljjabaegi.tistory.com/636?utm_source=chatgpt.com)
+
+For example:
+
+```
+G1 Heap:
+
++------+------+------+------+------+
+| Eden | Eden | S0   | Old  | Old  |
++------+------+------+------+------+
+| Old  | Free | Eden | Old  | S1   |
++------+------+------+------+------+
+| Free | Old  | Free | Eden | Old  |
++------+------+------+------+------+
+```
+
+The regions are not permanently assigned to one generation. Their roles can change over time.
+
+### Why is this an optimization?
+
+Suppose the heap has 100 regions:
+
+| Region   | Live data | Reclaimable space |
+| -------- | --------- | ----------------- |
+| Region 1 | 10%       | 90%               |
+| Region 2 | 80%       | 20%               |
+| Region 3 | 15%       | 85%               |
+| Region 4 | 95%       | 5%                |
+
+A collector can prioritize regions with a high amount of reclaimable space.
+
+This is the idea behind G1's Garbage-First name.
+
+Rather than always collecting the entire old generation, G1 can select a collection set of regions based on expected reclamation benefit and pause-time goals.
+
+### Main benefit
+
+The collector can make collection decisions based on the amount of garbage in different regions.
+
+This helps it balance memory reclamation against pause duration.
+
+## 7. Remembered Sets and Card Tables
+
+Reference-scanning optimization
+
+This is one of the most important optimizations to understand.
+
+Consider two generations:
+
+```
+Young Generation             Old Generation
+
+                              [Old A]
+                                 |
+                                 |
+                                 v
+                              [Young B]
+```
+
+Here, an old object references a young object.
+
+When the JVM collects the Young Generation, it must know about references coming from the Old Generation.
+
+Otherwise, it might incorrectly collect `Young B`, even though it is reachable through `Old A`.
+
+### The naive approach
+
+The collector could scan every object in the Old Generation to discover references into the Young Generation.
+
+But imagine:
+
+```
+Old Generation:  10 million objects
+
+Young Generation: 100,000 objects
+```
+
+Scanning all old objects during every young collection would be expensive.
+
+### Optimization: Card Table
+
+The JVM uses a card table to track portions of the heap that have been modified.
+
+Conceptually, the heap is divided into small memory regions called cards.
+
+```
+Old Generation:
+
++----------+----------+----------+----------+
+| Card 0   | Card 1   | Card 2   | Card 3   |
++----------+----------+----------+----------+
+     |          |          |          |
+     v          v          v          v
+   Clean      Dirty      Clean      Clean
+```
+
+When an application changes a reference in an object, a write barrier can mark the corresponding card as dirty.
+
+```
+oldObject.reference = youngObject;
+```
+
+Conceptually:
+
+```
+1. Store the new reference.
+2. Mark the corresponding card as dirty.
+```
+
+During collection, the collector examines relevant dirty cards rather than scanning the entire old generation.
+
+### Remembered Sets
+
+A remembered set maintains information about references entering a particular region or collection area.
+
+G1 uses remembered sets to identify incoming references to regions.
+
+Conceptually:
+
+```
+Region A (Old) ─────► Region B (Young)
+                          ▲
+                          |
+                    Remembered Set
+                    records incoming
+                    references
+```
+
+### Benefits
+
+- Reduces unnecessary heap scanning.
+- Makes partial collection practical.
+- Helps collectors identify references between regions.
+
+Important: Card tables and remembered sets are related but not identical. A card table tracks modified heap portions; a remembered set records information about references relevant to a region.
+
+## 8. Object Allocation Optimization
+
+Application performance optimization
+
+Garbage collection is not only about reclaiming memory. The JVM also tries to make allocating objects extremely fast.
+
+Consider:
+
+```
+public void process() {
+
+    User user = new User();
+
+    Order order = new Order();
+
+    Response response = new Response();
+}
+```
+
+Every allocation potentially requires the JVM to:
+
+1. Find available heap memory.
+2. Reserve memory for the object.
+3. Initialize its object header and fields.
+4. Return a reference to the allocated object.
+
+Doing all of this through a global allocation mechanism could create contention between application threads.
+
+### Thread-Local Allocation Buffers (TLABs)
+
+HotSpot uses Thread-Local Allocation Buffers for many small object allocations.
+
+Each Java thread receives a small allocation area inside the heap.
+
+```
+Java Heap
++------------------------------------------+
+|                                          |
+|  Thread 1 TLAB    Thread 2 TLAB          |
+|  +------------+   +------------+         |
+|  | Object A   |   | Object C   |         |
+|  | Object B   |   | Object D   |         |
+|  | Free space |   | Free space |         |
+|  +------------+   +------------+         |
+|                                          |
++------------------------------------------+
+```
+
+When Thread 1 allocates an object, it can usually allocate directly from its own TLAB without competing with Thread 2.
+
+Allocation is often implemented using a simple pointer increment:
+
+```
+Before:
+[Allocated objects][Free space]
+                  ^
+                  allocation pointer
+
+After allocating an object:
+
+[Allocated objects][New object][Free space]
+                               ^
+                               allocation pointer
+```
+
+### Benefits
+
+- Fast object allocation.
+- Reduced synchronization between threads.
+- Better scalability in multithreaded applications.
+
+When a TLAB is exhausted, the thread obtains another one or uses an alternative allocation path.
+
+## 9. Escape Analysis and Scalar Replacement
+
+Allocation-elimination optimization
+
+This optimization is slightly different from traditional GC optimizations: it can reduce the number of objects that need to be garbage-collected in the first place.
+
+Consider:
+
+```
+class Point {
+    int x;
+    int y;
+
+    Point(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+}
+
+public int calculate() {
+
+    Point point = new Point(10, 20);
+
+    return point.x + point.y;
+}
+```
+
+The `Point` object does not escape from `calculate()`.
+
+It is not returned, stored in a field, or passed to another method in a way that lets it escape.
+
+The JIT compiler may determine that the object does not need to exist as an actual heap allocation.
+
+It may optimize the code to something conceptually equivalent to:
+
+```
+public int calculate() {
+
+    int x = 10;
+    int y = 20;
+
+    return x + y;
+}
+```
+
+This is called scalar replacement.
+
+### Escape analysis classifications
+
+The JIT compiler can reason about whether an object:
+
+- Does not escape a method.
+- Escapes a method but not a thread.
+- Escapes the current thread or becomes globally accessible.
+
+The degree of optimization depends on the compiler and the code.
+
+### Benefits
+
+- Fewer heap allocations.
+- Less GC pressure.
+- Reduced memory usage.
+- Potentially improved execution speed.
+
+Important correction: Do not assume that a non-escaping object is automatically allocated on the stack. HotSpot commonly uses escape analysis for optimizations such as scalar replacement and lock elimination; it does not generally move arbitrary Java objects onto the stack.
+
+## 10. String Deduplication
+
+Memory optimization
+
+Applications often create many strings containing identical character data.
+
+For example:
+
+```
+String name1 = new String("Gamal");
+String name2 = new String("Gamal");
+String name3 = new String("Gamal");
+```
+
+These are three distinct `String` objects, although they contain the same text.
+
+Depending on their construction, they may have separate backing arrays containing identical character data.
+
+Conceptually:
+
+```
+name1 ──► String Object 1 ──► ["G", "a", "m", "a", "l"]
+
+name2 ──► String Object 2 ──► ["G", "a", "m", "a", "l"]
+
+name3 ──► String Object 3 ──► ["G", "a", "m", "a", "l"]
+```
+
+String deduplication can allow these strings to share the same backing array:
+
+```
+name1 ──► String Object 1 ──┐
+                            |
+name2 ──► String Object 2 ──┼──► Shared character storage
+                            |
+name3 ──► String Object 3 ──┘
+```
+
+The String objects remain distinct, but their character storage can be shared.
+
+### How to enable it with G1
+
+```
+java -XX:+UseG1GC \
+     -XX:+UseStringDeduplication \
+     -jar application.jar
+```
+
+String deduplication is especially useful when applications retain many duplicate strings, such as:
+
+- User names.
+- Country names.
+- Repeated JSON field values.
+- Database entity attributes.
+
+It is not always beneficial: deduplication itself consumes CPU and processing resources.
+
+Also, Java String interning (`String.intern()`) is a different mechanism from G1 string deduplication.
+
+## 11. Humongous Object Handling
+
+Large-object allocation optimization
+
+Some objects are much larger than ordinary objects.
+
+For example:
+
+```
+byte[] image = new byte[10 * 1024 * 1024];
+```
+
+A large byte array can create allocation and fragmentation challenges.
+
+G1 has a special mechanism for handling humongous objects.
+
+An object is considered humongous when its size is at least half a G1 region.
+
+For example, if a G1 region is 4 MB:
+
+```
+Region size = 4 MB
+
+Humongous threshold = 2 MB
+```
+
+An object of 3 MB is therefore humongous.
+
+It occupies one or more contiguous regions:
+
+```
++----------+----------+----------+----------+
+| Normal   | Humongous object            |   |
+| objects  | Region 1 | Region 2         |   |
++----------+----------+------------------+---+
+```
+
+G1 manages these allocations specially because large objects do not fit into the ordinary Eden allocation path.
+
+Optimization goal: Manage large allocations without disrupting the normal allocation and evacuation mechanisms.
+
+However, humongous allocations can still create fragmentation and collection challenges, so avoiding unnecessary large temporary arrays can be beneficial.
+
+## 12. Adaptive Heap Sizing and GC Tuning
+
+Configuration optimization
+
+The JVM can adjust some GC parameters according to application behavior and configured goals.
+
+For example, consider an application that has:
+
+```
+Maximum heap: 4 GB
+Current heap usage: 1 GB
+```
+
+The JVM does not necessarily need to commit or use the entire maximum heap immediately.
+
+It can adjust heap usage according to allocation rates, collection behavior, and available memory.
+
+### Important JVM parameters
+
+| Option                        | Purpose                                                        |
+| ----------------------------- | -------------------------------------------------------------- |
+| `-Xms`                        | Initial/minimum heap size                                      |
+| `-Xmx`                        | Maximum heap size                                              |
+| `-XX:MaxGCPauseMillis`        | Desired maximum pause-time goal for collectors that support it |
+| `-XX:ParallelGCThreads`       | Number of parallel GC worker threads                           |
+| `-XX:ConcGCThreads`           | Number of concurrent GC worker threads, where applicable       |
+| `-XX:+UseStringDeduplication` | Enable G1 string deduplication                                 |
+
+For example:
+
+```
+java \
+  -Xms512m \
+  -Xmx4g \
+  -XX:+UseG1GC \
+  -XX:MaxGCPauseMillis=200 \
+  -jar application.jar
+```
+
+This asks G1 to aim for pause times around 200 milliseconds.
+
+Important: `MaxGCPauseMillis` is a target, not a hard guarantee. The collector balances this goal against throughput and memory requirements.
+
+## 13. Class Unloading
+
+Metadata and class-loader memory optimization
+
+So far, we have mostly discussed ordinary Java objects.
+
+But the JVM also manages class metadata.
+
+For example, application servers, plugin systems, and frameworks may dynamically load classes.
+
+```
+ClassLoader A
+    |
+    +── Class A
+    +── Class B
+    +── Class C
+```
+
+If a class loader becomes unreachable and the necessary unloading conditions are satisfied, the JVM can unload its classes and reclaim associated class metadata.
+
+This is important for:
+
+- Application redeployment.
+- Plugin unloading.
+- Dynamic class generation.
+- Long-running application servers.
+
+Class unloading is not the same as ordinary object reclamation. It is associated with class-loader reachability and metadata management, commonly involving Metaspace.
+
+## 14. Reference Processing Optimization
+
+Java supports several special reference types:
+
+| Reference | Purpose                                                     |
+| --------- | ----------------------------------------------------------- |
+| Strong    | Normal references; keep objects reachable                   |
+| Soft      | Allow objects to be reclaimed under memory pressure         |
+| Weak      | Do not keep objects alive against weak-reference processing |
+| Phantom   | Support post-mortem cleanup coordination                    |
+
+For example:
+
+```
+WeakReference<User> reference =
+        new WeakReference<>(new User());
+```
+
+The JVM must process special references during garbage collection.
+
+This work can become significant when an application creates many weak, soft, or phantom references.
+
+Collectors use reference-processing mechanisms to discover and process these references efficiently.
+
+For modern resource cleanup, `Cleaner` or `AutoCloseable` is preferable to relying on finalization.
+
+## 15. GC optimization: What solves which problem?
+
+Here is a consolidated view.
+
+| Problem                                       | Optimization                  | Example                     |
+| --------------------------------------------- | ----------------------------- | --------------------------- |
+| Too many short-lived objects                  | Generational GC               | Young-generation collection |
+| Collection takes too long on one CPU          | Parallel GC                   | Parallel workers            |
+| Application pauses are too long               | Concurrent GC                 | ZGC, Shenandoah             |
+| Entire heap is expensive to scan              | Region-based collection       | G1                          |
+| Cross-region references are expensive to find | Remembered sets / card tables | G1                          |
+| Object allocation creates contention          | TLAB                          | HotSpot allocation          |
+| Temporary objects create GC pressure          | Escape analysis               | Scalar replacement          |
+| Duplicate strings consume memory              | String deduplication          | G1                          |
+| Large objects complicate allocation           | Humongous object handling     | G1                          |
+| Unused classes consume metadata               | Class unloading               | Class-loader reclamation    |
+| Heap sizing is unsuitable                     | Adaptive sizing and tuning    | G1 pause goals              |
+
+## 16. Which optimizations are used by which collectors?
+
+Not every optimization is implemented by every garbage collector.
+
+This table gives a simplified view of important HotSpot collector characteristics.
+
+| Optimization                          | Serial    | Parallel  | G1     | ZGC   | Shenandoah |
+| ------------------------------------- | --------- | --------- | ------ | ----- | ---------- |
+| Generational collection               | Yes       | Yes       | Yes    | Yes\* | Yes\*      |
+| Parallel GC workers                   | No        | Yes       | Yes    | Yes   | Yes        |
+| Concurrent marking                    | No        | No        | Yes    | Yes   | Yes        |
+| Concurrent relocation/evacuation      | No        | No        | No\*\* | Yes   | Yes        |
+| Region-based organization             | No        | No        | Yes    | Yes   | Yes        |
+| Remembered sets / equivalent tracking | Yes\*\*\* | Yes\*\*\* | Yes    | Yes   | Yes        |
+| String deduplication                  | No        | No        | Yes    | No    | No         |
+
+\* Modern ZGC and Shenandoah support generational modes in recent JDK releases. Their historical non-generational modes still exist in older releases.
+
+\*\* G1 evacuation is performed during Stop-the-World pauses, although marking and some other work happen concurrently.
+
+\*\*\* These collectors use remembered-set/card-table mechanisms, but their implementations differ from G1.
+
+## 17. How to observe GC optimizations in practice
+
+You can experiment with GC behavior using a small Java application.
+
+### Example: Generate temporary objects
+
+```
+import java.util.ArrayList;
+import java.util.List;
+
+public class GCDemo {
+
+    public static void main(String[] args) {
+
+        List<byte[]> retainedObjects = new ArrayList<>();
+
+        for (int i = 0; i < 100_000; i++) {
+
+            // Temporary allocation
+            byte[] temporary = new byte[1024];
+
+            // Retain some objects
+            if (i % 1000 == 0) {
+                retainedObjects.add(temporary);
+            }
+        }
+
+        System.out.println("Allocation completed");
+
+        // Keep retained objects reachable
+        System.out.println(retainedObjects.size());
+    }
+}
+```
+
+This program creates many objects that quickly become unreachable, while retaining a small number.
+
+### Run with different collectors
+
+```
+# G1
+java -XX:+UseG1GC GCDemo
+
+# Parallel
+java -XX:+UseParallelGC GCDemo
+
+# Serial
+java -XX:+UseSerialGC GCDemo
+
+# ZGC (if supported)
+java -XX:+UseZGC GCDemo
+```
+
+### Enable GC logging
+
+For modern Java versions:
+
+```
+java -Xlog:gc* GCDemo
+```
+
+You can observe:
+
+- GC frequency.
+- Young and old collection activity.
+- Pause durations.
+- Heap occupancy before and after collection.
+- Concurrent GC phases.
+- Region activity for G1.
+
+For more detailed GC logs:
+
+```
+java -Xlog:gc*=debug GCDemo
+```
+
+You can also use Java Flight Recorder (JFR) and Java Mission Control (JMC) to investigate allocation rates, GC pauses, and application behavior.
+
+## 18. Recommended study order
+
+For your JVM internals documentation, I would organize GC optimizations like this:
+
+```
+garbage-collection/
+├── gc-algorithms/
+│   ├── mark-sweep
+│   ├── mark-compact
+│   └── copying
+│
+├── gc-optimizations/
+│   ├── overview
+│   ├── generational-optimization/
+│   │   ├── generational-hypothesis
+│   │   ├── young-generation-collection
+│   │   └── object-promotion
+│   │
+│   ├── collection-execution/
+│   │   ├── stop-the-world
+│   │   ├── parallel-collection
+│   │   ├── concurrent-collection
+│   │   └── incremental-collection
+│   │
+│   ├── heap-organization/
+│   │   ├── region-based-collection
+│   │   ├── remembered-sets
+│   │   ├── card-tables
+│   │   └── humongous-objects
+│   │
+│   ├── allocation-optimization/
+│   │   ├── tlab
+│   │   ├── escape-analysis
+│   │   ├── scalar-replacement
+│   │   └── lock-elimination
+│   │
+│   ├── memory-optimization/
+│   │   ├── string-deduplication
+│   │   ├── class-unloading
+│   │   └── reference-processing
+│   │
+│   └── adaptive-optimization/
+│       ├── adaptive-heap-sizing
+│       ├── pause-time-goals
+│       └── gc-tuning
+│
+├── collectors/
+│   ├── serial-gc
+│   ├── parallel-gc
+│   ├── g1-gc
+│   ├── zgc
+│   └── shenandoah
+│
+└── gc-monitoring/
+    ├── gc-logging
+    ├── jfr
+    ├── jmc
+    └── gc-performance-analysis
+```
+
+### My recommendation
+
+For an in-depth JVM study, prioritize these five topics:
+
+1. Generational GC: Understand Eden, Survivor spaces, object aging, and promotion.
+2. Parallel vs. Concurrent GC: Understand the difference between throughput and latency.
+3. Remembered Sets and Card Tables: Understand how the JVM avoids scanning the entire heap.
+4. TLAB and Escape Analysis: Understand how the JVM reduces allocation overhead and GC pressure.
+5. G1 GC: Bring all these concepts together in a real collector.
+
+One particularly useful next step is to study G1 GC internals. It demonstrates how region-based heap organization, remembered sets, concurrent marking, evacuation, and pause-time prediction work together in an actual JVM garbage collector.

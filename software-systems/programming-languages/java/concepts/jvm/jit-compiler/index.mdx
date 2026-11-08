@@ -1,0 +1,669 @@
+# JIT Compiler (Just-In-Time Compiler) in Java
+
+The JIT (Just-In-Time) Compiler is a component of the JVM that improves Java application performance by compiling frequently executed Java bytecode into native machine code at runtime.
+
+The interesting part is that Java doesn't normally compile the entire application into machine code before execution. Instead, it combines two execution approaches:
+
+1. Interpretation: The JVM executes bytecode instructions one at a time.
+2. JIT Compilation: The JVM identifies frequently executed code and compiles it into native machine code for faster execution.
+
+Let's understand how this works internally.
+
+## 1. Where does the JIT Compiler fit into JVM architecture?
+
+Recall the JVM architecture we discussed earlier:
+
+[コンパイル前の動作 — OpenJDK Internals 1.0 documentation](https://images.openai.com/static-rsc-4/ldrrFcacRu2vsIQBuYu4wEfAd3y-slfOmepjI51cA_9TZ4wapGMnqF0izgotZPijGDwy5_7ZW9WvYamTM2LUvGayiNYvkFPkCkZV8_4oZ-2pm31ZkwbJqKuaedhsEM1YY_MrTKLjB9AT5GRFD19FX0Vi8Y4sbVFwgbZb-VCSkEU?purpose=inline)
+
+[nothingcosmos.github.io](https://nothingcosmos.github.io/OpenJDKOverview/src/precompile.html?utm_source=chatgpt.com)
+
+The JIT compiler is part of the Execution Engine.
+
+The relevant components are:
+
+| Component         | Responsibility                                                  |
+| ----------------- | --------------------------------------------------------------- |
+| Interpreter       | Executes bytecode instructions directly.                        |
+| JIT Compiler      | Compiles frequently executed bytecode into native machine code. |
+| Code Cache        | Stores compiled native machine code.                            |
+| Garbage Collector | Manages heap memory and reclaims unreachable objects.           |
+
+The Execution Engine uses the interpreter and JIT compiler together.
+
+## 2. Why does Java need a JIT Compiler?
+
+Let's start with how Java code executes.
+
+Consider this example:
+
+```
+public class Main {
+
+    public static int calculate(int x) {
+        return x * 2;
+    }
+
+    public static void main(String[] args) {
+
+        for (int i = 0; i < 1_000_000; i++) {
+            calculate(i);
+        }
+    }
+}
+```
+
+When you compile this program:
+
+```
+javac Main.java
+```
+
+Java generates bytecode:
+
+```
+Main.class
+```
+
+The bytecode is platform-independent, but your CPU cannot execute Java bytecode directly.
+
+The JVM must execute it somehow.
+
+There are two approaches.
+
+### Approach 1: Interpreter
+
+The interpreter reads bytecode instructions and executes them individually.
+
+Conceptually:
+
+```
+Java Bytecode
+      |
+      v
+  Interpreter
+      |
+      v
+CPU Machine Instructions
+```
+
+For example, the method:
+
+```
+public static int calculate(int x) {
+    return x * 2;
+}
+```
+
+Might have bytecode similar to:
+
+```
+iload_0
+iconst_2
+imul
+ireturn
+```
+
+The interpreter executes these instructions.
+
+The problem: If a method executes one million times, the JVM repeatedly interprets its bytecode.
+
+This introduces interpretation overhead.
+
+### Approach 2: JIT Compiler
+
+Instead of interpreting frequently executed methods repeatedly, the JVM can compile them into native machine code.
+
+```
+Java Bytecode
+      |
+      v
+  JIT Compiler
+      |
+      v
+Native Machine Code
+      |
+      v
+     CPU
+```
+
+Now, subsequent calls can execute the compiled machine code directly.
+
+This significantly reduces execution overhead.
+
+## 3. How does the JIT Compiler work?
+
+This is the most important part.
+
+The JVM doesn't immediately compile every method into native machine code.
+
+Instead, it uses a technique called HotSpot Detection.
+
+A method or code section that executes frequently is called hot code.
+
+The process looks like this:
+
+[What Happens After We Hit Compile in Java? | belief driven design](https://images.openai.com/static-rsc-4/Fag-5b6znDVBSzkroi3jybTJRzzLqk2WgGs8eb7042CoqTJtHiLw3L2ickHsj55XDBd_iGfKlYIPj53Y_xSo1Hj8gLppCaMLAG8MTdXi4yEfUh5RL9pk9TTF4QUxKv01_ewZtyRpZl9NWiDR6yCaJDAQCKFNFHFCp94-AYDPG_Y?purpose=inline)
+
+[belief-driven-design.com](https://belief-driven-design.com/what-happens-after-compile-java-315fe/?utm_source=chatgpt.com)
+
+Let's break it down.
+
+Step 1: Load and execute bytecode
+
+The class loader loads the class, and the JVM starts executing its bytecode.
+
+Step 2: Interpret methods
+
+Initially, methods may execute through the interpreter.
+
+Step 3: Collect profiling information
+
+While executing, the JVM collects runtime information, such as:
+
+- How frequently a method is called.
+- How frequently a loop executes.
+- Which types of objects are passed to a method.
+- Which branches are frequently taken.
+
+Step 4: Identify hot methods
+
+The JVM identifies methods or loops that execute frequently.
+
+Step 5: Compile hot code
+
+The JIT compiler compiles selected bytecode into native machine code.
+
+Step 6: Execute compiled code
+
+The JVM can now execute the compiled version instead of repeatedly interpreting the same bytecode.
+
+The resulting native code is stored in the JVM's Code Cache.
+
+## 4. C1 and C2 Compilers
+
+The HotSpot JVM traditionally uses two main JIT compilers:
+
+- C1 (Client Compiler)
+- C2 (Server Compiler)
+
+They have different optimization strategies.
+
+| Feature              | C1 Compiler                    | C2 Compiler                    |
+| -------------------- | ------------------------------ | ------------------------------ |
+| Compilation speed    | Faster                         | Slower                         |
+| Optimization level   | Moderate                       | Aggressive                     |
+| Compilation overhead | Lower                          | Higher                         |
+| Generated code       | Good performance               | Usually highly optimized       |
+| Main objective       | Reduce startup and warmup time | Maximize execution performance |
+
+### C1 Compiler
+
+C1 performs relatively fast compilation with moderate optimizations.
+
+It is useful when the JVM wants to improve performance quickly without spending too much time compiling.
+
+### C2 Compiler
+
+C2 performs more aggressive optimizations.
+
+It uses profiling information gathered during execution to generate highly optimized machine code.
+
+For example, it can perform:
+
+- Method inlining.
+- Loop optimizations.
+- Dead code elimination.
+- Escape analysis.
+- Lock elimination.
+- Devirtualization.
+
+We will examine these optimizations shortly.
+
+## 5. Tiered Compilation
+
+Modern HotSpot JVMs commonly use Tiered Compilation.
+
+Instead of choosing only C1 or C2, the JVM can progressively optimize code through multiple compilation levels.
+
+| Level | Execution strategy                       |
+| ----- | ---------------------------------------- |
+| 0     | Interpreter                              |
+| 1     | C1, simple compilation without profiling |
+| 2     | C1, limited profiling                    |
+| 3     | C1, full profiling                       |
+| 4     | C2, aggressive optimization              |
+
+The general execution flow looks like this:
+
+```
+          Java Bytecode
+                |
+                v
+           Interpreter
+             Level 0
+                |
+                v
+        Frequently Executed?
+                |
+                v
+          C1 Compiler
+          Levels 1-3
+                |
+                v
+        Collect Profiling Data
+                |
+                v
+          C2 Compiler
+             Level 4
+                |
+                v
+       Optimized Native Code
+                |
+                v
+               CPU
+```
+
+Note that this is a conceptual progression. Not every method passes through every level.
+
+Tiered compilation is enabled by default in modern HotSpot JVM configurations.
+
+## 6. JIT Compiler Optimizations
+
+This is where the JIT compiler becomes particularly interesting.
+
+Unlike a traditional ahead-of-time compiler, the JIT compiler has access to actual runtime behavior.
+
+It can use this information to optimize code based on how the application really executes.
+
+Let's examine some important optimizations.
+
+### 6.1 Method Inlining
+
+Suppose you have:
+
+```
+public class Calculator {
+
+    public int doubleValue(int x) {
+        return x * 2;
+    }
+
+    public int calculate(int x) {
+        return doubleValue(x) + 10;
+    }
+}
+```
+
+Normally, calling `doubleValue()` involves method invocation overhead.
+
+The JIT compiler might replace:
+
+```
+return doubleValue(x) + 10;
+```
+
+With:
+
+```
+return (x * 2) + 10;
+```
+
+This is called Method Inlining.
+
+Benefits:
+
+- Reduces method invocation overhead.
+- Enables further optimizations.
+- Improves execution performance.
+
+### 6.2 Dead Code Elimination
+
+Consider:
+
+```
+public int calculate() {
+
+    int a = 10;
+    int b = 20;
+
+    int unused = a + b;
+
+    return a * 2;
+}
+```
+
+The variable `unused` doesn't affect the result.
+
+The JIT compiler can eliminate unnecessary calculations.
+
+Optimized equivalent:
+
+```
+public int calculate() {
+    return 20;
+}
+```
+
+### 6.3 Loop Optimization
+
+Consider:
+
+```
+public int calculate() {
+
+    int result = 0;
+
+    for (int i = 0; i < 1000; i++) {
+        result += i;
+    }
+
+    return result;
+}
+```
+
+The JIT compiler can optimize loops using techniques such as:
+
+- Loop unrolling.
+- Loop invariant code motion.
+- Range-check elimination.
+
+For example, loop unrolling reduces loop-control overhead by performing multiple iterations within one loop iteration.
+
+### 6.4 Escape Analysis
+
+This is an especially interesting optimization.
+
+Consider:
+
+```
+public int calculate() {
+
+    Point point = new Point(10, 20);
+
+    return point.x + point.y;
+}
+```
+
+Suppose:
+
+```
+class Point {
+    int x;
+    int y;
+
+    Point(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+}
+```
+
+Normally, creating `Point` means allocating an object on the heap.
+
+However, the JIT compiler may determine that this object never escapes the method.
+
+It can potentially eliminate the object allocation entirely through Scalar Replacement.
+
+The optimized code may effectively become:
+
+```
+public int calculate() {
+    return 10 + 20;
+}
+```
+
+This avoids unnecessary object allocation.
+
+Important: Escape analysis does not simply mean that every local object gets allocated on the stack. Scalar replacement can eliminate the allocation altogether.
+
+### 6.5 Lock Elimination
+
+Consider:
+
+```
+public void calculate() {
+
+    Object lock = new Object();
+
+    synchronized (lock) {
+        // Some calculation
+    }
+}
+```
+
+If the JIT compiler proves that `lock` cannot be accessed by another thread, it may eliminate the synchronization entirely.
+
+This is called Lock Elimination.
+
+It reduces synchronization overhead.
+
+## 7. Deoptimization: Can the JVM Undo JIT Compilation?
+
+Yes!
+
+This is one of the most interesting characteristics of the HotSpot JIT compiler.
+
+The JIT compiler sometimes makes optimizations based on assumptions derived from profiling information.
+
+For example:
+
+```
+public int calculate(Number number) {
+    return number.intValue();
+}
+```
+
+Suppose profiling shows that this method almost always receives an `Integer`.
+
+The JIT compiler might optimize the method assuming that `Integer` is the common receiver type.
+
+Later, the application passes a different implementation of `Number`.
+
+The previous optimization may no longer be valid.
+
+The JVM can perform Deoptimization:
+
+```
+        Optimized Native Code
+                |
+                v
+       Assumption Violated?
+                |
+           Yes  |
+                v
+          Deoptimization
+                |
+                v
+      Reconstruct Interpreter State
+                |
+                v
+        Resume Interpretation
+                |
+                v
+       Collect New Profiling Data
+                |
+                v
+         Recompile if Needed
+```
+
+The JVM can return execution to interpreted code or less aggressively compiled code, and may later recompile using updated profiling information.
+
+This allows the JVM to make aggressive optimizations while preserving correct program behavior.
+
+## 8. JIT Compiler vs AOT Compiler
+
+You might wonder how JIT differs from traditional compilation.
+
+AOT (Ahead-Of-Time) compilation generates native machine code before the application runs.
+
+| Feature              | JIT                             | AOT                                         |
+| -------------------- | ------------------------------- | ------------------------------------------- |
+| Compilation time     | Runtime                         | Before runtime                              |
+| Runtime profiling    | Available                       | Generally unavailable during compilation    |
+| Startup overhead     | Compilation and warmup overhead | Often lower                                 |
+| Runtime optimization | Can use actual runtime behavior | Depends on available build-time information |
+| Output               | Native machine code             | Native machine code                         |
+
+Java also supports AOT-related technologies.
+
+For example, GraalVM Native Image can compile Java applications into native executables before deployment.
+
+This can significantly improve startup time and reduce memory consumption, although it introduces different trade-offs and constraints.
+
+## 9. How to Observe JIT Compilation Yourself
+
+You can observe the JVM compiling methods using JVM diagnostic options.
+
+Create this example:
+
+```
+public class JitDemo {
+
+    public static int calculate(int x) {
+        return x * 2;
+    }
+
+    public static void main(String[] args) {
+
+        long result = 0;
+
+        for (int i = 0; i < 10_000_000; i++) {
+            result += calculate(i);
+        }
+
+        System.out.println(result);
+    }
+}
+```
+
+Run:
+
+```
+javac JitDemo.java
+```
+
+Then:
+
+```
+java -XX:+PrintCompilation JitDemo
+```
+
+You may see output similar to:
+
+```
+     75    1       3       JitDemo::calculate (4 bytes)
+     82    2       4       JitDemo::calculate (4 bytes)
+```
+
+Interpretation:
+
+| Field              | Meaning                                              |
+| ------------------ | ---------------------------------------------------- |
+| 75 / 82            | Compilation timestamp (milliseconds since JVM start) |
+| 1 / 2              | Compilation task ID                                  |
+| 3 / 4              | Compilation level                                    |
+| JitDemo::calculate | Compiled method                                      |
+| 4 bytes            | Bytecode size                                        |
+
+Here:
+
+- Level 3 indicates C1 compilation with full profiling.
+- Level 4 indicates C2 compilation.
+
+The exact output depends on JVM version, runtime conditions, and compilation decisions.
+
+Other useful JVM options:
+
+| Option                           | Purpose                                                                                         |
+| -------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `-XX:+PrintCompilation`          | Print compilation events                                                                        |
+| `-XX:+UnlockDiagnosticVMOptions` | Enable additional diagnostic options                                                            |
+| `-XX:+PrintInlining`             | Print method inlining decisions                                                                 |
+| `-XX:CompileThreshold=...`       | Legacy compilation threshold control; not a reliable modern tiered-compilation tuning mechanism |
+| `-XX:-TieredCompilation`         | Disable tiered compilation                                                                      |
+
+For modern JVM performance investigation, also explore Java Flight Recorder (JFR) and JIT compilation events.
+
+## 10. Complete Execution Lifecycle
+
+Let's connect everything we have discussed.
+
+[Behind the Scenes: How JVM Actually Executes Your Code | by KanakSingh | Medium](https://images.openai.com/static-rsc-4/0E-IHi9Qn3eLLjCA5e2tMJOYZ7ixw_uYp6vJEUNFH0D5ASt4f3QJlST3cYbDNFfv8ekA2RGFlT9aOSpnMKDAjV1ZyAWagkzn8Q9Dr3Kk9kA_wNLrtsdfX6V236NPlFJQOILqYeZxB8Wb2R1EqbFp5EO7f71pjmRgafRxizODMBs?purpose=inline)
+
+[medium.com](https://medium.com/%40kanaksinghh/behind-the-scenes-how-jvm-actually-executes-your-code-bada3f28d847?utm_source=chatgpt.com)
+
+The lifecycle can be summarized as:
+
+1. `javac` compiles Java source code into bytecode.
+2. The JVM loads classes.
+3. The interpreter begins executing bytecode.
+4. The JVM collects profiling information.
+5. Hot methods are identified.
+6. C1 compiles methods relatively quickly.
+7. C2 may further optimize frequently executed methods.
+8. Native machine code is stored in the Code Cache.
+9. The CPU executes the compiled machine code.
+10. If an optimization assumption becomes invalid, the JVM can deoptimize and resume execution safely.
+
+## 11. Where does JIT fit in your JVM study TOC?
+
+I recommend organizing your JVM execution section like this:
+
+```
+JVM Architecture
+│
+├── Class Loader Subsystem
+│   ├── Loading
+│   ├── Linking
+│   └── Initialization
+│
+├── Runtime Data Areas
+│   ├── Heap
+│   ├── Java Stacks
+│   ├── Method Area
+│   ├── PC Registers
+│   └── Native Method Stacks
+│
+├── Execution Engine
+│   ├── Interpreter
+│   │
+│   ├── JIT Compiler
+│   │   ├── Overview
+│   │   ├── HotSpot Detection
+│   │   ├── C1 Compiler
+│   │   ├── C2 Compiler
+│   │   ├── Tiered Compilation
+│   │   ├── JIT Optimizations
+│   │   │   ├── Method Inlining
+│   │   │   ├── Dead Code Elimination
+│   │   │   ├── Loop Optimizations
+│   │   │   ├── Escape Analysis
+│   │   │   ├── Scalar Replacement
+│   │   │   ├── Lock Elimination
+│   │   │   └── Devirtualization
+│   │   ├── Deoptimization
+│   │   ├── Code Cache
+│   │   └── JIT Monitoring and Diagnostics
+│   │
+│   └── Garbage Collector
+│
+└── Native Interface (JNI)
+```
+
+## 12. Important related concepts to study next
+
+I recommend this learning sequence:
+
+| Topic                | Why it matters                                       |
+| -------------------- | ---------------------------------------------------- |
+| Interpreter vs JIT   | Understand the two execution mechanisms              |
+| HotSpot JVM          | Understand the JVM implementation                    |
+| C1 and C2            | Understand compilation strategies                    |
+| Tiered Compilation   | Understand progressive optimization                  |
+| Method Inlining      | Understand a major JIT optimization                  |
+| Escape Analysis      | Understand allocation optimization                   |
+| Deoptimization       | Understand how speculative optimizations remain safe |
+| Code Cache           | Understand where compiled code resides               |
+| Java Flight Recorder | Observe JVM runtime behavior                         |
+
+My recommendation: Study HotSpot Detection → Tiered Compilation → Method Inlining → Escape Analysis → Deoptimization in that order. These concepts will give you a strong understanding of how modern Java applications achieve high runtime performance.

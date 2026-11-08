@@ -1,0 +1,658 @@
+---
+id: find the fewest number of flights between two cities when every flight
+title: Find the Fewest Flights Between Two Cities Using BFS
+---
+
+## 1. Lab overview
+
+In this lab, you'll build a program that finds the minimum number of flights needed to travel from one city to another, assuming every direct flight counts as one edge and all flights have equal cost.
+
+For example, suppose the available flights are:
+
+```
+                 Cairo
+                /     \
+           Athens     Dubai
+             |        /   \
+          London   Tokyo   Paris
+             \       /
+              \-----/
+```
+
+A route from Cairo to London could be:
+
+```
+Cairo → Athens → London
+```
+
+That route takes 2 flights. BFS can find it without trying every possible route.
+
+The key idea is that BFS explores cities in increasing order of the number of flights from the starting city:
+
+- Level 0: 0 flights from the source.
+- Level 1: reachable with 1 flight.
+- Level 2: reachable with 2 flights.
+- And so on.
+
+Important: This lab minimizes the number of flights, not total travel time, ticket price, or distance. If flights have different costs, ordinary BFS is not generally the right algorithm.
+
+## 2. Learning objectives
+
+By completing this lab, you will learn to:
+
+- Model a transportation network as a graph.
+- Represent a graph using an adjacency list.
+- Apply BFS with a queue and a visited array or set.
+- Track each city's predecessor to reconstruct the route.
+- Prove why BFS finds the fewest flights in an unweighted graph.
+- Analyze time and space complexity.
+- Implement and test the same algorithm in C and Java.
+
+## 3. Problem statement
+
+Given:
+
+- A set of cities.
+- A list of direct flights between cities.
+- A source city.
+- A destination city.
+
+Find a route that uses the minimum number of direct flights.
+
+Assume flights are bidirectional in the initial version: if a direct flight connects Cairo and Athens, either city can be reached from the other. We'll discuss one-way flights as an extension.
+
+If no route exists, report that the destination is unreachable.
+
+### Sample input
+
+We'll use this network in both implementations.
+
+```
+Cities:
+0 = Cairo
+1 = Athens
+2 = Dubai
+3 = London
+4 = Paris
+5 = Tokyo
+6 = Rome
+
+Direct flights:
+Cairo  -- Athens
+Cairo  -- Dubai
+Athens -- London
+Athens -- Paris
+Dubai  -- Paris
+Dubai  -- Tokyo
+London -- Rome
+Paris  -- Rome
+
+Source: Cairo
+Destination: Rome
+```
+
+### Expected result
+
+```
+Fewest flights: 3
+Route: Cairo -> Athens -> London -> Rome
+```
+
+Another route also takes 3 flights:
+
+```
+Cairo -> Athens -> Paris -> Rome
+```
+
+BFS is allowed to return either shortest route. The exact route depends on the order in which neighbors are processed.
+
+## 4. Understand the graph and data structures
+
+We will represent the network as an undirected, unweighted graph:
+
+```math
+ G=(V,E) 
+```
+
+- $V$: the set of cities (vertices).
+- $E$: the set of direct flights (edges).
+- Each edge has a cost of 1 flight.
+- The source is Cairo, and the destination is Rome.
+
+### Graph representation: adjacency list
+
+An adjacency list stores the neighbors of each city.
+
+```
+Cairo:  Athens, Dubai
+Athens: Cairo, London, Paris
+Dubai:  Cairo, Paris, Tokyo
+London: Athens, Rome
+Paris:  Athens, Dubai, Rome
+Tokyo:  Dubai
+Rome:   London, Paris
+```
+
+This representation is a good fit because we only need to explore cities directly connected to the current city.
+
+For an undirected graph, each flight is stored twice: once in each city's neighbor list.
+
+### The three core data structures
+
+| Data structure           | Purpose                                              |
+| ------------------------ | ---------------------------------------------------- |
+| Adjacency list           | Finds the direct neighbors of a city                 |
+| Queue                    | Processes discovered cities in FIFO order            |
+| Visited array/set        | Prevents repeated visits and cycles                  |
+| Parent/predecessor array | Remembers how each city was reached                  |
+| Distance array           | Stores the minimum number of flights from the source |
+
+The distance and parent arrays are particularly important. Finding a destination is not enough—we want to return the actual route and the number of flights.
+
+## 5. BFS algorithm: step by step
+
+BFS works because it processes all cities at distance $d$ before processing cities at distance $d+1$.
+
+We initialize:
+
+```
+dist[Cairo]  = 0
+parent[Cairo] = NONE
+
+dist[all other cities]   = INFINITY
+parent[all other cities] = NONE
+```
+
+Then we enqueue Cairo.
+
+### Step 1 — Visit Cairo
+
+```
+Queue: [Cairo]
+
+Cairo is 0 flights away.
+```
+
+Its neighbors are Athens and Dubai, so we discover both.
+
+```
+Queue: [Athens, Dubai]
+
+dist[Athens] = 1
+dist[Dubai]  = 1
+
+parent[Athens] = Cairo
+parent[Dubai]  = Cairo
+```
+
+### Step 2 — Visit Athens
+
+Athens is removed from the front of the queue. Its neighbors are Cairo, London, and Paris.
+
+Cairo has already been visited, so we skip it. We discover London and Paris.
+
+```
+Queue: [Dubai, London, Paris]
+
+dist[London] = 2
+dist[Paris]  = 2
+
+parent[London] = Athens
+parent[Paris]  = Athens
+```
+
+### Step 3 — Visit Dubai
+
+Dubai is two steps away from some cities, but its own distance is still 1.
+
+We discover Tokyo. Paris has already been discovered through Athens, so we do not overwrite its parent.
+
+```
+Queue: [London, Paris, Tokyo]
+
+dist[Tokyo] = 2
+parent[Tokyo] = Dubai
+```
+
+### Step 4 — Visit London
+
+London's neighbors are Athens and Rome. Athens is already visited, but Rome is not.
+
+```
+Queue: [Paris, Tokyo, Rome]
+
+dist[Rome] = 3
+parent[Rome] = London
+```
+
+The destination has been discovered at distance 3. We can stop as soon as it is discovered, provided we mark it visited and record its parent at that moment.
+
+### Step 5 — Reconstruct the route
+
+The parent array points backward from the destination:
+
+```
+Rome
+  |
+  v
+London
+  |
+  v
+Athens
+  |
+  v
+Cairo
+```
+
+Reverse this sequence:
+
+```
+Cairo -> Athens -> London -> Rome
+```
+
+The minimum number of flights is 3.
+
+### Why does BFS guarantee the minimum?
+
+Suppose Rome could be reached in only 2 flights. BFS would have discovered every city reachable within 2 flights before it processed cities at distance 2 and discovered Rome at distance 3.
+
+Since BFS processes vertices in nondecreasing distance order, the first discovery of Rome must use the fewest edges.
+
+This is the key property that makes BFS appropriate for shortest paths in unweighted graphs.
+
+## 6. Implementation in C
+
+This version uses:
+
+- A linked-list adjacency list.
+- An array-based queue.
+- `visited[]` to avoid revisiting cities.
+- `parent[]` to reconstruct the route.
+- `distance[]` to count flights.
+
+The city names are mapped to integer IDs, which makes the graph operations simple and efficient.
+
+```
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#define V 7
+
+enum City {
+    CAIRO, ATHENS, DUBAI, LONDON,
+    PARIS, TOKYO, ROME
+};
+
+const char *city_names[V] = {
+    "Cairo", "Athens", "Dubai", "London",
+    "Paris", "Tokyo", "Rome"
+};
+
+// A linked-list node represents one neighboring city.
+typedef struct Node {
+    int city;
+    struct Node *next;
+} Node;
+
+Node *adj[V] = { NULL };
+
+// Add a directed edge to an adjacency list.
+void addDirectedEdge(int from, int to) {
+    Node *node = malloc(sizeof(Node));
+
+    if (node == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        exit(EXIT_FAILURE);
+    }
+
+    node->city = to;
+    node->next = adj[from];
+    adj[from] = node;
+}
+
+// Flights are bidirectional in this lab.
+void addFlight(int a, int b) {
+    addDirectedEdge(a, b);
+    addDirectedEdge(b, a);
+}
+
+void findFewestFlights(int source, int destination) {
+    int visited[V] = { 0 };
+    int parent[V];
+    int distance[V];
+
+    // A queue can hold each city at most once.
+    int queue[V];
+    int front = 0;
+    int rear = 0;
+
+    for (int i = 0; i < V; i++) {
+        parent[i] = -1;
+        distance[i] = -1;
+    }
+
+    // Initialize BFS.
+    visited[source] = 1;
+    distance[source] = 0;
+    queue[rear++] = source;
+
+    while (front < rear) {
+        int current = queue[front++];
+
+        // Stop when the destination is dequeued.
+        if (current == destination) {
+            break;
+        }
+
+        for (Node *edge = adj[current];
+             edge != NULL;
+             edge = edge->next) {
+
+            int neighbor = edge->city;
+
+            if (!visited[neighbor]) {
+                visited[neighbor] = 1;
+                parent[neighbor] = current;
+                distance[neighbor] = distance[current] + 1;
+
+                queue[rear++] = neighbor;
+            }
+        }
+    }
+
+    if (!visited[destination]) {
+        printf("No route from %s to %s.\n",
+               city_names[source],
+               city_names[destination]);
+        return;
+    }
+
+    // Reconstruct the route backward from destination.
+    int path[V];
+    int path_length = 0;
+
+    for (int city = destination;
+         city != -1;
+         city = parent[city]) {
+        path[path_length++] = city;
+    }
+
+    printf("Fewest flights: %d\n", distance[destination]);
+    printf("Route: ");
+
+    // Print the path in source-to-destination order.
+    for (int i = path_length - 1; i >= 0; i--) {
+        printf("%s", city_names[path[i]]);
+
+        if (i > 0) {
+            printf(" -> ");
+        }
+    }
+
+    printf("\n");
+}
+
+// Free the adjacency-list nodes.
+void freeGraph(void) {
+    for (int i = 0; i < V; i++) {
+        Node *current = adj[i];
+
+        while (current != NULL) {
+            Node *next = current->next;
+            free(current);
+            current = next;
+        }
+    }
+}
+
+int main(void) {
+    addFlight(CAIRO, ATHENS);
+    addFlight(CAIRO, DUBAI);
+    addFlight(ATHENS, LONDON);
+    addFlight(ATHENS, PARIS);
+    addFlight(DUBAI, PARIS);
+    addFlight(DUBAI, TOKYO);
+    addFlight(LONDON, ROME);
+    addFlight(PARIS, ROME);
+
+    findFewestFlights(CAIRO, ROME);
+
+    freeGraph();
+    return 0;
+}
+
+```
+
+### Compile and run
+
+Save the program as `flights.c`.
+
+```
+gcc -std=c11 -Wall -Wextra -pedantic flights.c -o flights
+./flights
+```
+
+One valid output is:
+
+```
+Fewest flights: 3
+Route: Cairo -> Dubai -> Paris -> Rome
+```
+
+The C implementation inserts neighbors at the beginning of each linked list, so it processes them in reverse insertion order. That's why it can return a different route than the Java implementation. Both routes are optimal.
+
+## 7. Implementation in Java
+
+In Java, we'll use `List<List<Integer>>` for the adjacency list and `ArrayDeque<Integer>` for the BFS queue.
+
+Compared with C, Java handles the adjacency-list memory management for us. The underlying BFS algorithm remains the same.
+
+```
+
+import java.util.*;
+
+public class FlightPlanner {
+    private static final String[] CITIES = {
+        "Cairo", "Athens", "Dubai", "London",
+        "Paris", "Tokyo", "Rome"
+    };
+
+    private static final int V = CITIES.length;
+
+    private final List<List<Integer>> graph =
+            new ArrayList<>();
+
+    public FlightPlanner() {
+        for (int i = 0; i < V; i++) {
+            graph.add(new ArrayList<>());
+        }
+    }
+
+    // Add a bidirectional flight.
+    public void addFlight(int a, int b) {
+        graph.get(a).add(b);
+        graph.get(b).add(a);
+    }
+
+    public void findFewestFlights(int source, int destination) {
+        boolean[] visited = new boolean[V];
+        int[] parent = new int[V];
+        int[] distance = new int[V];
+
+        Arrays.fill(parent, -1);
+        Arrays.fill(distance, -1);
+
+        Queue<Integer> queue = new ArrayDeque<>();
+
+        // The source is zero flights away from itself.
+        visited[source] = true;
+        distance[source] = 0;
+        queue.offer(source);
+
+        while (!queue.isEmpty()) {
+            int current = queue.poll();
+
+            if (current == destination) {
+                break;
+            }
+
+            for (int neighbor : graph.get(current)) {
+                if (!visited[neighbor]) {
+                    visited[neighbor] = true;
+                    parent[neighbor] = current;
+                    distance[neighbor] = distance[current] + 1;
+
+                    queue.offer(neighbor);
+                }
+            }
+        }
+
+        if (!visited[destination]) {
+            System.out.println(
+                    "No route from " + CITIES[source]
+                    + " to " + CITIES[destination] + ".");
+            return;
+        }
+
+        // Follow parent links backward, then reverse the route.
+        List<Integer> path = new ArrayList<>();
+
+        for (int city = destination;
+             city != -1;
+             city = parent[city]) {
+            path.add(city);
+        }
+
+        Collections.reverse(path);
+
+        System.out.println(
+                "Fewest flights: " + distance[destination]);
+
+        System.out.print("Route: ");
+
+        for (int i = 0; i < path.size(); i++) {
+            System.out.print(CITIES[path.get(i)]);
+
+            if (i < path.size() - 1) {
+                System.out.print(" -> ");
+            }
+        }
+
+        System.out.println();
+    }
+
+    public static void main(String[] args) {
+        FlightPlanner planner = new FlightPlanner();
+
+        planner.addFlight(0, 1); // Cairo -- Athens
+        planner.addFlight(0, 2); // Cairo -- Dubai
+        planner.addFlight(1, 3); // Athens -- London
+        planner.addFlight(1, 4); // Athens -- Paris
+        planner.addFlight(2, 4); // Dubai -- Paris
+        planner.addFlight(2, 5); // Dubai -- Tokyo
+        planner.addFlight(3, 6); // London -- Rome
+        planner.addFlight(4, 6); // Paris -- Rome
+
+        planner.findFewestFlights(0, 6);
+    }
+}
+
+```
+
+### Compile and run
+
+Save the program as `FlightPlanner.java`.
+
+```
+javac FlightPlanner.java
+java FlightPlanner
+```
+
+Expected output:
+
+```
+Fewest flights: 3
+Route: Cairo -> Athens -> London -> Rome
+```
+
+## 8. Testing the algorithm
+
+A good algorithm lab should test more than the normal case. Try these scenarios in both implementations.
+
+| Test case                | Source | Destination      | Expected result                   |
+| ------------------------ | ------ | ---------------- | --------------------------------- |
+| Direct flight            | Cairo  | Athens           | 1 flight                          |
+| Multiple flights         | Cairo  | Rome             | 3 flights                         |
+| Same city                | Cairo  | Cairo            | 0 flights                         |
+| Unreachable city         | Cairo  | An isolated city | No route                          |
+| Multiple shortest routes | Cairo  | Rome             | Any valid 3-flight route          |
+| Cyclic graph             | Cairo  | Rome             | Still 3 flights; no infinite loop |
+
+To test an isolated city, add a new vertex with no edges. In a fixed-size C implementation, increase `V` and add its name. In Java, add it to the city list and update the graph size.
+
+One important edge case is source equals destination. The route should contain just that city, and the distance should be zero.
+
+## 9. Complexity analysis
+
+Let $V$ be the number of cities and $E$ the number of bidirectional flight connections.
+
+| Operation                                      | Time complexity |
+| ---------------------------------------------- | --------------- |
+| Build the adjacency list                       | $O(V+E)$    |
+| Initialize visited, parent and distance arrays | $O(V)$      |
+| BFS traversal                                  | $O(V+E)$    |
+| Reconstruct the route                          | $O(V)$      |
+| Total                                          | $O(V+E)$    |
+
+The adjacency list occupies $O(V+E)$ space. The queue, visited array, parent array, distance array and reconstructed path use another $O(V)$ space.
+
+Therefore, the overall complexity is:
+
+```math
+ \boxed{\text{Time: }O(V+E)} 
+```
+
+```math
+ \boxed{\text{Space: }O(V+E)} 
+```
+
+This is one reason adjacency lists are a good choice for sparse transportation networks.
+
+## 10. Exercises
+
+### Lab checklist
+
+0 of 5 completed
+
+Exercise 1 — Return only the number of flights
+
+Modify the program so it returns an integer instead of printing the route. Return -1 if the destination is unreachable.
+
+Exercise 2 — Return the route as a collection
+
+Refactor the algorithm into a method that returns a List of city IDs in Java or fills an output array in C.
+
+Exercise 3 — Support one-way flights
+
+Add a directed-flight method that inserts an edge in only one adjacency list. Verify that a route can exist from A to B but not from B to A.
+
+Exercise 4 — Compare BFS and DFS
+
+Implement DFS for the same graph. Find a case where DFS returns a route with more flights than BFS.
+
+Exercise 5 — Add weighted flight costs
+
+Suppose each flight has a ticket price. Explain why minimizing the number of flights is different from minimizing the total price, and investigate Dijkstra's algorithm.
+
+## 11. Final takeaways
+
+- Model cities as vertices and direct flights as edges.
+- Use an adjacency list to store the flight network.
+- Use a FIFO queue to explore the graph level by level.
+- Mark cities visited when they are enqueued, not when they are dequeued.
+- Record `parent[neighbor] = current` when a city is discovered.
+- Reconstruct the route by following parent links backward.
+- BFS finds a minimum-edge path when all edges have equal cost.
+
+The central lesson is that BFS solves a shortest-path problem by combining a graph representation, a queue, and predecessor tracking. The same pattern applies to social networks, unweighted road maps, maze solving, and minimum-move puzzles.

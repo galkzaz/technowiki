@@ -4,18 +4,1066 @@ title: "lab12: Using Resilience4j for improved resilience"
 sidebar_position: 12
 ---
 
-The following diagram illustrates the cooperation between Spring Cloud Config, its clients, a Git
-repository, and Spring Cloud Bus:
-![How Spring Cloud Config fits into the microservice landscape](/docs/assets/software-engineering/design-architecture/architectural-styles/microservices/labs/product-review-recommendation-microservices/lab11.png)
+In this Lab, we will learn how to use Resilience4j to make our microservices more resilient – that is, how to mitigate and recover from errors. 
 
-The diagram shows the following:
-1. When the microservices start up, they ask the configuration server for its configuration.
-2. The configuration server gets the configuration from, in this case, a Git repository.
-3. Optionally, the Git repository can be configured to send notifications to the configuration
-server when Git commits are pushed to the Git repository.
-4. The configuration server will publish change events using Spring Cloud Bus. The micro-
-services that are affected by the change will react and retrieve the updated configuration
-from the configuration server.
+We will see how the circuit breaker in Resilience4j can be used together with a time limiter and retry mechanism to prevent two of the most common error situations:
+- Microservices that start to respond slowly or not at all
+- Requests that randomly fail from time to time, for example, due to temporary network problems
 
-Finally, Spring Cloud Config also supports the encryption of sensitive information in the config-
-uration, such as credentials.
+The circuit breaker, time limiter, and retry mechanisms are potentially useful in any synchronous
+communication between two software components, for example, microservices. In this lab,
+we will apply these mechanisms in one place, in calls from the product-composite service to the
+product service. This is illustrated in the following figure:
+
+![ Adding resilience capabilities to the system landscape](/docs/assets/software-engineering/design-architecture/architectural-styles/microservices/labs/product-review-recommendation-microservices/lab11-microservices-landscape.png)
+Note that the synchronous calls to the discovery and config servers from the other microservices
+are not shown in the preceding diagram (to make it easier to read).
+
+## Introducing the circuit breaker
+
+Resilience4j exposes information about circuit breakers at runtime in a number of ways:
+- The current state of a circuit breaker can be monitored using the microservice’s actuator
+health endpoint, `/actuator/health`
+- The circuit breaker also publishes events on an actuator endpoint, for example, state
+transitions and `/actuator/circuitbreakerevents`
+- Finally, circuit breakers are integrated with Spring Boot’s metrics system, which can be
+used to publish metrics to monitoring tools such as Prometheus
+
+We will try out the health and event endpoints in this Lab. In Lab 20, Monitoring Microservices, we will see Prometheus in action and how it can collect metrics that are exposed by
+Spring Boot, for example, metrics from our circuit breaker.
+
+To control the logic in a circuit breaker, Resilience4j can be configured using standard Spring Boot
+configuration files. We will use the following configuration parameters:
+- **slidingWindowType**: To determine whether a circuit breaker needs to be opened. **We will use a count-based sliding window, setting this parameter to `COUNT_BASED`**.
+- **slidingWindowSize**: This is the number of calls in a closed state, which are used to deter-
+mine whether the circuit should be opened. **We will set this parameter to 5**
+- **failureRateThreshold**: This is the threshold, in percent, for failed calls that will cause
+the circuit to be opened. **We will set this parameter to 50%**. This setting, together with
+slidingWindowSize set to 5, means that if three or more of the last five calls are faults,
+then the circuit will open.
+- **automaticTransitionFromOpenToHalfOpenEnabled**: This determines whether the circuit
+breaker will automatically transition to the half-open state once the waiting period is over.
+Otherwise, it will wait for the first call after the waiting period is over until it transitions
+to the half-open state. **We will set this parameter to `true`**.
+- **waitDurationInOpenState**: This specifies how long the circuit stays in an open state –
+that is, before it transitions to the half-open state. **We will set this parameter to `10000
+ms`**. This setting, together with enabling the automatic transition to the half-open state,
+set by the previous parameter, means that the circuit breaker will keep the circuit open
+for 10 seconds and then transition to the half-open state.
+
+- **permittedNumberOfCallsInHalfOpenState**: This is the number of calls in the half-open
+state, which are used to determine whether the circuit will be opened again or go back to
+the normal, closed state. **We will set this parameter to `3`**, meaning that the circuit breaker
+will decide whether the circuit will be opened or closed based on the first three calls af-
+ter the circuit has transitioned to the half-open state. Since the failureRateThreshold
+parameters are set to 50%, the circuit will be open again if 2 or all 3 calls fail. Otherwise,
+the circuit will be closed.
+- **ignoreExceptions**: This can be used to specify exceptions that should not be counted
+as faults. Expected business exceptions such as not found or invalid input are typical
+exceptions that the circuit breaker should ignore; users who search for non-existing data
+or enter invalid input should not cause the circuit to open. **We will set this parameter to a
+list containing the `NotFoundException` and `InvalidInputException` exceptions**.
+
+Finally, to configure Resilience4j to report the state of the circuit breaker in the actuator health
+endpoint in the correct way, the following parameters are set:
+- **registerHealthIndicator = true** enables Resilience4j to fill in the health endpoint with
+information regarding the state of its circuit breakers.
+
+- **allowHealthIndicatorToFail = false** tells Resilience4j not to affect the status of the
+health endpoint. This means that the health endpoint will still report "UP" even if one
+of the component’s circuit breakers is in an open or half-open state. It is very important
+that the health state of the component is not reported as "DOWN" just because one of its
+circuit breakers is not in a closed state. This means that the component is still considered
+to be OK, even though one of the components it depends on is not.
+- Finally, we must also configure Spring Boot Actuator to add the circuit breaker health
+information that Resilience4j produces in the response to a request to its health endpoint:
+    ```yml
+    management.health.circuitbreakers.enabled: true
+    ```
+
+## Introducing the time limiter
+To help a circuit breaker handle slow or unresponsive services, a timeout mechanism can be helpful. Resilience4j’s timeout mechanism, called a **TimeLimiter**, can be configured using standard
+Spring Boot configuration files. We will use the following configuration parameter:
+- **timeoutDuration**: This specifies how long a TimeLimiter instance waits for a call to
+complete before it throws a timeout exception. **We will set it to 2s**.
+
+## Introducing the retry mechanism
+The retry mechanism is very useful for random and infrequent faults, such as temporary network glitches. The retry mechanism can simply retry a failed request a number of times with a configurable delay between the attempts. 
+
+Resilience4j exposes retry information in the same way as it does for circuit breakers when it comes
+to events and metrics but does not provide any health information. Retry events are accessible
+on the actuator endpoint, `/actuator/retryevents`. To control the retry logic, Resilience4j can
+be configured using standard Spring Boot configuration files. We will use the following config-
+uration parameters:
+- **maxAttempts**: The number of attempts before giving up, including the first call. **We will set
+this parameter to 3**, allowing a maximum of two retry attempts after an initial failed call.
+- **waitDuration**: The wait time before the next retry attempt. **We will set this value to `1000
+ms`**, meaning that we will wait 1 second between retries.
+- **retryExceptions**: A list of exceptions that will trigger a retry. **We will only trigger retries
+on `InternalServerError` exceptions** – that is, when HTTP requests respond with a `500`
+status code.
+
+With this introduction, we are ready to see how to add these resilience mechanisms to the source
+code in the product-composite service.
+
+## Adding the resilience mechanisms to the source code
+Before we add the resilience mechanisms to the source code:
+- we will add code that makes it possible to force an error to occur, as a delay and/or as a random fault. 
+- Next, we will add a circuit breaker
+together with a time limiter to handle slow or unresponsive APIs, as well as a retry mechanism
+that can handle faults that happen randomly. 
+
+Adding these features from Resilience4j follows
+the Spring Boot way, which we have been using in the previous chapters:
+- Add a starter dependency on Resilience4j in the build file
+- Add annotations in the source code where the resilience mechanisms will be applied
+- Add a configuration that controls the behavior of the resilience mechanisms
+
+Handling resilience challenges is a responsibility of the integration layer; therefore, the resilience
+mechanisms will be placed in the `ProductCompositeIntegration` class. The source code in the
+business logic, implemented in the `ProductCompositeServiceImpl` class, will not be aware of
+the presence of the resilience mechanisms.
+
+Once we have the mechanisms in place, we will finally extend our test script, `test-em-all-docker.bash`,
+with tests that automatically verify that the circuit breaker works as expected when deployed in
+the system landscape.
+
+### Adding programmable delays and random errors
+To be able to test our resilience mechanisms, we need a way to control when errors happen. A
+simple way to achieve this is by adding optional query parameters in the API used to retrieve a
+product and a composite product.
+
+:::info
+
+The code and API parameters added in this section to force delays and errors to occur
+should only be used during development and tests, not in production. When we learn
+about the concept of a service mesh in Lab 18, Using a Service Mesh to Improve
+Observability and Management, we will learn about better methods that can be used
+in production to introduce delays and errors in a controlled way. By using a service
+mesh, we can introduce delays and errors, typically used for verifying resilience
+capabilities, without affecting the source code of the microservices.
+
+:::
+
+The composite product API will simply pass on the parameters to the product API. The following
+query parameters have been added to the two APIs:
+- **delay**: Causes the `getProduct` API on the product microservice to delay its response. The
+parameter is specified in seconds. For example, if the parameter is set to `3`, it will cause a
+delay of `3` seconds before the response is returned.
+- **faultPercentage**: Causes the `getProduct` API on the product microservice to throw an
+exception randomly with the probability specified by the query parameter, from `0` to
+`100%`. For example, if the parameter is set to `25`, it will cause every fourth call to the API,
+on average, to fail with an exception. It will return HTTP error `500` (Internal Server
+Error) in these cases.
+
+#### Changes in the API definitions
+The two query parameters that we introduced previously, **delay** and **faultPercentage**, have
+been defined in the api project in the following two Java interfaces:
+
+api/src/main/java/se/magnus/api/composite/product/ProductCompositeService.java
+```Java
+  @GetMapping(value = "/product-composite/{productId}", produces = "application/json")
+  Mono<ProductAggregate> getProduct(
+      @PathVariable int productId,
+      @RequestParam(value = "delay", required = false, defaultValue = "0") int delay,
+      @RequestParam(value = "faultPercent", required = false, defaultValue = "0") int faultPercent);
+```
+api/src/main/java/se/magnus/api/core/product/ProductService.java
+```Java
+  @GetMapping(value = "/product/{productId}", produces = "application/json")
+  Mono<Product> getProduct(
+      @PathVariable int productId,
+      @RequestParam(value = "delay", required = false, defaultValue = "0") int delay,
+      @RequestParam(value = "faultPercent", required = false, defaultValue = "0") int faultPercent);
+```
+
+The query parameters are declared optional with default values that disable the use of the error
+mechanisms. This means that if none of the query parameters are used in a request, neither a
+delay will be applied nor an error thrown.
+
+#### Changes in the product-composite microservice
+The product-composite microservice simply passes the parameters to the product API. The
+service implementation receives the API request and passes on the parameters to the integration
+component that makes the call to the product API:
+
+The call from the `ProductCompositeServiceImpl` class to the integration component
+looks like this:
+
+```Java
+integration.getProduct(productId, delay, faultPercent),
+```
+
+**microservices/product-composite-service/src/main/java/se/magnus/microservices/composite/product/services/ProductCompositeServiceImpl.java**
+```Java
+  @Override
+  @SuppressWarnings("unchecked")
+  public Mono<ProductAggregate> getProduct(int productId, int delay, int faultPercent) {
+
+    LOG.info("Will get composite product info for product.id={}", productId);
+    return Mono.zip(
+        values -> createProductAggregate(
+            (SecurityContext) values[0], (Product) values[1], (List<Recommendation>) values[2],
+            (List<Review>) values[3], serviceUtil.getServiceAddress()),
+        getSecurityContextMono(),
+        integration.getProduct(productId, delay, faultPercent),
+        integration.getRecommendations(productId).collectList(),
+        integration.getReviews(productId).collectList())
+        .doOnError(ex -> LOG.warn("getCompositeProduct failed: {}", ex.toString()))
+        .log(LOG.getName(), FINE);
+  }
+```
+
+The call from the ProductCompositeIntegration class to the product API looks like this:
+```Java
+        URI url = UriComponentsBuilder.fromUriString(PRODUCT_SERVICE_URL
+                + "/product/{productId}?delay={delay}&faultPercent={faultPercent}")
+                .build(productId, delay, faultPercent);
+```
+**microservices/product-composite-service/src/main/java/se/magnus/microservices/composite/product/services/ProductCompositeIntegration.java**
+```Java
+    @Override
+    public Mono<Product> getProduct(int productId, int delay, int faultPercent) {
+
+        URI url = UriComponentsBuilder.fromUriString(PRODUCT_SERVICE_URL
+                + "/product/{productId}?delay={delay}&faultPercent={faultPercent}")
+                .build(productId, delay, faultPercent);
+        LOG.debug("Will call the getProduct API on URL: {}", url);
+
+        return webClient.get().uri(url)
+                .retrieve().bodyToMono(Product.class).log(LOG.getName(), FINE)
+                .onErrorMap(WebClientResponseException.class, ex -> handleException(ex));
+    }
+```
+
+#### Changes in the product microservice
+The product microservice implements the actual delay and random error generator in the
+ProductServiceImpl class by extending the existing stream used to read product information
+from the MongoDB database. 
+
+**microservices/product-service/src/main/java/se/magnus/microservices/core/product/services/ProductServiceImpl.java**
+Before:
+```Java
+    @Override
+    public Mono<Product> getProduct(int productId) {
+
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
+
+        LOG.info("Will get product info for id={}", productId);
+
+        return repository.findByProductId(productId)
+                .switchIfEmpty(Mono.error(new NotFoundException("No product found for productId: " + productId)))
+                .log(LOG.getName(), FINE)
+                .map(e -> mapper.entityToApi(e))
+                .map(e -> setServiceAddress(e));
+    }
+```
+
+After:
+```Java
+    @Override
+    public Mono<Product> getProduct(int productId, int delay, int faultPercent) {
+
+        if (productId < 1) {
+            throw new InvalidInputException("Invalid productId: " + productId);
+        }
+
+        LOG.info("Will get product info for id={}", productId);
+
+        return repository.findByProductId(productId)
+                .map(e -> throwErrorIfBadLuck(e, faultPercent))
+                .delayElement(Duration.ofSeconds(delay))
+                .switchIfEmpty(Mono.error(new NotFoundException("No product found for productId: " + productId)))
+                .log(LOG.getName(), FINE)
+                .map(e -> mapper.entityToApi(e))
+                .map(e -> setServiceAddress(e));
+    }
+    private ProductEntity throwErrorIfBadLuck(ProductEntity entity, int faultPercent) {
+
+        if (faultPercent == 0) {
+            return entity;
+        }
+
+        int randomThreshold = getRandomNumber(1, 100);
+
+        if (faultPercent < randomThreshold) {
+            LOG.debug("We got lucky, no error occurred, {} < {}", faultPercent, randomThreshold);
+        } else {
+            LOG.info("Bad luck, an error occurred, {} >= {}", faultPercent, randomThreshold);
+            throw new RuntimeException("Something went wrong...");
+        }
+
+        return entity;
+    }
+
+    private final Random randomNumberGenerator = new Random();
+
+    private int getRandomNumber(int min, int max) {
+
+        if (max < min) {
+            throw new IllegalArgumentException("Max must be greater than min");
+        }
+
+        return randomNumberGenerator.nextInt((max - min) + 1) + min;
+    }
+```
+When the stream returns a response from the Spring Data repository, it first applies the
+`throwErrorIfBadLuck` method to see whether an exception needs to be thrown. Next, it applies
+a delay using the `delayElement` function in the Mono class.
+The random error generator, `throwErrorIfBadLuck()`, creates a random number between `1` and
+`100` and throws an exception if it is higher than, or equal to, the specified fault percentage. If no
+exception is thrown, the product entity is passed on in the stream.
+
+With the programmable delays and random error functions in place, we are ready to start adding
+resilience mechanisms to the code. We will start with the circuit breaker and the time limiter.
+
+### Adding a circuit breaker and a time limiter
+As we mentioned previously, we need to add dependencies, annotations, and configuration. We
+also need to add some code for implementing fallback logic for fail-fast scenarios. We will see
+how to do this in the following sections.
+
+#### Adding dependencies to the build file
+To add a circuit breaker and a time limiter, we have to add dependencies to the appropriate Resilience4j libraries in the build file, build.gradle. From the product documentation (https://resilience4j.readme.io/docs/getting-started-3#setup), we can learn that the following
+three dependencies need to be added.
+
+**microservices/product-composite-service/build.gradle**
+```groovy
+ext {
+    springCloudVersion = '2025.0.0'
+    resilience4jVersion = '2.3.0'
+}
+dependencies {
+    implementation "io.github.resilience4j:resilience4j-spring-boot3:${resilience4jVersion}"
+    implementation "io.github.resilience4j:resilience4j-reactor:${resilience4jVersion}"
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+}
+```
+To avoid Spring Cloud overriding the version used with the older version of Resilience4j that it
+bundles, we also import a resilience4j-bom (bill of materials) file, as described in the Spring Boot
+3 demo project at https://github.com/resilience4j/resilience4j-spring-boot3-demo. We
+add this bom file to the existing bom file for Spring Cloud in the dependencyManagement section:
+```groovy
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+        mavenBom "io.github.resilience4j:resilience4j-bom:${resilience4jVersion}"
+    }
+}
+```
+
+#### Adding annotations in the source code
+The circuit breaker can be applied by annotating the method it is expected to protect
+with `@CircuitBreaker(...)`, which, in this case, is the `getProduct()` method in the
+`ProductCompositeIntegration` class. The circuit breaker is triggered by an exception, not by a
+timeout itself. To be able to trigger the circuit breaker after a timeout, we will add a time limiter
+that can be applied with the `@TimeLimiter(...)` annotation. The source code looks as follows:
+
+**microservices/product-composite-service/src/main/java/se/magnus/microservices/composite/product/services/ProductCompositeIntegration.java**
+```Java
+    @Override
+    @Retry(name = "product")
+    @TimeLimiter(name = "product")
+    @CircuitBreaker(name = "product", fallbackMethod = "getProductFallbackValue")
+    public Mono<Product> getProduct(int productId, int delay, int faultPercent) {
+
+        URI url = UriComponentsBuilder.fromUriString(PRODUCT_SERVICE_URL
+                + "/product/{productId}?delay={delay}&faultPercent={faultPercent}")
+                .build(productId, delay, faultPercent);
+        LOG.debug("Will call the getProduct API on URL: {}", url);
+
+        return webClient.get().uri(url)
+                .retrieve().bodyToMono(Product.class).log(LOG.getName(), FINE)
+                .onErrorMap(WebClientResponseException.class, ex -> handleException(ex));
+    }
+
+    private Mono<Product> getProductFallbackValue(int productId, int delay, int faultPercent,
+            CallNotPermittedException ex) {
+
+        LOG.warn(
+                "Creating a fail-fast fallback product for productId = {}, delay = {}, faultPercent = {} and exception = {} ",
+                productId, delay, faultPercent, ex.toString());
+
+        if (productId == 13) {
+            String errMsg = "Product Id: " + productId + " not found in fallback cache!";
+            LOG.warn(errMsg);
+            throw new NotFoundException(errMsg);
+        }
+
+        return Mono.just(
+                new Product(productId, "Fallback product" + productId, productId, serviceUtil.getServiceAddress()));
+    }
+```
+The name of the circuit breaker and the time limiter annotation, "product", are used to identify
+the configuration that will be applied. The `fallbackMethod` parameter in the circuit breaker annotation is used to specify what fallback method to call (`getProductFallbackValue`, in this case)
+when the circuit breaker is open; we will provide information on how it is used shortly.
+
+To activate the circuit breaker, the annotated method must be invoked as a Spring bean. In our
+case, it’s the integration class that’s injected by Spring into the service implementation class,
+`ProductCompositeServiceImpl`, and therefore used as a Spring bean:
+
+**microservices/product-composite-service/src/main/java/se/magnus/microservices/composite/product/services/ProductCompositeServiceImpl.java**
+
+```Java
+  private final ProductCompositeIntegration integration;
+
+  public ProductCompositeServiceImpl(ServiceUtil serviceUtil, ProductCompositeIntegration integration) {
+    this.serviceUtil = serviceUtil;
+    this.integration = integration;
+  }
+
+    public Mono<ProductAggregate> getProduct(int productId, int delay, int faultPercent) {
+
+    LOG.info("Will get composite product info for product.id={}", productId);
+    return Mono.zip(
+        values -> createProductAggregate(
+            (SecurityContext) values[0], (Product) values[1], (List<Recommendation>) values[2],
+            (List<Review>) values[3], serviceUtil.getServiceAddress()),
+        getSecurityContextMono(),
+        integration.getProduct(productId, delay, faultPercent),
+        integration.getRecommendations(productId).collectList(),
+        integration.getReviews(productId).collectList())
+        .doOnError(ex -> LOG.warn("getCompositeProduct failed: {}", ex.toString()))
+        .log(LOG.getName(), FINE);
+  }
+```
+
+#### Adding fail-fast fallback logic
+To be able to apply fallback logic when the circuit breaker is open – that is, when a request fails
+fast – we can specify a fallback method on the `CircuitBreaker` annotation, as seen in the previous
+source code. The method must follow the signature of the method the circuit breaker is applied
+for and also have an extra last argument used for passing the exception that triggered the circuit
+breaker. In our case, the method signature for the fallback method looks like this:
+```Java
+private Mono<Product> getProductFallbackValue(int productId,
+int delay, int faultPercent, CallNotPermittedException ex) {
+```
+The last parameter specifies that we want to be able to handle exceptions of the
+`CallNotPermittedException` type. We are only interested in exceptions that are thrown when
+the circuit breaker is in its open state so that we can apply fail-fast logic. When the circuit
+breaker is open, it will not permit calls to the underlying method; instead, it will immediately
+throw a `CallNotPermittedException` exception. Therefore, we are only interested in catching
+`CallNotPermittedException` exceptions.
+The fallback logic can look up information based on the `productId` from alternative sources, for
+example, an internal cache. In our case, we will return hardcoded values based on `productId`, to
+simulate a hit in a cache. To simulate a miss in the cache, we will throw a not found exception
+in the case where `productId` is 13. 
+
+**microservices/product-composite-service/src/main/java/se/magnus/microservices/composite/product/services/ProductCompositeIntegration.java**
+```Java
+    @Override
+    @Retry(name = "product")
+    @TimeLimiter(name = "product")
+    @CircuitBreaker(name = "product", fallbackMethod = "getProductFallbackValue")
+    public Mono<Product> getProduct(int productId, int delay, int faultPercent) {
+
+        URI url = UriComponentsBuilder.fromUriString(PRODUCT_SERVICE_URL
+                + "/product/{productId}?delay={delay}&faultPercent={faultPercent}")
+                .build(productId, delay, faultPercent);
+        LOG.debug("Will call the getProduct API on URL: {}", url);
+
+        return webClient.get().uri(url)
+                .retrieve().bodyToMono(Product.class).log(LOG.getName(), FINE)
+                .onErrorMap(WebClientResponseException.class, ex -> handleException(ex));
+    }
+
+    private Mono<Product> getProductFallbackValue(int productId, int delay, int faultPercent,
+            CallNotPermittedException ex) {
+
+        LOG.warn(
+                "Creating a fail-fast fallback product for productId = {}, delay = {}, faultPercent = {} and exception = {} ",
+                productId, delay, faultPercent, ex.toString());
+
+        if (productId == 13) {
+            String errMsg = "Product Id: " + productId + " not found in fallback cache!";
+            LOG.warn(errMsg);
+            throw new NotFoundException(errMsg);
+        }
+
+        return Mono.just(
+                new Product(productId, "Fallback product" + productId, productId, serviceUtil.getServiceAddress()));
+    }
+```
+
+#### Adding configuration
+Finally, the configuration of the circuit breaker and time limiter is added to the `product-composite.yml` file in the `config` repository, as follows:
+```yml
+resilience4j.timelimiter:
+  instances:
+    product:
+      timeoutDuration: 2s
+
+management.health.circuitbreakers.enabled: true
+
+resilience4j.circuitbreaker:
+  instances:
+    product:
+      allowHealthIndicatorToFail: false
+      registerHealthIndicator: true
+      slidingWindowType: COUNT_BASED
+      slidingWindowSize: 5
+      failureRateThreshold: 50
+      waitDurationInOpenState: 10000
+      permittedNumberOfCallsInHalfOpenState: 3
+      automaticTransitionFromOpenToHalfOpenEnabled: true
+      ignoreExceptions:
+        - se.magnus.api.exceptions.InvalidInputException
+        - se.magnus.api.exceptions.NotFoundException
+```
+The values in the configuration have already been described in the previous sections, Introducing the circuit breaker and Introducing the time limiter.
+
+### Adding a retry mechanism
+In the same way as we did for the circuit breaker, a retry mechanism is set up by adding de-
+pendencies, annotations, and configuration. The dependencies were added previously in the
+Adding dependencies to the build file section, so we only need to add the annotation and set up the
+configuration.
+#### Adding the retry annotation
+The retry mechanism can be applied to a method by annotating it with @Retry(name="nnn"),
+where nnn is the name of the configuration entry to be used for this method. See the following
+Adding configuration section for details on the configuration. The method, in our case, is the same as
+it is for the circuit breaker and time limiter, getProduct() in the ProductCompositeIntegration
+class:
+```Java
+    @Override
+    @Retry(name = "product")
+    @TimeLimiter(name = "product")
+    @CircuitBreaker(name = "product", fallbackMethod = "getProductFallbackValue")
+    public Mono<Product> getProduct(int productId, int delay, int faultPercent) {
+
+        URI url = UriComponentsBuilder.fromUriString(PRODUCT_SERVICE_URL
+                + "/product/{productId}?delay={delay}&faultPercent={faultPercent}")
+                .build(productId, delay, faultPercent);
+        LOG.debug("Will call the getProduct API on URL: {}", url);
+
+        return webClient.get().uri(url)
+                .retrieve().bodyToMono(Product.class).log(LOG.getName(), FINE)
+                .onErrorMap(WebClientResponseException.class, ex -> handleException(ex));
+    }
+```
+#### Adding configuration
+Configuration for the retry mechanism is added in the same way as for the circuit breaker and
+time limiter in the product-composite.yml file in the config repository, like so:
+
+**config-repo/product-composite.yml**
+```yml
+resilience4j.retry:
+  instances:
+    product:
+      maxAttempts: 3
+      waitDuration: 1000
+      retryExceptions:
+      - org.springframework.web.reactive.function.client.WebClientResponseException$InternalServerError
+
+```
+The actual values were discussed in the previous Introducing the retry mechanism section.
+
+:::note
+
+When using multiple mechanisms of Resilience4j (in our case, the circuit breaker, time limiter, and retry mechanism), understanding the order in which these aspects are applied is important. For more information, see https://resilience4j.readme.io/docs/getting-started-3#aspect-order.
+
+:::
+
+That is all the dependencies, annotations, source code, and configuration required. Let’s wrap
+up by extending the test script with tests that verify that the circuit breaker works as expected
+in a deployed system landscape.
+
+### Adding automated tests
+Automated tests for the circuit breaker have been added to the test-em-all.bash test script in
+a separate function, `testCircuitBreaker()`:
+
+**test-em-all-docker.bash**
+```sh
+: ${SKIP_CB_TESTS=false}
+
+function testCircuitBreaker() {
+
+    echo "Start Circuit Breaker tests!"
+
+    # First, use the health - endpoint to verify that the circuit breaker is closed
+    assertEqual "CLOSED" "$(docker compose exec -T product-composite wget -qO - http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state)"
+
+    # Open the circuit breaker by running three slow calls in a row, i.e. that cause a timeout exception
+    # Also, verify that we get 500 back and a timeout related error message
+    for ((n=0; n<3; n++))
+    do
+        assertCurl 500 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS?delay=3 $AUTH -s"
+        message=$(echo $RESPONSE | jq -r .message)
+        assertEqual "Did not observe any item or terminal signal within 2000ms" "${message:0:57}"
+    done
+
+    # Verify that the circuit breaker is open
+    assertEqual "OPEN" "$(docker compose exec -T product-composite wget -qO - http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state)"
+
+    # Verify that the circuit breaker now is open by running the slow call again, verify it gets 200 back, i.e. fail fast works, and a response from the fallback method.
+    assertCurl 200 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS?delay=3 $AUTH -s"
+    assertEqual "Fallback product$PROD_ID_REVS_RECS" "$(echo "$RESPONSE" | jq -r .name)"
+
+    # Also, verify that the circuit breaker is open by running a normal call, verify it also gets 200 back and a response from the fallback method.
+    assertCurl 200 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS $AUTH -s"
+    assertEqual "Fallback product$PROD_ID_REVS_RECS" "$(echo "$RESPONSE" | jq -r .name)"
+
+    # Verify that a 404 (Not Found) error is returned for a non existing productId ($PROD_ID_NOT_FOUND) from the fallback method.
+    assertCurl 404 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_NOT_FOUND $AUTH -s"
+    assertEqual "Product Id: $PROD_ID_NOT_FOUND not found in fallback cache!" "$(echo $RESPONSE | jq -r .message)"
+
+    # Wait for the circuit breaker to transition to the half open state (i.e. max 10 sec)
+    echo "Will sleep for 10 sec waiting for the CB to go Half Open..."
+    sleep 10
+
+    # Verify that the circuit breaker is in half open state
+    assertEqual "HALF_OPEN" "$(docker compose exec -T product-composite wget -qO - http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state)"
+
+    # Close the circuit breaker by running three normal calls in a row
+    # Also, verify that we get 200 back and a response based on information in the product database
+    for ((n=0; n<3; n++))
+    do
+        assertCurl 200 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS $AUTH -s"
+        assertEqual "product name C" "$(echo "$RESPONSE" | jq -r .name)"
+    done
+
+    # Verify that the circuit breaker is in closed state again
+    assertEqual "CLOSED" "$(docker compose exec -T product-composite wget -qO - http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state)"
+
+    # Verify that the expected state transitions happened in the circuit breaker
+    assertEqual "CLOSED_TO_OPEN"      "$(docker compose exec -T product-composite wget -qO - http://product-composite:8080/actuator/circuitbreakerevents/product/STATE_TRANSITION | jq -r .circuitBreakerEvents[-3].stateTransition)"
+    assertEqual "OPEN_TO_HALF_OPEN"   "$(docker compose exec -T product-composite wget -qO - http://product-composite:8080/actuator/circuitbreakerevents/product/STATE_TRANSITION | jq -r .circuitBreakerEvents[-2].stateTransition)"
+    assertEqual "HALF_OPEN_TO_CLOSED" "$(docker compose exec -T product-composite wget -qO - http://product-composite:8080/actuator/circuitbreakerevents/product/STATE_TRANSITION | jq -r .circuitBreakerEvents[-1].stateTransition)"
+}
+
+echo "SKIP_CB_TESTS=${SKIP_CB_TESTS}"
+
+if [[ $SKIP_CB_TESTS == "false" ]]
+then
+    testCircuitBreaker
+fi
+
+```
+
+To be able to perform some of the required verifications, we need to have access to the actuator
+endpoints of the product-composite microservice, which are not exposed through the edge
+server. Therefore, we will access the actuator endpoints by running a command in the product-
+composite microservice using the Docker Compose exec command. The base image used by the
+microservices, Eclipse Temurin, bundles wget, so we can simply run a wget command in the
+product-composite container to get the information required. The command looks like this:
+
+**test-em-all-docker.bash**
+```sh
+ # Verify that the circuit breaker is open
+ assertEqual "OPEN" "$(docker compose exec -T product-composite wget -qO - http://product-composite:8080/actuator/health | jq -r .
+```
+
+:::info
+
+The -T argument is used to disable the use of a terminal for the exec command.
+This is important to make it possible to run the test-em-all.bash test script in an
+environment where no terminals exist, for example, in an automated build pipeline
+used for CI/CD.
+
+:::
+
+To be able to extract the information we need for our tests, we can pipe the output to the jq tool.
+For example, to extract the actual state of the circuit breaker, we can run the following command:
+```sh
+docker compose exec -T product-composite wget -qO - http://product-
+composite:8080/actuator/health | jq -r .components.circuitBreakers.
+details.product.details.state
+```
+It will return either CLOSED, OPEN, or HALF_OPEN, depending on the actual state.
+The test starts by doing exactly this – that is, verifying that the circuit breaker is closed before
+the tests are executed:
+```sh
+assertEqual "CLOSED" "$(docker compose exec -T product-composite wget
+-qO - http://product-composite:8080/actuator/health | jq -r .components.
+circuitBreakers.details.product.details.state)"
+```
+Next, the test will force the circuit breaker to open up by running three commands in a row, all
+of which will fail on a timeout caused by a slow response from the product service (the delay
+parameter is set to 3 seconds):
+```sh
+for ((n=0; n<3; n++))
+do
+assertCurl 500 "curl -k https://$HOST:$PORT/product-composite/$PROD_
+ID_REVS_RECS?delay=3 $AUTH -s"
+message=$(echo $RESPONSE | jq -r .message)
+assertEqual "Did not observe any item or terminal signal within
+2000ms" "${message:0:57}"
+done
+```
+
+:::note
+
+A quick reminder of the configuration: The timeout of the product service is set
+to 2 seconds so that a delay of 3 seconds will cause a timeout. The circuit breaker is
+configured to evaluate the last five calls when closed. The tests in the script that pre-
+cede the circuit breaker-specific tests have already performed a couple of successful
+calls. The failure threshold is set to 50%. Three calls with a three-second delay are
+enough to open the circuit.
+
+:::
+
+
+With the circuit open, we expect a fail-fast behavior – that is, we won’t need to wait for the timeout
+before we get a response. We also expect the fallback method to be called to return a best-effort
+response. This should also apply to a normal call – that is, without requesting a delay. This is
+verified with the following code:
+
+```sh
+assertEqual "OPEN" "$(docker compose exec -T product-composite wget -qO - http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state)"
+assertCurl 200 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS?delay=3 $AUTH -s"
+assertEqual "Fallback product$PROD_ID_REVS_RECS" "$(echo "$RESPONSE" | jq -r .name)"
+assertCurl 200 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS $AUTH -s"
+assertEqual "Fallback product$PROD_ID_REVS_RECS" "$(echo "$RESPONSE" | jq -r .name)"
+```
+
+**Product ID 1** is stored in a variable, `$PROD_ID_REVS_RECS`, to make it easier to modif the script if required.
+
+We can also verify that the simulated not found error logic works as expected in the fallback
+method – that is, the fallback method returns `404`, `NOT_FOUND` for product ID `13`::
+
+```sh
+assertCurl 404 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_
+NOT_FOUND $AUTH -s"
+assertEqual "Product Id: $PROD_ID_NOT_FOUND not found in fallback cache!"
+"$(echo $RESPONSE | jq -r .message)"
+```
+**Product ID 13** is stored in a variable, `$PROD_ID_NOT_FOUND`.
+
+As configured, the circuit breaker will change its state to half-open after `10` seconds. To be able
+to verify that, the test waits for `10` seconds:
+```sh
+echo "Will sleep for 10 sec waiting for the CB to go Half Open..."
+sleep 10
+```
+
+After verifying the expected state (half-open), the test runs three normal requests to make the
+circuit breaker go back to its normal state, which is also verified:
+```sh
+assertEqual "HALF_OPEN" "$(docker compose exec -T product-composite wget
+-qO - http://product-composite:8080/actuator/health | jq -r .components.
+circuitBreakers.details.product.details.state)"
+for ((n=0; n<3; n++))
+do
+assertCurl 200 "curl -k https://$HOST:$PORT/product-composite/$PROD_
+ID_REVS_RECS $AUTH -s"
+assertEqual "product name C" "$(echo "$RESPONSE" | jq -r .name)"
+done
+assertEqual "CLOSED" "$(docker compose exec -T product-composite wget
+-qO - http://product-composite:8080/actuator/health | jq -r .components.
+circuitBreakers.details.product.details.state)"
+```
+The test code also verifies that it got a response with data from the underlying database. It does
+that by comparing the returned product name with the value stored in the database. For the
+product with product ID 1, the name is "product name C".
+
+:::info
+
+A quick reminder of the configuration: The circuit breaker is configured to evaluate
+the first three calls when in the half-open state. Therefore, we need to run 3 requests
+where more than 50% are successful before the circuit is closed.
+
+:::
+
+The test wraps up by using the /actuator/circuitbreakerevents actuator API, which is exposed
+by the circuit breaker to reveal internal events. It is used to find out what state transitions the
+circuit breaker has performed. We expect the last three state transitions to be as follows:
+- First state transition: Closed to open
+- Next state transition: Open to half-open
+- Last state transition: Half-open to closed
+This is verified by the following code:
+```sh
+assertEqual "CLOSED_TO_OPEN" "$(docker compose exec -T product-
+composite wget -qO - http://product-composite:8080/actuator/
+circuitbreakerevents/product/STATE_TRANSITION | jq -r
+.circuitBreakerEvents[-3].stateTransition)"
+
+assertEqual "OPEN_TO_HALF_OPEN" "$(docker compose exec -T
+product-composite wget -qO - http://product-composite:8080/
+actuator/circuitbreakerevents/product/STATE_TRANSITION | jq -r
+.circuitBreakerEvents[-2].stateTransition)"
+assertEqual "HALF_OPEN_TO_CLOSED" "$(docker compose exec -T
+product-composite wget -qO - http://product-composite:8080/
+actuator/circuitbreakerevents/product/STATE_TRANSITION | jq -r
+.circuitBreakerEvents[-1].stateTransition)"
+
+```
+
+
+:::info
+
+The jq expression, `circuitBreakerEvents[-1]`, means the last entry in the array
+of circuit breaker events, `[-2]` is the second to last event, while `[-3]` is the third to
+last event. Together, they are the three latest events, the ones we are interested in.
+
+:::
+
+We added quite a lot of steps to the test script, but with this, we can automatically verify that
+the expected basic behavior of our circuit breaker is in place. In the next section, we will try it
+out. We will run tests both automatically by running the test script and manually by running the
+commands in the test script by hand.
+
+## Trying out the circuit breaker and retry mechanism
+Now, it’s time to try out the circuit breaker and retry mechanism. We will start, as usual, by
+building the Docker images and running the test script, test-em-all.bash. After that, we will
+manually run through the tests we described previously to ensure that we understand what’s
+going on! We will perform the following manual tests:
+- Happy days tests of the circuit breaker to verify that the circuit is closed under normal
+operations
+- Negative tests of the circuit breaker to verify that the circuit opens up when things start
+to go wrong
+- Going back to normal operation to verify that the circuit goes back to its closed state once
+the problems are resolved
+- Trying out the retry mechanism with random errors
+
+### Building and running the automated tests
+To build and run the automated tests, we need to do the following:
+1. First, build the Docker images with the following commands:
+```sh
+./gradlew build && docker compose build
+```
+
+2. Next, start the system landscape in Docker and run the usual tests with the following
+command:
+```sh
+./test-em-all-docker.bash start
+```
+
+When the test script prints out **Start Circuit Breaker tests!**, the tests we
+described previously have been executed!
+
+### Manual tests
+#### Verifying that the circuit is closed under normal operations
+Before we can call the API, we need an access token. Run the following commands to acquire an
+access token:
+```sh
+unset ACCESS_TOKEN
+ACCESS_TOKEN=$(curl -k https://writer:secret-writer@localhost:8443/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .access_token -r)
+
+echo $ACCESS_TOKEN
+```
+
+:::note 
+
+An access token issued by the authorization server is valid for one hour. So, if you
+start to get `401` – Unauthorized errors after a while, it is probably time to acquire
+a new access token.
+
+:::
+
+Try a normal request and verify that it returns the HTTP response code `200`:
+```sh
+curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1 -w "%{http_code}\n" -o /dev/null -s
+```
+
+:::note
+
+The -w "%{http_code}\n" switch is used to print the HTTP return status. As long
+as the command returns 200, we are not interested in the response body, so we
+suppress it with the -o /dev/null switch.
+
+:::
+
+Verify that the circuit breaker is closed using the health API:
+```sh
+docker compose exec product-composite wget -qO - http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state
+```
+We expect it to respond with `CLOSED`.
+
+#### Forcing the circuit breaker to open when things go wrong
+Now, it’s time to make things go wrong! By that, I mean it’s time to try out some negative tests to
+verify that the circuit opens up when things start to go wrong. Call the API 3 times and direct the
+product service to cause a timeout on every call – that is, delay the response by 3 seconds. This
+should be enough to trip the circuit breaker:
+```sh
+curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1?delay=3 -s | jq .
+```
+We expect a response such as the following each time:
+```
+{
+  "timestamp": "2026-10-27T11:03:24.373+00:00",
+  "path": "/product-composite/1",
+  "status": 500,
+  "error": "Internal Server Error",
+  "requestId": "8f13834a-52",
+  "message": "Did not observe any item or terminal signal within 2000ms in 'onErrorResume' (and no fallback has been configured)"
+}
+```
+The circuit breaker is now open, so if you make a fourth attempt (within waitInterval – that is,
+10 seconds), you will see fail-fast behavior and the fallback method in action. You will get a re-
+sponse back immediately instead of an error message once the time limiter kicks in after 2 seconds:
+```
+{
+  "productId": 1,
+  "name": "Fallback product1",
+  "weight": 1,
+  "recommendations": [
+    {
+      "recommendationId": 1,
+      "author": "author 1",
+      "rate": 1,
+      "content": "content 1"
+    },
+    {
+      "recommendationId": 2,
+      "author": "author 2",
+      "rate": 2,
+      "content": "content 2"
+    },
+    {
+      "recommendationId": 3,
+      "author": "author 3",
+      "rate": 3,
+      "content": "content 3"
+    }
+  ],
+  "reviews": [
+    {
+      "reviewId": 1,
+      "author": "author 1",
+      "subject": "subject 1",
+      "content": "content 1"
+    },
+    {
+      "reviewId": 2,
+      "author": "author 2",
+      "subject": "subject 2",
+      "content": "content 2"
+    },
+    {
+      "reviewId": 3,
+      "author": "author 3",
+      "subject": "subject 3",
+      "content": "content 3"
+    }
+  ],
+  "serviceAddresses": {
+    "cmp": "a0389df92150/172.18.0.11:8080",
+    "pro": "a0389df92150/172.18.0.11:8080",
+    "rev": "2f185e7b945f/172.18.0.10:8080",
+    "rec": "9a49a9ef29cc/172.18.0.9:8080"
+  }
+}
+```
+The response will come from the fallback method. This can be recognized by looking at the value in the name field, Fallback product1.
+
+Wait 10 seconds for the circuit breaker to transition to half-open, and then run the following
+command to verify that the circuit is now in a half-open state:
+```
+docker compose exec product-composite wget -qO - http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state
+```
+#### Closing the circuit breaker again
+Once the circuit breaker is in a half-open state, it waits for three calls to see whether it should
+open the circuit again or go back to normal by closing it.
+Let’s submit three normal requests to close the circuit breaker:
+```
+curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1 -w "%{http_code}\n" -o /dev/null -s
+```
+They should all respond with 200. Verify that the circuit is closed again by using the health API:
+```sh
+docker compose exec product-composite wget -qO - http://product-composite:8080/actuator/health | jq -r .components.circuitBreakers.details.product.details.state
+```
+
+We expect it to respond with `CLOSED`.
+
+Wrap this up by listing the last three state transitions using the following command:
+```sh
+docker compose exec product-composite wget -qO - http://product-composite:8080/actuator/circuitbreakerevents/product/STATE_TRANSITION | jq -r '.circuitBreakerEvents[-3].stateTransition, .circuitBreakerEvents[-2].stateTransition, .circuitBreakerEvents[-1].stateTransition'
+```
+Expect it to respond with the following:
+```
+HALF_OPEN_TO_OPEN
+OPEN_TO_HALF_OPEN
+HALF_OPEN_TO_CLOSED
+```
+
+This response tells us that we have taken our circuit breaker through a full lap of its state diagram:
+- From closed to open when the timeout errors start to prevent requests from succeeding
+- From open to half-open to see whether the error is gone
+- From half-open to closed when the error is gone – that is, when we are back to normal
+operation
+
+With that, we are done with testing the circuit breaker; let’s move on and see the retry mechanism at play.
+
+#### Trying out retries caused by random errors
+Let’s simulate that there is a – hopefully temporary – random issue with our product service or
+the communication with it.
+
+We can do this by using the faultPercent parameter. If we set it to 25, we expect every fourth
+request on average to fail. We hope that the retry mechanism will kick in to help us by automatically retrying failed requests. One way of noticing that the retry mechanism has kicked in is to
+measure the response time of the curl command.
+
+A normal response should take around 100 ms. Since we have configured the retry mechanism
+to wait 1 second (see the waitDuration parameter in the section on the configuration of the retry
+mechanism), we expect the response time to increase by 1 second per retry attempt. To force a
+random error to occur, run the following command a couple of times:
+```sh
+time curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1?faultPercent=25 -w "%{http_code}\n" -o /dev/null -s
+```
+The command should respond with 200, indicating that the request succeeded. A response time
+prefixed with real (for example, real 0m0.078s) means that the response time was 0.078 s or 78
+ms. A normal response – that is, without any retries – should report a response time of around
+100 ms, as follows:
+```
+200
+
+real    0m0.189s
+user    0m0.046s
+sys     0m0.028s
+```
+A response after 1 retry should take a little over 1 second and look as follows:
+```
+200
+
+real    0m1.203s
+user    0m0.014s
+sys     0m0.009s
+```
+The HTTP status code 200 indicates that the request has succeeded, even though it
+required one retry before succeeding!
+
+After you have noticed a response time of 1 second, indicating that the request required 1 retry to
+succeed, run the following command to see the last 2 retry events:
+```sh
+docker compose exec product-composite wget -qO - http://product-composite:8080/actuator/retryevents | jq '.retryEvents[-2],.retryEvents[-1]'
+```
+You should be able to see the failed request and the next successful attempt. The creationTime
+timestamps are expected to differ by 1 second. Expect a response such as the following:
+```json
+{
+  "retryName": "product",
+  "type": "RETRY",
+  "creationTime": "2026-10-27T11:14:29.229036597Z[Etc/UTC]",
+  "errorMessage": "org.springframework.web.reactive.function.client.WebClientResponseException$InternalServerError: 500 Internal Server Error from GET http://918f9f3a2492:8080/product/1",
+  "numberOfAttempts": 1
+}
+{
+  "retryName": "product",
+  "type": "SUCCESS",
+  "creationTime": "2026-10-27T11:14:30.270397365Z[Etc/UTC]",
+  "errorMessage": "org.springframework.web.reactive.function.client.WebClientResponseException$InternalServerError: 500 Internal Server Error from GET http://918f9f3a2492:8080/product/1",
+  "numberOfAttempts": 1
+}
+```
+
+:::note
+
+If you are really unlucky, you will get 2 faults in a row, and then you will get a re-
+sponse time of 2 seconds instead of 1. If you repeat the preceding command, you will
+be able to see that the numberOfAttempts field is counted for each retry attempt,
+which is set to 1 in this case: "numberOfAttempts": 1. If calls continue to fail, the
+circuit breaker will kick in and open its circuit – that is, subsequent calls will apply
+fail-fast logic and the fallback method will be applied!
+
+:::
+
+Don’t forget to shut down the system landscape:
+```sh
+docker compose down
+```
+## Summary
+In this Lab, we saw Resilience4j and its circuit breaker, time limiter, and retry mechanism in action.
+
+We have seen the usage of endpoints for both health and events in this Lab, but we will have
+to wait until Lab 20, Monitoring Microservices, before we use any of the metrics.
+
+In the next Lab, we will cover the last part of using Spring Cloud, where we will learn how to
+trace call chains through a set of cooperating microservices using Spring Cloud Sleuth and Zipkin.

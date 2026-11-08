@@ -1,0 +1,514 @@
+# Version 4: Keyboard-Controlled Grid Maze in C
+
+In Version 3, the player entered a sequence of vertex labels such as `S A C T`. In Version 4, we'll make the maze feel like a real game: the player moves through the grid using the keyboard, one cell at a time.
+
+We'll keep the focus on Data Structures and Algorithms rather than adding a game library.
+
+## 1. What we'll build
+
+- Keyboard movement
+
+    W / A / S / D or arrow keys
+
+- Grid-based maze
+
+    Walls block movement; open passages allow it.
+
+- Start and goal
+
+    Reach T from S to win.
+
+- Algorithm connection
+
+    The maze is a graph; each legal move is an edge. DFS can still solve it.
+
+We'll implement a terminal-based game for Linux, using C and `termios` to read key presses without requiring the player to press Enter. This version generates a random maze using iterative DFS, just like Version 3.
+
+## 2. Controls
+
+| Key        | Action     |
+| ---------- | ---------- |
+| `W` or `↑` | Move up    |
+| `S` or `↓` | Move down  |
+| `A` or `←` | Move left  |
+| `D` or `→` | Move right |
+| `Q`        | Quit       |
+
+The player cannot move through a wall. Each successful move updates the player’s grid position and redraws the maze.
+
+## 3. Complete C implementation
+
+Save the following as `maze_game_v4.c`. It uses a grid of cells, randomly generates the maze with iterative DFS, and handles keyboard input in the terminal.
+
+```c
+
+/*
+ * maze_game_v4.c
+ *
+ * Keyboard-controlled random maze for Linux/macOS terminals.
+ *
+ * Controls:
+ *   W / A / S / D  - Move
+ *   Arrow keys     - Move
+ *   Q              - Quit
+ *
+ * Compile:
+ *   gcc -std=c11 -Wall -Wextra -pedantic maze_game_v4.c -o maze_game_v4
+ *
+ * Run:
+ *   ./maze_game_v4
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <termios.h>
+#include <unistd.h>
+
+/* Maze dimensions. */
+#define ROWS 10
+#define COLS 20
+#define CELLS (ROWS * COLS)
+
+/* Directions. */
+enum {
+    NORTH = 0,
+    EAST,
+    SOUTH,
+    WEST,
+    DIRECTIONS
+};
+
+/* Opposite direction for each wall. */
+static const int opposite[DIRECTIONS] = {
+    SOUTH, WEST, NORTH, EAST
+};
+
+/* Row and column changes for each direction. */
+static const int dr[DIRECTIONS] = {
+    -1, 0, 1, 0
+};
+
+static const int dc[DIRECTIONS] = {
+    0, 1, 0, -1
+};
+
+/*
+ * walls[r][c][d] == 1 means a wall exists.
+ * walls[r][c][d] == 0 means the passage is open.
+ */
+static int walls[ROWS][COLS][DIRECTIONS];
+static int visited[ROWS][COLS];
+
+/* Player and goal positions. */
+static int playerRow = 0;
+static int playerCol = 0;
+static const int goalRow = ROWS - 1;
+static const int goalCol = COLS - 1;
+
+static int moves = 0;
+
+/* Save the terminal configuration so we can restore it. */
+static struct termios originalTerminal;
+static int terminalConfigured = 0;
+
+static void restoreTerminal(void)
+{
+    if (terminalConfigured) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalTerminal);
+        terminalConfigured = 0;
+    }
+}
+
+/* Enable immediate, character-by-character keyboard input. */
+static int enableRawMode(void)
+{
+    struct termios raw;
+
+    if (!isatty(STDIN_FILENO)) {
+        fprintf(stderr, "Run this game in an interactive terminal.\n");
+        return 0;
+    }
+
+    if (tcgetattr(STDIN_FILENO, &originalTerminal) == -1) {
+        perror("tcgetattr");
+        return 0;
+    }
+
+    raw = originalTerminal;
+
+    /* Disable canonical input and echo. */
+    raw.c_lflag &= (tcflag_t) ~(ICANON | ECHO);
+
+    /* Read one character at a time. */
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
+
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
+        perror("tcsetattr");
+        return 0;
+    }
+
+    terminalConfigured = 1;
+    atexit(restoreTerminal);
+    return 1;
+}
+
+/* Return true if a cell is inside the grid. */
+static int inBounds(int r, int c)
+{
+    return r >= 0 && r < ROWS &&
+           c >= 0 && c < COLS;
+}
+
+/* Convert a cell coordinate into a stack index. */
+static int cellIndex(int r, int c)
+{
+    return r * COLS + c;
+}
+
+/* Reset all walls and visit markers. */
+static void initializeMaze(void)
+{
+    for (int r = 0; r < ROWS; r++) {
+        for (int c = 0; c < COLS; c++) {
+            visited[r][c] = 0;
+
+            for (int d = 0; d < DIRECTIONS; d++) {
+                walls[r][c][d] = 1;
+            }
+        }
+    }
+}
+
+/*
+ * Generate a perfect maze using iterative depth-first search.
+ *
+ * Every cell starts surrounded by walls. DFS chooses an unvisited
+ * neighboring cell, removes the shared wall, and moves into it.
+ * When no unvisited neighbor remains, DFS backtracks.
+ *
+ * The resulting maze is connected and contains no cycles.
+ */
+static void generateMaze(void)
+{
+    int stack[CELLS];
+    int top = 0;
+
+    initializeMaze();
+
+    stack[top++] = cellIndex(0, 0);
+    visited[0][0] = 1;
+
+    while (top > 0) {
+        int current = stack[top - 1];
+        int r = current / COLS;
+        int c = current % COLS;
+
+        int choices[DIRECTIONS];
+        int choiceCount = 0;
+
+        /* Collect all unvisited neighboring cells. */
+        for (int d = 0; d < DIRECTIONS; d++) {
+            int nr = r + dr[d];
+            int nc = c + dc[d];
+
+            if (inBounds(nr, nc) && !visited[nr][nc]) {
+                choices[choiceCount++] = d;
+            }
+        }
+
+        if (choiceCount == 0) {
+            /* Dead end: backtrack. */
+            top--;
+            continue;
+        }
+
+        /* Choose one available direction at random. */
+        int d = choices[rand() % choiceCount];
+        int nr = r + dr[d];
+        int nc = c + dc[d];
+
+        /* Remove the wall from both sides of the passage. */
+        walls[r][c][d] = 0;
+        walls[nr][nc][opposite[d]] = 0;
+
+        visited[nr][nc] = 1;
+        stack[top++] = cellIndex(nr, nc);
+    }
+}
+
+/* Clear the terminal and display the current maze. */
+static void drawMaze(void)
+{
+    /* ANSI escape sequences: clear screen and move cursor home. */
+    printf("\033[2J\033[H");
+
+    printf("KEYBOARD MAZE | Moves: %d\n", moves);
+    printf("Move: W/A/S/D or arrow keys | Quit: Q\n\n");
+
+    /* Top boundary. */
+    for (int c = 0; c < COLS; c++) {
+        printf("+");
+        printf(walls[0][c][NORTH] ? "---" : "   ");
+    }
+    printf("+\n");
+
+    for (int r = 0; r < ROWS; r++) {
+        /* Cell contents and vertical walls. */
+        for (int c = 0; c < COLS; c++) {
+            printf("%c", walls[r][c][WEST] ? '|' : ' ');
+
+            char symbol = ' ';
+
+            if (r == playerRow && c == playerCol) {
+                symbol = 'P';
+            } else if (r == goalRow && c == goalCol) {
+                symbol = 'T';
+            } else if (r == 0 && c == 0) {
+                symbol = 'S';
+            }
+
+            printf(" %c ", symbol);
+        }
+
+        printf("%c\n", walls[r][COLS - 1][EAST] ? '|' : ' ');
+
+        /* Bottom boundary of this row. */
+        for (int c = 0; c < COLS; c++) {
+            printf("+");
+            printf(walls[r][c][SOUTH] ? "---" : "   ");
+        }
+        printf("+\n");
+    }
+
+    printf("\nP = Player, S = Start, T = Target\n");
+    fflush(stdout);
+}
+
+/*
+ * Read a key without waiting for Enter.
+ *
+ * Arrow keys arrive as escape sequences:
+ *   Up:    ESC [ A
+ *   Down:  ESC [ B
+ *   Right: ESC [ C
+ *   Left:  ESC [ D
+ *
+ * Return W/A/S/D, Q, or 0 for an unsupported key.
+ */
+static int readKey(void)
+{
+    int ch = getchar();
+
+    if (ch == EOF) {
+        return 'q';
+    }
+
+    /* Handle arrow-key escape sequences. */
+    if (ch == 27) {
+        int second = getchar();
+
+        if (second != '[') {
+            return 0;
+        }
+
+        int third = getchar();
+
+        switch (third) {
+            case 'A': return 'w';
+            case 'B': return 's';
+            case 'C': return 'd';
+            case 'D': return 'a';
+            default:  return 0;
+        }
+    }
+
+    /* Normalize uppercase letters. */
+    if (ch >= 'A' && ch <= 'Z') {
+        ch = ch - 'A' + 'a';
+    }
+
+    if (ch == 'w' || ch == 'a' ||
+        ch == 's' || ch == 'd' || ch == 'q') {
+        return ch;
+    }
+
+    return 0;
+}
+
+/*
+ * Attempt to move the player in one direction.
+ *
+ * A move succeeds only if:
+ *   1. The destination is inside the grid.
+ *   2. There is no wall between the current and destination cells.
+ */
+static void movePlayer(int direction)
+{
+    int nr = playerRow + dr[direction];
+    int nc = playerCol + dc[direction];
+
+    if (!inBounds(nr, nc)) {
+        return;
+    }
+
+    /* Check the wall separating the two cells. */
+    if (walls[playerRow][playerCol][direction]) {
+        return;
+    }
+
+    playerRow = nr;
+    playerCol = nc;
+    moves++;
+}
+
+/* Convert keyboard input into a movement direction. */
+static void handleKey(int key)
+{
+    switch (key) {
+        case 'w':
+            movePlayer(NORTH);
+            break;
+
+        case 'd':
+            movePlayer(EAST);
+            break;
+
+        case 's':
+            movePlayer(SOUTH);
+            break;
+
+        case 'a':
+            movePlayer(WEST);
+            break;
+
+        default:
+            /* Ignore unsupported keys. */
+            break;
+    }
+}
+
+int main(void)
+{
+    srand((unsigned int)time(NULL));
+
+    generateMaze();
+
+    if (!enableRawMode()) {
+        return EXIT_FAILURE;
+    }
+
+    while (1) {
+        drawMaze();
+
+        if (playerRow == goalRow && playerCol == goalCol) {
+            printf("\nYou escaped the maze in %d moves!\n", moves);
+            break;
+        }
+
+        int key = readKey();
+
+        if (key == 'q') {
+            printf("\nGame ended. Thanks for playing!\n");
+            break;
+        }
+
+        handleKey(key);
+    }
+
+    restoreTerminal();
+    return EXIT_SUCCESS;
+}
+
+```
+
+## 4. Compile and run
+
+On Linux, open a terminal in the directory containing the source file and run:
+
+```
+gcc -std=c11 -Wall -Wextra -pedantic maze_game_v4.c -o maze_game_v4
+./maze_game_v4
+```
+
+No external libraries are required; `termios.h` and `unistd.h` are POSIX headers available on Linux and macOS.
+
+## 5. How the algorithms work
+
+### A. Maze generation — iterative DFS
+
+The generator uses an explicit stack instead of recursive function calls.
+
+```
+Start at cell (0, 0)
+        |
+        v
+Find unvisited neighboring cells
+        |
+        v
+Are any available?
+   /          \
+ Yes           No
+  |             |
+Choose one    Pop stack
+at random       |
+  |             |
+Remove wall     |
+  |             |
+Mark visited   |
+Push neighbor  |
+  |             |
+  +---- Repeat--+
+```
+
+Every cell is visited exactly once. Each new cell is connected to its parent by removing the wall between them. This produces a perfect maze: every cell is reachable, and there is exactly one simple path between any two cells.
+
+### B. Player movement — graph traversal in disguise
+
+Consider two neighboring cells:
+
+```
++---+---+
+| P     |
++   +---+
+|       |
++---+---+
+```
+
+The player can move right only if the current cell's east wall is open. The movement function checks:
+
+1. Is the destination inside the grid?
+2. Is the wall between the current cell and the destination open?
+3. If both conditions are satisfied, update the player's position.
+
+This is effectively moving between adjacent vertices in an implicit graph. We don't need to build a separate adjacency list because the grid and wall arrays already tell us which edges exist.
+
+### C. Time and space complexity
+
+Let $V = \text{ROWS} \times \text{COLS}$ be the number of cells.
+
+| Operation               | Time       | Extra space                           |
+| ----------------------- | ---------- | ------------------------------------- |
+| Initialize maze         | $O(V)$ | $O(V)$                            |
+| Generate maze using DFS | $O(V)$ | $O(V)$                            |
+| Attempt one movement    | $O(1)$ | $O(1)$                            |
+| Redraw maze             | $O(V)$ | $O(1)$, excluding terminal output |
+
+Redrawing the entire maze after every key press is simple and adequate for this small game. Later, we could optimize rendering to update only the cells that change.
+
+## 6. Try these tests
+
+- Press `W` at the starting cell: the player should remain in place if the north wall is closed.
+- Move through an open passage: the move counter should increase.
+- Hold a direction against a wall: the player should not pass through it.
+- Navigate to `T`: the game should announce victory.
+- Press `Q`: the game should exit and restore the terminal settings.
+
+One small detail: because `P` represents the player, the starting `S` is hidden while the player occupies the start cell. Once the player moves away, `S` becomes visible.
+
+## 7. Where Version 5 could go
+
+A natural next step is to add BFS as an automatic maze solver. The player could first try solving the maze manually, then press a key to reveal the shortest route. That would let you compare DFS-based maze generation with BFS-based shortest-path search.
+
+Would you like me to remind you to continue with Version 5 later, or would you prefer to continue directly in this conversation?

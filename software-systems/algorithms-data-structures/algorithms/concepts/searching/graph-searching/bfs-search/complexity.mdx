@@ -1,0 +1,742 @@
+{/* # BFS Complexity Analysis */}
+
+The goal of complexity analysis is to understand how BFS's running time and memory usage grow as the graph becomes larger.
+
+We'll use these symbols throughout:
+
+- $V$: number of vertices.
+- $E$: number of edges.
+- $s$: source vertex.
+- $R$: number of vertices reachable from $s$.
+- $E_R$: number of edges examined within the reachable portion of the graph, counting adjacency-list entries.
+
+The main result is:
+
+$$
+T(V,E)=O(V+E)}
+$$
+
+for BFS over an adjacency-list representation when the algorithm traverses the entire graph. For a single-source BFS, the more precise bound is $O(R+E_R)$.
+
+## 1. Time complexity: $O(V+E)$ with adjacency lists
+
+Recall the core BFS algorithm:
+
+```
+BFS(G, source):
+    create empty queue Q
+
+    for each vertex v:
+        visited[v] = false
+
+    visited[source] = true
+    ENQUEUE(Q, source)
+
+    while Q is not empty:
+        u = DEQUEUE(Q)
+
+        for each neighbor v of u:
+            if visited[v] == false:
+                visited[v] = true
+                ENQUEUE(Q, v)
+```
+
+Let's examine where the time goes.
+
+### A. Initializing the visited array
+
+```
+for each vertex v:
+    visited[v] = false
+```
+
+This visits all $V$ vertices:
+`{}
+$$ 
+T\_{\text{initialization}}=O(V) 
+$$
+`}
+Even if the source can reach only a small part of the graph, this initialization still costs $O(V)$ when we initialize the entire array.
+
+Before starting BFS, we initialize three arrays for all vertices:
+
+```
+for (int v = 0; v < graph->numVertices; v++) {
+    color[v] = WHITE;
+    parent[v] = -1;
+    distance[v] = -1;
+}
+```
+
+Suppose the graph has six vertices:
+
+```
+        A
+       / \
+      B   C
+     / \   \
+    D   E---F
+```
+
+We initialize the information for every vertex:
+
+| Vertex | Color | Parent | Distance |
+| ------ | ----- | ------ | -------- |
+| A      | WHITE | -1     | -1       |
+| B      | WHITE | -1     | -1       |
+| C      | WHITE | -1     | -1       |
+| D      | WHITE | -1     | -1       |
+| E      | WHITE | -1     | -1       |
+| F      | WHITE | -1     | -1       |
+
+We perform a constant amount of work for each vertex.
+
+Therefore:
+
+$$
+T\_{\text{initialization}} = O(V)
+$$
+
+### B. Processing vertices and the queue
+
+Remember this important BFS rule:
+
+A vertex is colored GRAY when it is discovered, before it is inserted into the queue.
+
+```
+if (color[v] == WHITE) {
+    color[v] = GRAY;
+    parent[v] = u;
+    distance[v] = distance[u] + 1;
+
+    enqueue(&queue, v);
+}
+```
+
+Each reachable vertex is enqueued once and dequeued once.
+
+Why is this important?
+
+Consider this graph:
+
+```
+        A
+       / \
+      B---C
+       \ /
+        D
+```
+
+Starting from A:
+
+- A discovers B and C.
+- B may discover D.
+- C also has an edge to D.
+
+When B discovers D, it changes D's color from WHITE to GRAY and enqueues it.
+
+Later, when C examines D, it sees that D is already GRAY. Therefore, D is not enqueued again.
+
+This guarantees:
+
+- Every vertex is enqueued at most once.
+- Every vertex is dequeued at most once.
+
+With a standard queue implementation, enqueueing and dequeueing each take $O(1)$ time.
+
+Therefore:
+`{}
+$$ 
+T\_{\text{queue}}=O(R)
+$$
+`}
+where $R\le V$.
+
+More precisely, there are at most $V$ enqueue operations and $V$ dequeue operations.
+
+### C. Examining neighbors
+
+When BFS processes a vertex, it scans that vertex's adjacency list.
+
+Consider our earlier graph:
+
+```
+        A
+       / \
+      B   C
+     / \   \
+    D   E---F
+```
+
+Its edges are:
+
+```
+A-B
+A-C
+B-D
+B-E
+C-F
+E-F
+```
+
+There are six vertices and six undirected edges:
+
+$$
+V=6,\quad E=6
+$$
+
+During BFS, each vertex is dequeued once, and its adjacency list is examined.
+
+For example:
+
+```
+while (!isEmpty(&queue)) {
+    int u = dequeue(&queue);
+
+    for (int i = 0; i < graph->adj[u].size; i++) {
+        int v = graph->adj[u].items[i];
+
+        if (color[v] == WHITE) {
+            color[v] = GRAY;
+            parent[v] = u;
+            distance[v] = distance[u] + 1;
+            enqueue(&queue, v);
+        }
+    }
+
+    color[u] = BLACK;
+}
+```
+
+The important detail is that we examine every adjacency-list entry exactly once.
+
+For an undirected graph, each edge appears in two adjacency lists:
+
+```
+A's adjacency list: B, C
+B's adjacency list: A, D, E
+C's adjacency list: A, F
+D's adjacency list: B
+E's adjacency list: B, F
+F's adjacency list: C, E
+```
+
+Processing `A` examines two adjacency-list entries: `B` and `C`. Processing `B` examines three: `A`, `D`, and `E`.
+
+Therefore, the total number of adjacency-list entries is:
+
+$$
+2E
+$$
+
+Across the traversal, the total number of neighbor entries examined is proportional to the sum of the degrees of the reached vertices.
+
+For a full undirected graph:
+$$ 
+\sum\_{v\in V}\deg(v)=2E
+$$
+`}
+For a full directed graph, each edge appears in one adjacency list, the sum of the outgoing degrees is $E$.
+
+Thus, the total neighbor-scanning cost is $O(E)$.
+
+### D. Combine the costs
+
+During initialization, Breadth-First Search updates information for all vertices,
+with performance O(V). When a vertex is first visited (and colored gray), it is inserted into the queue, and no vertex is added twice. Since the queue can add and
+remove elements in constant time, the cost of managing the queue is O(V). Finally,
+each vertex is dequeued exactly once and its adjacent vertices are traversed exactly
+once. The sum total of the edge loops, therefore, is bounded by the total number of
+edges, or O(E). Thus, the total performance is O(V + E).
+
+| Operation                    | Time                  |
+| ---------------------------- | --------------------- |
+| Initialize `visited`         | $O(V)$            |
+| Enqueue and dequeue vertices | $O(V)$ worst case |
+| Examine adjacency lists      | $O(E)$            |
+| Total                        | $O(V+E)$          |
+
+Adding them:
+
+$$
+T(V,E) = O(V) + O(V) + O(E)
+$$
+
+Removing constants and combining terms:
+
+$$
+\boxed{T(V,E)=O(V+E)}
+$$
+
+We omit constant factors in Big-O notation.
+
+Important: $O(V+E)$ is a worst-case bound for a complete traversal. If you start BFS at one vertex and only a small portion of the graph is reachable, the work can be smaller. With an already-built adjacency-list graph and an efficient queue, the traversal itself takes $O(R+E_R)$, excluding any separate full-graph initialization.
+
+## 5. Why the graph representation matters
+
+The $O(V+E)$ complexity assumes an adjacency-list representation.
+
+Compare it with an adjacency matrix:
+
+| Operation                         | Adjacency list   | Adjacency matrix |
+| --------------------------------- | ---------------- | ---------------- |
+| Initialize BFS arrays             | $O(V)$       | $O(V)$       |
+| Examine neighbors of one vertex   | $O(\deg(v))$ | $O(V)$       |
+| Examine neighbors of all vertices | $O(E)$       | $O(V^2)$     |
+| Overall BFS                       | $O(V+E)$     | $O(V^2)$     |
+
+With an adjacency matrix, BFS must scan an entire row of $V$ entries to find the neighbors of each dequeued vertex, even if that vertex has very few neighbors.
+
+The key takeaway: BFS itself does not automatically guarantee $O(V+E)$. That complexity comes from combining BFS with an adjacency-list representation and a queue that supports constant-time insertion and removal.
+
+## 2. Space complexity: $O(V)$ auxiliary space
+
+BFS needs extra memory to keep track of which vertices it has discovered, which vertices are waiting to be processed, and optionally how each vertex was reached.
+
+Consider these common structures:
+
+```
+visited[V]      // Was each vertex discovered?
+queue[V]        // Which vertices are waiting to be processed?
+parent[V]       // Optional: predecessor in the BFS tree
+distance[V]     // Optional: shortest distance from source
+```
+
+Each structure uses at most $O(V)$ space.
+
+| Structure    | Purpose                               | Space      |
+| ------------ | ------------------------------------- | ---------- |
+| `visited[]`  | Prevent duplicate discoveries         | $O(V)$ |
+| Queue        | Store vertices waiting for processing | $O(V)$ |
+| `parent[]`   | Reconstruct paths                     | $O(V)$ |
+| `distance[]` | Store shortest-path distances         | $O(V)$ |
+
+Even if we use all four structures, their combined space is:
+
+$$
+O(V)+O(V)+O(V)+O(V)=O(V)
+$$
+
+Therefore, BFS requires:
+
+$$
+\boxed{S\_{\text{auxiliary}}=O(V)}
+$$
+
+### Why can the queue contain $O(V)$ vertices?
+
+Imagine a star-shaped graph:
+
+```
+          B
+          |
+      C --A-- D
+          |
+          E
+```
+
+When BFS processes `A`, it discovers and enqueues all its neighbors.
+
+```
+Queue: [B, C, D, E]
+```
+
+The queue temporarily contains several vertices at once. In a star with $V$ vertices, the queue can contain $V-1$ vertices after processing the center.
+
+So the queue's worst-case size is $O(V)$, even though every vertex enters it at most once.
+
+### Does this include the graph itself?
+
+Usually, no. Auxiliary space means additional memory used by the algorithm, excluding the input graph.
+
+For an adjacency-list graph, the graph itself occupies $O(V+E)$ space. BFS's auxiliary structures occupy $O(V)$ space.
+
+If you include both the graph and BFS's extra memory, the total is $O(V+E)$.
+
+Also, if BFS only needs to determine reachability and the graph is already supplied, you might not need `parent[]` or `distance[]`. The `visited[]` array and queue are still sufficient for a standard implementation.
+
+## 3. Why every vertex is discovered at most once
+
+The reason is the `visited` check combined with marking a vertex when it is enqueued, not when it is dequeued.
+
+```
+for each neighbor v of u:
+    if visited[v] == false:
+        visited[v] = true
+        ENQUEUE(Q, v)
+```
+
+Let's break down what happens.
+
+### Step 1: A vertex is discovered
+
+Suppose BFS processes `A`:
+
+```
+A --- B
+```
+
+It sees that `B` has not been visited.
+
+```
+visited[B] = true
+ENQUEUE(Q, B)
+```
+
+At this moment, `B` is marked as discovered.
+
+### Step 2: Another vertex encounters it
+
+Now consider a triangle:
+
+```
+    A
+   / \
+  B---C
+```
+
+When `A` is processed, both `B` and `C` are discovered and enqueued.
+
+Later, while processing `B`, BFS sees `C` as a neighbor. However:
+
+```
+visited[C] == true
+```
+
+Therefore, `C` is not enqueued again.
+
+### Step 3: The same rule applies everywhere
+
+Once `visited[v]` becomes `true`, the algorithm never changes it back to `false` during that BFS run.
+
+Consequently:
+
+- Every vertex is discovered at most once.
+- Every vertex is enqueued at most once.
+- Every vertex is dequeued at most once.
+- Every reachable vertex's adjacency list is scanned at most once.
+
+This is a key part of the linear-time complexity proof.
+
+### What if we mark vertices only when dequeuing?
+
+Suppose we change the code to:
+
+```
+if visited[v] == false:
+    ENQUEUE(Q, v)
+```
+
+and only mark `v` as visited when it is removed from the queue.
+
+In the triangle, both `A`'s processing and `B`'s processing could enqueue `C` before `C` is marked visited. The queue could contain duplicates.
+
+That can cause redundant work and complicate the complexity argument. Marking on discovery avoids this problem.
+
+Rule to remember: in ordinary BFS, mark a vertex visited immediately before enqueueing it.
+
+## 4. Why each edge is examined at most twice in an undirected adjacency-list representation
+
+This is where the distinction between an edge and an adjacency-list entry matters.
+
+Consider this undirected edge:
+
+```
+A ----- B
+```
+
+In an adjacency-list representation, the edge appears in both vertices' lists:
+
+```
+A: B
+B: A
+```
+
+When BFS processes `A`, it examines the entry `B`.
+
+Later, if BFS processes `B`, it examines the entry `A`.
+
+So the same undirected edge is examined twice—once from each endpoint.
+
+### Example
+
+```
+    A
+   / \
+  B---C
+```
+
+The adjacency lists are:
+
+```
+A: B, C
+B: A, C
+C: A, B
+```
+
+If all three vertices are reached, the total neighbor entries examined are:
+
+- Process `A`: 2 entries
+- Process `B`: 2 entries
+- Process `C`: 2 entries
+
+Total:
+
+$$
+2+2+2=6
+$$
+
+There are three undirected edges:
+
+$$
+E=3
+$$
+
+Each edge contributes two adjacency-list entries:
+
+$$
+\sum\_{v\in V}\deg(v)=2E=6
+$$
+
+In general:
+
+$$
+\boxed{\sum\_{v\in V}\deg(v)=2E}
+$$
+
+Therefore, scanning every adjacency list takes $O(2E)$, which simplifies to $O(E)$.
+
+### What about directed graphs?
+
+For a directed graph:
+
+```
+A ---> B
+```
+
+the adjacency list normally contains:
+
+```
+A: B
+B: (no outgoing edge to A)
+```
+
+Each directed edge appears once in the outgoing adjacency lists, so scanning the complete graph examines $E$ entries.
+
+| Graph type | Adjacency-list entries per edge | Total entries |
+| ---------- | ------------------------------- | ------------- |
+| Undirected | 2                               | $2E$      |
+| Directed   | 1                               | $E$       |
+
+Both produce $O(E)$ time for neighbor scanning.
+
+One qualification: a single-source BFS may not scan every edge in the graph. It scans the adjacency lists of the reachable vertices. The full-graph counts above apply when all relevant vertices are processed.
+
+## 5. Adjacency matrix versus adjacency list
+
+The graph's representation affects BFS complexity. The BFS algorithm is conceptually the same, but the cost of finding a vertex's neighbors changes.
+
+### Adjacency-list representation
+
+Each vertex stores its neighbors.
+
+```
+A: B, C
+B: A, D, E
+C: A, F
+D: B
+E: B
+F: C
+```
+
+When BFS processes `B`, it can iterate directly over `A`, `D`, and `E`—the neighbors actually stored in `B`'s list.
+
+For a full traversal:
+
+$$
+T\_{\text{list}}=O(V+E)
+$$
+
+The graph's storage is $O(V+E)$, and BFS's auxiliary space is $O(V)$.
+
+### Adjacency-matrix representation
+
+An adjacency matrix uses a $V\times V$ table.
+
+For an undirected graph, `matrix[u][v]` indicates whether an edge connects `u` and `v`.
+
+For our example:
+
+```
+      A B C D E F
+    +------------
+A   | 0 1 1 0 0 0
+B   | 1 0 0 1 1 0
+C   | 1 0 0 0 0 1
+D   | 0 1 0 0 0 0
+E   | 0 1 0 0 0 0
+F   | 0 0 1 0 0 0
+```
+
+To find the neighbors of `B`, BFS must scan the entire row:
+
+```
+B: 1 0 0 1 1 0
+```
+
+It checks all $V$ possible vertices, even though `B` has only three neighbors.
+
+If BFS processes every vertex, it scans $V$ entries per vertex:
+
+$$
+T\_{\text{matrix}}=O(V^2)
+$$
+
+This is true even for a sparse graph with very few edges.
+
+### Comparison
+
+| Property                         | Adjacency list             | Adjacency matrix                     |
+| -------------------------------- | -------------------------- | ------------------------------------ |
+| Graph storage                    | $O(V+E)$               | $O(V^2)$                         |
+| Full BFS time                    | $O(V+E)$               | $O(V^2)$                         |
+| Find all neighbors of one vertex | $O(\deg(v))$           | $O(V)$                           |
+| Check whether an edge exists     | Typically $O(\deg(v))$ | $O(1)$                           |
+| Best suited for                  | Usually sparse graphs      | Dense graphs or frequent edge checks |
+
+A graph is sparse when it has relatively few edges compared with $V^2$. It is dense when it has many edges, approaching the maximum possible number.
+
+### Which representation should you use?
+
+For most BFS implementations and learning exercises, an adjacency list is a good default because it lets you examine only the edges that actually exist.
+
+An adjacency matrix can still be a reasonable choice for dense graphs or when constant-time edge-existence checks are important.
+
+## 6. Output-sensitive considerations and implementation overhead
+
+Big-O complexity describes how work grows with input size, but the exact cost also depends on what the algorithm must return and how it is implemented.
+
+### 6.1 Traversal order versus shortest-path output
+
+Suppose BFS only prints the vertices it visits.
+
+It does not necessarily need `parent[]` or `distance[]`. It can use just:
+
+```
+visited[]
+queue
+```
+
+Its auxiliary space remains $O(V)$.
+
+But suppose you need to reconstruct a shortest path from `A` to `G`. Then BFS must preserve predecessor information:
+
+```
+parent[B] = A
+parent[E] = B
+parent[G] = E
+```
+
+Starting at `G` and following parent pointers backward gives:
+
+```
+G <- E <- B <- A
+```
+
+Reverse the sequence:
+
+```
+A -> B -> E -> G
+```
+
+The extra `parent[]` array uses $O(V)$ space. It does not change the overall asymptotic time complexity.
+
+If you return the path explicitly, constructing or writing a path of length $L$ takes $O(L)$ time, where $L\le V$.
+
+### 6.2 Single-source BFS versus full-graph BFS
+
+A single-source traversal only processes vertices reachable from the source.
+
+Let:
+
+- $R$ be the number of reachable vertices.
+- $E_R$ be the number of adjacency-list entries scanned during the traversal.
+
+Then the traversal itself takes:
+
+$$
+O(R+E_R)
+$$
+
+However, if your implementation initializes a `visited[]` array for all vertices before starting, it also pays $O(V)$ for initialization:
+
+$$
+O(V+R+E_R)
+$$
+
+For a full-graph traversal, every vertex is considered, so the usual bound is $O(V+E)$.
+
+This distinction matters when the graph is large but the source can reach only a small component.
+
+### 6.3 Initialization can affect practical performance
+
+Consider two implementations.
+
+Implementation A: creates and initializes a new visited array for every BFS run.
+
+```
+initialize visited[V]
+run BFS
+```
+
+Implementation B: reuses an array and uses timestamps or visitation markers to avoid clearing every entry.
+
+Implementation B can reduce repeated initialization overhead in applications that run BFS many times. However, it adds implementation complexity and must handle marker reuse correctly.
+
+The standard implementation that initializes all vertices is often clearer and perfectly appropriate for a single run.
+
+### 6.4 Queue implementation matters
+
+The $O(V+E)$ bound assumes queue operations take $O(1)$ time.
+
+A circular array queue or a suitable linked queue can provide constant-time enqueue and dequeue operations.
+
+But consider a queue implemented using an array where removing the first element shifts all remaining elements:
+
+```
+[A, B, C, D]
+remove A
+[B, C, D]  <- all remaining elements shifted
+```
+
+Each dequeue could cost $O(V)$ in the worst case. With $O(V)$ dequeues, the queue operations alone could cost $O(V^2)$.
+
+So the algorithm's theoretical complexity depends on choosing an appropriate queue implementation.
+
+### 6.5 Printing can dominate the runtime
+
+If BFS prints every visited vertex, the output itself takes time proportional to the number of printed vertices.
+
+For a traversal that prints all $V$ vertices, the output cost is at least:
+
+$$
+\Omega(V)
+$$
+
+If you print the entire adjacency matrix as part of debugging, that adds $O(V^2)$ output work, regardless of BFS's adjacency-list traversal complexity.
+
+This is why complexity analysis usually separates the algorithm's core work from formatting, logging, and input/output.
+
+### Final summary
+
+| Topic                     | Key conclusion                                                              |
+| ------------------------- | --------------------------------------------------------------------------- |
+| Adjacency-list time       | $O(V+E)$ for a full traversal                                           |
+| Auxiliary space           | $O(V)$                                                                  |
+| Unique discovery          | Mark visited before enqueueing                                              |
+| Undirected edges          | Each edge appears twice in adjacency lists                                  |
+| Adjacency matrix          | Full BFS takes $O(V^2)$                                                 |
+| Single-source traversal   | Work depends on the reachable subgraph, plus initialization                 |
+| Output and implementation | Path reconstruction, logging, and inefficient queue operations can add cost |
+
+The most important complexity insight is this: BFS is linear in the size of the graph when using adjacency lists and an efficient queue. It achieves this because each vertex is enqueued at most once and each relevant adjacency-list entry is examined at most once.

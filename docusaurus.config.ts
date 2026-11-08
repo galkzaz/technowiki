@@ -3,6 +3,8 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { remarkKroki } from "remark-kroki";
 import { themes } from "prism-react-renderer";
+import remarkExcalidraw from "./src/plugins/remark-excalidraw/index.js";
+import remarkBracketMath from "./src/plugins/remark-bracket-math/index.js";
 
 const lightCodeTheme = themes.github;
 const darkCodeTheme = themes.dracula;
@@ -13,15 +15,20 @@ const sharedDocsConfig = {
   //sidebarPath: "./sidebars.ts",
   remarkPlugins: [
     remarkMath,
+    remarkBracketMath,
+    // Kroki diagrams
     [
       remarkKroki,
       {
         server: "https://kroki.io",
         output: "img-base64",
-        alias: ["plantuml", "ditaa"],
+        alias: ["plantuml", "ditaa", "goat"],
         target: "mdx3",
       },
     ],
+
+    // Excalidraw diagrams — separate plugin entry
+    remarkExcalidraw,
   ],
   rehypePlugins: [
     [
@@ -54,6 +61,7 @@ const config: Config = {
   markdown: {
     format: "detect",
     mermaid: true,
+    
   },
 
   themes: ["@docusaurus/theme-mermaid"],
@@ -135,6 +143,28 @@ const config: Config = {
         ...sharedDocsConfig,
       },
     ],
+    // Artificial Intelligence Instance
+    [
+      "@docusaurus/plugin-content-docs",
+      {
+        id: "artificial-intelligence",
+        path: "artificial-intelligence",
+        routeBasePath: "artificial-intelligence",
+        sidebarPath: require.resolve("./artificial-intelligence/sidebars.ts"),
+        ...sharedDocsConfig,
+      },
+    ],
+    // // Embedded Systems Instance
+    // [
+    //   "@docusaurus/plugin-content-docs",
+    //   {
+    //     id: "embedded-systems",
+    //     path: "embedded-systems",
+    //     routeBasePath: "embedded-systems",
+    //     //sidebarPath: require.resolve("./embedded-systems/sidebars.ts"),
+    //     ...sharedDocsConfig,
+    //   },
+    //],
     // Embedded Systems Instance
     [
       "@docusaurus/plugin-content-docs",
@@ -146,6 +176,26 @@ const config: Config = {
         ...sharedDocsConfig,
       },
     ],
+    // Add this Webpack resolution fix plugin
+    function fixFullySpecifiedWebpack() {
+      return {
+        name: 'fix-fully-specified-webpack',
+        configureWebpack() {
+          return {
+            module: {
+              rules: [
+                {
+                  test: /\.m?js$/,
+                  resolve: {
+                    fullySpecified: false,
+                  },
+                },
+              ],
+            },
+          };
+        },
+      };
+    },
   ],
 
   themeConfig: {
@@ -204,6 +254,12 @@ const config: Config = {
         {
           label: "Software Engineering",
           to: "/software-engineering",
+          position: "right",
+          className: "nav-main-hub",
+        },
+        {
+          label: "Artificial Intelligence",
+          to: "/artificial-intelligence",
           position: "right",
           className: "nav-main-hub",
         },
@@ -510,6 +566,440 @@ const config: Config = {
               to: "/software-engineering/infrastructure-devops/reliability",
             },
           ],
+        },
+        /** * 6. PROMOTED ITEMS: ARTIFICIAL INTELLIGENCE
+         */
+        {
+          label: "Introduction",
+          to: "/artificial-intelligence/introduction-to-ai",
+          position: "left",
+          sidebarId: "IntroductionToAISidebar",
+          className: "nav-ai-only",
+        },
+        {
+          label: "Foundations",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "Computational Foundations",
+              sidebarId: "ComputationalFoundationsSidebar",
+              to: "/artificial-intelligence/02-ai-foundations/computational-foundations",
+            },
+            {
+              label: "Mathematics For AI",
+              sidebarId: "MathematicsForAISidebar",
+              to: "/artificial-intelligence/02-ai-foundations/mathematics-for-ai",
+            },
+            {
+              label: "Programming For AI",
+              sidebarId: "ProgrammingForAISidebar",
+              to: "/artificial-intelligence/02-ai-foundations/programming-for-ai",
+            },
+          ],
+        },
+        {
+          label: "Data",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "Data Collection",
+              sidebarId: "DataCollectionSidebar",
+              to: "/artificial-intelligence/03-data-for-ai/data-collection",
+            },
+            {
+              label: "Data Engineering For AI",
+              sidebarId: "DataEngineeringForAISidebar",
+              to: "/artificial-intelligence/03-data-for-ai/data-engineering-for-ai",
+            },
+            {
+              label: "Data Fundamentals",
+              sidebarId: "DataFundamentalsSidebar",
+              to: "/artificial-intelligence/03-data-for-ai/data-fundamentals",
+            },
+            {
+              label: "Data Preprocessing",
+              sidebarId: "DataPreprocessingSidebar",
+              to: "/artificial-intelligence/03-data-for-ai/data-preprocessing",
+            },
+            {
+              label: "Dataset Management",
+              sidebarId: "DatasetManagementSidebar",
+              to: "/artificial-intelligence/03-data-for-ai/dataset-management",
+            },
+            {
+              label: "Exploratory Data Analysis",
+              sidebarId: "ExploratoryDataAnalysisSidebar",
+              to: "/artificial-intelligence/03-data-for-ai/exploratory-data-analysis",
+            },
+          ],
+        },
+        {
+          label: "Classical AI",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "Constraint Satisfaction Problems",
+              sidebarId: "ConstraintSatisfactionProblemsSidebar",
+              to: "/artificial-intelligence/04-classical-artificial-intelligence/constraint-satisfaction-problems",
+            },
+            {
+              label: "Expert Systems",
+              sidebarId: "ExpertSystemsSidebar",
+              to: "/artificial-intelligence/04-classical-artificial-intelligence/expert-systems",
+            },
+            {
+              label: "Intelligent Agents",
+              sidebarId: "IntelligentAgentsSidebar",
+              to: "/artificial-intelligence/04-classical-artificial-intelligence/intelligent-agents",
+            },
+            {
+              label: "Knowledge Representation",
+              sidebarId: "KnowledgeRepresentationSidebar",
+              to: "/artificial-intelligence/04-classical-artificial-intelligence/knowledge-representation",
+            },
+            {
+              label: "Planning And Decision Making",
+              sidebarId: "PlanningAndDecisionMakingSidebar",
+              to: "/artificial-intelligence/04-classical-artificial-intelligence/planning-and-decision-making",
+            },
+            {
+              label: "Problem Solving And Search",
+              sidebarId: "ProblemSolvingAndSearchSidebar",
+              to: "/artificial-intelligence/04-classical-artificial-intelligence/problem-solving-and-search",
+            },
+            {
+              label: "Reasoning And Inference",
+              sidebarId: "ReasoningAndInferenceSidebar",
+              to: "/artificial-intelligence/04-classical-artificial-intelligence/reasoning-and-inference",
+            },
+          ],
+        },
+        {
+          label: "Machine Learning",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "Feature Engineering",
+              sidebarId: "FeatureEngineeringSidebar",
+              to: "/artificial-intelligence/05-machine-learning/feature-engineering",
+            },
+            {
+              label: "Introduction To ML",
+              sidebarId: "IntroductionToMLSidebar",
+              to: "/artificial-intelligence/05-machine-learning/introduction-to-ml",
+            },
+            {
+              label: "Model Evaluation",
+              sidebarId: "ModelEvaluationSidebar",
+              to: "/artificial-intelligence/05-machine-learning/model-evaluation",
+            },
+            {
+              label: "Model Training And Optimization",
+              sidebarId: "ModelTrainingAndOptimizationSidebar",
+              to: "/artificial-intelligence/05-machine-learning/model-training-and-optimization",
+            },
+            {
+              label: "Self-Supervised Learning",
+              sidebarId: "SelfSupervisedLearningSidebar",
+              to: "/artificial-intelligence/05-machine-learning/self-supervised-learning",
+            },
+            {
+              label: "Semi-Supervised Learning",
+              sidebarId: "SemiSupervisedLearningSidebar",
+              to: "/artificial-intelligence/05-machine-learning/semi-supervised-learning",
+            },
+            {
+              label: "Supervised Learning",
+              sidebarId: "SupervisedLearningSidebar",
+              to: "/artificial-intelligence/05-machine-learning/supervised-learning",
+            },
+            {
+              label: "Unsupervised Learning",
+              sidebarId: "UnsupervisedLearningSidebar",
+              to: "/artificial-intelligence/05-machine-learning/unsupervised-learning",
+            },
+          ],
+        },
+        {
+          label: "Deep Learning",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "Deep Learning Frameworks",
+              sidebarId: "DeepLearningFrameworksSidebar",
+              to: "/artificial-intelligence/06-deep-learning/deep-learning-frameworks",
+            },
+            {
+              label: "Distributed Deep Learning",
+              sidebarId: "DistributedDeepLearningSidebar",
+              to: "/artificial-intelligence/06-deep-learning/distributed-deep-learning",
+            },
+            {
+              label: "Neural Network Architectures",
+              sidebarId: "NeuralNetworkArchitecturesSidebar",
+              to: "/artificial-intelligence/06-deep-learning/neural-network-architectures",
+            },
+            {
+              label: "Neural Network Fundamentals",
+              sidebarId: "NeuralNetworkFundamentalsSidebar",
+              to: "/artificial-intelligence/06-deep-learning/neural-network-fundamentals",
+            },
+            {
+              label: "Optimization And Regularization",
+              sidebarId: "OptimizationAndRegularizationSidebar",
+              to: "/artificial-intelligence/06-deep-learning/optimization-and-regularization",
+            },
+            {
+              label: "Transfer Learning",
+              sidebarId: "TransferLearningSidebar",
+              to: "/artificial-intelligence/06-deep-learning/transfer-learning",
+            },
+          ],
+        },
+        {
+          label: "Specializations",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "Computer Vision",
+              sidebarId: "ComputerVisionSidebar",
+              to: "/artificial-intelligence/07-ai-specializations/computer-vision",
+            },
+            {
+              label: "Natural Language Processing",
+              sidebarId: "NaturalLanguageProcessingSidebar",
+              to: "/artificial-intelligence/07-ai-specializations/natural-language-processing",
+            },
+            {
+              label: "Other AI Applications",
+              sidebarId: "OtherAIApplicationsSidebar",
+              to: "/artificial-intelligence/07-ai-specializations/other-ai-applications",
+            },
+            {
+              label: "Recommender Systems",
+              sidebarId: "RecommenderSystemsSidebar",
+              to: "/artificial-intelligence/07-ai-specializations/recommender-systems",
+            },
+            {
+              label: "Reinforcement Learning",
+              sidebarId: "ReinforcementLearningSidebar",
+              to: "/artificial-intelligence/07-ai-specializations/reinforcement-learning",
+            },
+            {
+              label: "Robotics And Autonomous Systems",
+              sidebarId: "RoboticsAndAutonomousSystemsSidebar",
+              to: "/artificial-intelligence/07-ai-specializations/robotics-and-autonomous-systems",
+            },
+            {
+              label: "Speech And Audio AI",
+              sidebarId: "SpeechAndAudioAISidebar",
+              to: "/artificial-intelligence/07-ai-specializations/speech-and-audio-ai",
+            },
+            {
+              label: "Time Series And Forecasting",
+              sidebarId: "TimeSeriesAndForecastingSidebar",
+              to: "/artificial-intelligence/07-ai-specializations/time-series-and-forecasting",
+            },
+          ],
+        },
+        {
+          label: "GenAI",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "Generative AI Frameworks",
+              sidebarId: "GenerativeAIFrameworksSidebar",
+              to: "/artificial-intelligence/generative-ai/generative-ai-frameworks",
+            },
+            {
+              label: "Generative AI Fundamentals",
+              sidebarId: "GenerativeAIFundamentalsSidebar",
+              to: "/artificial-intelligence/generative-ai/generative-ai-fundamentals",
+            },
+            {
+              label: "Generative Image And Video",
+              sidebarId: "GenerativeImageAndVideoSidebar",
+              to: "/artificial-intelligence/generative-ai/generative-image-and-video",
+            },
+            {
+              label: "Large Language Models",
+              sidebarId: "LargeLanguageModelsSidebar",
+              to: "/artificial-intelligence/generative-ai/large-language-models",
+            },
+            {
+              label: "Multimodal AI",
+              sidebarId: "MultimodalAISidebar",
+              to: "/artificial-intelligence/generative-ai/multimodal-ai",
+            },
+            {
+              label: "Prompt Engineering",
+              sidebarId: "PromptEngineeringSidebar",
+              to: "/artificial-intelligence/generative-ai/prompt-engineering",
+            },
+            {
+              label: "Retrieval Augmented Generation",
+              sidebarId: "RetrievalAugmentedGenerationSidebar",
+              to: "/artificial-intelligence/generative-ai/retrieval-augmented-generation",
+            },
+          ],
+        },
+        {
+          label: "Agentic Systems",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "Agent Evaluation And Safety",
+              sidebarId: "AgentEvaluationAndSafetySidebar",
+              to: "/artificial-intelligence/09-ai-agents-and-agentic-systems/agent-evaluation-and-safety",
+            },
+            {
+              label: "Agent Frameworks",
+              sidebarId: "AgentFrameworksSidebar",
+              to: "/artificial-intelligence/09-ai-agents-and-agentic-systems/agent-frameworks",
+            },
+            {
+              label: "Agent Fundamentals",
+              sidebarId: "AgentFundamentalsSidebar",
+              to: "/artificial-intelligence/09-ai-agents-and-agentic-systems/agent-fundamentals",
+            },
+            {
+              label: "Agent Memory",
+              sidebarId: "AgentMemorySidebar",
+              to: "/artificial-intelligence/09-ai-agents-and-agentic-systems/agent-memory",
+            },
+            {
+              label: "Agent Orchestration",
+              sidebarId: "AgentOrchestrationSidebar",
+              to: "/artificial-intelligence/09-ai-agents-and-agentic-systems/agent-orchestration",
+            },
+          ],
+        },
+        {
+          label: "Engineering",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "AI Frameworks And Platforms",
+              sidebarId: "AIFrameworksAndPlatformsSidebar",
+              to: "/artificial-intelligence/10-ai-engineering-and-mlops/ai-frameworks-and-platforms",
+            },
+            {
+              label: "AI System Design",
+              sidebarId: "AISystemDesignSidebar",
+              to: "/artificial-intelligence/10-ai-engineering-and-mlops/ai-system-design",
+            },
+            {
+              label: "AI Testing",
+              sidebarId: "AITestingSidebar",
+              to: "/artificial-intelligence/10-ai-engineering-and-mlops/ai-testing",
+            },
+            {
+              label: "Experiment Management",
+              sidebarId: "ExperimentManagementSidebar",
+              to: "/artificial-intelligence/10-ai-engineering-and-mlops/experiment-management",
+            },
+            {
+              label: "ML Pipelines",
+              sidebarId: "MLPipelinesSidebar",
+              to: "/artificial-intelligence/10-ai-engineering-and-mlops/ml-pipelines",
+            },
+            {
+              label: "Model Deployment",
+              sidebarId: "ModelDeploymentSidebar",
+              to: "/artificial-intelligence/10-ai-engineering-and-mlops/model-deployment",
+            },
+            {
+              label: "Model Monitoring",
+              sidebarId: "ModelMonitoringSidebar",
+              to: "/artificial-intelligence/10-ai-engineering-and-mlops/model-monitoring",
+            },
+          ],
+        },
+        {
+          label: "Security&Governance",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "AI Security",
+              sidebarId: "AISecuritySidebar",
+              to: "/artificial-intelligence/11-responsible-ai-security-and-governance/ai-security",
+            },
+            {
+              label: "Explainable AI",
+              sidebarId: "ExplainableAISidebar",
+              to: "/artificial-intelligence/11-responsible-ai-security-and-governance/explainable-ai",
+            },
+            {
+              label: "Governance And Compliance",
+              sidebarId: "GovernanceAndComplianceSidebar",
+              to: "/artificial-intelligence/11-responsible-ai-security-and-governance/governance-and-compliance",
+            },
+            {
+              label: "Privacy",
+              sidebarId: "PrivacySidebar",
+              to: "/artificial-intelligence/11-responsible-ai-security-and-governance/privacy",
+            },
+            {
+              label: "Responsible AI",
+              sidebarId: "ResponsibleAISidebar",
+              to: "/artificial-intelligence/11-responsible-ai-security-and-governance/responsible-ai",
+            },
+          ],
+        },
+        {
+          label: "Labs",
+          type: "dropdown",
+          position: "left",
+          className: "nav-ai-only",
+          items: [
+            {
+              label: "Advanced Projects",
+              sidebarId: "AdvancedProjectsSidebar",
+              to: "/artificial-intelligence/12-ai-projects-and-practical-labs/advanced-projects",
+            },
+            {
+              label: "Beginner Projects",
+              sidebarId: "BeginnerProjectsSidebar",
+              to: "/artificial-intelligence/12-ai-projects-and-practical-labs/beginner-projects",
+            },
+            {
+              label: "Capstone Projects",
+              sidebarId: "CapstoneProjectsSidebar",
+              to: "/artificial-intelligence/12-ai-projects-and-practical-labs/capstone-projects",
+            },
+            {
+              label: "Intermediate Projects",
+              sidebarId: "IntermediateProjectsSidebar",
+              to: "/artificial-intelligence/12-ai-projects-and-practical-labs/intermediate-projects",
+            },
+          ],
+        },
+        {
+          label: "Resources",
+          to: "/artificial-intelligence/13-ai-resources",
+          position: "left",
+          sidebarId: "AIResourcesSidebar",
+          className: "nav-ai-only",
         },
         /** * 5. PROMOTED ITEMS: EMBEDDED
          */

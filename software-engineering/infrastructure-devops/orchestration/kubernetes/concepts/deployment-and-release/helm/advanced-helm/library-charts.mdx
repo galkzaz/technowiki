@@ -1,0 +1,626 @@
+# Helm Library Charts
+
+A Helm Library Chart is a special type of Helm chart designed to provide reusable template definitions that other Helm charts can import and use.
+
+Unlike a regular Helm chart, a library chart cannot be installed independently and does not directly deploy Kubernetes resources.
+
+Its main purpose is to eliminate duplicated Helm templates across multiple application charts.
+
+Let's understand why it exists, how it works, and how to implement one.
+
+# 1. Why do we need Library Charts?
+
+Imagine you have several microservices in your Kubernetes cluster:
+
+- Product Service
+- Recommendation Service
+- Review Service
+- Product Composite Service
+
+Each service has its own Helm chart.
+
+```
+charts/
+│
+├── product-service/
+│   ├── Chart.yaml
+│   ├── values.yaml
+│   └── templates/
+│       ├── deployment.yaml
+│       └── service.yaml
+│
+├── recommendation-service/
+│   ├── Chart.yaml
+│   ├── values.yaml
+│   └── templates/
+│       ├── deployment.yaml
+│       └── service.yaml
+│
+└── review-service/
+    ├── Chart.yaml
+    ├── values.yaml
+    └── templates/
+        ├── deployment.yaml
+        └── service.yaml
+```
+
+You will notice that all three services have similar Kubernetes Deployment and Service templates.
+
+For example, every Deployment needs:
+
+- `apiVersion`
+- `kind`
+- `metadata`
+- `labels`
+- `replicas`
+- `selector`
+- `containers`
+- `image`
+- `ports`
+- `resources`
+- `readinessProbe`
+- `livenessProbe`
+
+You might have nearly identical templates in all three charts.
+
+This creates a maintenance problem.
+
+Suppose you decide to add standard security settings to every Deployment.
+
+You need to update three templates.
+
+As your application grows to 20 or 50 microservices, maintaining duplicated templates becomes increasingly difficult.
+
+A Library Chart solves this problem by allowing multiple application charts to share common template definitions.
+
+# 2. What is a Library Chart?
+
+A Library Chart is a reusable collection of named Helm templates.
+
+For example:
+
+```
+charts/
+│
+├── common-library/
+│
+├── product-service/
+│
+├── recommendation-service/
+│
+└── review-service/
+```
+
+The library might provide reusable templates for:
+
+- Kubernetes Deployment
+- Kubernetes Service
+- Kubernetes ConfigMap
+- Kubernetes Ingress
+- Common labels
+- Container specifications
+- Resource limits
+- Health probes
+- Security contexts
+
+The application charts import the library and reuse its templates.
+
+## Library Chart architecture
+
+![Library Chart architecture](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/concepts/deployment-and-release/helm/advanced-helm/Library-Chart-architecture.png)
+{/* Common Library Chart
+
+Reusable named templates
+
+Deployment
+
+Service
+
+Labels
+
+Probes
+
+Chart dependency and template inclusion
+
+Product
+
+Service chart
+
+Review
+
+Service chart
+
+Recommendation
+
+Service chart
+
+Each application renders its own resources
+
+Kubernetes API Server
+
+Receives ordinary Deployment and Service manifests */}
+
+The library chart provides the common logic, while each application chart provides its application-specific configuration.
+
+# 3. Library Chart vs Application Chart
+
+Helm supports two chart types:
+
+| Feature                                    | Application Chart     | Library Chart                                                                              |
+| ------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------ |
+| `type`                                     | `application`         | `library`                                                                                  |
+| Purpose                                    | Deploy an application | Share reusable templates                                                                   |
+| Can be installed independently?            | Yes                   | No                                                                                         |
+| Can contain Kubernetes resource templates? | Yes                   | Provides reusable template definitions                                                     |
+| Can be a dependency?                       | Yes                   | Yes                                                                                        |
+| Has values configuration?                  | Yes                   | Can define defaults, but consuming charts generally supply the application-specific values |
+| Produces Kubernetes resources directly?    | Yes                   | No                                                                                         |
+
+For example, an application chart declares:
+
+```yml
+apiVersion: v2
+name: product-service
+version: 1.0.0
+type: application
+```
+
+A library chart declares:
+
+```yml
+apiVersion: v2
+name: common-library
+version: 1.0.0
+type: library
+```
+
+The important difference is the `type` field.
+
+# 4. Creating a Library Chart
+
+Let's build a practical example.
+
+We will create a common library chart that provides reusable Deployment and Service templates.
+
+## 4.1 Project structure
+
+```
+helm-project/
+│
+└── charts/
+    │
+    ├── common-library/
+    │   ├── Chart.yaml
+    │   └── templates/
+    │       ├── _deployment.yaml
+    │       ├── _service.yaml
+    │       └── _labels.tpl
+    │
+    └── product-service/
+        ├── Chart.yaml
+        ├── values.yaml
+        └── templates/
+            ├── deployment.yaml
+            └── service.yaml
+```
+
+Notice the underscore in the library template filenames.
+
+Files such as `_deployment.yaml` and `_labels.tpl` are partial templates. Helm does not render them as standalone Kubernetes manifests.
+
+Instead, they define named templates that other templates can include.
+
+## 4.2 Define the Library Chart
+
+`charts/common-library/Chart.yaml`
+
+```yml
+apiVersion: v2
+
+name: common-library
+
+description: Reusable templates for Kubernetes applications.
+
+type: library
+
+version: 1.0.0
+```
+
+This tells Helm that the chart is a library.
+
+## 4.3 Create a reusable labels template
+
+`charts/common-library/templates/_labels.tpl`
+
+```yml
+{{/*
+Common Kubernetes labels.
+*/}}
+
+{{- define "common.labels" -}}
+
+app.kubernetes.io/name: {{ .Chart.Name }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+
+{{- end }}
+```
+
+Let's understand the important parts.
+
+`define`
+
+```
+{{ define "common.labels" }}
+```
+
+Defines a named template called `common.labels`.
+
+`Chart.Name`
+
+Returns the name of the chart currently being rendered.
+
+`Release.Name`
+
+Returns the name of the installed Helm release.
+
+`Release.Service`
+
+Returns the Helm release management service, normally `Helm`.
+
+The template can now be reused by any chart that imports this library.
+
+## 4.4 Create a reusable Deployment template
+
+`charts/common-library/templates/_deployment.yaml`
+
+```yml
+{{/*
+Reusable Kubernetes Deployment.
+*/}}
+
+{{- define "common.deployment" -}}
+
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: {{ .Values.name }}
+
+  labels:
+    {{- include "common.labels" . | nindent 4 }}
+
+spec:
+  replicas: {{ .Values.replicaCount }}
+
+  selector:
+    matchLabels:
+      app: {{ .Values.name }}
+
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.name }}
+
+    spec:
+      containers:
+        - name: {{ .Values.name }}
+
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+
+{{- end }}
+```
+
+This template defines a reusable Deployment.
+
+Notice that it uses `.Values` to read configuration from the chart that invokes it.
+
+For example:
+
+```
+name: product-service
+
+replicaCount: 2
+
+image:
+  repository: mycompany/product-service
+  tag: "1.0.0"
+
+containerPort: 8080
+```
+
+The library does not need to know whether it is being used by Product Service, Review Service, or Recommendation Service.
+
+It only needs the expected values.
+
+## 4.5 Create a reusable Service template
+
+`charts/common-library/templates/_service.yaml`
+
+```yml
+{{/*
+Reusable Kubernetes Service.
+*/}}
+
+{{- define "common.service" -}}
+
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: {{ .Values.name }}-service
+
+  labels:
+    {{- include "common.labels" . | nindent 4 }}
+
+spec:
+  type: {{ .Values.service.type }}
+
+  selector:
+    app: {{ .Values.name }}
+
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.containerPort }}
+
+{{- end }}
+```
+
+Now our library provides three reusable templates:
+
+```
+common-library/
+└── templates/
+    ├── _labels.tpl
+    ├── _deployment.yaml
+    └── _service.yaml
+```
+
+# 5. Using a Library Chart in an Application Chart
+
+Now let's consume the library from Product Service.
+
+## 5.1 Declare the dependency
+
+`charts/product-service/Chart.yaml`
+
+```yml
+apiVersion: v2
+
+name: product-service
+
+description: Product Service Helm chart.
+
+type: application
+
+version: 1.0.0
+
+appVersion: "1.0.0"
+
+dependencies:
+  - name: common-library
+    version: 1.0.0
+    repository: "file://../common-library"
+```
+
+The dependency declares that Product Service needs `common-library`.
+
+The `file://` URL references the local library chart.
+
+## 5.2 Configure application values
+
+`charts/product-service/values.yaml`
+
+```yml
+name: product-service
+
+replicaCount: 2
+
+image:
+  repository: mycompany/product-service
+  tag: "1.0.0"
+
+containerPort: 8080
+
+service:
+  type: ClusterIP
+  port: 80
+```
+
+These values are passed to the reusable templates.
+
+## 5.3 Include the library templates
+
+`charts/product-service/templates/deployment.yaml`
+
+```
+{{- include "common.deployment" . }}
+```
+
+`charts/product-service/templates/service.yaml`
+
+```
+{{- include "common.service" . }}
+```
+
+That's it!
+
+Instead of duplicating Deployment and Service YAML, the application chart calls the reusable definitions from the library.
+
+The `.` passes the current chart's template context to the library template.
+
+This is important because the library needs access to:
+
+- `.Values`
+- `.Chart`
+- `.Release`
+- Other Helm built-in objects.
+
+# 6. How Helm Resolves Library Templates
+
+Let's follow the complete rendering process.
+
+![Helm Library Chart rendering](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/concepts/deployment-and-release/helm/advanced-helm/How-Helm-Resolves-Library-Templates.png)
+{/* 1\. Product Service Chart
+
+Chart.yaml declares common-library as a dependency.
+
+2\. Common Library Chart
+
+Helm loads the named templates: common.deployment, common.service and common.labels.
+
+3\. Template Inclusion
+
+Product Service invokes the templates using include and passes its context and values.
+
+4\. Rendered Kubernetes Manifests
+
+Helm generates the Product Service Deployment and Service YAML.
+
+5\. Kubernetes API Server */}
+
+The important detail is that the library chart does not deploy anything by itself.
+
+Its templates are evaluated when the dependent application chart is rendered.
+
+# 7. Updating the Library Chart
+
+Suppose you want every microservice Deployment to have resource requests and limits.
+
+Without a library chart, you would update every microservice Deployment template.
+
+With a library chart, you update only:
+
+`common-library/templates/_deployment.yaml`
+
+Add:
+
+```yml
+resources:
+  requests:
+    cpu: {{ .Values.resources.requests.cpu | quote }}
+    memory: {{ .Values.resources.requests.memory | quote }}
+
+  limits:
+    cpu: {{ .Values.resources.limits.cpu | quote }}
+    memory: {{ .Values.resources.limits.memory | quote }}
+```
+
+Then add the corresponding values in each application chart:
+
+```yml
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+```
+
+All dependent charts can now use the same resource configuration structure.
+
+You can also provide sensible defaults and make optional features conditional using Helm template functions.
+
+Important: When you modify the library, remember to update its chart version and update the dependency lock/build in the consuming charts. The dependent charts must use the new library version to receive the changes.
+
+# 8. Library Chart vs Umbrella Chart
+
+These two concepts are often confused.
+
+They solve different problems.
+
+| Feature                           | Library Chart                                | Umbrella Chart                         |
+| --------------------------------- | -------------------------------------------- | -------------------------------------- |
+| Main purpose                      | Reuse template definitions                   | Group multiple application charts      |
+| Contains reusable named templates | Yes                                          | Not its primary purpose                |
+| Deploys multiple applications     | No                                           | Yes                                    |
+| Can be installed independently    | No                                           | Yes, as an application chart           |
+| Typical use                       | Common Deployment, Service, labels templates | Deploying a complete application stack |
+
+Consider this example:
+
+```
+ecommerce/
+│
+├── common-library/
+│
+├── product-service/
+│
+├── review-service/
+│
+├── recommendation-service/
+│
+└── ecommerce-platform/
+    └── Chart.yaml
+```
+
+The relationship is:
+
+```
+                 common-library
+                       |
+            +----------+----------+
+            |          |          |
+            v          v          v
+         product     review   recommendation
+            |          |          |
+            +----------+----------+
+                       |
+               ecommerce-platform
+                 (umbrella chart)
+```
+
+- The library shares templates.
+- The application charts deploy individual services.
+- The umbrella chart groups application charts as dependencies.
+
+You can use both in the same project.
+
+# 9. Important Helm Library Chart Considerations
+
+1. Named templates are essential: Use `define` to declare reusable templates and `include` to invoke them.
+2. Avoid generic template names: Prefix names with your library name, such as `common.deployment`, to avoid naming collisions.
+3. Pass context deliberately: `include "common.deployment" .` passes the caller's context. If you pass a custom dictionary with `dict`, the library must use the structure you provide.
+4. Keep application-specific configuration in application charts: The library should provide reusable logic, not hardcode Product Service or Review Service settings.
+5. Version your library: Treat it as a shared software dependency. Test changes against dependent charts before upgrading them.
+6. Do not confuse it with a Kubernetes resource: A library chart is a Helm-level reuse mechanism, not a Kubernetes API object.
+
+# 10. Recommended placement in your Helm TOC
+
+I would organize the Helm section as follows:
+
+```
+helm/
+├── fundamentals/
+│   ├── overview.mdx
+│   ├── architecture.mdx
+│   └── chart-types.mdx
+│
+├── charts/
+│   ├── chart-structure.mdx
+│   ├── application-charts.mdx
+│   ├── library-charts.mdx
+│   ├── chart-dependencies.mdx
+│   ├── umbrella-charts.mdx
+│   └── chart-versioning.mdx
+│
+├── templating/
+│   ├── go-templates.mdx
+│   ├── named-templates.mdx
+│   ├── include-and-template.mdx
+│   └── template-functions.mdx
+│
+└── labs/
+    ├── create-application-chart.mdx
+    ├── create-library-chart.mdx
+    └── deploy-microservices-with-helm.mdx
+```
+
+My recommendation: Learn Library Charts immediately after Application Charts and before Chart Dependencies. The most valuable exercise is extracting common Deployment, Service, and labels templates from your Product, Review, and Recommendation Service charts into one `common-library`.
+
+For the official documentation: [Helm – Library Charts](https://helm.sh/docs/topics/library_charts/?utm_source=chatgpt.com).

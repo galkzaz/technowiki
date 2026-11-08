@@ -1,0 +1,1399 @@
+# Kubernetes Local Development
+
+When learning Kubernetes, you don't need a cloud cluster to get started. You can run a small Kubernetes cluster on your own computer, deploy applications to it, inspect the Kubernetes API objects, and practice troubleshooting without paying for cloud infrastructure.
+
+For your infrastructure-devops/Kubernetes roadmap, I recommend learning local development in this order:
+
+1. Understand the local-cluster options and choose one.
+2. Install `kubectl`, the Kubernetes command-line client.
+3. Create a local cluster with kind or Minikube.
+4. Deploy an application and inspect its Kubernetes objects.
+5. Explore the Kubernetes Dashboard or other observability tools.
+6. Build a repeatable local development workflow that you can later adapt to a remote cluster.
+
+## 1. What does local Kubernetes development mean?
+
+A local Kubernetes cluster is a Kubernetes environment running on your workstation. It behaves like a real Kubernetes cluster in many important ways: it has an API server, a scheduler, controllers, worker-node functionality, and a container runtime.
+
+```
+
+flowchart TB
+    DEV["Developer workstation"]
+    SRC["Application source code"]
+    BUILD["Build container image"]
+    KUBECTL["kubectl"]
+    CLUSTER["Local Kubernetes cluster"]
+    API["Kubernetes API server"]
+    ETCD["Cluster state: etcd"]
+    CTRL["Scheduler and controllers"]
+    NODE["Worker node"]
+    POD["Application Pod"]
+    SVC["Service"]
+
+    DEV --> SRC
+    SRC --> BUILD
+    DEV --> KUBECTL
+    KUBECTL -->|"Kubernetes API requests"| API
+    API <--> ETCD
+    API <--> CTRL
+    CTRL --> NODE
+    BUILD -->|"Image available to node"| NODE
+    NODE --> POD
+    POD --> SVC
+
+
+```
+There are two important communication paths:
+
+- Management path: `kubectl` communicates with the Kubernetes API server to create, inspect, and update objects.
+- Application path: the container image must be available to the cluster's nodes; Kubernetes runs the Pods, and Services provide stable network endpoints.
+
+Local development also introduces a practical challenge: your host machine and your cluster may have separate networking and image-storage environments. Understanding how images and ports cross that boundary is essential.
+
+## 2. Local-cluster options
+
+The three common choices for learning Kubernetes locally are kind, Minikube, and Docker Desktop's built-in Kubernetes option.
+
+| Option                    | How it runs Kubernetes                                                            | Best use case                                                        | Main consideration                                            |
+| ------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- |
+| kind                      | Kubernetes nodes run as containers                                                | CI testing, repeatable labs, learning cluster fundamentals           | Some networking and storage features need extra configuration |
+| Minikube                  | Runs a local Kubernetes node or multi-node cluster using a supported driver       | Interactive learning, addons, dashboard, experimenting with features | More setup and resource overhead depending on the driver      |
+| Docker Desktop Kubernetes | Kubernetes runs within Docker Desktop's managed environment                       | Convenient desktop development                                       | Tied to Docker Desktop and its configuration                  |
+| Managed cloud cluster     | A provider operates the control plane and often integrates networking and storage | Production-like cloud testing                                        | Cost, credentials, and cloud resource management              |
+
+### Which should you choose?
+
+- kind — recommended starting point for repeatable labs
+
+    Particularly suitable if you already work with Docker and want to understand Kubernetes resources, controllers, Services, and deployments. You can create and delete clusters quickly.
+
+- Minikube — recommended for interactive exploration
+
+    Useful when you want a learning environment with optional addons and guided experiments. It is a good choice for exploring the Dashboard, ingress, and other cluster features.
+
+You do not need to learn both immediately. Pick one for the first labs; most Kubernetes concepts transfer between them.
+
+## kind — Kubernetes in Docker
+
+kind runs Kubernetes nodes inside containers managed by Docker or another supported container engine. Each node container runs Kubernetes node components; it is not simply an application container with a Kubernetes label.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://kind.sigs.k8s.io\&sz=32)
+
+Kind+1
+
+
+
+### 3.1 Install and create a cluster
+
+On Arch Linux or CachyOS, if your system repositories are working:
+
+```
+sudo pacman -Syu kubectl kind
+```
+
+Check that your container engine is running:
+
+```
+docker info
+```
+
+Create a cluster:
+
+```
+kind create cluster --name dev
+```
+
+Verify it:
+
+```
+kubectl config get-contexts
+kubectl config use-context kind-dev
+kubectl cluster-info
+kubectl get nodes
+kubectl get pods -A
+```
+
+The context name `kind-dev` refers to the cluster named `dev`. The cluster configuration is added to your kubeconfig, normally `~/.kube/config`.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://kind.sigs.k8s.io\&sz=32)
+
+Quick Start+1
+
+
+
+### 3.2 What does kind create?
+```
+
+flowchart TB
+    HOST["Your Linux workstation"]
+    DOCKER["Docker engine"]
+    subgraph KIND["kind cluster: dev"]
+        NODE["Container acting as Kubernetes node"]
+        CP["Control plane components"]
+        KUBELET["kubelet and container runtime"]
+        POD["Your application Pods"]
+        CP --> KUBELET
+        KUBELET --> POD
+    end
+    HOST --> DOCKER
+    DOCKER --> NODE
+    NODE --- CP
+
+```
+
+For a default kind cluster, the node is a container, and Kubernetes components run inside it. A multi-node kind cluster can use several node containers, letting you practice scheduling and node-related behavior without creating multiple physical machines.
+
+### 3.3 Create a multi-node cluster
+
+You can use a configuration file to create a control-plane node and two worker nodes.
+
+Create `kind-config.yaml`:
+
+```
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+
+```
+
+Then run:
+
+```
+kind create cluster \
+  --name lab \
+  --config kind-config.yaml
+
+kubectl get nodes -o wide
+```
+
+You should see three Kubernetes nodes. This is useful for studying scheduling, node labels, and what happens when a node becomes unavailable. It is still a local simulation, not equivalent to three independent production servers.
+
+### 3.4 The important image-loading detail
+
+Suppose you build a Spring Boot image locally:
+
+```
+docker build -t orders-api:dev .
+```
+
+That image is in your local Docker image store. The kind node's container runtime may not be able to see it automatically.
+
+Load it into kind:
+
+```
+kind load docker-image orders-api:dev --name dev
+```
+
+Then reference it in your Deployment:
+
+```
+containers:
+  - name: orders-api
+    image: orders-api:dev
+    imagePullPolicy: IfNotPresent
+```
+
+The `IfNotPresent` setting lets Kubernetes use the image already present on the node rather than always trying to pull it. Use distinct tags when rebuilding images so that you can identify exactly which version you are testing.
+
+## Minikube
+
+Minikube is another tool for running a local Kubernetes cluster. It is designed for learning and development and supports different drivers, including Docker and virtual machines. It also offers addons for extending the cluster.
+
+### Install and start
+
+On Arch Linux or CachyOS:
+
+```sh
+sudo pacman -Syu kubectl minikube
+```
+
+Start a cluster using Docker as the driver:
+
+```
+minikube start --driver=docker
+```
+
+Check its state:
+
+```
+minikube status
+kubectl get nodes
+kubectl get pods -A
+```
+
+If Docker is unavailable, Minikube can use other supported drivers, depending on your environment.
+
+### Useful Minikube commands
+
+| Command                              | Purpose                                                                |
+| ------------------------------------ | ---------------------------------------------------------------------- |
+| `minikube start`                     | Start the cluster                                                      |
+| `minikube status`                    | Inspect cluster status                                                 |
+| `minikube stop`                      | Stop it without deleting the cluster                                   |
+| `minikube delete`                    | Delete the cluster                                                     |
+| `minikube addons list`               | List available addons                                                  |
+| `minikube addons enable ingress`     | Enable the ingress addon, if supported for your setup                  |
+| `minikube image load orders-api:dev` | Load a local application image into the cluster                        |
+| `minikube service my-service`        | Open or expose a Service through Minikube's supported access mechanism |
+
+For a local application image, `minikube image load` is the equivalent concept to `kind load docker-image`, though the command differs. Consult the current Minikube documentation for driver-specific networking and addon behavior.
+
+### Working with minikube profiles
+In order to run multiple Kubernetes clusters locally, minikube comes with the concept of profiles.
+For example, if you want to work with multiple versions of Kubernetes, you can create multiple
+Kubernetes clusters using minikube. Each cluster will be assigned a separate minikube profile.
+
+Most of the minikube commands accept a `--profile` flag (or `-p` for short), which can be used
+to specify which of the Kubernetes clusters the command will be applied to. If you plan to work
+with one specific profile for a while, a more convenient alternative exists, where you specify the
+current profile with the following command:
+```sh
+minikube profile my-profile
+```
+This command will set the `my-profile` profile as the current profile.
+
+To get the current profile, run the following command:
+```sh
+minikube config get profile
+```
+If no profile is specified, either using the `minikube profile` command or the `--profile` switch,
+a default profile named minikube will be used.
+
+Information regarding existing profiles can be found with the `minikube profile list` command.
+
+### 4.3 kind vs Minikube in practice
+
+| Task               | kind                                                                                     | Minikube                  |
+| ------------------ | ---------------------------------------------------------------------------------------- | ------------------------- |
+| Create a cluster   | `kind create cluster`                                                                    | `minikube start`          |
+| Load a local image | `kind load docker-image ...`                                                             | `minikube image load ...` |
+| Inspect nodes      | `kubectl get nodes`                                                                      | `kubectl get nodes`       |
+| Stop a cluster     | `kind` clusters are typically deleted when finished; use container lifecycle accordingly | `minikube stop`           |
+| Delete a cluster   | `kind delete cluster --name dev`                                                         | `minikube delete`         |
+| Addons             | Often configured separately or through manifests                                         | Built-in addon mechanism  |
+
+My recommendation: use kind for repeatable, disposable labs and Minikube when you specifically want to explore its addon ecosystem or local access helpers. Both are valid learning environments.
+
+## 5. kubectl installation and configuration
+
+`kubectl` is the Kubernetes command-line client. It sends requests to the Kubernetes API server using the connection and credentials in your kubeconfig. It does not run the cluster itself.
+
+kubectl is the Kubernetes CLI tool. Once a cluster has been set up, this is usually the only tool you need to manage the cluster!
+
+
+### 5.1 Install kubectl
+
+On Arch Linux or CachyOS:
+
+```sh
+sudo pacman -S kubectl
+```
+
+For other Linux distributions, macOS, and Windows, follow the official installation guide: [Install Kubernetes tools](https://kubernetes.io/docs/tasks/tools/?utm_source=chatgpt.com).
+
+Verify the installation:
+
+```sh
+kubectl version --client
+```
+
+You need a cluster as well as the client to run most cluster operations.
+
+### Working with the Kubernetes CLI, kubectl
+For managing the API objects, the `kubectl apply` command is the only command you need to know about. It is a **declarative command**; that is, as an
+operator, we ask Kubernetes to apply the object definition we give to the command. It is then up
+to Kubernetes to figure out what actually needs to be done.
+
+In some cases, **imperative statements** that explicitly tell Kubernetes what to do are preferred. One
+example is the `kubectl delete` command, where we explicitly tell Kubernetes to delete some
+API objects. Creating a namespace object can also be conveniently done with an explicit `kubectl
+create namespace` command.
+
+Repetitive usage of the imperative statements will make them fail – for example, deleting the
+same API object twice using `kubectl delete` or creating the same namespace twice using `kubectl
+create`. A declarative command (that is, using `kubectl apply`) will not fail on repetitive usage – it
+will simply state that there is no change and exit without taking any action.
+
+Some commonly used commands for retrieving information about a Kubernetes cluster are as
+follows:
+- `kubectl get` shows information about the specified API object
+- `kubectl describe` gives more detail about the specified API object
+- `kubectl logs` displays log output from containers
+
+If in doubt about how to use the kubectl tool, the `kubectl help` and `kubectl <command> --help`
+commands are always available and provide very useful information. 
+
+Another helpful command
+is `kubectl explain`, which can be used to show what fields are available when declaring a Kubernetes object. For example, run the following command if you need to look up the fields available
+to describe a container in the template of a Deployment object:
+```sh
+kubectl explain deployment.spec.template.spec.containers
+```
+
+### 5.2 Understand kubeconfig and contexts
+
+To be able to work with more than one Kubernetes cluster, using either minikube locally or Ku-
+bernetes clusters set up on on-premises servers or in the cloud, kubectl comes with the concept
+of contexts. A context is a combination of the following:
+- A Kubernetes cluster
+- Authentication information for a user
+- A default namespace
+
+By default, contexts are saved in the `~/.kube/config` file, but the file can be changed using the
+`KUBECONFIG` environment variable.
+
+Kubeconfig tells `kubectl` which cluster to contact and how to authenticate. A context combines a cluster, a user identity, and an optional default namespace.
+
+```
+
+flowchart TD
+    K["kubectl command"]
+    CFG["kubeconfig"]
+    CTX["Selected context"]
+    CL["Cluster endpoint"]
+    AUTH["User credentials"]
+    NS["Default namespace"]
+    API["Kubernetes API server"]
+    K --> CFG
+    CFG --> CTX
+    CTX --> CL
+    CTX --> AUTH
+    CTX --> NS
+    CL --> API
+    AUTH --> API
+```
+
+When a Kubernetes cluster is created in minikube, a context is created with the same name as the
+minikube profile and is then set as the current context. So, kubectl commands that are issued
+after the cluster is created in minikube will be sent to that cluster.
+To list the available contexts, run the following command:
+```sh
+kubectl config get-contexts
+```
+The following is a sample response:
+```
+CURRENT   NAME       CLUSTER    AUTHINFO   NAMESPACE
+*         minikube   minikube   minikube   default
+```
+The wildcard, *, in the first column marks the current context.
+
+If you want to switch the current context to another context – that is, work with another Kubernetes cluster – run the following command:
+```sh
+kubectl config use-context my-cluster
+```
+In this example, the current context will be changed to `my-cluster`.
+
+To update a context (for example, switching the default namespace used by kubectl), use the
+```sh
+kubectl config set-context
+```
+For example, to change the default namespace of the current context to my-namespace, use the
+following command:
+```sh
+kubectl config set-context $(kubectl config current-context) --namespace my-namespace
+```
+In this command, `kubectl config current-context` is used to get the name of the current context.
+
+
+Useful commands:
+
+```
+# List available contexts
+kubectl config get-contexts
+
+# Show the current context
+kubectl config current-context
+
+# Switch to kind's dev cluster
+kubectl config use-context kind-dev
+
+# Set the default namespace for the current context
+kubectl config set-context --current --namespace=demo
+
+# Inspect cluster information
+kubectl cluster-info
+
+# List nodes and workloads
+kubectl get nodes
+kubectl get pods -A
+```
+
+Important: when you have both local and remote clusters configured, always check `kubectl config current-context` before running commands that modify or delete resources.
+
+## relation between minikube profile,kubectl contexts,cluster
+The relationship is:
+
+- **Minikube profile** identifies a particular Minikube-managed local cluster.
+- **Kubernetes cluster** is the actual Kubernetes environment (API server, nodes, workloads, etc.).
+- **kubectl context** tells `kubectl` which cluster and user credentials to use, and optionally which namespace to target.
+
+In other words, a Minikube profile manages a cluster, while a kubectl context provides a way to connect to that cluster.
+
+### #How they relate
+
+```
+flowchart TB
+    M["Minikube"]
+    P1["Profile: dev"]
+    P2["Profile: staging"]
+    C1["Kubernetes cluster: dev"]
+    C2["Kubernetes cluster: staging"]
+    K["kubectl"]
+    X1["Context: minikube-dev"]
+    X2["Context: minikube-staging"]
+
+    M --> P1
+    M --> P2
+    P1 --> C1
+    P2 --> C2
+    X1 -->|"references"| C1
+    X2 -->|"references"| C2
+    K --> X1
+    K --> X2
+
+```
+
+Each Minikube profile represents a separate local cluster configuration and lifecycle.
+
+Each cluster can have a corresponding entry in your kubeconfig. A context references that cluster entry.
+
+### Example: create two Minikube profiles
+
+Suppose you want two independent environments:
+
+- `dev`: for application development.
+- `staging`: for testing before deployment.
+
+Create them:
+
+```sh
+minikube start -p dev
+minikube start -p staging
+```
+
+Here, `-p` means `--profile`.
+
+List your profiles:
+
+```sh
+minikube profile list
+```
+
+You should see both profiles.
+
+Each profile has its own cluster and Kubernetes resources.
+
+For example:
+
+```sh
+kubectl get nodes --context=dev
+kubectl get nodes --context=staging
+```
+
+The context names commonly match the profile names for Minikube.
+
+### How kubeconfig represents them
+
+Your kubeconfig (usually `~/.kube/config`) contains three important sections:
+
+```yml
+apiVersion: v1
+
+clusters:
+  - name: dev
+    cluster:
+      server: https://127.0.0.1:xxxxx
+
+  - name: staging
+    cluster:
+      server: https://127.0.0.1:yyyyy
+
+users:
+  - name: dev
+    user:
+      # Authentication configuration
+
+  - name: staging
+    user:
+      # Authentication configuration
+
+contexts:
+  - name: dev
+    context:
+      cluster: dev
+      user: dev
+      namespace: default
+
+  - name: staging
+    context:
+      cluster: staging
+      user: staging
+      namespace: default
+
+current-context: dev
+```
+*Illustrative kubeconfig structure; actual Minikube-generated entries contain additional connection and authentication details.*
+
+Notice the distinction:
+
+| Kubeconfig section | Meaning                                              |
+| ------------------ | ---------------------------------------------------- |
+| `clusters`         | Defines Kubernetes API server connection information |
+| `users`            | Defines authentication information                   |
+| `contexts`         | Combines a cluster, user, and optional namespace     |
+| `current-context`  | Determines which context kubectl uses by default     |
+
+A context is not itself a Kubernetes cluster. It is a local client-side configuration that points to one.
+
+### Switching between profiles and contexts
+
+There are two related but different commands.
+
+Minikube profile switching:
+
+```sh
+minikube profile dev
+minikube profile staging
+```
+
+This changes Minikube's active profile for subsequent Minikube commands.
+
+kubectl context switching:
+
+```sh
+kubectl config use-context dev
+kubectl config use-context staging
+```
+
+This changes the default cluster connection for subsequent `kubectl` commands.
+
+You can also bypass the default context:
+
+```sh
+kubectl get pods --context=dev
+kubectl get pods --context=staging
+```
+
+This is useful when working with multiple clusters.
+
+### Minikube profile vs kubectl context
+
+| Feature                       | Minikube profile                     | kubectl context            |
+| ----------------------------- | ------------------------------------ | -------------------------- |
+| Managed by                    | Minikube                             | kubectl                    |
+| Stored in                     | Minikube's profile configuration     | kubeconfig                 |
+| Represents                    | A Minikube-managed cluster           | A connection configuration |
+| Creates/deletes clusters      | Yes, through Minikube commands       | No                         |
+| Switches default target       | For Minikube commands                | For kubectl commands       |
+| Can reference remote clusters | No, it represents a Minikube profile | Yes                        |
+
+### A practical example
+
+Imagine you have the following environments:
+
+- Local development
+
+    Minikube profile: dev
+
+    Cluster: dev · Context: dev · Namespace: development
+
+- Local staging
+
+    Minikube profile: staging
+
+    Cluster: staging · Context: staging · Namespace: staging
+
+- Remote production
+
+    Cloud-managed cluster
+
+    Cluster: production · Context: production · Namespace: production
+
+You can manage all three using the same `kubectl` installation:
+
+```sh
+kubectl config get-contexts
+
+kubectl config use-context dev
+kubectl get pods
+
+kubectl config use-context staging
+kubectl get pods
+
+kubectl config use-context production
+kubectl get pods
+```
+
+The production context doesn't need to be a Minikube profile. It can point to a cloud-managed Kubernetes cluster.
+
+One important distinction: a namespace is not another cluster or context. It is a logical partition inside a cluster. You can have `development`, `staging`, and `production` namespaces within a single cluster.
+
+Remember this mental model:
+
+```
+Minikube profile  → manages a local cluster
+Kubernetes cluster → runs Kubernetes resources
+kubectl context   → tells kubectl where/how to connect
+Namespace         → selects a logical area inside that cluster
+```
+
+This distinction becomes especially important when you eventually manage local kind/Minikube clusters alongside remote Kubernetes environments such as Amazon EKS, Azure AKS, or Google GKE.
+
+## Kubernetes Dashboard and visual tools
+
+A graphical UI can help you explore Pods, Deployments, Services, namespaces, and logs. However, there is an important current-status detail: the original Kubernetes Dashboard project is deprecated and archived. Kubernetes documentation recommends considering Headlamp for new installations.
+
+Headlamp
+
+A modern Kubernetes UI for browsing and managing cluster resources. It can be useful when you want a graphical view alongside `kubectl`.
+
+
+Kubernetes Dashboard — legacy
+
+Older tutorials may use this UI. Minikube has historically provided a convenient command for enabling and opening it, but the original project is no longer maintained. Avoid treating it as the default choice for a new setup.
+
+[Official Dashboard documentation](https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/?utm_source=chatgpt.com)
+
+### Why a dashboard is useful
+
+For example, when you deploy an application and it fails to start, a dashboard can help you find the Pod, inspect its status, and view its events or logs. The same information is available from the command line:
+
+```
+kubectl get pods -n demo
+kubectl describe pod <pod-name> -n demo
+kubectl logs <pod-name> -n demo
+kubectl get events -n demo --sort-by=.metadata.creationTimestamp
+```
+
+A UI is a convenience, not a replacement for learning the API objects and `kubectl`.
+
+Security note: a dashboard can expose powerful cluster operations. Use appropriate authentication and RBAC permissions; don't grant administrative access just to make a local UI work.
+
+## 7. Local development workflow
+
+This is the workflow I recommend using repeatedly as you work through Kubernetes topics.
+
+```
+
+flowchart TD
+    A["1. Write application code"]
+    B["2. Build container image"]
+    C["3. Start or select local cluster"]
+    D["4. Make image available to cluster"]
+    E["5. Apply Kubernetes manifests"]
+    F["6. Wait for rollout and inspect status"]
+    G["7. Test Service and application"]
+    H["8. Inspect logs and troubleshoot"]
+    I["9. Update code, image, or manifests"]
+    A --> B --> C --> D --> E --> F --> G
+    G -->|"Failure"| H
+    H --> I
+    G -->|"Success"| I
+    I --> B
+
+```
+Let's run a complete starter lab using kind.
+ 
+### Using kind
+#### 7.1 Create a local cluster
+
+```
+kind create cluster --name dev
+kubectl config use-context kind-dev
+
+kubectl get nodes
+```
+
+#### 7.2 Create a Deployment and Service
+
+Save this as `nginx.yaml`:
+
+```
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.28
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+
+```
+
+Apply it:
+
+```
+kubectl create namespace demo
+kubectl apply -n demo -f nginx.yaml
+kubectl rollout status deployment/nginx -n demo
+```
+
+Because the manifest omits `metadata.namespace`, applying with `-n demo` places both objects in that namespace.
+
+#### 7.3 Inspect the resulting objects
+
+```
+kubectl get deployments,replicasets,pods,services -n demo
+
+kubectl describe deployment nginx -n demo
+
+kubectl get pods -n demo -o wide
+```
+
+You should see a Deployment, a ReplicaSet, two Pods, and a Service. The Pods may run on the same local node; this is normal for a single-node kind cluster.
+
+#### 7.4 Access the application
+
+A simple way to test the Service from your workstation is port forwarding:
+
+```
+kubectl port-forward -n demo service/nginx 8080:80
+```
+
+Keep that command running. In another terminal, run:
+
+```
+curl http://localhost:8080
+```
+
+You should receive the Nginx welcome-page HTML.
+
+The path is:
+```
+Browser or curl
+
+localhost:8080
+↓
+kubectl port-forward
+
+Forwards the local port to the Service
+↓
+Service `nginx:80`
+
+Routes to an eligible Pod on port 80
+```
+Port forwarding is especially convenient for local development because you don't need to configure an external load balancer.
+
+#### 7.5 Practice troubleshooting
+
+Try these exercises:
+
+- Scale the Deployment to three replicas.
+- Read a Pod's logs.
+- Delete one Pod and watch the ReplicaSet create a replacement.
+- Change the image tag and observe the rollout.
+- Inspect the Service's EndpointSlices.
+- Intentionally use an invalid image name and diagnose the resulting `ImagePullBackOff`.
+
+Useful commands:
+
+```
+kubectl scale deployment/nginx --replicas=3 -n demo
+kubectl get pods -n demo -w
+kubectl get endpointslices -n demo
+kubectl rollout history deployment/nginx -n demo
+kubectl rollout status deployment/nginx -n demo
+```
+
+Clean up when finished:
+
+```
+kubectl delete namespace demo
+kind delete cluster --name dev
+```
+
+Deleting the namespace removes its namespaced objects, so only do this after you've finished any labs you want to keep.
+
+### Using minikube
+
+Let's build a complete local Kubernetes development workflow using **Minikube + Docker + kubectl**.
+
+We'll use Nginx initially to keep the example simple. The same workflow applies later to your Spring Boot microservices.
+
+The workflow is:
+
+```
+
+flowchart TD
+    A["1. Write application code"]
+    B["2. Build Docker image"]
+    C["3. Start Minikube cluster"]
+    D["4. Load image into Minikube"]
+    E["5. Write Kubernetes manifests"]
+    F["6. Deploy using kubectl"]
+    G["7. Check Deployment, Pods and Service"]
+    H["8. Access application"]
+    I["9. Monitor and troubleshoot"]
+    J["10. Update application and redeploy"]
+    A --> B --> C --> D --> E --> F --> G --> H --> I --> J
+    J --> B
+
+```
+#### 1. Prepare your environment
+
+You need three main tools:
+
+| Tool     | Responsibility                              |
+| -------- | ------------------------------------------- |
+| Docker   | Builds and manages container images         |
+| Minikube | Runs your local Kubernetes cluster          |
+| kubectl  | Communicates with the Kubernetes API server |
+
+On Arch Linux / CachyOS:
+
+```
+sudo pacman -Syu docker kubectl minikube
+```
+
+Start Docker:
+
+```
+sudo systemctl enable --now docker
+```
+
+Verify:
+
+```
+docker version
+kubectl version --client
+minikube version
+```
+
+Make sure your user has permission to access Docker. If not, use the appropriate Docker group configuration or run Docker commands with `sudo`.
+
+#### 2. Create a Minikube profile
+
+Create a local development cluster:
+
+```
+minikube start \
+  --profile=dev \
+  --driver=docker
+```
+
+Here:
+
+- `dev` is the Minikube profile name.
+- `--driver=docker` tells Minikube to use Docker to run the Kubernetes node.
+- Minikube creates the cluster and configures its kubeconfig connection.
+
+Check the cluster:
+
+```
+minikube profile list
+minikube status -p dev
+kubectl config get-contexts
+```
+
+Select the context:
+
+```
+kubectl config use-context dev
+```
+
+Verify:
+
+```
+kubectl cluster-info
+kubectl get nodes
+kubectl get pods -A
+```
+
+You should see a Kubernetes node in the `Ready` state.
+
+#### 3. Build the application image
+
+For this first lab, we'll use Nginx.
+
+Normally, you would build your own image:
+
+```
+docker build -t orders-api:dev .
+```
+
+The important concept is that building an image locally does not necessarily make it available inside Minikube.
+
+There are two approaches.
+
+##### Approach A: Build with Docker, then load into Minikube
+
+```
+docker build -t orders-api:dev .
+
+minikube image load orders-api:dev -p dev
+```
+
+This is a straightforward workflow when using Docker as your build environment.
+
+##### Approach B: Build directly into Minikube's image environment
+
+```
+minikube image build -t orders-api:dev . -p dev
+```
+
+This is useful when you want Minikube to handle the image build operation.
+
+For now, use Approach A because it clearly illustrates the separation between your host's image store and the cluster's image store.
+
+```
+
+flowchart LR
+    SRC["Application source"]
+    DOCKER["Host Docker image store"]
+    MINI["Minikube node image store"]
+    POD["Kubernetes Pod"]
+
+    SRC -->|"docker build"| DOCKER
+    DOCKER -->|"minikube image load"| MINI
+    MINI -->|"kubelet/runtime uses image"| POD
+
+```
+#### 4. Create a namespace
+
+We'll use a namespace called `development`.
+
+```
+kubectl create namespace development
+```
+
+Check:
+
+```
+kubectl get namespaces
+```
+
+This keeps the resources for this lab logically separated from other workloads in the cluster.
+
+#### 5. Create Kubernetes manifests
+
+Create a directory:
+
+```
+mkdir -p k8s
+```
+
+Create `k8s/deployment.yaml`:
+
+```
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: development
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.28
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+
+```
+
+This creates a Deployment requesting two Nginx replicas.
+
+Create `k8s/service.yaml`:
+
+```
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  namespace: development
+spec:
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+
+```
+
+The Service selects Pods with the label `app: nginx`.
+
+Note: We are using the official Nginx image here, so we don't need to build or load a custom image for this particular lab. The image-loading commands in Step 3 illustrate how you would handle your own application image.
+
+#### 6. Deploy the application
+
+Apply the manifests:
+
+```
+kubectl apply -f k8s/
+```
+
+Kubernetes creates:
+
+- One Deployment object.
+- One ReplicaSet object, managed by the Deployment controller.
+- Two Pod objects, managed by the ReplicaSet controller.
+- One Service object.
+
+Check the result:
+
+```
+kubectl get all -n development
+```
+
+Wait for the rollout:
+
+```
+kubectl rollout status deployment/nginx -n development
+```
+
+#### 7. Understand what happens inside Minikube
+
+```
+
+flowchart TB
+    DEV["Developer"]
+    K["kubectl apply"]
+    API["Kubernetes API Server"]
+    ETCD[("etcd")]
+    DC["Deployment Controller"]
+    RC["ReplicaSet Controller"]
+    SCH["Scheduler"]
+    KL["kubelet"]
+    RT["Container Runtime"]
+    P1["Nginx Pod 1"]
+    P2["Nginx Pod 2"]
+    SVC["Nginx Service"]
+
+    DEV --> K
+    K --> API
+    API <--> ETCD
+    API --> DC
+    DC --> RC
+    RC --> API
+    API --> SCH
+    SCH --> API
+    API --> KL
+    KL --> RT
+    RT --> P1
+    RT --> P2
+    P1 --> SVC
+    P2 --> SVC
+
+```
+
+The important distinction:
+
+- `kubectl` submits desired state.
+- The API server stores and exposes Kubernetes objects.
+- Controllers create and maintain dependent objects.
+- The scheduler assigns Pods to nodes.
+- Kubelet ensures the assigned Pods are running.
+- The container runtime starts the containers.
+- The Service provides a stable endpoint for the Pods.
+
+#### 8. Inspect and verify the application
+
+Check the objects:
+
+```
+kubectl get deployments -n development
+kubectl get replicasets -n development
+kubectl get pods -n development -o wide
+kubectl get services -n development
+kubectl get endpointslices -n development
+```
+
+Check Pod labels:
+
+```
+kubectl get pods -n development --show-labels
+```
+
+Check logs:
+
+```
+kubectl logs deployment/nginx -n development
+```
+
+Inspect a Pod:
+
+```
+kubectl describe pod <pod-name> -n development
+```
+
+#### 9. Access the application
+
+Our Service uses `ClusterIP`, which means it is accessible inside the cluster by default.
+
+For local development, use port forwarding:
+
+```
+kubectl port-forward \
+  -n development \
+  service/nginx \
+  8080:80
+```
+
+Keep this terminal running.
+
+Open another terminal:
+
+```
+curl http://localhost:8080
+```
+
+You should receive the Nginx welcome-page HTML.
+
+Alternatively, Minikube provides a Service helper:
+
+```
+minikube service nginx \
+  -n development \
+  -p dev
+```
+
+This opens or displays an access URL using Minikube's networking mechanism.
+
+#### 10. Update the application
+
+Let's simulate changing the desired number of replicas.
+
+```
+kubectl scale deployment nginx \
+  --replicas=3 \
+  -n development
+```
+
+Check:
+
+```
+kubectl get pods -n development
+```
+
+You should now see three Pods.
+
+You can also modify the manifest to change `replicas: 2` to `replicas: 3`, then run:
+
+```
+kubectl apply -f k8s/
+```
+
+This illustrates the declarative workflow: update the desired state, and Kubernetes reconciles the actual state.
+
+##### Practice a failure scenario
+
+Delete one Pod:
+
+```
+kubectl delete pod <pod-name> -n development
+```
+
+Watch the Pods:
+
+```
+kubectl get pods -n development -w
+```
+
+The ReplicaSet controller detects that the actual number of Pods is below the desired number and creates a replacement.
+
+This is a fundamental Kubernetes self-healing behavior.
+
+#### 11. Troubleshooting commands
+
+| Problem               | Command                                                                   |
+| --------------------- | ------------------------------------------------------------------------- |
+| Cluster unavailable   | `minikube status -p dev`                                                  |
+| Wrong cluster context | `kubectl config current-context`                                          |
+| Pod not starting      | `kubectl describe pod <name> -n development`                              |
+| Application logs      | `kubectl logs <name> -n development`                                      |
+| Deployment status     | `kubectl rollout status deployment/nginx -n development`                  |
+| Service endpoints     | `kubectl get endpointslices -n development`                               |
+| Recent events         | `kubectl get events -n development --sort-by=.metadata.creationTimestamp` |
+| All cluster workloads | `kubectl get pods -A`                                                     |
+
+#### 12. Clean up
+
+Delete the lab's Kubernetes resources:
+
+```
+kubectl delete namespace development
+```
+
+Stop Minikube but preserve its cluster:
+
+```
+minikube stop -p dev
+```
+
+Or delete the entire profile and cluster:
+
+```
+minikube delete -p dev
+```
+
+Deleting the profile removes its cluster resources and configuration. It is not the same as merely stopping the cluster.
+
+#### 13. Complete workflow cheat sheet
+
+| Phase             | Command                                                        |
+| ----------------- | -------------------------------------------------------------- |
+| Start cluster     | `minikube start -p dev --driver=docker`                        |
+| Select context    | `kubectl config use-context dev`                               |
+| Build image       | `docker build -t orders-api:dev .`                             |
+| Load image        | `minikube image load orders-api:dev -p dev`                    |
+| Create namespace  | `kubectl create namespace development`                         |
+| Deploy manifests  | `kubectl apply -f k8s/`                                        |
+| Inspect resources | `kubectl get all -n development`                               |
+| Check rollout     | `kubectl rollout status deployment/orders-api -n development`  |
+| Access service    | `kubectl port-forward svc/orders-api 8080:8080 -n development` |
+| View logs         | `kubectl logs deployment/orders-api -n development`            |
+| Stop cluster      | `minikube stop -p dev`                                         |
+| Delete cluster    | `minikube delete -p dev`                                       |
+
+#### 14. How this evolves for your Spring Boot microservices
+
+Once the Nginx lab is working, replace it with one of your Spring Boot services, for example `product-service`.
+
+Your development cycle becomes:
+
+```
+
+flowchart TD
+    CODE["Modify Spring Boot product-service"]
+    BUILD["Build JAR"]
+    IMAGE["Build Docker image"]
+    LOAD["Load image into Minikube"]
+    YAML["Update Kubernetes Deployment"]
+    DEPLOY["kubectl apply"]
+    TEST["Test through Service"]
+    OBS["Inspect logs, events and metrics"]
+
+    CODE --> BUILD --> IMAGE --> LOAD --> YAML --> DEPLOY --> TEST --> OBS
+    OBS -->|"Next change"| CODE
+
+```
+
+For a multi-service application, you will eventually manage:
+
+- A Deployment for each microservice.
+- A Service for each microservice that needs stable network access.
+- ConfigMaps for non-sensitive configuration.
+- Secrets or external secret-management integrations for credentials.
+- Readiness and liveness probes.
+- Resource requests and limits.
+- Ingress or Gateway for external HTTP access.
+
+One architectural point worth keeping in mind: Minikube is your local Kubernetes environment, not a replacement for your application build pipeline. Docker builds images, Minikube provides the cluster, and `kubectl` manages Kubernetes objects. Keeping these responsibilities separate will make your transition to cloud Kubernetes much easier.
+
+## Managing a local Kubernetes cluster
+A running Kubernetes cluster consumes a lot of resources, mostly memory. So, when we are done
+working with a Kubernetes cluster in minikube, we must be able to hibernate it in order to release
+the resources allocated to it. We also need to know how to resume the cluster when we want to
+continue working with it. Eventually, we must also be able to permanently remove the cluster
+when we don’t want to keep it on disk anymore.
+
+minikube comes with a `stop` command that can be used to hibernate a Kubernetes cluster. The
+`start` command we used to initially create the Kubernetes cluster can also be used to resume
+the cluster from its hibernated state. To permanently remove a cluster, we can use the `delete`
+command from minikube.
+
+Run the following command to hibernate (that is, stop) the Kubernetes cluster:
+```sh
+minikube stop
+```
+Run the following command to resume (that is, start) the Kubernetes cluster again:
+```sh
+minikube start
+```
+Running kubectl commands directly after restarting the cluster might result in error messages
+like this:
+```
+E0428 09:44:16.333361 79175 memcache.go:106] couldn't get resource list
+for metrics.k8s.io/v1beta1: the server is currently unable to handle the
+request
+```
+This is due to metrics-server being a bit slow on starting up; the error message will disappear
+after a short while.
+
+:::note
+
+When resuming an already existing cluster, the start command ignores switches
+that were used when you were creating the cluster.
+
+:::
+
+After resuming the Kubernetes cluster, the kubectl context will be updated to use this cluster with
+the currently used namespace set to default. If you are working with another namespace, you can update the kubectl context with the following command:
+```sh
+kubectl config set-context $(kubectl config current-context) --namespace=development
+```
+Subsequent kubectl commands will be applied to the `development` namespace when applicable.
+
+minikube also comes with a more lightweight and faster alternative to the `stop` and
+`start` commands: the `pause` and `unpause` commands. In this case, the components
+in the control plane are paused, not stopped, reducing the CPU consumption of the
+cluster to a minimum.
+
+If you later want to terminate the Kubernetes cluster, you can run the following command:
+```sh
+minikube delete --profile dev
+```
+You can actually run the delete command without specifying the profile, but it is safer to be
+explicit about the profile. Otherwise, you may accidentally delete the wrong Kubernetes cluster!
+## 8. Common local-development problems
+
+| Symptom                      | Likely cause                                                       | First check                                                       |
+| ---------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `kubectl` cannot connect     | Cluster stopped or wrong context                                   | `kubectl config current-context` and `kubectl cluster-info`       |
+| Pod shows `ImagePullBackOff` | Image unavailable, incorrect tag, or registry authentication issue | `kubectl describe pod ...`                                        |
+| Pod is `Pending`             | Scheduling constraints or insufficient resources                   | `kubectl describe pod ...`                                        |
+| Service has no endpoints     | Selector doesn't match ready Pods, or Pods aren't ready            | `kubectl get pods --show-labels` and `kubectl get endpointslices` |
+| Local port is unreachable    | Port-forward stopped, wrong port, or application not ready         | Check the port-forward terminal and Pod status                    |
+| Local image isn't found      | Image wasn't loaded into the local cluster                         | Use `kind load docker-image ...` or `minikube image load ...`     |
+
+## 9. Suggested learning sequence
+
+For your Kubernetes learning project, I'd structure local development like this:
+
+1. `local-cluster-options` — compare kind, Minikube, and desktop clusters.
+2. `kubectl-installation` — install the client, configure contexts, and understand kubeconfig.
+3. `kind` — create clusters, load images, and explore multi-node behavior.
+4. `minikube` — use drivers, addons, and local service access.
+5. `kubernetes-dashboard` — compare visual tooling, including Headlamp and the legacy Dashboard.
+6. `local-development-workflow` — build, deploy, test, debug, update, and clean up.
+
+After this, the most useful next topics are container image management, Deployments and Services, ConfigMaps and Secrets, readiness/liveness probes, resource requests and limits, and persistent storage. These are the building blocks you'll use when moving from a local Spring Boot service to a Kubernetes deployment.

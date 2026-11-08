@@ -1,0 +1,1909 @@
+---
+id: software-engineering-design-architecture-architectural-styles-microservices-labs-product-review-recommendation-microservices-lab14
+title: "lab14: Developing Lightweight Microservices Using Kubernetes"
+sidebar_position: 14
+---
+
+This Lab will help you to understand the importance of Kubernetes as a runtime platform for
+containerized workloads. You will learn how to set up Kubernetes in a local development environment and deploy microservices on Kubernetes. Finally, you will learn how to use some of the
+most important features in Kubernetes instead of the corresponding Spring Cloud features to
+provide a more lightweight microservice system landscape (in other words, one that is easier to
+maintain and manage).
+
+In this Lab, we will deploy the microservices in this book to Kubernetes. To bundle and configure the microservices for Deployments in different runtime environments, **Helm**, a package
+manager for Kubernetes, will be used.
+
+Since Kubernetes comes with built-in support for Service discovery, it seems unnecessary
+to deploy **Netflix Eureka** for that purpose. Finally, we will also try out some Spring Boot features
+that facilitate the deployment of microservices in Kubernetes.
+
+The following topics will be covered in this Lab:
+- Replacing **Netflix Eureka** with Kubernetes Service objects and kube-proxy for Service
+discovery
+- Introducing how Kubernetes will be used
+- Using Spring Boot’s support for graceful shutdown and probes for liveness and readiness
+- Using Helm to package, configure, and deploy the microservices in different environments
+- Verifying the deployments with the test script, `test-em-all-k8.bash`
+
+## Creating a Kubernetes cluster
+To create a Kubernetes cluster using minikube, we need to run a few commands:
+- Unset the `KUBECONFIG` environment variable to ensure that the kubectl context is created
+in the default config file, `~/.kube/config`.
+- Create the cluster using the `minikube start` command, where we can also specify what
+`version` of Kubernetes to use and the amount of hardware resources we want to allocate
+to the cluster:
+- To be able to complete the examples in the remaining Labs of this book, allocate `10 GB` of memory (that is, `10,240 MB`) to the cluster. The samples should also work if only `6 GB (6,144 MB)` is allocated to the minikube cluster, albeit more slowly.
+- Allocate the number of CPU cores and disk space you find suitable; 4 CPU cores and 30
+GB of disk space are used in the following example.
+- Specify that we will use the **Docker driver** as described previously.
+- Specify the required port mappings. Ports `8080` and `8443` will be used by the Ingress controller, and ports `30080` and `30443` will be used by Services of the **NodePort** type.
+- Specify the minikube profile to be used for the coming minikube commands. We will use
+`product-review-recommendation-microservices-dev` as the profile name.
+- After the cluster has been created, we will use the add-on manager in minikube to enable
+an Ingress controller and a metrics server that comes out of the box with minikube. The
+Ingress controller and the metrics server will be used in the next Labs.
+
+Run the following commands to create the Kubernetes cluster:
+```sh
+unset KUBECONFIG
+
+minikube start \
+--profile=product-review-recommendation-microservices-dev \
+--memory=10240 \
+--cpus=4 \
+--disk-size=30g \
+--kubernetes-version=v1.32 . 0 \
+--driver=docker \
+--ports=8080:80 --ports=8443:443 \
+--ports=30080:30080 --ports=30443:30443
+
+minikube profile product-review-recommendation-microservices-dev
+minikube addons enable ingress
+minikube addons enable metrics-server
+```
+After the preceding commands are complete, you should be able to communicate with the cluster.
+Try the `kubectl get nodes` command. It should respond with something that looks similar to
+the following:
+
+Once created, the cluster will initialize itself in the background, starting up a number of system
+Pods in the kube-system and the ingress-nginx namespace. We can monitor its progress by
+issuing the following command:
+```sh
+kubectl get pods --all-namespaces
+```
+Once the startup is complete, the preceding command should report the status for all Pods as
+`Running` and the `READY` count should be `1/1`, meaning that a single container in each Pod is up
+and running:
+
+Note that two Pods are reported as Completed, and not Running. They are Pods created by Job
+objects, used to execute a container a fixed number of times such as a batch job. Run the `kubectl get jobs --namespace=ingress-nginx` command to reveal the two Job objects.
+
+## Replacing Netflix Eureka with Kubernetes Services
+As shown in the previous Lab, Lab 15, Introduction to Kubernetes, Kubernetes comes with
+a built-in discovery service based on Kubernetes Service objects and the kube-proxy runtime
+component. This makes it unnecessary to deploy a separate discovery service such as Netflix
+Eureka, which we used in the previous Labs.
+
+To summarize this, we will remove the discovery server based on Netflix Eureka from our micro-
+service landscape, as illustrated in the following diagram:
+![](/docs/assets/software-engineering/software-architecture/architecture-styles/microservice/laps/product-review-recommendation-microservices/lab13-Replacing-Netflix-Eureka-with-Kubernetes-discovery-service.png)
+
+To replace the discovery server based on Netflix Eureka with the built-in discovery service in Kubernetes, we need to make some changes in our build and configuration files. We do not need to make any changes in the Java source code, except for some of the test classes, where a property is no longer required and will therefore be removed. The following changes have been applied to the source code:
+- [ ] Netflix Eureka and the Spring Cloud LoadBalancer-specific configuration (client and server) have been removed from the configuration repository, **config-repo**.
+- [ ] Routing rules in the gateway Service to the Eureka server have been removed from the `config-repo/gateway.yml` file.
+- [ ] The Eureka server project, in the `spring-cloud/eureka-server` folder, has been removed.
+- [ ] The Eureka server has been removed from the Docker Compose files and the settings. gradle Gradle file.
+- [ ] The dependency on `spring-cloud-starter-netflix-eureka-client` has been removed in all of Eureka’s client build files, `build.gradle`.
+- [ ] The `eureka.client.enabled=false` property setting has been removed from all integration tests of former Eureka clients.
+- [ ] The gateway Service no longer uses routing based on the client-side load balancer in Spring Cloud LoadBalancer, using the lb protocol. For example, the `lb://product-composite` routing destination has been replaced with `http://product-composite` in the `config-repo/gateway.yml` file.
+- [ ] The HTTP port used by the microservices and the authorization server has been changed from port `8080` (`9999` in the case of the authorization server) to the default HTTP port, `80`. This has been configured in `config-repo` for each affected Service, like so:
+    ```yml
+    spring.config.activate.on-profile: docker
+    server.port: 80
+    ```
+
+None of the HTTP addresses that we will use are affected by the replacement of Netflix Eureka
+with Kubernetes Services. For example, addresses used by the composite Service are unaffected:
+```Java
+private final String productServiceUrl = "http://product";
+private final String recommendationServiceUrl = "http://recommendation";
+private final String reviewServiceUrl = "http://review";
+```
+
+This is because we changed the HTTP port used by the microservices and the authorization server
+to the default HTTP port, 80, as described previously.
+
+Using Docker Compose still works, even though Netflix Eureka has been removed.
+The main reason that this works is that the container names in the Docker Compose
+files are the same as the corresponding Service names used in Kubernetes, meaning
+that the microservices’ DNS names are the same in both environments. This can be
+used to run functional tests of the microservices without deploying them to Kuber-
+netes – for example, running test-em-all.bash together with Docker Desktop in
+the same way we did in the previous Labs. Removing Netflix Eureka, however,
+means that we no longer have a discovery service in place when using plain Docker
+and Docker Compose. Therefore, scaling microservices will only work when de-
+ploying to Kubernetes.
+
+In Lab 17, Implementing Kubernetes Features to Simplify the System Landscape, in
+the Verifying that microservices work without Kubernetes section, we will discuss the
+importance of avoiding the source code of the microservices being dependent on the
+Kubernetes platform, thus avoiding vendor lock-in. We will also use the test script,
+test-em-all.bash, together with Docker Compose, to verify that the microservices
+don’t require Kubernetes from a functional perspective.
+
+Now that we’ve familiarized ourselves with how Netflix Eureka will be replaced with Kubernetes
+Services, let’s introduce the other Kubernetes objects we will use.
+
+## Introducing how Kubernetes will be used
+Later on in the Lab, we will see in detail how various Kubernetes objects are used to deploy the
+microservices and the resource managers they depend on, such as databases and queue managers.
+Before delving into all the details, let’s get an overview of the Kubernetes objects that will be used:
+- For each microservice, database, and queue manager that will be deployed in Kubernetes,
+one Deployment object and one Service object will be created. For all components, except
+for the edge server named gateway, the Service object will be of the **ClusterIP** type. For
+the gateway, the Service object will be of the **NodePort** type, accepting external HTTPS
+requests on port `30433`.
+- The config server will use a **ConfigMap**, containing the configuration files in `config-repo`.
+- To hold credentials for the config server and its clients, two Secrets will be created: one
+for the config server and one for its clients
+
+## Using Spring Boot’s support for graceful shutdown and probes for liveness and readiness
+Spring Boot has added useful features to support deployments to Kubernetes:
+### Graceful shutdown
+
+Whenever a microservice instance needs to be stopped (for example,
+in a rolling upgrade scenario), there is a risk that active requests are affected when the
+instance is stopped. To minimize this risk, Spring Boot has added support for graceful
+shutdown. 
+
+When applying graceful shutdown, a microservice stops accepting new requests and waits for a configurable time for active requests to complete before it shuts
+down the application. Requests that take a longer time to complete than the shutdown
+wait period will be aborted. These requests will be seen as exceptional cases that a shutdown procedure can’t wait for before it stops the application.
+
+Graceful shutdown is enabled by default, and has been configured with a waiting period
+of 10 seconds for all microservices by adding the following to the common `application.yml` file in the **config-repo** folder:
+```yml
+spring.lifecycle.timeout-per-shutdown-phase: 10s
+```
+
+### Liveness and readiness probes
+
+proper implementations of liveness and readiness probes are essential for Kubernetes to
+be able to manage our Pods. 
+To briefly recap, a liveness probe tells Kubernetes whether a
+Pod needs to be replaced, and a readiness probe tells Kubernetes whether its Pod is ready
+to accept requests. 
+
+To simplify this work, Spring Boot has added support to implement
+liveness and readiness probes. The probes are exposed on the URLs `/actuator/health/
+liveness` and `/actuator/health/readiness`, respectively. They can either be declared
+by configuration or implementation in source code if increased control is required compared to what configuration gives. 
+
+When declaring the probes by configuration, a health
+group can be declared for each probe, specifying what existing health indicators it should
+include. For example, a readiness probe should report `DOWN` if a microservice can’t access its
+MongoDB database. In this case, the health group for the readiness probe should include
+the mongo health indicator. 
+
+In this Lab, we will declare the probes using the following configuration in the common `application.yml` file in the **config-repo** folder:
+```yml
+management.endpoint.health.probes.enabled: true
+management.endpoint.health.group.readiness.include: readinessState,rabbit, db, mongo
+```
+The first line of the configuration enables the liveness and readiness probes. 
+The second line declares that readiness probes will include health indicators for RabbitMQ, MongoDB,
+and SQL databases, if available. 
+
+For the liveness probe, we don’t need to add any extra health indicators. For the scope of this Lab, it is sufficient that the liveness probe reports `UP` given that the Spring Boot application is up and running.
+
+## Introducing Helm
+we will use Helm (https://helm.sh), an open source-based
+package manager for Kubernetes. Helm comes with a templating language that can be used
+to extract settings specific to a microservice or an environment from generic definitions of the
+various Kubernetes objects used.
+
+To extract boilerplate definitions from the components’ charts, a special type of chart, a [library chart](/software-engineering/infrastructure-devops/orchestration/kubernetes/concepts/deployment-and-release/helm/advanced-helm/library-charts), will be used.
+
+Finally, to be able to describe how to deploy all components into different types of environments
+(for example, for development and testing or staging and production), the concept of parent
+charts and subcharts will be used. We will define two types of environments, dev-env and prod-env. Each environment will be implemented as a parent chart that depends on different sets
+of subcharts, for example, the microservice charts. The environment charts will also provide
+environment-specific default values, such as for the requested number of Pods, Docker image
+versions, credentials, and resource requests and limits.
+
+In summary, we will have one reusable library chart, named common; a set of microservice- and
+resource manager-specific charts, placed in the components folder; and two environment-specific
+parent charts, placed in the environments folder. The file structure looks like this:
+```
+|-- common
+| |-- Chart.yaml
+| |-- templates
+| |-- templates_org
+| `-- values.yaml
+|-- components
+| |-- auth-server
+| |-- config-server
+| |-- gateway
+| |-- mongodb
+| |-- mysql
+| |-- product
+| |-- product-composite
+| |-- rabbitmq
+| |-- recommendation
+| |-- review
+| `-- zipkin-server
+`-- environments
+    |-- dev-env
+    `-- prod-env
+```
+
+To share Helm charts with others, they can be published to a Helm chart repository. In this Labs,
+we will not publish any charts, but in Lab 17, Implementing Kubernetes Features to Simplify the
+System Landscape, we will install a component named cert-manager using a Helm chart from a
+chart repository.
+
+### The common library chart
+This chart contains reusable templates, also known as named templates, for the four types of
+Kubernetes manifests we will use in this Lab: `Deployment`, `Service`, `ConfigMap`, and `Secret`.
+The structure and content of the common chart are based on the output from a `helm create`
+command. Specifically, the `_helpers.tpl` template file has been retained to reuse best practices
+for naming conventions. It declares the following templates that encapsulate naming conventions:
+• `common.name`: Based on the chart name.
+• `common.fullname`: Based on a combination of the name of the release and the chart. In
+this book, we will override this naming convention and simply use the name of the chart.
+• `common.chart`: Based on the chart name and version.
+
+### The ConfigMap template
+This template is designed to create `ConfigMaps` from files in the `config-repo` folder. Each `ConfigMap` will contain all non-sensitive configurations required by a specific Deployment. The Deployment manifest will map the content of the ConfigMap as a volume in its Pod template. This
+will result in Pods created by the Deployment being able to access the configuration as files in
+their local filesystem. See the later The Deployment template section for details. The `config-repo`
+folder needs to be placed in the charts that use the common chart.
+
+The template file is named `_configmap_from_file.yaml`, and it looks like this:
+
+**kubernetes/helm/common/templates/_configmap_from_file.yaml**
+```yml
+{{- define "common.configmap_from_file" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "common.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "common.name" . }}
+    helm.sh/chart: {{ include "common.chart" . }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+{{ (.Files.Glob "config-repo/*").AsConfig | indent 2 }}
+{{- end -}}
+```
+An explanation of the template is as follows:
+• The first line, `{{- define "common.configmap_from_file " -}}`, is used to declare the name of the reusable template. The scope of the template ends with a matching `{{-` end `-}}`, the last line in this example.
+• To set the name of the ConfigMap, the `common.fullname` template from the `_helpers.tpl` file is used.
+• Next, a number of labels are defined to make it easier to identify the ConfigMap later on.
+Again, templates from the `_helpers.tpl` file are used to set the name and specify the
+chart used. To mark that this Service has been created using Helm, the `app.kubernetes.io/managed-by` label is set to the value for the `.Release.Service` field. From the earlier
+description of the Release object, we know that it always returns the `Helm` value.
+• Next comes the core part of the ConfigMap, its data section. To specify the actual configuration in the ConfigMap, the Glob function in the Files object is used to get all files in
+the config-repo folder. Next, the AsConfig function is applied to the content in the files
+to form a proper YAML map. The result is piped to the indent function, which ensures a
+proper indentation is rendered – in this case, using two characters.
+
+The hyphens in `{{-` and `-}}` are used to remove preceding and trailing whitespace remaining
+after the processing of the directive inside the curly braces.
+
+:::note
+
+In this Lab, this template will be used only by the config server chart in the
+components folder. In the next Lab, all other microservices will also use this
+template to define their own ConfigMaps, since the config server will be removed.
+
+:::
+
+In this Lab, only the config server will use a ConfigMap. See the The components charts section
+for a description of how this template is used.
+To see the ConfigMap that will be created by Helm using this template, run the following commands:
+```sh
+cd ./kubernetes/helm/components/config-server
+helm dependency update .
+helm template . -s templates/configmap_from_file.yaml
+```
+Expect output from the helm template command like the following:
+```yml
+# Source: config-server/templates/configmap_from_file.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-server
+  labels:
+    app.kubernetes.io/name: config-server
+    helm.sh/chart: config-server-1.0.0
+    app.kubernetes.io/managed-by: Helm
+data:
+  application.yml: "app:\n  auth-server: localhost\n\nspring.rabbitmq:\n  host: 127.0.0.1\n
+    \ port: 5672\n  username: guest\n  password: '{cipher}17fcf0ae5b8c5cf87de6875b699be4a1746dd493a99d926c7a26a68c422117ef'\n\nspring.cloud.stream.kafka.binder:\n
+    \ brokers: 127.0.0.1\n  defaultBrokerPort: 9092\n\nspring.cloud.stream.defaultBinder:
+    rabbit\n\n# WARNING: Exposing all management endpoints over http should only be
+    used during development, must be locked down in production!\nmanagement.endpoint.health.show-details:
+    \"ALWAYS\"\nmanagement.endpoints.web.exposure.include: \"*\"\nmanagement.endpoint.health.probes.enabled:
+    true\nmanagement.health.rabbit.enabled: true\nmanagement.health.kafka.enabled: false\n\nmanagement.zipkin.tracing.endpoint:
+    http://zipkin-server:9411/api/v2/spans\nmanagement.tracing.sampling.probability:
+    1.0\n\nserver.shutdown: graceful\nspring.lifecycle.timeout-per-shutdown-phase: 10s\n\nspring:\n
+    \ reactor:\n    context-propagation: auto\n    \n---\nspring.config.activate.on-profile:
+    docker\n\nspring.rabbitmq.host: rabbitmq\n\nspring.cloud.stream.kafka.binder.brokers:
+    kafka\n\napp:\n  auth-server: auth-server\n\n---\nspring.config.activate.on-profile:
+    kafka\n\nmanagement.health.rabbit.enabled: false\nspring.cloud.stream.defaultBinder:
+    kafka\nspring.kafka.bootstrap-servers: kafka:9092\nspring.cloud.stream.kafka.binder.replication-factor:
+    1\n"
+  auth-server.yml: |
+    server.port: 9999
+    server.forward-headers-strategy: framework
+  
+    logging:
+      level:
+        root: INFO
+  
+    ---
+    spring.config.activate.on-profile: docker
+  
+    server.port: 80
+  gateway.yml: |+
+    server.port: 8443
+  
+    # During development, allow forwarding the X-Forwarded-* and Forwarded headers from any proxies.
+    # When usd in QA and production, this should be set to a specific IP address or CIDR range, e.g. 10\.0\.0\..* (Java Regular Expression).
+    # For more information, see https://spring.io/security/cve-2025-41235
+    spring.cloud.gateway.server.webflux.trusted-proxies: ".*"
+  
+    spring.ssl.bundle.jks.gateway:
+      key:
+        alias: localhost
+      keystore:
+        type: PKCS12
+        location: classpath:keystore/edge.p12
+        password: '{cipher}d59274473b196cebe288f849c442eba34aa497d14a13e10a23f824489e1c23ec'
+  
+    server.ssl.bundle: gateway
+  
+    spring.cloud.gateway.server.webflux.routes:
+  
+    - id: product-composite
+      uri: http://product-composite
+      predicates:
+      - Path=/product-composite/**
+  
+    - id: oauth2-server
+      uri: http://auth-server
+      predicates:
+      - Path=/oauth2/**
+  
+    - id: oauth2-login
+      uri: http://auth-server
+      predicates:
+      - Path=/login/**
+  
+    - id: oauth2-error
+      uri: http://auth-server
+      predicates:
+      - Path=/error/**
+  
+    - id: product-composite-swagger-ui
+      uri: http://product-composite
+      predicates:
+      - Path=/openapi/**
+  
+    - id: config-server
+      uri: ${spring.cloud.config.uri}
+      predicates:
+      - Path=/config/**
+      filters:
+      - RewritePath=/config/(?<segment>.*), /$\{segment}
+  
+    - id: host_route_200
+      uri: http://httpstat.us
+      predicates:
+      - Host=i.feel.lucky:8080
+      - Path=/headerrouting/**
+      filters:
+      - SetPath=/200
+  
+    - id: host_route_418
+      uri: http://httpstat.us
+      predicates:
+      - Host=im.a.teapot:8080
+      - Path=/headerrouting/**
+      filters:
+      - SetPath=/418
+  
+    - id: host_route_501
+      uri: http://httpstat.us
+      predicates:
+      - Path=/headerrouting/**
+      filters:
+      - SetPath=/501
+  
+    spring.security.oauth2.resourceserver.jwt.issuer-uri: http://${app.auth-server}
+  
+    management.endpoint.gateway.enabled: true
+  
+    logging:
+      level:
+        root: INFO
+        org.springframework.cloud.gateway.route.RouteDefinitionRouteLocator: INFO
+        org.springframework.cloud.gateway: TRACE
+        org.springframework.web.server.adapter.HttpWebHandlerAdapter: TRACE
+  
+  product-composite.yml: "springdoc:\n  swagger-ui.path: /openapi/swagger-ui.html\n
+    \ api-docs.path: /openapi/v3/api-docs\n  packagesToScan: se.magnus.microservices.composite.product\n
+    \ pathsToMatch: /**\n  cache.disabled: true\n\n  swagger-ui:\n    oauth2-redirect-url:
+    /swagger-ui/oauth2-redirect.html\n    oauth:\n      clientId: writer\n      clientSecret:
+    '{cipher}debb77857798ba70441b229de88624213b0a00b284f95fe31d1378d117cf3ffa'\n      useBasicAuthenticationWithAccessCodeGrant:
+    true\n  oAuthFlow:\n    authorizationUrl: https://localhost:8443/oauth2/authorize\n
+    \   tokenUrl: https://localhost:8443/oauth2/token\n\nserver.forward-headers-strategy:
+    framework\n\napi:\n\n  common:\n    version: 1.0.0\n    title: Sample API\n    description:
+    Description of the API...\n    termsOfService: MY TERMS OF SERVICE\n    license:
+    MY LICENSE\n    licenseUrl: MY LICENSE URL\n\n    externalDocDesc: MY WIKI PAGE\n
+    \   externalDocUrl: MY WIKI URL\n    contact:\n      name: NAME OF CONTACT\n      url:
+    URL TO CONTACT\n      email: contact@mail.com\n\n  responseCodes:\n    ok.description:
+    OK\n    badRequest.description: Bad Request, invalid format of the request. See
+    response message for more information\n    notFound.description: Not found, the
+    specified id does not exist\n    unprocessableEntity.description: Unprocessable
+    entity, input parameters caused the processing to fail. See response message for
+    more information\n\n  product-composite:\n\n    get-composite-product:\n      description:
+    Returns a composite view of the specified product id\n      notes: |\n        #
+    Normal response\n        If the requested product id is found the method will return
+    information regarding:\n        1. Product information\n        1. Reviews\n        1.
+    Recommendations\n        1. Service Addresses\\n(technical information regarding
+    the addresses of the microservices that created the response)\n\n        # Expected
+    partial and error responses\n        1. If no product information is found, a **404
+    - Not Found** error will be returned\n        1. In no recommendations or reviews
+    are found for a product, a partial response will be returned\n\n    create-composite-product:\n
+    \     description: Creates a composite product\n      notes: |\n        # Normal
+    response\n        The composite product information posted to the API will be split
+    up and stored as separate product-info, recommendation and review entities.\n\n
+    \       # Expected error responses\n        1. If a product with the same productId
+    as specified in the posted information already exists,\n           an **422 - Unprocessable
+    Entity** error with a \"duplicate key\" error message will be returned\n\n    delete-composite-product:\n
+    \     description: Deletes a product composite\n      notes: |\n        # Normal
+    response\n        Entities for product information, recommendations and reviews
+    related to the specified productId will be deleted.\n        The implementation
+    of the delete method is idempotent, i.e. it can be called several times with the
+    same response.\n\n        This means that a delete request of a non-existing product
+    will return **200 Ok**.\n\nserver.port: 7001\nserver.error.include-message: always\n\nspring.cloud.stream:\n
+    \ default.contentType: application/json\n  bindings:\n    products-out-0:\n      destination:
+    products\n      producer:\n        required-groups: auditGroup\n    recommendations-out-0:\n
+    \     destination: recommendations\n      producer:\n        required-groups: auditGroup\n
+    \   reviews-out-0:\n      destination: reviews\n      producer:\n        required-groups:
+    auditGroup\n\nspring.security.oauth2.resourceserver.jwt.issuer-uri: http://${app.auth-server}\n\nresilience4j.timelimiter:\n
+    \ instances:\n    product:\n      timeoutDuration: 2s\n\nresilience4j.retry:\n  instances:\n
+    \   product:\n      maxAttempts: 3\n      waitDuration: 1000\n      retryExceptions:\n
+    \     - org.springframework.web.reactive.function.client.WebClientResponseException$InternalServerError\n\nmanagement.health.circuitbreakers.enabled:
+    true\n\nresilience4j.circuitbreaker:\n  instances:\n    product:\n      allowHealthIndicatorToFail:
+    false\n      registerHealthIndicator: true\n      slidingWindowType: COUNT_BASED\n
+    \     slidingWindowSize: 5\n      failureRateThreshold: 50\n      waitDurationInOpenState:
+    10000\n      permittedNumberOfCallsInHalfOpenState: 3\n      automaticTransitionFromOpenToHalfOpenEnabled:
+    true\n      ignoreExceptions:\n        - se.magnus.api.exceptions.InvalidInputException\n
+    \       - se.magnus.api.exceptions.NotFoundException\n        \nlogging:\n  level:\n
+    \   root: INFO\n    se.magnus: INFO\n    org.springframework.web.server.adapter.HttpWebHandlerAdapter:
+    INFO\n\n\n# To see tracing headers, uncomment the following two lines and restart
+    the product-composite service\n# spring.codec.log-request-details: true\n# logging.level.org.springframework.web.reactive.function.client.ExchangeFunctions:
+    TRACE\n\n---\nspring.config.activate.on-profile: docker\n\nserver.port: 80\n\n---\nspring.config.activate.on-profile:
+    streaming_partitioned\n\nspring.cloud.stream.bindings.products-out-0.producer:\n
+    \ partition-key-expression: headers['partitionKey']\n  partition-count: 2\n\nspring.cloud.stream.bindings.recommendations-out-0.producer:\n
+    \ partition-key-expression: headers['partitionKey']\n  partition-count: 2\n\nspring.cloud.stream.bindings.reviews-out-0.producer:\n
+    \ partition-key-expression: headers['partitionKey']\n  partition-count: 2\n"
+  product.yml: |
+    server.port: 7002
+    server.error.include-message: always
+  
+    spring.data.mongodb:
+      host: localhost
+      port: 27017
+      database: product-db
+  
+    spring.cloud.function.definition: messageProcessor
+  
+    spring.cloud.stream:
+      default.contentType: application/json
+      bindings.messageProcessor-in-0:
+        destination: products
+        group: productsGroup
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+      maxAttempts: 3
+      backOffInitialInterval: 500
+      backOffMaxInterval: 1000
+      backOffMultiplier: 2.0
+  
+    spring.cloud.stream.rabbit.bindings.messageProcessor-in-0.consumer:
+      autoBindDlq: true
+      republishToDlq: true
+  
+    spring.cloud.stream.kafka.bindings.messageProcessor-in-0.consumer:
+      enableDlq: true
+  
+    logging:
+      level:
+        root: INFO
+        se.magnus: INFO
+        org.springframework.data.mongodb.core.ReactiveMongoTemplate: DEBUG
+  
+    ---
+    spring.config.activate.on-profile: docker
+  
+    server.port: 80
+  
+    spring.data.mongodb.host: mongodb
+  
+    ---
+    spring.config.activate.on-profile: streaming_partitioned
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+      partitioned: true
+      instanceCount: 2
+  
+    ---
+    spring.config.activate.on-profile: streaming_instance_0
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer.instanceIndex: 0
+  
+    ---
+    spring.config.activate.on-profile: streaming_instance_1
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer.instanceIndex: 1
+  recommendation.yml: |
+    server.port: 7003
+    server.error.include-message: always
+  
+    spring.data.mongodb:
+      host: localhost
+      port: 27017
+      database: recommendation-db
+  
+    spring.cloud.function.definition: messageProcessor
+  
+    spring.cloud.stream:
+      default.contentType: application/json
+      bindings.messageProcessor-in-0:
+        destination: recommendations
+        group: recommendationsGroup
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+      maxAttempts: 3
+      backOffInitialInterval: 500
+      backOffMaxInterval: 1000
+      backOffMultiplier: 2.0
+  
+    spring.cloud.stream.rabbit.bindings.messageProcessor-in-0.consumer:
+      autoBindDlq: true
+      republishToDlq: true
+  
+    spring.cloud.stream.kafka.bindings.messageProcessor-in-0.consumer:
+      enableDlq: true
+  
+    logging:
+      level:
+        root: INFO
+        se.magnus: INFO
+        org.springframework.data.mongodb.core.ReactiveMongoTemplate: DEBUG
+  
+    ---
+    spring.config.activate.on-profile: docker
+  
+    server.port: 80
+  
+    spring.data.mongodb.host: mongodb
+  
+    ---
+    spring.config.activate.on-profile: streaming_partitioned
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+      partitioned: true
+      instanceCount: 2
+  
+    ---
+    spring.config.activate.on-profile: streaming_instance_0
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer.instanceIndex: 0
+  
+    ---
+    spring.config.activate.on-profile: streaming_instance_1
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer.instanceIndex: 1
+  review.yml: |
+    server.port: 7004
+    server.error.include-message: always
+  
+    # Strongly recommend to set this property to "none" in a production environment!
+    spring.jpa.hibernate.ddl-auto: update
+  
+    spring.datasource:
+      url: jdbc:mysql://localhost/review-db
+      username: user
+      password: '{cipher}24b93c790fa2ed0dc5a6a2b8c39853cf4d6cd6100c248de5f279fb5dd78e7be6'
+  
+    spring.datasource.hikari.initializationFailTimeout: 60000
+  
+    spring.cloud.function.definition: messageProcessor
+  
+    spring.cloud.stream:
+      default.contentType: application/json
+      bindings.messageProcessor-in-0:
+        destination: reviews
+        group: reviewsGroup
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+      maxAttempts: 3
+      backOffInitialInterval: 500
+      backOffMaxInterval: 1000
+      backOffMultiplier: 2.0
+  
+    spring.cloud.stream.rabbit.bindings.messageProcessor-in-0.consumer:
+      autoBindDlq: true
+      republishToDlq: true
+  
+    spring.cloud.stream.kafka.bindings.messageProcessor-in-0.consumer:
+      enableDlq: true
+  
+    logging:
+      level:
+        root: INFO
+        se.magnus: INFO
+        org.hibernate.SQL: DEBUG
+        org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+  
+    ---
+    spring.config.activate.on-profile: docker
+  
+    server.port: 80
+  
+    spring.datasource.url: jdbc:mysql://mysql/review-db
+  
+    ---
+    spring.config.activate.on-profile: streaming_partitioned
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer:
+      partitioned: true
+      instanceCount: 2
+  
+    ---
+    spring.config.activate.on-profile: streaming_instance_0
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer.instanceIndex: 0
+  
+    ---
+    spring.config.activate.on-profile: streaming_instance_1
+  
+    spring.cloud.stream.bindings.messageProcessor-in-0.consumer.instanceIndex: 1
+
+```
+The data field contains the content of all files in the `config-repo` folder.
+
+### The Secrets template
+This template is designed to create Secrets defined by values such as credentials provided by the
+`dev-env` and `prod-env` environments. The Secrets will be mapped as environment variables in
+the Pods. See the The Deployment template section for details. Since an environment must be able
+to define multiple Secrets, this template is designed to create multiple Secret manifests using the
+range function in Helm. The template file is named `_secrets.yaml`, and it looks like this:
+```yml
+{{- define "common.secrets" -}}
+{{- range $secretName, $secretMap := .Values.secrets }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  labels:
+    app.kubernetes.io/name: {{ $secretName }}
+    helm.sh/chart: {{ include "common.chart" $ }}
+    app.kubernetes.io/managed-by: {{ $.Release.Service }}
+type: Opaque
+data:
+{{- range $key, $val := $secretMap }}
+  {{ $key }}: {{ $val | b64enc }}
+{{- end }}
+---
+{{- end -}}
+{{- end -}}
+```
+An explanation of the template is as follows:
+• After the declaration of the template in line 1 comes the use of the range function in line 2. The function assumes that the `.Values.secrets` field contains a map of Secret names
+and a map of the Secret’s keys/value pairs. A declaration of the Secrets field in one of the
+environment’s values.yaml files will look like this:
+```yml
+secrets:
+    a-secret:
+        key-1: secret-value-1
+        key-2: secret-value-2
+    another-secret:
+        key-3: secret-value-3
+```
+This definition will render two Secrets, named `a-secret` and `another-secret`. The range
+function assigns the current Secret name and its map to the `$secretName` and `$secretMap`
+variables.
+• Since the range function changes the current scope, we can no longer use the dot notation to pass the root context to the common.chart template. Instead, the `$` variable has
+to be used.
+• In the data section of the manifest, a second range function is applied a second time to
+traverse the current Secret’s key/value pairs. Each key/value pair is assigned by the range
+function to the `$key` and `$val` variables.
+• Finally, the Secret’s key/value pairs are defined as a map entry in the data section. The
+value in the `$val` variable is piped to the b64enc function to get it properly Base64-encoded, as required by a Secret manifest.
+The `---` characters are used to separate the rendered Secret manifests from each other so that
+they are processed as separate YAML documents.
+
+Secrets are only defined by the dev-env and prod-env environment charts. They are used to create
+environment-specific credentials. See the The environment charts section for a description of how
+this template is used.
+
+To see the Secrets that will be created for dev-env by Helm using this template, run the following
+commands:
+```sh
+cd ./kubernetes/helm
+for f in components/*; do helm dependency update $f; done
+helm dependency update environments/dev-env
+helm template environments/dev-env -s templates/secrets.yaml
+```
+Expect output from the helm template command like this:
+```yml
+# Source: dev-env/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: config-client-credentials
+  labels:
+    app.kubernetes.io/name: config-client-credentials
+    helm.sh/chart: dev-env-1.0.0
+    app.kubernetes.io/managed-by: Helm
+type: Opaque
+data:
+  CONFIG_SERVER_PWD: ZGV2LXB3ZA==
+  CONFIG_SERVER_USR: ZGV2LXVzcg==
+  SPRING_CLOUD_CONFIG_URI: aHR0cDovL2NvbmZpZy1zZXJ2ZXI6ODg4OA==
+
+
+---
+# Source: dev-env/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: config-server-secrets
+  labels:
+    app.kubernetes.io/name: config-server-secrets
+    helm.sh/chart: dev-env-1.0.0
+    app.kubernetes.io/managed-by: Helm
+type: Opaque
+data:
+  ENCRYPT_KEY: bXktdmVyeS1zZWN1cmUtZW5jcnlwdC1rZXk=
+  SPRING_SECURITY_USER_NAME: ZGV2LXVzcg==
+  SPRING_SECURITY_USER_PASSWORD: ZGV2LXB3ZA==
+```
+
+### The Service template
+The Service template introduces support for overriding default values from the common chart,
+with values specific to the charts that use the common chart. The common chart will, for example,
+provide default values for the Service type and what ports the Service will expose. This will be
+useful for most of the microservices, but some of them need to be able to override these default
+values in their own values.yaml file.
+The template file is named _service.yaml and starts like the other named templates, with the dec-
+laration of its name, followed by the implementation of the override mechanism. It looks like this:
+```yml
+{{- define "common.service" -}}
+{{- $common := dict "Values" .Values.common -}} 
+{{- $noCommon := omit .Values "common" -}} 
+{{- $overrides := dict "Values" $noCommon -}} 
+{{- $noValues := omit . "Values" -}} 
+{{- with merge $noValues $overrides $common -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "common.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "common.name" . }}
+    helm.sh/chart: {{ include "common.chart" . }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+{{ toYaml .Values.service.ports | indent 4 }}
+  selector:
+    app.kubernetes.io/name: {{ include "common.name" . }}
+{{- end -}}
+{{- end -}}
+```
+This construct can be explained in the following way:
+• When the _service.yaml template is used by a microservice to render its Service manifest, the values from the microservice values.yaml file will be available in the .Values
+object, and the common chart’s values will be available under the .Values.common field.
+• So, the $common variable will refer to a dictionary, created by the dict function, with one
+key, Values, and its value will be the default values from the common chart. These values
+are taken from the common key in the .Values object.
+• The $noCommon variable will hold all values from the microservice except values under the
+common key, specified using the omit function.
+• The $overrides variable will refer to a dictionary, also with one key, Values, but its value
+will be the values from the microservice’s values, except the common values. It gets the
+values from the $noCommon variable declared on the previous line.
+• The $noValues variable will hold all other built-in objects, except for the Values object.
+• Now, here is where the override will happen; the merge function will create one dictionary
+based on the dictionaries referred to by the $noValues, $overrides, and $common variables.
+In this case, values found in the $overrides dictionary will take precedence over values
+in the $common dictionary, thereby overriding its values.
+• Finally, the with function will change the scope for the template code that follows until
+its `{{-` end `-}}` definition is reached. So, the current scope, “.", will now refer to the
+merged dictionary.`
+
+Let’s take an example to see how this will work out. The common chart’s values.yaml file contains
+the following default settings for the Service type and exposed ports:
+
+kubernetes/helm/common/values.yaml
+```yml
+service:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: http
+    protocol: TCP
+    name: http
+```
+This setting will render Service objects that are of the `ClusterIP` type. The Service objects will
+expose port `80` and forward requests to the Pods on their port, named `http`.
+
+The gateway Service needs to expose a `NodePort` and use other port settings. To override the
+preceding default values, it declares the following in its chart’s `values.yaml` file:
+
+kubernetes/helm/components/gateway/values.yaml
+```yml
+service:
+  type: NodePort
+  ports:
+  - port: 443
+    targetPort: 8443
+    nodePort: 30443
+```
+
+
+The rest of the Service template file looks like this:
+
+• The metadata fields for name and labels are defined in the same way as already seen for
+the previous templates.
+• The type of the Service is set by the .Values.service.type field.
+• The ports exposed by the Service are specified using the .Values.service.ports field. The
+built-in toYaml function is used to format its value as yaml, and the result is piped to the
+indent function, which ensures a proper indentation is rendered, in this case, 4 characters.
+• Finally, the Pod selector is defined. It is based on the app.kubernetes.io/name label
+and is given the name using the common.name template
+
+The Service template is used by each component to create its Service manifest. As described pre-
+viously, the core microservices reuse the configuration in the common chart’s values.yaml file,
+while the other components override these values in their own values.yaml file.
+To see the Service manifest generated for a core component for the product microservice, run
+the following commands:
+```sh
+cd .Lab16/kubernetes/helm
+helm dependency update components/product
+helm template components/product -s templates/service.yaml
+```
+Expect output from the helm template command like this:
+```yml
+# Source: product/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: product
+  labels:
+    app.kubernetes.io/name: product
+    helm.sh/chart: product-1.0.0
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: product
+```
+
+To see the Service manifest generated for a component that overrides the settings in the common
+chart for the gateway component, run the following commands:
+```sh
+cd .Lab16/kubernetes/helm
+helm dependency update components/gateway
+helm template components/gateway -s templates/service.yaml
+```
+Expect output from the helm template command like this:
+```yml
+# Source: gateway/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels:
+    app.kubernetes.io/name: gateway
+    helm.sh/chart: gateway-1.0.0
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: NodePort
+  ports:
+    - nodePort: 30443
+      port: 443
+      targetPort: 8443
+  selector:
+    app.kubernetes.io/name: gateway
+```
+### The Deployment template
+ This is the most complex
+template since it must handle many parts of the Deployment manifest as optional. Different
+components will use different parts of a Deployment manifest. The common chart values.yaml
+file contains default values for these settings that are applicable to most of the components,
+minimizing the need to override these settings in each component’s own chart’s values.yaml
+file. The following parts of the Deployment manifest are optional for use by the components:
+• Arguments given to the container when it starts up
+• Environment variables
+• Environment variables from Secrets
+• The liveness probe
+• The readiness probe
+• A ConfigMap and a corresponding volume
+
+The template file is named `_deployment.yaml`, and its first lines look very similar to the Service
+template, utilizing the same type of override mechanism:
+```yml
+{{- define "common.deployment" -}}
+{{- $common := dict "Values" .Values.common -}} 
+{{- $noCommon := omit .Values "common" -}} 
+{{- $overrides := dict "Values" $noCommon -}} 
+{{- $noValues := omit . "Values" -}} 
+{{- with merge $noValues $overrides $common -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "common.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "common.name" . }}
+    helm.sh/chart: {{ include "common.chart" . }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+```
+When it comes to the spec part of the manifest, it starts with the following:
+```yml
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "common.name" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "common.name" . }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+```
+Here, we can see how the core parts of the spec are defined: the requested number of replicas, the
+selector for the Pods, and the template used to create new Pods. The template defines labels that
+match the selector and the name, Docker image, and imagePullPolicy to use when starting a
+container.
+
+Next comes the various optional parts of the manifest, as described previously:
+```yml
+          {{- with .Values.image.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.env }}
+          env:
+          {{- range $key, $val := .Values.env }}
+          - name: {{ $key }}
+            value: {{ $val }}
+          {{- end }}
+          {{- end }}
+          {{- if .Values.envFromSecretRefs }}
+          envFrom:
+          {{- range .Values.envFromSecretRefs }}
+          - secretRef:
+              name: {{ . }}
+          {{- end }}
+          {{- end }}
+          {{- if .Values.livenessProbe_enabled }}
+          livenessProbe:
+{{ toYaml .Values.livenessProbe | indent 12 }}
+          {{- end }}
+          {{- if .Values.readinessProbe_enabled }}
+          readinessProbe:
+{{ toYaml .Values.readinessProbe | indent 12 }}
+          {{- end }}
+```
+For the environment variables and Secrets that are mapped to environment variables, the range
+function is used in the same way the secrets template uses it. The environment variables can be
+specified on either a component or environment level, depending on their use case. Secrets are
+always specified by an environment chart. See the following sections regarding the component
+and environment charts.
+
+The manifest is concluded by the declaration of the ports the container exposes, resource requests
+and limits, and finally, the optional declaration of a ConfigMap and a corresponding volume to
+map the files in the ConfigMap to:
+```yml
+          ports:
+{{ toYaml .Values.ports | indent 12 }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+      {{- if .Values.configmap.enabled }}
+          volumeMounts:
+          - name: {{ include "common.fullname" . }}
+            mountPath: {{ .Values.configmap.volumeMounts.mountPath }}
+      volumes:
+        - name: {{ include "common.fullname" . }}
+          configMap:
+            name: {{ include "common.fullname" . }}
+      {{- end }}
+{{- end -}}
+{{- end -}}
+```
+From the common chart’s values.yaml file, we can find some default values of interest, for ex-
+ample, how default values for the liveness and readiness probes are defined:
+
+```yml
+livenessProbe_enabled: false
+livenessProbe:
+  httpGet:
+    scheme: HTTP
+    path: /actuator/health/liveness
+    port: 80
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 20
+  successThreshold: 1
+
+readinessProbe_enabled: false
+readinessProbe:
+  httpGet:
+    scheme: HTTP
+    path: /actuator/health/readiness
+    port: 80
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+  successThreshold: 1
+```
+From these declarations, we can see the following:
+• The probes are by default disabled since not all Deployments use probes.
+• The probes are based on HTTP GET requests sent to the endpoints exposed by Spring Boot,
+as described in the previous Using Spring Boot’s support for graceful shutdown and probes for
+liveness and readiness section.
+• As long as the endpoint responds with a 2xx or a 3xx response code, the probe is consid-
+ered to be successful.
+• The probes can be configured using the following parameters:
+• initialDelaySeconds specifies how long Kubernetes waits to probe a container
+after it’s started up.
+• periodSeconds specifies the time between probe requests sent by Kubernetes.
+• timeoutSeconds specifies how long Kubernetes waits on a response before it treats
+the probe as failed.
+• failureThreshold specifies how many failed attempts Kubernetes makes before
+giving up. In the case of a liveness probe, this means restarting the Pod. In the case
+of a readiness probe, it means that Kubernetes will not send any more requests to
+the container until the readiness probes are successful again.
+• successThreshold specifies the number of successful attempts that are required
+for a probe to be considered successful again after a failure. This only applies to
+readiness probes, since it must be set to 1 if specified for liveness probes.
+
+:::note
+
+Finding optimal settings for the probes can be challenging – that is, finding a proper
+balance between getting a swift reaction from Kubernetes when the availability of
+a Pod changes and not overloading the Pods with probe requests.
+
+Specifically, configuring a liveness probe with values that are too low can result in
+Kubernetes restarting Pods that don’t need to be restarted; they just need some extra
+time to start up. Starting a large number of Pods at the same time, also resulting in
+extra-long startup times, can similarly result in a lot of unnecessary restarts.
+
+Setting the configuration values too high on the probes (except for the
+successThreshold value) makes Kubernetes react more slowly, which can be an-
+noying in a development environment. Proper values also depend on the available
+hardware, which affects the startup times for the Pods. For the scope of this book,
+failureThreshold for the liveness probes is set to a high value, 20, to avoid unnec-
+essary restarts on computers with limited hardware resources.
+
+:::
+
+The Deployment template is used by each component to create its Deployment manifest. The core
+microservices reuse most of the configuration in the common chart’s values.yaml file, minimiz-
+ing the need for component-specific configuration, while the other components override more
+of these values in their own values.yaml file.
+To see the Deployment manifest generated for a core component, run the following commands
+for the product microservice:
+```sh
+cd ./kubernetes/helm
+helm dependency update components/product
+helm template components/product -s templates/deployment.yaml
+```
+response 
+```yml
+# Source: product/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product
+  labels:
+    app.kubernetes.io/name: product
+    helm.sh/chart: product-1.0.0
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: product
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: product
+    spec:
+      containers:
+        - name: product
+          image: "hands-on/product-service:latest"
+          imagePullPolicy: Never
+          env:
+          - name: SPRING_PROFILES_ACTIVE
+            value: docker
+          livenessProbe:
+            failureThreshold: 20
+            httpGet:
+              path: /actuator/health/liveness
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 2
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /actuator/health/readiness
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 2
+          ports:
+            - containerPort: 80
+              name: http
+              protocol: TCP
+          resources:
+            limits:
+              memory: 400Mi
+```
+To see the Deployment manifest generated for a component that overrides the settings in the
+common chart, run the following commands for the MongoDB component:
+```sh
+cd ./kubernetes/helm
+helm dependency update components/mongodb
+helm template components/mongodb -s templates/deployment.yaml
+```
+response:
+```yml
+# Source: mongodb/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb
+  labels:
+    app.kubernetes.io/name: mongodb
+    helm.sh/chart: mongodb-1.0.0
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mongodb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: "registry.hub.docker.com/library/mongo:8.0.5"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 27017
+          resources:
+            limits:
+              memory: 400Mi
+```
+
+### The components charts
+The charts for the microservices and the resource managers are stored in the components folder,
+and they all share the same file structure:
+• Chart.yaml expresses a dependency on the common library chart.
+• The template folder contains two templates, deployment.yaml and service.yaml. Both
+templates apply the corresponding named template from the common chart. For example,
+the Service.yaml template looks like this:
+```yml
+{{- template "common.service" . -}}
+```
+• The values.yaml file contains settings specific to the microservice. For example, the values
+file for the auth-server chart looks like this:
+
+```yml
+fullnameOverride: auth-server
+
+image:
+  name: auth-server
+
+env:
+  SPRING_PROFILES_ACTIVE: "docker"
+
+livenessProbe_enabled: true
+
+readinessProbe_enabled: true
+
+```
+The auth-server only needs to declare its name, Docker image, Spring profile, and that
+it wants to use the default configuration of the liveness and readiness probes.
+
+The config server differs from the other charts in that it uses a ConfigMap to store the config-
+repo containing the configuration files for all the other microservices. In its template folder, it
+defines a template for a ConfigMap that is based on the named template in the common chart
+for ConfigMaps that we have already been introduced to:
+```yml
+{{- template "common.configmap_from_file" . -}}
+```
+The template expects to find the property files in the charts folder, config-repo. To avoid duplicating config-repo from ./config-repo, a soft link, also known as a
+symbolic link, has been created with the following command:
+```sh
+cd ./kubernetes/helm/components/config-server 
+ln -s ../../../../config-repo config-repo
+```
+
+:::info
+
+Since Git preserves soft links, you don’t need to recreate the soft link – the git clone command makes it for you!
+
+:::
+
+As already mentioned in the walk-through of the common chart, the gateway Service differs from
+the other microservices, since it needs to expose a Service of the NodePort type.
+
+Besides the charts for the microservices, the components folder also contains charts for the databases, message broker, and Zipkin server we use. They are structured in the same way as the microservices. Since the common templates have been designed to streamline the charts for the microservices, the other charts need to override more default values in values.yaml files compared to the microservices. For more details, look at the values.yaml files in the following folders: mongodb, mysql, rabbitmq, and zipkin-server.
+
+### The environment charts
+Finally, the dev-env and prod-env charts in the environments folder tie everything together to
+complete installation packages for a typical development/test or staging/production environ-
+ment. Their Charts.yaml file contains dependencies on both the common chart and the charts
+in the components folder, and the template folder contains a secrets.yaml template to create
+environment-specific credentials as Secrets. It is based on the named template for Secrets from
+the common chart and looks like this:
+```yml
+{{- template "common.secrets" . -}}
+```
+Looking at the dev-env chart’s values.yaml file, we can find the following Secret values defined
+for the config-server-secrets Secret:
+```yml
+secrets:
+
+  config-server-secrets:
+    ENCRYPT_KEY: my-very-secure-encrypt-key
+    SPRING_SECURITY_USER_NAME: dev-usr
+    SPRING_SECURITY_USER_PASSWORD: dev-pwd
+```
+
+This will result in the config-server-secrets Secret containing three Secret values, all Base64-encoded. Its manifest will look like this:
+```yml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: config-server-secrets
+  labels:
+    ...
+type: Opaque
+data:
+  ENCRYPT_KEY: bXktdmVyeS1zZWN1cmUtZW5jcnlwdC1rZXk=
+  SPRING_SECURITY_USER_NAME: ZGV2LXVzcg==
+  SPRING_SECURITY_USER_PASSWORD: ZGV2LXB3ZA==
+```
+
+:::note
+
+Note that this values.yaml file contains sensitive information, for example, the
+encrypt key used by the config server and the password used to access the config
+server. This file must be stored securely. An alternative, if it is inappropriate to store
+this file securely, is to remove the sensitive information from this file and supply it
+when the helm install command is executed.
+
+:::
+
+To use the Secret in the Deployment manifest for the config server, the following is defined in the
+dev-env chart’s values.yaml file:
+```yml
+config-server:
+  envFromSecretRefs:
+    - config-server-secrets
+```
+This will be used by the Deployment template described previously to add the Secret as environ-
+ment variables in the Deployment manifest for the config server.
+
+The prod-env chart overrides more values than the dev-env chart. For example, the values.yaml
+file in the prod-env chart specifies that an extra Spring profile, prod, should be used and what
+version to use for the Docker images. This looks like the following for the product microservice:
+
+```yml
+product:
+  image:
+    tag: v1
+  env:
+    SPRING_PROFILES_ACTIVE: "docker,prod"
+```
+
+With this introduction to what the various types of charts contain, let’s move on and use them
+together with the Helm commands we learned about to deploy our microservices in Kubernetes!
+
+## Deploying to Kubernetes for development and test
+In this section, we will deploy the microservices in an environment to be used for development
+and test activities, such as system integration tests. This type of environment is used primarily
+for functional tests and is, therefore, configured to use minimal system resources and the latest
+available versions of the microservices’ Docker images.
+
+To be able to run functional tests, we will deploy the microservices together with the resource
+managers they require in the same namespace, which we will call hands-on. This makes it easy
+to set up a test environment and also to remove it once we are done with it. We can simply delete
+the namespace to get rid of all resources used by the test environment. This Deployment scenario
+is illustrated by the following diagram:
+![Resource managers deployed in the same Kubernetes namespace as the microservices in the dev environment](/docs/assets/software-engineering/software-architecture/architecture-styles/microservice/laps/product-review-recommendation-microservices/lab14.png)
+
+Before we can deploy the system landscape, we need to build our Docker images and resolve the dependencies for our Helm charts.
+### Building Docker images
+Normally, we have to push images to a Docker registry and configure Kubernetes to pull images
+from the registry. In our case, where we have a local single-node cluster, we can shortcut this
+process by pointing our Docker client to the Docker engine in minikube and then running the
+`docker compose build` command. This will result in the Docker images being immediately
+available to Kubernetes. For development, we will use latest as the Docker image version for
+the microservices.
+
+You can build Docker images from the source as follows:
+```sh
+./gradlew build
+eval $(minikube docker-env)
+docker compose -f docker-compose-k8.yml build
+```
+The eval `$(minikube docker-env)` command directs the local Docker client to communicate
+with the Docker engine in minikube.
+
+The docker-compose.yml file has been updated to specify a name for the Docker images it builds.
+For example, for the product Service, we have the following:
+```yml
+  product:
+    build: microservices/product-service
+    image: hands-on/product-service
+    mem_limit: 512m
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - CONFIG_SERVER_USR=${CONFIG_SERVER_USR}
+      - CONFIG_SERVER_PWD=${CONFIG_SERVER_PWD}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+```
+
+:::note
+
+latest is the default tag for a Docker image name, so it is not specified.
+
+:::
+
+With the Docker images built, it’s time to build the Helm charts.
+
+### Resolving Helm chart dependencies
+First, we update the dependencies in the components folder:
+```sh
+for f in kubernetes/helm/components/*; do helm dep up $f; done
+```
+Next, we update the dependencies in the environments folder:
+```sh
+for f in kubernetes/helm/environments/*; do helm dep up $f; done
+```
+Finally, we verify that the dependencies for the dev-env folder look good:
+```sh
+helm dep ls kubernetes/helm/environments/dev-env/
+```
+Expect the command to respond with the following:
+```
+NAME                    VERSION REPOSITORY                                      STATUS
+common                  1.0.0   file://../../common                             ok    
+rabbitmq                1.0.0   file://../../components/rabbitmq                ok    
+mongodb                 1.0.0   file://../../components/mongodb                 ok    
+mysql                   1.0.0   file://../../components/mysql                   ok    
+config-server           1.0.0   file://../../components/config-server           ok    
+gateway                 1.0.0   file://../../components/gateway                 ok    
+auth-server             1.0.0   file://../../components/auth-server             ok    
+product                 1.0.0   file://../../components/product                 ok    
+recommendation          1.0.0   file://../../components/recommendation          ok    
+review                  1.0.0   file://../../components/review                  ok    
+product-composite       1.0.0   file://../../components/product-composite       ok    
+zipkin-server           1.0.0   file://../../components/zipkin-server           ok    
+```
+
+With both Docker images built and Helm dependencies resolved, we can start deploying to Kubernetes!
+### Deploying to Kubernetes
+Deploying to Kubernetes means creating or updating Kubernetes objects. We will use Helm to
+perform the deployment, per the following steps:
+1. To avoid a slow deployment process due to Kubernetes downloading Docker images (po-
+tentially causing the liveness probes we described previously to restart our Pods), run the
+following docker pull commands to download the images in advance:
+```sh
+eval $(minikube docker-env)
+docker pull mysql:9.2.0
+docker pull mongo:8.0.5
+docker pull rabbitmq:4.0.7-management
+docker pull openzipkin/zipkin:3.5.0
+```
+2. Before using the Helm charts, render the templates using the helm template command
+to see what the manifests will look like:
+```sh
+helm template kubernetes/helm/environments/dev-env
+```
+Note that no interaction was performed with the Kubernetes cluster, so cluster information will be faked, and no tests will be run to verify whether the rendered manifest will
+be accepted by the cluster.
+3. To also verify that the Kubernetes cluster will actually accept the rendered manifest, a
+dry run of the installation can be performed by passing –-dry-run to the helm install
+command. Passing the `--debug` flag will also show which user-supplied and calculated
+values Helm will use when rendering the manifests. Run the following command to per-
+form a dry run:
+```sh
+helm install --dry-run --debug product-review-recommendation-microservices-dev kubernetes/helm/environments/dev-env
+```
+4. To initiate the deployment of the complete system landscape, including creating the
+hands-on namespace, run the following command:
+```sh
+helm install product-review-recommendation-microservices-dev \
+kubernetes/helm/environments/dev-env \
+-n product-review-recommendation-microservices-dev \
+--create-namespace
+```
+
+:::note 
+
+Note that here is where the Helm machinery kicks in. It will use the charts
+we walked through in the previous Introducing Helm section to render and
+apply the Kubernetes manifests, resulting in the required Kubernetes objects
+for the deployment being created.
+
+:::
+
+5. Set the newly created namespace as the default namespace for kubectl:
+```sh
+kubectl config set-context $(kubectl config current-context) --namespace=product-review-recommendation-microservices-dev
+```
+6. To see the Pods starting up, run the following command:
+```sh
+kubectl get pods --watch
+```
+This command will continuously report when new Pods are running, and if something
+goes wrong, it will report the status, such as Error and CrashLoopBackOff. After a while,
+you might see that errors are reported for the gateway, product-composite, and zipkin-
+server Pods. The reason for this is that they all depend on external resources that they
+require to be accessible during the startup. If not, they will crash. The gateway and product
+composite Service depend on the auth server, and the Zipkin server depends on access
+to RabbitMQ. Typically, they start up faster than the resources they rely on, causing this
+situation. 
+```
+NAME                                 READY   STATUS              RESTARTS   AGE
+auth-server-bdd8774c6-rlwf7          0/1     ErrImageNeverPull   0          100s
+config-server-7b79854b46-f9wk5       0/1     Running             0          100s
+gateway-55948dc7f7-l5kkj             0/1     ErrImageNeverPull   0          100s
+mongodb-676c5c6db4-nrbh9             1/1     Running             0          100s
+mysql-b8bf5cf97-rj6ql                0/1     ContainerCreating   0          100s
+product-77449bcd97-zd76d             0/1     ErrImageNeverPull   0          100s
+product-composite-5bfb754d79-lqvtp   0/1     ErrImageNeverPull   0          100s
+rabbitmq-64cf9c45c9-tkgxb            0/1     ContainerCreating   0          100s
+recommendation-864bb855d7-sgxxg      0/1     ErrImageNeverPull   0          100s
+review-78d457b8c6-9mhmk              0/1     ErrImageNeverPull   0          100s
+zipkin-server-6bdbc68476-t752q       0/1     ContainerCreating   0          100s
+zipkin-server-6bdbc68476-t752q       0/1     Running             0          2m28s
+```
+However, Kubernetes will detect the crashed Pods, and they will restart. Once
+the resources are up and running, all Pods will start up and be reported as ready, showing
+1/1 in the READY column. A sample output from the command looks like this:
+```
+```
+After seeing some output like the preceding, interrupt the command with Ctrl + C.
+7. Wait for all the Pods in the namespace to be ready with the following command:
+```sh
+kubectl wait --timeout=600s --for=condition=ready pod --all
+```
+Expect the command to respond with 11 log lines such as `pod/... condition met`, where
+the three dots (...) are replaced with the name of the actual Pod that is reported to be
+ready.
+8. To see the Docker images that are used, run the following command:
+```sh
+kubectl get pods -o json | jq .items[].spec.containers[].image
+```
+The response should look like the following:
+```
+"hands-on/auth-server:latest"
+"hands-on/auth-server:latest"
+"hands-on/config-server:latest"
+"hands-on/config-server:latest"
+```
+
+Note that the Docker images have the version tag set to latest for the microservices.
+We are now ready to test our deployment! However, before we can do that, we need to go through
+changes that are required in the test script for use with Kubernetes.
+
+### Changes in the test script for use with Kubernetes
+To verify the deployment, we will, as usual, run the test script, test-em-all.bash. To work with
+Kubernetes, the circuit breaker tests have been slightly modified. The circuit breaker tests call the
+actuator endpoints on the product-composite Service to check their health state and get access
+to circuit breaker events. Since this endpoint isn’t exposed externally, the previous Labs used
+the docker compose exec command to run a curl command inside of the product-composite
+Service to perform the tests.
+
+Starting with this Lab, the test script can either use the docker compose exec command or
+the corresponding kubectl command, kubectl exec, depending on whether we run the microservices using Docker Compose or Kubernetes.
+
+To know which command to use, a new parameter has been added to the script, `USE_K8S`. It defaults to false. For details, see the `testCircuitBreaker()` function in the test script.
+
+### Testing the Deployment
+When launching the test script, we have to give it the address of the host that runs Kubernetes
+(that is, our minikube instance) and the `NodePort` where our gateway Service listens for external
+requests. The gateway is accessible using port `30443`. As mentioned in Lab 15, since we use
+minikube’s docker driver, the hostname is always localhost. Since the hostname is the same
+as when running tests with Docker Compose, we don’t have to specify it; only the port has to be
+specified, together with the USE_K8S parameter.
+Start the tests with the following command:
+```sh
+PORT=30443 USE_K8S=true ./test-em-all.bash
+```
+In the output from the script, we can see how the NodePort is used, but besides that, everything
+looks the same as when we used Docker Compose in the previous Labs:
+```
+Start Tests: Sat Nov 7 02:29:48 AM EET 2026
+HOST=localhost
+PORT=30443
+USE_K8S=true
+SKIP_CB_TESTS=false
+Wait for: curl -k https://localhost:30443/actuator/health... DONE, continues...
+.....
+Test OK (actual value: HALF_OPEN_TO_CLOSED)
+End, all tests OK: Sat Nov 7 02:30:16 AM EET 2026
+```
+With the system landscape validations performed, let’s see how we can test the new features in
+Spring Boot: graceful shutdown and the probes for liveness and readiness.
+
+### Testing Spring Boot’s support for graceful shutdown and
+probes for liveness and readiness
+In this section, we will test out the new Spring Boot features and see how they interact with other
+components in Kubernetes.
+
+Let’s start by testing Spring Boot’s support for graceful shutdown, where the application during
+its shutdown phase will wait a configurable length of time for active requests to complete. Re-
+member that no new requests are allowed during the shutdown phase.
+
+To test the graceful shutdown mechanism, we will run a client that continuously sends requests to
+the composite Service. First, we will use it to send requests that take 5 seconds, a shorter amount
+of time than the shutdown wait period. The waiting period is configured to be 10 seconds. Next,
+we will use it to send requests that take a longer time, 15 seconds, to see how they are handled.
+As the test client, we will use Siege, a command line-based load test tool.
+
+To be able to test run requests that take this long to complete, we need to temporarily disable the
+timeout in the product-composite Service. Otherwise, its circuit breaker will kick in and pre-
+vent us from running the long requests. To be able to disable Resilience4j, a configuration class,
+ResilienceConfig, has been added to the composite service. If the app.resilience.enabled
+property is set to false, all features in Resilience4j are disabled. To disable Resilience4j in the
+composite Service, perform the following steps:
+1. Add the following under the product-composite section in the values file for the dev-env
+environment kubernetes/helm/environments/dev-env/values.yaml:
+env:
+APP_RESILIENCE_ENABLED: '"false"'
+After the change, the configuration file should look like this:
+product-composite:
+env:
+APP_RESILIENCE_ENABLED: '"false"'
+envFromSecretRefs:
+- config-client-credentials
+
+:::note
+
+As long as this setting is active, the circuit breaker tests in test-em-all.
+bash will no longer work since they assume a timeout of 2 seconds.
+
+:::
+
+2. Update the Helm installation with Helm’s upgrade command, using the --wait flag to
+ensure that the update is completed when the command terminates:
+helm upgrade product-review-recommendation-microservices-dev -n product-review-recommendation-microservices-dev \
+kubernetes/helm/environments/dev-env --wait
+Now we can run the tests, proceeding with the following steps to test with requests that are
+shorter than the shutdown wait period:
+1. Get an access token:
+ACCESS_TOKEN=$(curl -d grant_type=client_credentials \
+-ks https://writer:secret-writer@localhost:30443/oauth2/token \
+-d scope="product:read product:write" \
+| jq .access_token -r)
+Ensure you have an access token by issuing the echo $ACCESS_TOKEN command. If it’s
+empty, you have to check the preceding curl command and the logs from the gateway
+and the auth server.
+
+2. Make a test request and ask for a delay of 5 seconds using the delay query parameter:
+time curl -kH "Authorization: Bearer $ACCESS_TOKEN" \
+https://localhost:30443/product-composite/1?delay=5
+If you get a normal response and the time command reports a 5-second response time,
+the config changes of the increased timeout worked!
+3. Use Siege to start requests that take 5 seconds to complete, with 5 concurrent users send-
+ing requests with a random delay of between 0 and 2 seconds to spread out the requests
+slightly:
+siege -c5 -d2 -v -H "Authorization: Bearer $ACCESS_TOKEN" \
+https://localhost:30443/product-composite/1?delay=5
+Expect output from the tool for each completed request like this:
+HTTP/1.1 200 5.04 secs: 771 bytes ==> GET /product-
+composite/1?delay=5
+4. Watch the log output from the product Service in a separate Terminal window with the
+following command:
+kubectl logs -f --tail=0 -l app.kubernetes.io/name=product
+5. We will now ask Kubernetes to restart the product Deployment. The restart will first
+start a new Pod before the old one is shut down, meaning that none of the requests sent
+by Siege should be affected by the restart. Of specific interest are the few requests that
+are processed by the old Pod when it starts to shut down. If the graceful shutdown works
+as expected, none of the active requests should fail. Perform the restart by running the
+following command in a separate window:
+kubectl rollout restart deploy/product
+6. Ensure that there are only successful requests reported in the output from the load test
+tool, Siege, reporting 200 (OK).
+7. In the log output from the now-stopped product Pod, you should see that all requests were
+allowed to terminate gracefully before the application was stopped. Expect log output
+similar to the following at the end of the log output:
+
+Specifically, note the time between the two log messages (4 seconds, in this case), in-
+dicating that the shutdown procedure actually waited for the last request to complete.
+Now, let’s run the second test, with requests taking a longer time to complete than the shutdown
+wait period:
+1. Restart Siege, requesting longer response times above the wait limit of 10 seconds. Start
+15 concurrent users, asking for a 15-second response time and a random delay between
+the requests of 0–15 seconds. Stop Siege with Ctrl + C and run the following command:
+siege -c15 -d15 -v -H "Authorization: Bearer $ACCESS_TOKEN" \
+https://localhost:30443/product-composite/1?delay=15
+2. Watch the log output from the product Pod with the following command:
+kubectl logs -f --tail=0 -l app.kubernetes.io/name=product
+3. Restart the product Deployment:
+kubectl rollout restart deploy/product
+4. Follow the log output from the product Pod. Once it has shut down, you should be able to
+see that not all requests were allowed to terminate gracefully before the application was
+stopped. Expect log output similar to the following at the end of the log output:
+
+The log message Graceful shutdown aborted with one or more requests still
+active indicates that at least one request was not allowed to complete before the appli-
+cation was stopped.
+5. In the output from the load test tool, Siege, there should now appear one or a few failing
+requests reporting 500 (Internal Server Error) like this:
+Figure 16.9: Long-running requests fail during shutdown
+This demonstrates how the shutdown procedure proceeds after the configured wait time
+and that the remaining long-running requests are aborted, as expected.
+
+This completes the tests of Spring Boot’s graceful shutdown mechanism, which is clearly useful
+to avoid normal client requests being affected by Pods being stopped, for example, as a result of
+scaling down or a rolling upgrade being performed.
+Clean up after the tests:
+1. Stop the Siege load test tool with Ctrl + C.
+2. Roll back the latest Helm release to get rid of the increased timeout:
+helm rollback product-review-recommendation-microservices-dev -n product-review-recommendation-microservices-dev --wait
+3. Also, remove the increased timeout setting in the kubernetes/helm/environments/dev-
+env/values.yaml file.
+4. Run test-em-all.bash to verify that the configuration is rolled back:
+PORT=30443 USE_K8S=true ./test-em-all.bash
+Finally, let’s see what information the Spring Boot liveness and readiness probes report. We will
+use the product Service, but feel free to also try out the probes for other Services:
+1. Run the following command to get output from the product Service’s liveness probe:
+kubectl exec -it deploy/product -- \
+wget -qO - localhost/actuator/health/liveness | jq .
+2. Expect it to respond with the following:
+3. Run the following command to get output from the product Service’s readiness probe:
+kubectl exec -it deploy/product -- \
+wget -qO - localhost/actuator/health/readiness | jq .
+Expect its response to be a bit more extensive:
+
+From the preceding output, we can confirm that the readiness of product now depends
+on its access to both MongoDB and RabbitMQ. This is expected, since we configured the
+readiness health group to include health indicators for RabbitMQ, MongoDB, and SQL
+databases, if available. See the Using Spring Boot’s support for graceful shutdown and probes
+for liveness and readiness section to recap, if required.
+Before we move on, let’s clean up what we have installed in the development environment. We
+can do this by simply deleting the namespace. Deleting the namespace will recursively delete
+the resources that exist in the namespace, including information regarding the Helm installation.
+Delete the namespace with the following command:
+kubectl delete namespace  product-review-recommendation-microservices-dev 
+
+:::info
+
+If you just want to uninstall what the helm install command installed, you can
+run the helm uninstall product-review-recommendation-microservices-dev command
+
+:::
+
+With the development environment removed, we can move on and set up an environment tar-
+geting staging and production.
+
+## Deploying to Kubernetes for staging and production
+In this section, we will deploy the microservices in an environment for staging and production
+usage. A staging environment is used to perform quality assurance (QA) and user acceptance
+tests (UATs) as the last step before taking a new release into production. To be able to verify that
+a new release not only meets functional requirements but also non-functional requirements (for
+example, in terms of performance, robustness, scalability, and resilience), a staging environment
+is configured to be as similar as possible to the production environment.
+
+When deploying to an environment for staging or production, there are a number of changes
+required compared to when deploying for development or tests:
+
+- **Resource managers should run outside of the Kubernetes cluster**: It is technically feasible to run databases and queue managers for production use on Kubernetes as stateful
+containers, using StatefulSets and PersistentVolumes. For the scope of this Lab, to simulate a production environment, we will run MySQL, MongoDB, and RabbitMQ as plain
+Docker containers outside of Kubernetes, using the already existing Docker Compose files.
+
+- **Lock down**: For security reasons, things such as 
+  - actuator endpoints and log levels need to be constrained in a production environment. 
+  - Externally exposed endpoints should also be reviewed from a security perspective. For example, access to the configuration server should probably be locked down in a production environment, but we will keep it exposed in this lab for convenience. 
+  - Docker image tags must be specified to be able to track which versions of the microservices have been deployed.
+
+- **Scale up available resources**: To meet the requirements of both high availability and
+higher load:
+  - we need to run at least two Pods per Deployment. 
+  - We might also need to increase the amount of memory and CPU that are allowed to be used per Pod. 
+  - To avoid running out of memory in the minikube instance, *we will keep one Pod per Deployment but increase the maximum memory allowed in the production environment*.
+- **Set up a production-ready Kubernetes cluster**: This is outside the scope of this lab, but, if feasible, you can use one of the managed Kubernetes Services provided by the leading cloud providers. *For the scope of this lab, we will deploy to our local minikube instance*.
+
+:::note
+
+This is not meant to be an exhaustive list of things that have to be considered when setting up an environment for production, but it’s a good start.
+
+:::
+
+Our simulated production environment will look as follows:
+![Resource managers deployed outside of Kubernetes](/docs/assets/software-engineering/software-architecture/architecture-styles/microservice/laps/product-review-recommendation-microservices/lab14-prod.png)
+
+The following changes have been applied to the source code to prepare for deployment in an
+environment that’s used for staging and production:
+
+A Spring profile named prod has been added to the configuration files in the config-repo
+configuration repository:
+```yml
+spring.config.activate.on-profile: prod
+```
+
+In the prod profiles, the following have been added:
+• URLs to the resource managers that run as plain Docker containers:
+```yml
+spring.rabbitmq.host: 172.17.0.1
+spring.data.mongodb.host: 172.17.0.1
+spring.datasource.url: jdbc:mysql://172.17.0.1:3306/review-db
+```
+
+:::note
+
+We use the 172.17.0.1 IP address to address the Docker engine in the mini-
+kube instance. This is the default IP address for the Docker engine when
+creating it with minikube, at least for minikube up to version 1.18.
+There is work ongoing to establish a standard DNS name for containers to
+use if they need to access the Docker host they run on, but at the time of
+writing, this work effort hasn’t been completed.
+
+:::
+
+- Log levels have been set to a warning or higher – that is, error or fatal. Here is an example:
+```yml
+logging.level.root: WARN
+```
+
+- The only actuator endpoints that are exposed over HTTP are the info and health end-
+points that are used by the liveness and readiness probes in Kubernetes, as well as the
+circuitbreakerevents endpoint that’s used by the test script, test-em-all.bash:
+```yml
+management.endpoints.web.exposure.include: health,info,circuitbreakerevents
+```
+
+:::note
+
+In a real-world production environment, we should also have changed the
+imagePullPolicy: Never setting to IfNotPresent, to download Docker
+images from a Docker registry. However, since we will deploy the production
+setup to the minikube instance where we manually build and tag the Docker
+images, we will not update this setting.
+
+:::
+
+
+### Deploying to Kubernetes
+To simulate the use of production-grade resource managers, MySQL, MongoDB, and RabbitMQ
+will run outside of Kubernetes using Docker Compose. We will start them up as we did in the
+previous Labs:
+```sh
+eval $(minikube docker-env)
+docker compose up -d mongodb mysql rabbitmq
+```
+We also need to tag the existing Docker images with v1, using the following commands:
+```sh
+docker tag hands-on/auth-server hands-on/auth-server:v1
+docker tag hands-on/config-server hands-on/config-server:v1
+docker tag hands-on/gateway hands-on/gateway:v1
+docker tag hands-on/product-composite-service hands-on/product-composite-
+service:v1
+docker tag hands-on/product-service hands-on/product-service:v1
+docker tag hands-on/recommendation-service hands-on/recommendation-
+service:v1
+docker tag hands-on/review-service hands-on/review-service:v1
+```
+
+From here, the commands are very similar to how we deployed to the development environment:
+1. Deploy using Helm:
+```sh
+helm install hands-on-prod-env kubernetes/helm/environments/prod-env \
+-n hands-on --create-namespace
+```
+2. Wait for the Deployments to be up and running:
+```sh
+kubectl wait --timeout=600s --for=condition=ready pod --all
+```
+3. To see the Docker images that are currently used in the production environment, run the
+following command:
+```sh
+kubectl get pods -o json | jq .items[].spec.containers[].image
+```
+
+Note the v1 version of the Docker images!
+Also note that the resource manager Pods for MySQL, MongoDB, and RabbitMQ are gone;
+these can be found with the docker compose ps command.
+4. Run the test script, test-em-all.bash, to verify the simulated production environment:
+```sh
+CONFIG_SERVER_USR=prod-usr \
+CONFIG_SERVER_PWD=prod-pwd \
+PORT=30443 USE_K8S=true ./test-em-all.bash
+```
+
+Expect the same type of output that we got when the test script was run
+against the development environment.
+
+That completes the tests; let’s clean up so that the Kubernetes environment is ready for the next Lab.
+
+Cleaning up
+To delete the resources that we used, run the following commands:
+1. Delete the namespace:
+```sh
+kubectl delete namespace hands-on
+```
+2. Shut down the resource managers that run outside of Kubernetes:
+```sh
+eval $(minikube docker-env)
+docker compose down
+eval $(minikube docker-env -u)
+```
+
+The `eval $(minikube docker-env -u)` command directs the local Docker client to communicate with the local Docker engine and no longer communicate with the Docker engine in minikube.
+
+As already described earlier in this Lab, the kubectl delete namespace command will recursively delete all Kubernetes resources that existed in the namespace, and the docker compose
+down command will stop MySQL, MongoDB, and RabbitMQ. With the production environment
+removed, we have reached the end of this Lab.
+
+## Summary
+In this Lab, we learned how to deploy the microservices on Kubernetes using Helm.
+
+We have seen how Helm can be used to create reusable templates, minimizing the boilerplate code
+required to create the Kubernetes manifests. Reusable templates are stored in a common chart,
+while microservice-specific charts provide values specific to each microservice. At the top level,
+we have parent charts that describe how a development/test and stage/production environment
+should be deployed using the microservice charts, optionally together with charts for resource
+managers such as databases and queue managers.
+
+We have also seen how we can benefit from using Spring Boot features to facilitate deployments
+to Kubernetes. Spring Boot’s support for graceful shutdown can be used to allow active requests
+to complete before a Spring Boot-based microservice is stopped, such as during a rolling upgrade.
+The support for liveness and readiness probes makes it easy to declare probes that are aware of
+the availability of external resources that a specific microservice depends on.
+
+Finally, to be able to deploy our microservices in Kubernetes, we had to replace Netflix Eureka with
+the built-in discovery service in Kubernetes. Changing the discovery service was done without any
+changes in the Java source code – all we had to do was apply changes to the build dependencies
+and some of the configuration.
+
+*In the next Lab, we will see how we can further utilize Kubernetes to reduce the number of
+supporting services we need to deploy in Kubernetes. Head over to the next Lab to see how
+we can eliminate the need for the configuration server and how our edge server can be replaced
+by a Kubernetes Ingress controller.*

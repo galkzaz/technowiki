@@ -19,8 +19,7 @@ The following topics will be covered in this lab:
 - Testing with an external OpenID Connect provider, Auth0
 
 ## Securing the system landscape
-To secure the system landscape as described in the introduction to this chapter, we will perform
-the following steps:
+To secure the system landscape, we will perform the following steps:
 1. Encrypt external requests and responses to and from our external API using HTTPS to
 protect against eavesdropping.
 2. Authenticate and authorize users and client applications that access our APIs using OAuth
@@ -30,14 +29,23 @@ protect against eavesdropping.
 We will only apply HTTPS for external communication to our edge server, using plain HTTP for
 communication inside our system landscape.
 
+:::info
+
+In the lab on service meshes (lab, Using a Service Mesh to Improve Observability and Management), we will see how we can
+get help from a service mesh product to automatically provision HTTPS to secure communication inside a system landscape
+
+:::
+
 For test purposes, we will add a local OAuth 2.0 authorization server to our system landscape.
+
 All external communication with the authorization server will be routed through the edge server.
+
 The edge server and the product-composite service will act as OAuth 2.0 resource servers; that
 is, they will require a valid OAuth 2.0 access token to allow access.
 
 To minimize the overhead of validating access tokens, we will assume that they are encoded as
 signed JWTs and that the authorization server exposes an endpoint that the resource servers can
-use to access the public keys, also known as a JSON Web Key Set, or jwk-set for short, required
+use to access the public keys, also known as a **JSON Web Key Set**, or **jwk-set** for short, required
 to validate the signing.
 The system landscape will look like the following:
 
@@ -49,8 +57,14 @@ From the preceding diagram, we can note the following:
  Both the edge server and the product-composite microservice will validate access tokens
 as signed JWTs
 - The edge server and the product-composite microservice will get the authorization
-server’s public keys from its jwk-set endpoint and use them to validate the signature of
-the JWT-based access tokens
+server’s public keys from its **jwk-set** endpoint and use them to validate the signature of
+the JWT-based access tokens.
+
+:::note
+
+Note that we will focus on securing access to APIs over HTTP, not on covering general best practices for securing web applications – for example, managing web application security risks pointed out by the OWASP Top Ten Project. Refer to https://owasp.org/www-project-top-ten/ for more information.
+
+::
 
 ## Protecting external communication with HTTPS
 In this section, we will learn how to prevent eavesdropping on external communication, for example, from the internet, via the public APIs exposed by the edge server. We will use HTTPS to encrypt communication. 
@@ -69,15 +83,13 @@ The command will ask for a number of parameters. When asked for a password, I en
 For the rest of the parameters, I simply entered an empty value to accept the default value. The
 certificate file created, edge.p12, is placed in the gateway projects folder, src/main/resources/
 keystore. This means that the certificate file will be placed in the .jar file when it is built and will
-be available on the classpath at runtime at keystore/edge.p12
+be available on the classpath at runtime at `keystore/edge.p12`
 
 :::note
 
 Providing certificates using the classpath is sufficient during development, but not applicable to other environments, for example, a production environment. See the Replacing a self-signed certificate at runtime section for how we can replace this certificate with an external certificate at runtime!
 
 :::
-
-
 
 Spring Boot provides the ability to configure SSL trust material that can be applied to several types of connections in order to support secure communications.  In this case, the edge server will use
 an SSL bundle to secure the communication to its embedded web server. 
@@ -109,7 +121,7 @@ on the classpath from the location `keystore/edge.p12`.
 shall be used by the embedded web server.
 
 In addition to these changes in the edge server, changes are also required in the following files to
-reflect the changes to the port and HTTP protocol, replacing HTTP with HTTPS and 8080 with 8443:
+reflect the changes to the port and HTTP protocol, replacing `HTTP` with `HTTPS` and `8080` with `8443`:
 - The three Docker Compose files, `docker-compose*.yml`
 - The test script, `test-em-all.bash`
 Providing certificates using the classpath is, as mentioned previously, only sufficient during
@@ -117,10 +129,60 @@ development. Let’s see how we can replace this certificate with an external ce
 
 This concludes the section on how to protect external communication with HTTPS. In the next section, we will learn how to secure access to the discovery server, Netflix Eureka, using HTTP Basic authentication.
 
+### Replacing a self-signed certificate at runtime
+Placing a self-signed certificate in the .jar file is only useful for development. For a working
+solution in runtime environments – for example, for test or production – it must be possible to
+use certificates signed by authorized CAs (short for Certificate Authorities).
+
+It must also be possible to specify the certificates to be used during runtime without the need
+to rebuild the .jar files and, when using Docker, the Docker image that contains the .jar file.
+When using Docker Compose to manage the Docker container, we can map a volume in the
+Docker container to a certificate that resides on the Docker host. We can also set up environment
+variables for the Docker container that points to the external certificate in the Docker volume.
+
+:::note
+
+In lab 15, **Introduction to Kubernetes**, we will learn about Kubernetes, where we
+will see more powerful solutions for how to handle secrets, such as certificates, that
+are suitable for running Docker containers in a cluster; that is, where containers are
+scheduled on a group of Docker hosts and not on a single Docker host.
+
+:::
+
+To replace the certificate packaged in the .jar file, perform the following steps:
+1. Create a second certificate and set the password to testtest when asked for it:
+  ```bash
+  mkdir docker/gateway/keystore
+  keytool -genkeypair -alias localhost -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore keystore/edge-test.p12 -validity 3650
+```
+2. Update the Docker Compose file, docker-compose.yml, with environment variables for
+the location, the password for the new certificate, and a volume that maps to the folder
+where the new certificate is placed. The configuration of the edge server will look like the
+following after the change:
+
+  ```yml
+    gateway:
+      environment:
+        - SPRING_PROFILES_ACTIVE=docker
+        - SERVER_SSL_BUNDLE_JKS_GATEWAY_KEYSTORE_LOCATION=file:/keystore/edge-test.p12
+        - SERVER_SSL_BUNDLE_JKS_GATEWAY_KEYSTORE_PASSWORD=testtest
+      volumes:
+        - docker/gateway/keystore:/keystore
+  ```
+3. If the edge server is up and running, it needs to be restarted with the following commands:
+
+  ```bash
+  docker compose up -d --scale gateway=0
+  docker compose up -d --scale gateway=1
+  ```
+
+This concludes the section on how to protect external communication with HTTPS. In the next
+section, we will learn how to secure access to the discovery server, Netflix Eureka, using HTTP
+Basic authentication.
 
 ## Securing access to the discovery server
 Previously, we learned how to protect external communication with HTTPS. Now we will use HTTP
-Basic authentication to restrict access to the APIs and web pages on the discovery server, Netflix
+**Basic authentication** to restrict access to the APIs and web pages on the discovery server, Netflix
 Eureka. This means that we will require a user to supply a username and password to get access.
 Changes are required both on the Eureka server and in the Eureka clients, described as follows.
 ### Changes in the Eureka server
@@ -131,7 +193,7 @@ implementation 'org.springframework.boot:spring-boot-starter-security'
 ```
 2. Security configuration has been added to the SecurityConfig class:
 a. The user is defined as follows:
-```java
+```Java
     @Bean
     public InMemoryUserDetailsManager userDetailsService() {
         @SuppressWarnings("deprecation") // Ok for test purposes, not for production use
@@ -144,7 +206,7 @@ a. The user is defined as follows:
     }
 ```
 b. The username and password are injected into the constructor from the configuration file:
-```java
+```Java
     private final String username;
     private final String password;
 
@@ -156,7 +218,7 @@ b. The username and password are injected into the constructor from the configur
     }
 ```
 c. All APIs and web pages are protected using HTTP Basic authentication by means of the following definition:
-```java
+```Java
     @Bean
     public SecurityFilterChain configure(HttpSecurity http) throws Exception {
         // Disable CSRF to allow services to register themselves with Eureka
@@ -175,7 +237,7 @@ app:
 ```
 4. Finally, the test class, `EurekaServerApplicationTests`, uses the credentials from the
 configuration file when testing the APIs of the Eureka server:
-```java
+```Java
   @Value("${app.eureka-username}")
   private String username;
 
@@ -229,6 +291,7 @@ in this labs.
 - A Dockerfile has been added with the same structure as for the other projects in this labs.
 - The authorization server has been integrated with Eureka for service discovery in the
 same way as the other projects in this lab.
+
 ```yml
 server.port: 9999
 server.forward-headers-strategy: framework
@@ -263,7 +326,7 @@ spring.config.activate.on-profile: docker
 app.eureka-server: eureka
 ```
 - Public access has been added to the actuator’s endpoints.
-```java
+```Java
   @Bean
   SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
     http
@@ -278,7 +341,7 @@ app.eureka-server: eureka
 - Unit tests have been added that verify access to the most critical endpoints according to
 the OpenID Connect specification.
 - The username and password for the single registered user are set to u and p, respectively.
-```java
+```Java
   @Bean
   UserDetailsService users() {
     @SuppressWarnings("deprecation") // Ok for test purposes, not for production use
@@ -291,7 +354,7 @@ the OpenID Connect specification.
   }
 ```
 - Two OAuth clients are registered, reader and writer. The reader client is granted a `product:read` scope, and the writer client is granted both a `product:read` and `product:write` scope. The clients are configured to have their client secret set to `secret-reader` and `secret-writer`, respectively.
-```java
+```Java
 
   @Bean
   public RegisteredClientRepository registeredClientRepository() {
@@ -360,9 +423,9 @@ have been applied:
       timeout: 2s
       retries: 60
 ```
-- The edge server, spring-cloud/gateway.
+For The edge server, spring-cloud/gateway.
 - A health check has been added for the authorization server in `HealthCheckConfiguration`.
-```java
+```Java
   @Bean
   ReactiveHealthContributor healthcheckMicroservices() {
 
@@ -398,7 +461,7 @@ tokens for clients, authenticate users, and show error messages.
 ```
 - Since these three URIs need to be unprotected by the edge server, they are configured in
 the new `SecurityConfig` class to permit all requests.
-```java
+```Java
 @Configuration
 @EnableWebFluxSecurity
 public class SecurityConfig {
@@ -442,8 +505,7 @@ users of the Swagger UI web page to test the protected API.
 We also need to enhance the test script, test-em-all.bash, so that it acquires access tokens and
 uses them when it performs the tests.
 
-### Changes in both the edge server and the product-composite
-service
+### Changes in both the edge server and the product-composite service
 The following changes have been applied in the source code for both the edge server and the
 product-composite service:
 - Spring Security dependencies have been added to build.gradle to support OAuth 2.0
@@ -456,7 +518,7 @@ implementation 'org.springframework.security:spring-security-oauth2-jose'
 - Security configurations have been added to new SecurityConfig classes in both projects:
 
 
-```java
+```Java
 
 package se.magnus.springcloud.gateway;
 @Configuration
@@ -484,7 +546,7 @@ public class SecurityConfig {
 }
 ```
 
-```java
+```Java
 
 package se.magnus.microservices.composite.product;
 @Configuration
@@ -531,17 +593,19 @@ In addition to the common changes applied in the previous section, the following
 also been applied to the **product-composite** service:
 - The security configuration in the **SecurityConfig** class has been refined by requiring
 OAuth 2.0 scopes in the access token in order to allow access:
-```java
+```Java
     .pathMatchers(POST, "/product-composite/**").hasAuthority("SCOPE_product:write")
     .pathMatchers(DELETE, "/product-composite/**").hasAuthority("SCOPE_product:write")
     .pathMatchers(GET, "/product-composite/**").hasAuthority("SCOPE_product:read")
 ```
-By convention, OAuth 2.0 scopes need to be prefixed with SCOPE_ when checked for authority using Spring Security.
+By convention, OAuth 2.0 scopes need to be prefixed with `SCOPE_` when checked for authority using Spring Security.
 - A method, `logAuthorizationInfo()`, has been added to log relevant parts from the
 JWT-encoded access token upon each call to the API. The access token can be acquired
 using the standard Spring Security `SecurityContext`, which, in a reactive environment,
 can be acquired using the static helper method, `ReactiveSecurityContextHolder.getContext()`. Refer to the `ProductCompositeServiceImpl` class for details.
-```java
+
+microservices/product-composite-service/src/main/java/se/magnus/microservices/composite/product/services/ProductCompositeServiceImpl.java
+```Java
   @Override
   public Mono<Void> deleteProduct(int productId) {
     try {
@@ -601,17 +665,796 @@ prevent the OAuth machinery from kicking in when we are running integration test
 disable it as follows:
 - A security configuration, TestSecurityConfig, is added to be used during tests.
 It permits access to all resources:
-```java
+
+microservices/product-composite-service/src/test/java/se/magnus/microservices/composite/product/TestSecurityConfig.java
+```Java
 http.csrf(csrf -> csrf.disable().authorizeExchange(
 exchange -> exchange.anyExchange().permitAll()));
 ```
 - In each Spring integration test class, we configure TestSecurityConfig to override
 the existing security configuration with the following:
-```java
+```Java
 @SpringBootTest(webEnvironment = RANDOM_PORT, classes = { TestSecurityConfig.class }, properties = {
         "spring.security.oauth2.resourceserver.jwt.issuer-uri=",
         "spring.main.allow-bean-definition-overriding=true",
         "eureka.client.enabled=false" })
 ```
-By convention, OAuth 2.0 scopes need to be prefixed with SCOPE_ when
-checked for authority using Spring Security.
+
+### Changes to allow Swagger UI to acquire access tokens
+To allow access to the protected APIs from the Swagger UI component, the following changes
+have been applied in the product-composite service:
+- The web pages exposed by the Swagger UI component have been configured to be publicly
+available. The following line has been added to the `SecurityConfig` class:
+  ```Java
+  .pathMatchers("/openapi/**").permitAll()
+  ```
+- The OpenAPI Specification of the API has been enhanced to require that the `security_auth`
+security schema is applied.
+The following line has been added to the definition of the **ProductCompositeService**
+interface in the API project:
+  ```Java
+  @SecurityRequirement(name = "security_auth")
+  ```
+- To define the semantics of the `security_auth` security schema, the **OpenApiConfig** class
+has been added to the product-composite project. It looks like this:
+  ```Java
+  package se.magnus.microservices.composite.product;
+
+  import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
+  import io.swagger.v3.oas.annotations.security.OAuthFlow;
+  import io.swagger.v3.oas.annotations.security.OAuthFlows;
+  import io.swagger.v3.oas.annotations.security.OAuthScope;
+  import io.swagger.v3.oas.annotations.security.SecurityScheme;
+
+  @SecurityScheme(name = "security_auth", type = SecuritySchemeType.OAUTH2, flows = @OAuthFlows(authorizationCode = @OAuthFlow(authorizationUrl = "${springdoc.oAuthFlow.authorizationUrl}", tokenUrl = "${springdoc.oAuthFlow.tokenUrl}", scopes = {
+          @OAuthScope(name = "product:read", description = "read scope"),
+          @OAuthScope(name = "product:write", description = "write scope")
+  })))
+  public class OpenApiConfig {
+  }
+  ```
+  - From the preceding class definition, we can see the following:
+  - The security schema will be based on OAuth 2.0.
+  - The authorization code grant flow will be used.
+  - The required URLs for acquiring an authorization code and access tokens will be
+  supplied by the configuration using the springdoc.oAuthFlow.authorizationUrl
+  and springdoc.oAuthFlow.tokenUrl parameters.
+  - A list of scopes (product:read and product:write) that Swagger UI will require to be able to call the APIs.
+- Finally, some configuration is added to `application.yml`:
+  ```yml
+    swagger-ui:
+      oauth2-redirect-url: /swagger-ui/oauth2-redirect.html
+      oauth:
+        clientId: writer
+        clientSecret: secret-writer
+        useBasicAuthenticationWithAccessCodeGrant: true
+    oAuthFlow:
+      authorizationUrl: https://localhost:8443/oauth2/authorize
+      tokenUrl: https://localhost:8443/oauth2/token
+  ```
+  From the preceding configuration, we can see the following:
+  - The redirect URL that Swagger UI will use to acquire the authorization code.
+  - Its client ID and client secret.
+  - It will use HTTP Basic authentication when identifying itself for the authorization
+  server.
+  - The values of the authorizationUrl and tokenUrl parameters used by the
+  OpenApiConfig class described previously. Note that these URLs are used by the
+  web browser and not by the product-composite service itself, so they must be
+  resolvable from the web browser.
+
+To allow unprotected access to the Swagger UI web pages, the edge server has also been configured
+to allow unrestricted access to URLs that are routed to the Swagger UI component. The following
+is added to the edge server’s SecurityConfig class:
+```Java
+.pathMatchers("/openapi/**").permitAll()
+```
+With these changes in place, both the edge server and the product-composite service can act as
+OAuth 2.0 resource servers, and the Swagger UI component can act as an OAuth client. 
+
+The last step we need to take to introduce the usage of OAuth 2.0 and OpenID Connect is to update the
+test script so it acquires access tokens and uses them when running the tests.
+
+### Changes in the test script
+To start with, we need to acquire an access token before we can call any of the APIs, except the
+health API. This is done, as already mentioned, using the OAuth 2.0 client credentials flow. To be
+able to call the create and delete APIs, we acquire an access token as the writer client, as follows:
+```sh
+ACCESS_TOKEN=$(curl -k https://writer:secret-writer@$HOST:$PORT/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .access_token -r)
+echo ACCESS_TOKEN=$ACCESS_TOKEN
+AUTH="-H \"Authorization: Bearer $ACCESS_TOKEN\""
+```
+From the preceding command, we can see that it uses HTTP Basic authentication, passing its
+client ID and client secret as `writer:secret-writer@` before the hostname.
+
+To verify that the scope-based authorization works, two tests have been added to the test script:
+
+```sh
+# Verify that a request without access token fails on 401, Unauthorized
+assertCurl 401 "curl -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
+
+# Verify that the reader - client with only read scope can call the read API but not delete API.
+READER_ACCESS_TOKEN=$(curl -k https://reader:secret-reader@$HOST:$PORT/oauth2/token -d grant_type=client_credentials -d scope="product:read" -s | jq .access_token -r)
+echo READER_ACCESS_TOKEN=$READER_ACCESS_TOKEN
+READER_AUTH="-H \"Authorization: Bearer $READER_ACCESS_TOKEN\""
+
+assertCurl 200 "curl $READER_AUTH -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
+assertCurl 403 "curl -X DELETE $READER_AUTH -k https://$HOST:$PORT/product-composite/$PROD_ID_REVS_RECS -s"
+```
+
+The test script uses the reader client’s credentials to acquire an access token:
+- The first test calls an API without supplying an access token. The API is expected to return
+the `401` Unauthorized HTTP status.
+- The second test verifies that the reader client can call a read-only API.
+- The last test calls an updating API using the reader client, which is only granted a read
+scope. A request sent to the delete API is expected to return the `403` Forbidden HTTP status.
+
+For the full source code, see `test-em-all-docker.bash`.
+
+With the test script updated to acquire and use OAuth 2.0 access tokens, we are ready to try it
+out in the next section!
+
+## Testing
+
+### Testing with the local authorization server
+In this section, we will try out the secured system landscape; that is, we will test all the security
+components together. We will use the local authorization server to issue access tokens. The fol-
+lowing tests will be performed:
+1. First, we build from the source and run the test script to ensure that everything fits together.
+2. Next, we will test the protected discovery server’s API and web page.
+3. After that, we will learn how to acquire access tokens using OAuth 2.0 client credentials
+and authorization code grant flows.
+4. With the issued access tokens, we will test the protected APIs. We will also verify that an
+access token issued for a reader client can’t be used to call an updating API.
+5. Finally, we will also verify that Swagger UI can issue access tokens and call the APIs.
+
+#### Building and running the automated tests
+To build and run automated tests, we perform the following steps:
+1. First, build the Docker images from source with the following commands:
+  ```sh
+  ./gradlew build && docker compose build
+  ```
+2. Next, start the system landscape in Docker and run the usual tests with the following
+command:
+  ```sh
+  ./test-em-all.bash start
+  ```
+
+Note the new negative tests at the end that verify that we get a `401` Unauthorized code back when not authenticated, and `403` Forbidden when not authorized
+
+#### Testing the protected discovery server
+With the protected discovery server, Eureka, up and running, we have to supply valid credentials
+to be able to access its APIs and web pages.
+
+For example, asking the Eureka server for registered instances can be done by means of the following curl command, where we supply the username and password directly in the URL:
+```sh
+curl -H "accept:application/json" https://u:p@localhost:8443/eureka/api/apps -ks | jq -r .applications.application[].instance[].instanceId
+```
+A sample response is as follows:
+```
+bb4c86f117a6:gateway:8443
+4d43227f2b0a:auth-server:9999
+e1f9fe94ca6e:product-composite:8080
+c3461913ffd5:product:8080
+c675f7b080a9:review:8080
+e1cc872ca7ea:recommendation:8080
+```
+When accessing the web page on https://localhost:8443/eureka/web, we first have to accept
+an unsecured connection, since our certificate is self-signed, and next, we have to supply valid
+credentials, as specified in the configuration file (u as username and p as password):
+
+Following a successful login, we will see the familiar web page from the Eureka server:
+```
+DS Replicas
+
+Instances currently registered with Eureka
+Application	AMIs	Availability Zones	Status
+AUTH-SERVER 	n/a (1) 	(1) 	UP (1) - 4d43227f2b0a:auth-server:9999
+GATEWAY 	n/a (1) 	(1) 	UP (1) - bb4c86f117a6:gateway:8443
+PRODUCT 	n/a (1) 	(1) 	UP (1) - c3461913ffd5:product:8080
+PRODUCT-COMPOSITE 	n/a (1) 	(1) 	UP (1) - e1f9fe94ca6e:product-composite:8080
+RECOMMENDATION 	n/a (1) 	(1) 	UP (1) - e1cc872ca7ea:recommendation:8080
+REVIEW 	n/a (1) 	(1) 	UP (1) - c675f7b080a9:review:8080
+```
+
+After ensuring that access to the Eureka server is protected, we will learn how to issue OAuth
+access tokens.
+
+#### Acquiring access tokens
+Now we are ready to acquire access tokens using grant flows defined by OAuth 2.0. We will first
+try out the client credentials grant flow, followed by the authorization code grant flow.
+
+#### Acquiring access tokens using the client credentials grant flow
+To get an access token for the writer client, that is, with both the `product:read` and `product:write`
+scopes, issue the following command:
+```sh
+curl -k https://writer:secret-writer@localhost:8443/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .
+```
+The client identifies itself using HTTP Basic authentication, passing its client ID, writer, and its
+client secret, secret. A sample response is as follows:
+```json
+{
+  "access_token": "eyJraWQiOiJjZjViZWJlZS1iMGRiLTQyYjYtYjQ4Mi1lZmYwYTQ0MzBkNDciLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ3cml0ZXIiLCJhdWQiOiJ3cml0ZXIiLCJuYmYiOjE3OTI0MDg3NTEsInNjb3BlIjpbInByb2R1Y3Q6d3JpdGUiLCJwcm9kdWN0OnJlYWQiXSwiaXNzIjoiaHR0cDovL2F1dGgtc2VydmVyOjk5OTkiLCJleHAiOjE3OTI0MTIzNTEsImlhdCI6MTc5MjQwODc1MSwianRpIjoiNzNjMmQ5ZGQtN2FlNC00ZjEyLWI3NWQtZjZjNzM5Y2U0Nzc2In0.KcPlQDHzxC5W8gOKr6zWOPLux6Wx2fJak0Q58WV4esr_ylMsVY_5ehGrsQPlskWQ8jHV0TZkQdxtgZuCq3X9U-Iyv049Eewgs621T4LI5YYJM8JdVsdRSmMsiRNxv1yM11XGnyUipLTg1G3qKYIQpFCda5QOt-tXVeXR2FYYDJnfIduy7ZqVgBX19iTgDgp5Zqwnhp9_o1lU-biZEveGH2F5KSGj9ZPUv827-hBX_jmZM6791tG9AKrBlwWrn7rWi4yP-oMrxrUBVgQp6no6ZcWk76Ub_RjU7lGGMRw23HjrLzR43v7YK55h2kiy5lkq-4Nm7XdxD8ypKGaMB7iNkg",
+  "scope": "product:write product:read",
+  "token_type": "Bearer",
+  "expires_in": 3599
+}
+```
+From the screenshot, we can see that we got the following information in the response:
+- The access token itself.
+- The scopes granted to the token. The writer client is granted both the `product:write`
+and `product:read` scope. It is also granted the openid scope, allowing access to information regarding the user’s ID, such as an email address.
+- The type of token we got; Bearer means that the bearer of this token should be given access
+according to the scopes granted to the token.
+- The number of seconds that the access token is valid `3599` seconds in this case.
+
+
+To get an access token for the reader client, that is, with only the product:read scope, simply
+replace writer with reader in the preceding command, resulting in the following:
+```sh
+curl -k https://reader:secret-reader@localhost:8443/oauth2/token -d grant_type=client_credentials -d scope="product:read" -s | jq .
+```
+
+```json
+{
+  "access_token": "eyJraWQiOiJjZjViZWJlZS1iMGRiLTQyYjYtYjQ4Mi1lZmYwYTQ0MzBkNDciLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJyZWFkZXIiLCJhdWQiOiJyZWFkZXIiLCJuYmYiOjE3OTI0MDg5MDksInNjb3BlIjpbInByb2R1Y3Q6cmVhZCJdLCJpc3MiOiJodHRwOi8vYXV0aC1zZXJ2ZXI6OTk5OSIsImV4cCI6MTc5MjQxMjUwOSwiaWF0IjoxNzkyNDA4OTA5LCJqdGkiOiIxMWMwOWM5NC1lOTRmLTQ5NGUtYjEyOC04YzBmYzY2NmMwMjEifQ.IVwgQ8oQNhXPKtRYHGt1VbVi9j-zHJl2qMlENjGIg8VzNh0HuzPzQWRsjxv3NNCE7NSPQ5pJjS6PJTzI8YHtbGDERGWWRJqLUGMm_xZvtzgnxuywhJi5S3sAA75QSBF-UNTCdqTqBALNdsF9hzPstGR_vqkwjeQFqGaOAzmQJTAHZfgF5Vqo3MU_B67mjdBKQeJ0-p_H3Ib-z4gAkSIvvCezKgKCni9XTgHOo1irS1B4ZdOVf2QT9QINsyxn1IaZjDMmY8aXGPoCtjyFKQy2VUOJD0J0a1HAPvZBfhnkYgCvhryS81MskvqmlmaAohHzlYFn70o4L574oPfp6Hm07w",
+  "scope": "product:read",
+  "token_type": "Bearer",
+  "expires_in": 3599
+}
+```
+#### Acquiring access tokens using the authorization code grant flow
+To acquire an access token using the authorization code grant flow, we need to involve a web
+browser. This grant flow is a bit more complicated in order to make it secure in an environment
+that is partly unsecured (the web browser).
+
+In the first unsecured step, we will use the web browser to acquire an authorization code that can
+be used only once, to be exchanged for an access token. The authorization code will be passed
+from the web browser to a secure layer – for example, server-side code, which can make a new
+request to the authorization server to exchange the authorization code for an access token. In
+this secure exchange, the server has to supply a client secret to verify its identity.
+Perform the following steps to execute the authorization code grant flow:
+1. To get an authorization code for the reader client, use the following URL in a web browser that
+accepts the use of self-signed certificates – for example, Chrome: `https://localhost:8443/oauth2/authorize?response_type=code&client_id=reader&redirect_uri=https://my.redirect.uri&scope=product:read&state=35725`.
+2. When asked to log in by the web browser, use the credentials specified in the configuration
+of the authorization server, `u` and `p`
+3. Next, we will be asked to give the reader client consent to call the APIs in our name:
+5. This might, at first glance, look a bit disappointing. The URL that the authorization server
+sends back to the web browser is based on the redirect URI specified by the client in the
+initial request. Copy the URL into a text editor and you will find something similar to the
+following:
+```
+https://my.redirect.uri/?code=-mipMXEaa84Wx_nhGoqa51x9t_dS1I7H9AS3GR-6ikzVkxLmNVljxWKCpBapKovE089ZGV1sKHaDpr0dhuazBFmndYWOIpOpwlejR29aCGSdYINvAi-Z60ZSn1aGEwnC&state=35725
+```
+Great! We can find the authorization code in the redirect URL in the code request parameter. Extract the authorization code from the code parameter and define an environment
+variable, CODE, with its value:
+```
+CODE=-mipMXEaa84Wx_nhGoqa51x9t_dS1I7H9AS3GR-6ikzVkxLmNVljxWKCpBapKovE089ZGV1sKHaDpr0dhuazBFmndYWOIpOpwlejR29aCGSdYINvAi-Z60ZSn1aGEwnC
+```
+6. Next, pretend you are the backend server that exchanges the authorization code with an
+access token using the following curl command:
+```sh
+curl -k https://reader:secret-reader@localhost:8443/oauth2/token \
+-d grant_type=authorization_code \
+-d client_id=reader \
+-d redirect_uri=https://my.redirect.uri \
+-d code=$CODE -s | jq .
+```
+A sample response is as follows:
+```json
+{
+  "access_token": "eyJraWQiOiJjZjViZWJlZS1iMGRiLTQyYjYtYjQ4Mi1lZmYwYTQ0MzBkNDciLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1IiwiYXVkIjoicmVhZGVyIiwibmJmIjoxNzkyNDA5MjY5LCJzY29wZSI6WyJwcm9kdWN0OnJlYWQiXSwiaXNzIjoiaHR0cDovL2F1dGgtc2VydmVyOjk5OTkiLCJleHAiOjE3OTI0MTI4NjksImlhdCI6MTc5MjQwOTI2OSwianRpIjoiYTZiMGZjODktYWQ1My00ZjIzLWE4OTMtYjFkYWU5YjM1NDEzIn0.i9Ijqs3dW3dRjHB5viv0q6y0VD-bmH1z8V6uqUTsXHZCmiYx2GVkS2BuTw2iENxa06X5LD-QdWwiHcJYef9BGuXoogn4fW5xBoaxn7vWlOBu4Bxv-tFR_H5gKoSL20CViOJz8A8w4pktBbw9MWwbGbW_3ST_jnSF6_-_HbjztCuKu38CyxClk-JzNUjaoRCWsZ3yMjd6xdUyEaPJTnQNd4_Y5tzPD-sxFKc3kN-I-GsCoVdopRpOddIEWBUNHLSdSBuvP8ldQqDfbY0g6khA_G0paYSLwBIAUaU4YLblCwPtJcY5-eQmDUMlngC-vFfjh_AfSR-bH5ZKcqklD_w6sA",
+  "refresh_token": "4wkSePTjQNMFT_q5ADCckrlo_EgsyuGGq5nw1xjY0lxjw1L7ZEQosj1OZTSj9VXU-SBF_svhkU2snQA8vYneHfxNNgw4St2lU0D-RHPCufQtcBP8gmWGequqspRIt_Ac",
+  "scope": "product:read",
+  "token_type": "Bearer",
+  "expires_in": 3599
+}
+```
+From the screenshot, we can see that we got similar information in the response as we
+got from the client credentials flow, with the following exceptions:
+- Since we used a more secure grant flow, we also got a refresh token issued
+- Since we asked for an access token for the reader client, we only got a `product:read`
+scope, no `product:write` scope
+7. To get an authorization code for the writer client, use the following URL:
+```
+https://localhost:8443/oauth2/authorize?response_type=code&client_id=writer&redirect_uri=https://my.redirect.uri&scope=product:read+product:write&state=72489.
+```
+
+```
+https://my.redirect.uri/?code=UfpSafq_EnUWx0aCD8NKoatAIt32mmEEUBUEX3LsfxyxzLfOBS1rpLfE6fCYVs5cXu6qvf2H83Yui3KC0v1pgu01mRZHBQ0TC52Bv4c5kjl1QfbyJ0Nu72drjcfmOJlH&state=72489
+```
+
+8. To exchange the code for an access token for the writer client, run the following command:
+```
+CODE=UfpSafq_EnUWx0aCD8NKoatAIt32mmEEUBUEX3LsfxyxzLfOBS1rpLfE6fCYVs5cXu6qvf2H83Yui3KC0v1pgu01mRZHBQ0TC52Bv4c5kjl1QfbyJ0Nu72drjcfmOJlH
+```
+```sh
+curl -k https://writer:secret-writer@localhost:8443/oauth2/token \
+-d grant_type=authorization_code \
+-d client_id=writer \
+-d redirect_uri=https://my.redirect.uri \
+-d code=$CODE -s | jq .
+```
+9. Verify that the response now also contains the `product:write` scope!
+```json
+{
+  "access_token": "eyJraWQiOiJjZjViZWJlZS1iMGRiLTQyYjYtYjQ4Mi1lZmYwYTQ0MzBkNDciLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1IiwiYXVkIjoid3JpdGVyIiwibmJmIjoxNzkyNDA5NTIwLCJzY29wZSI6WyJwcm9kdWN0OndyaXRlIiwicHJvZHVjdDpyZWFkIl0sImlzcyI6Imh0dHA6Ly9hdXRoLXNlcnZlcjo5OTk5IiwiZXhwIjoxNzkyNDEzMTIwLCJpYXQiOjE3OTI0MDk1MjAsImp0aSI6IjQxZTkxNjFhLTcxN2UtNGNmZi05NDcwLWE2ODdhNzliZjdlYyJ9.dzoIO8rlfSpwKWSrMiNZAMcqKAiKFqopbvy3Fd10JbcXOyWPFoMhN42rNuNvlQRNN4ZxoA6mtC4_EnlZwg_IP9khDbisnXulODSUQ_Sem0B13FkhRY8JBveEKq61mK9z48kzhf2zwbekZaZplSMhkuvOnwhDa7OpRvwt8IecZzrb1KCi-YO4zs5ezW32bvqoXbQTd2w554pbvmUO3QbDgt5dElgzdaI196ObPy7-3-WIWZXUwgrig18eR0X3xzN20juYaByewJ9sNlP_ikK4UgUog8_IIL8v325KVS5y5u_IlU0yCbA87E5BAgAZq-ad3UULJv-O38zFK0LiQmNl8g",
+  "refresh_token": "sKU93kwU1P0lTQw7IzyecKrnBxT95Ji8MVUQmgKuz1UpxNPGCToiIagF8cbEwa9ltnqIqdD0lZLCZ_piOLzk_m-nXLObbeXt72aVcLBO1MeVuaWXXIDUPCC0fo57ccB2",
+  "scope": "product:write product:read",
+  "token_type": "Bearer",
+  "expires_in": 3599
+}
+```
+
+#### Calling protected APIs using access tokens
+Now, let’s use the access tokens we have acquired to call the protected APIs.
+An OAuth 2.0 access token is expected to be sent as a standard HTTP authorization header,
+where the access token is prefixed with Bearer.
+
+Run the following commands to call the protected APIs:
+1. First, call an API to retrieve a composite product without a valid access token:
+ACCESS_TOKEN=an-invalid-token
+```sh
+curl https://localhost:8443/product-composite/1 -k -H "Authorization: Bearer $ACCESS_TOKEN" -i
+```
+It should return the following response:
+```
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer error="invalid_token", error_description="An error occurred while attempting to decode the Jwt: Invalid JWT serialization: Missing dot delimiter(s)", error_uri="https://tools.ietf.org/html/rfc6750#section-3.1"
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+Strict-Transport-Security: max-age=31536000 ; includeSubDomains
+X-Frame-Options: DENY
+X-XSS-Protection: 0
+Referrer-Policy: no-referrer
+content-length: 0
+```
+The error message clearly states that the access token is invalid!
+
+2. Next, try using the API to retrieve a composite product using one of the access tokens
+acquired for the reader client from the previous section:
+```sh
+ACCESS_TOKEN=eyJraWQiOiJjZjViZWJlZS1iMGRiLTQyYjYtYjQ4Mi1lZmYwYTQ0MzBkNDciLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1IiwiYXVkIjoicmVhZGVyIiwibmJmIjoxNzkyNDA5MjY5LCJzY29wZSI6WyJwcm9kdWN0OnJlYWQiXSwiaXNzIjoiaHR0cDovL2F1dGgtc2VydmVyOjk5OTkiLCJleHAiOjE3OTI0MTI4NjksImlhdCI6MTc5MjQwOTI2OSwianRpIjoiYTZiMGZjODktYWQ1My00ZjIzLWE4OTMtYjFkYWU5YjM1NDEzIn0.i9Ijqs3dW3dRjHB5viv0q6y0VD-bmH1z8V6uqUTsXHZCmiYx2GVkS2BuTw2iENxa06X5LD-QdWwiHcJYef9BGuXoogn4fW5xBoaxn7vWlOBu4Bxv-tFR_H5gKoSL20CViOJz8A8w4pktBbw9MWwbGbW_3ST_jnSF6_-_HbjztCuKu38CyxClk-JzNUjaoRCWsZ3yMjd6xdUyEaPJTnQNd4_Y5tzPD-sxFKc3kN-I-GsCoVdopRpOddIEWBUNHLSdSBuvP8ldQqDfbY0g6khA_G0paYSLwBIAUaU4YLblCwPtJcY5-eQmDUMlngC-vFfjh_AfSR-bH5ZKcqklD_w6sA
+
+curl https://localhost:8443/product-composite/1 -k -H "Authorization: Bearer $ACCESS_TOKEN" -i
+```
+Now we will get the 200 OK status code and the expected response body will be returned:
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 714
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+Strict-Transport-Security: max-age=31536000 ; includeSubDomains
+X-Frame-Options: DENY
+X-XSS-Protection: 0
+Referrer-Policy: no-referrer
+
+{"productId":1,"name":"product name C","weight":300,"recommendations":[{"recommendationId":1,"author":"author 1","rate":1,"content":"content 1"},{"recommendationId":2,"author":"author 2","rate":2,"content":"content 2"},{"recommendationId":3,"author":"author 3","rate":3,"content":"content 3"}],"reviews":[{"reviewId":1,"author":"author 1","subject":"subject 1","content":"content 1"},{"reviewId":2,"author":"author 2","subject":"subject 2","content":"content 2"},{"reviewId":3,"author":"author 3","subject":"subject 3","content":"content 3"}],"serviceAddresses":{"cmp":"e1f9fe94ca6e/172.19.0.8:8080","pro":"c3461913ffd5/172.19.0.10:8080","rev":"c675f7b080a9/172.19.0.9:8080","rec":"e1cc872ca7ea/172.19.0.11:8080"}}
+```
+3. If we try to access an updating API, for example, the delete API, with an access token
+acquired for the reader client, the call will fail:
+```sh
+curl https://localhost:8443/product-composite/999 -k -H "Authorization: Bearer $ACCESS_TOKEN" -X DELETE -i
+```
+It will fail with a response similar to the following:
+```
+HTTP/1.1 403 Forbidden
+WWW-Authenticate: Bearer error="insufficient_scope", error_description="The request requires higher privileges than provided by the access token.", error_uri="https://tools.ietf.org/html/rfc6750#section-3.1"
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+Strict-Transport-Security: max-age=31536000 ; includeSubDomains
+X-Frame-Options: DENY
+X-XSS-Protection: 0
+Referrer-Policy: no-referrer
+content-length: 0
+```
+From the error response, it is clear that we are forbidden to call the API since the request
+requires higher privileges than what our access token is granted.
+4. If we repeat the call to the delete API, but with an access token acquired for the writer
+client, the call will succeed with `202` Accepted in the response.
+```sh
+ACCESS_TOKEN=eyJraWQiOiJjZjViZWJlZS1iMGRiLTQyYjYtYjQ4Mi1lZmYwYTQ0MzBkNDciLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1IiwiYXVkIjoid3JpdGVyIiwibmJmIjoxNzkyNDA5NTIwLCJzY29wZSI6WyJwcm9kdWN0OndyaXRlIiwicHJvZHVjdDpyZWFkIl0sImlzcyI6Imh0dHA6Ly9hdXRoLXNlcnZlcjo5OTk5IiwiZXhwIjoxNzkyNDEzMTIwLCJpYXQiOjE3OTI0MDk1MjAsImp0aSI6IjQxZTkxNjFhLTcxN2UtNGNmZi05NDcwLWE2ODdhNzliZjdlYyJ9.dzoIO8rlfSpwKWSrMiNZAMcqKAiKFqopbvy3Fd10JbcXOyWPFoMhN42rNuNvlQRNN4ZxoA6mtC4_EnlZwg_IP9khDbisnXulODSUQ_Sem0B13FkhRY8JBveEKq61mK9z48kzhf2zwbekZaZplSMhkuvOnwhDa7OpRvwt8IecZzrb1KCi-YO4zs5ezW32bvqoXbQTd2w554pbvmUO3QbDgt5dElgzdaI196ObPy7-3-WIWZXUwgrig18eR0X3xzN20juYaByewJ9sNlP_ikK4UgUog8_IIL8v325KVS5y5u_IlU0yCbA87E5BAgAZq-ad3UULJv-O38zFK0LiQmNl8g
+
+curl https://localhost:8443/product-composite/1 -k -H "Authorization: Bearer $ACCESS_TOKEN" -i
+```
+The delete operation should return `202` even if the product with the specified product ID does not exist in the underlying database, since the delete
+operation is idempotent
+```.HTTP/1.1 202 Accepted
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+Strict-Transport-Security: max-age=31536000 ; includeSubDomains
+X-Frame-Options: DENY
+X-XSS-Protection: 0
+Referrer-Policy: no-referrer
+content-length: 0
+```
+If you look into the log output using the 
+```sh
+docker compose logs -f product-composite
+```
+command, you should be able to find authorization information such as the following:
+```
+product-composite-1  | 2026-10-19T11:38:13.418Z DEBUG 1 --- [product-composite] [     parallel-1] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: u, scopes: [product:write, product:read], expires 2026-10-19T12:32:00Z: issuer: http://auth-server:9999, audience: [writer]
+```
+This information was extracted in the product-composite service from the JWT-encoded access token; the product-composite service did not need to communicate with the authorization server to get this information!
+
+With these tests, we have seen how to acquire an access token with the client credentials and
+authorization code grant flows. We have also seen how scopes can be used to limit what a client
+can do with a specific access token – for example, only use it for reading operations.
+
+#### Testing Swagger UI with OAuth 2.0
+In this section, we will learn how to use the Swagger UI component to access the protected API.
+The configuration described in the earlier Changes in the product-composite service only section allows us to issue an access token for Swagger UI and use it when calling the APIs from Swagger UI.
+To try it out, perform the following steps:
+1. Open the Swagger UI start page by going to the following URL in a web browser: `https://localhost:8443/openapi/swagger-ui.html`.
+2. On the start page, we can now see a new button, next to the Servers drop-down list, with
+the text Authorize.
+3. Click on the Authorize button to initiate an authorization code grant flow.
+4. Swagger UI will present a list of scopes that it will ask the authorization server to get
+access to. Select all scopes by clicking on the link with the text select all and then clicking
+on the Authorize button:
+
+You will then be redirected to the authorization server. If you are not already logged in
+from the web browser used, the authorization server will ask for your credentials as in
+the Acquiring access tokens using the authorization code grant flow section.
+5. Log in with username u and password p.
+6. Next, the authorization server will ask for your consent. Select both scopes and click on
+the Submit Consent button.
+7. Swagger UI will complete the authorization process by showing information about the
+completed grant flow. Click on the Close button to get back to the start page:
+8. Now you can try out the APIs in the same way as described in Chapter 5, Adding an API
+Description Using OpenAPI. Swagger UI will add the access token to the requests. If you
+look closely at the curl command reported below the Responses header, you can find
+the access token.
+
+This completes the tests we will perform with the local authorization server. In the next section,
+we will replace it with an external OpenID Connect-compliant provider.
+### Testing with an external OpenID Connect provider
+We will use Auth0, https://auth0.com/, for our tests with an external OpenID provider. To be
+able to use Auth0 instead of our own authorization server, we will go through the following topics:
+- Setting up an account with a reader and writer client and a user in Auth0
+- Applying the changes required to use Auth0 as an OpenID provider
+- Running the test script to verify that it is working
+- Acquiring access tokens using the following grant flows:
+- Client credentials grant flow
+- Authorization code grant flow
+- Calling protected APIs using the access tokens acquired from the grant flows
+- Using the user info endpoint to get more information about a user
+Let us go through each of them in the following sections
+
+#### Setting up and configuring an account in Auth0
+Most of the configuration required in Auth0 will be taken care of by a script that uses Auth0’s
+management API. But we must perform a few manual steps up to the point where Auth0 has
+created a client ID and client secret we can use to access the management API. Auth0’s service is
+multi-tenant, allowing us to create our own domain of OAuth objects in terms of clients, resource
+owners, and resource servers.
+Perform the following manual steps to sign up for a free account in Auth0 and create a client that
+we can use to access the management API:
+1. Open the https://auth0.com URL in your browser.
+2. Click on the Sign up button:
+a. Sign up with an email of your choice.
+b. Select the coding role by selecting the box named Yes, Coding.
+c. Select the I need advanced settings checkbox to select the region and name of
+your tenant.
+d. Click on the Next button.
+e. Select the Region and enter the name of the new Tenant Domain – in my case,
+`dev-ml-1.eu.auth0.com`. Click on the Create Account button.
+f. Look in your mailbox for an email with the subject Verify Your email and use the
+instructions in the email to verify your account.
+3. Following sign-up, you will be directed to an onboarding page.
+4. In the menu to the left, click on Applications to get it expanded, then click on APIs to find
+the management API, Auth0 Management API. This API was created for you during the
+creation of your tenant. We will use this API to create the required definitions in the tenant.
+5. Click on Auth0 Management API and select the Test tab.
+6. A big button with the text Create & Authorize Test Application will appear. Click on it
+to get a client created that can be used to access the management API.
+7. Once created, a page is displayed with the header Asking Auth0 for tokens from my
+application. As a final step, we need to give the created client permission to use the man-
+agement APIs.
+8. Click on the Machine to Machine Applications tab, next to the Test tab.
+9. Here, we will find the test client, Auth0 Management API (Test Application), and we
+can see that it is authorized to use the management API. If we click on the down arrow
+next to the Authorized toggle button, a large number of available privileges are revealed.
+10. Click on the All choice and then on the Update button. The screen should look similar to
+the following screenshot:
+11. Click on the Continue button after understanding that you now have a very powerful
+client with access to all management APIs within your tenant.
+12. Now, we just need to collect the client ID and client secret of the created client. The easiest
+way to do that is to select Applications in the menu to the left (under the main menu
+choice, Applications) and then select the application named Auth0 Management API
+(Test Application). A screen similar to the following should be displayed:
+13. Open the `./auth0/env.bash` file and copy the following values
+from the preceding screen:
+a. Domain into the value of the TENANT variable
+b. Client ID into the value of the `MGM_CLIENT_ID` variable
+c. Client Secret into the value of the `MGM_CLIENT_SECRET` variable
+14. Complete the values required in the `env.bash` file by specifying an email address and
+password, in the `USER_EMAIL` and `USER_PASSWORD` variables, of a test user that the script
+will create for us.
+
+:::note
+
+Specifying a password for a user like this is not considered best practice from
+a security perspective. Auth0 supports enrolling users who will be able to
+set the password themselves, but it is more involved to set up. For more
+information, see https://auth0.com/docs/connections/database/
+password-change. Since this is only used for test purposes, specifying a
+password like this is OK.
+
+:::
+
+15. We can now run the script that will create the following definitions for us:
+  - Two applications, reader and writer, or clients in OAuth terminology
+  - The product-composite API, a resource server in OAuth terminology, with the
+OAuth scopes product:read and product:write
+  - A user, a resource owner in OAuth terminology, that we will use to test the authorization code grant flow
+  - Finally, we will grant the reader application the product:read scope, and the
+writer application the product:read and product:write scopes
+16. Run the following commands:
+```sh
+cd ./auth0
+./setup-tenant.bash
+```
+17. Expect the following output:
+```
+Auth0 - OAuth2 settings:
+
+export TENANT=dev-q8n0c0etgofb7gpd.us.auth0.com
+export WRITER_CLIENT_ID=e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu
+export WRITER_CLIENT_SECRET=_tem-EyJtY23CuttdPC-vdCbLordq5hu9eZS_fPT0XhJxIofgy8UFOpUKYGTz1Jd
+export READER_CLIENT_ID=9i4jMfSw3FLCWSudUsnGrZKFzzFLe88O
+export READER_CLIENT_SECRET=seTtNVTux6LJCkWcPrmFTObvMvWUCezMWk5fBSJoSt2YQjecepAGBqITqP6VTFeK
+```
+18. Save a copy of the export commands printed at the end of the output; we will use them
+multiple times later on in this chapter.
+19. Look in your mailbox for the email specified for the test user. You will receive a mail with
+the subject Verify your email. Use the instructions in the email to verify the test user’s
+email address.
+20. Note that the script is idempotent, meaning it can be run multiple times without corrupting the configuration. If running the script again, it should respond with the following:
+```
+Update the tenant, set its default connection to a user dictionary...
+"Username-Password-Authentication"
+Reader client app already exists
+Writer client app already exists
+API product-composite (https://localhost:8443/product-composite) already exists
+```
+21. It can be very handy to be able to run the script again – for example, to get access to the
+client ID and client secret of the reader and writer.
+22. If you need to remove the objects created by setup-tenant.bash, you can run the `reset-tenant.bash` script
+
+With an Auth0 account created and configured, we can move on and apply the necessary configuration changes in the system landscape
+##### Applying the required changes to use Auth0 as an OpenID provider
+In this section, we will learn what configuration changes are required to be able to replace the local
+authorization server with Auth0. We only need to change the configuration for the two services
+that act as OAuth resource servers, the product-composite and gateway services.
+
+We also need to change our test script a bit, so that it acquires the access tokens from Auth0 in-
+stead of acquiring them from our local authorization server. Let’s start with the OAuth resource
+servers, the product-composite and gateway services.
+```sh
+docker compose -f docker-compose-auth.yml --env-file docker/config/.env.auth0 up --build
+```
+
+We also need to update the test script so it acquires access tokens from the Auth0 OIDC provider.
+This is done by performing the following changes in `test-em-all-auth.bash`:
+1. Find the following command:
+```
+ACCESS_TOKEN=$(curl -k https://writer:secret-writer@$HOST:$PORT/
+oauth2/token -d grant_type=client_credentials -d scope="product:read
+product:write" -s | jq .access_token -r)
+```
+2. Replace it with these commands:
+```
+export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+ACCESS_TOKEN=$(curl -X POST https://$TENANT/oauth/token \
+-d grant_type=client_credentials \
+-d audience=https://localhost:8443/product-composite \
+-d scope=product:read+product:write \
+-d client_id=$WRITER_CLIENT_ID \
+-d client_secret=$WRITER_CLIENT_SECRET -s | jq -r .access_token)
+```
+3. Set the values for the TENANT, WRITER_CLIENT_ID, and WRITER_CLIENT_SECRET environ-
+ment variables in the preceding commands with the values returned by the setup-tenant.
+bash script.
+
+4. Next, find the following command:
+```
+READER_ACCESS_TOKEN=$(curl -k https://reader:secret-
+reader@$HOST:$PORT/oauth2/token -d grant_type=client_credentials -d
+scope="product:read" -s | jq .access_token -r)
+```
+5. Replace it with this command:
+```
+export READER_CLIENT_ID=...
+export READER_CLIENT_SECRET=...
+READER_ACCESS_TOKEN=$(curl -X POST https://$TENANT/oauth/token \
+-d grant_type=client_credentials \
+-d audience=https://localhost:8443/product-composite \
+-d scope=product:read \
+-d client_id=$READER_CLIENT_ID \
+-d client_secret=$READER_CLIENT_SECRET -s | jq -r .access_token)
+```
+
+6. Set the values for the READER_CLIENT_ID and READER_CLIENT_SECRET environment vari-
+ables in the preceding commands with the values returned by the setup-tenant.bash
+script.
+
+Now the access tokens are issued by Auth0 instead of our local authorization server, and our API
+implementations can verify the access tokens using information from Auth0’s discovery service
+configured in the application.yml files. The API implementations can, as before, use the scopes
+in the access tokens to authorize the client to perform the call to the API, or not.
+With this, we have all the required changes in place. Let’s run some tests to verify that we can
+acquire access tokens from Auth0.
+
+Running the test script with Auth0 as the OpenID Connect
+provider
+Now, we are ready to give Auth0 a try!
+Run the usual tests, but this time, using Auth0 as the OpenID Connect provider, with the fol-
+lowing command:
+```
+./test-em-all-auth.bash
+```
+
+In the logs, you will be able to find authorization information from the access tokens issued by
+Auth0. Run this command:
+docker compose logs product-composite | grep "Authorization info"
+Expect the following outputs from the command:
+1. From calls using an access token with both the product:read and product:write scopes,
+we will see both scopes listed as follows:
+```
+product-composite-1  | 2026-10-20T12:42:07.080Z DEBUG 1 --- [product-composite] [     parallel-3] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu@clients, scopes: product:read product:write, expires 2026-10-21T12:42:03Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+product-composite-1  | 2026-10-20T12:42:07.493Z DEBUG 1 --- [product-composite] [or-http-epoll-3] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu@clients, scopes: product:read product:write, expires 2026-10-21T12:42:03Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+product-composite-1  | 2026-10-20T12:42:07.775Z DEBUG 1 --- [product-composite] [     parallel-1] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu@clients, scopes: product:read product:write, expires 2026-10-21T12:42:03Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+product-composite-1  | 2026-10-20T12:42:08.024Z DEBUG 1 --- [product-composite] [or-http-epoll-3] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu@clients, scopes: product:read product:write, expires 2026-10-21T12:42:03Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+product-composite-1  | 2026-10-20T12:42:08.273Z DEBUG 1 --- [product-composite] [     parallel-3] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu@clients, scopes: product:read product:write, expires 2026-10-21T12:42:03Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+product-composite-1  | 2026-10-20T12:42:08.479Z DEBUG 1 --- [product-composite] [or-http-epoll-3] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu@clients, scopes: product:read product:write, expires 2026-10-21T12:42:03Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+product-composite-1  | 2026-10-20T12:42:09.751Z DEBUG 1 --- [product-composite] [or-http-epoll-2] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu@clients, scopes: product:read product:write, expires 2026-10-21T12:42:03Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+product-composite-1  | 2026-10-20T12:42:09.933Z DEBUG 1 --- [product-composite] [or-http-epoll-2] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu@clients, scopes: product:read product:write, expires 2026-10-21T12:42:03Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+product-composite-1  | 2026-10-20T12:42:10.181Z DEBUG 1 --- [product-composite] [or-http-epoll-2] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu@clients, scopes: product:read product:write, expires 2026-10-21T12:42:03Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+product-composite-1  | 2026-10-20T12:42:10.278Z DEBUG 1 --- [product-composite] [or-http-epoll-1] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: e41lxpDYC4hJwlSXc4NNHnMMFZdysdKu@clients, scopes: product:read product:write, expires 2026-10-21T12:42:03Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+product-composite-1  | 2026-10-20T12:42:11.109Z DEBUG 1 --- [product-composite] [or-http-epoll-4] s.m.m.c.p.s.ProductCompositeServiceImpl  : Authorization info: Subject: 9i4jMfSw3FLCWSudUsnGrZKFzzFLe88O@clients, scopes: product:read, expires 2026-10-21T12:42:10Z: issuer: https://dev-q8n0c0etgofb7gpd.us.auth0.com/, audience: [https://localhost:8443/product-composite]
+```
+From calls using an access token with only the product:read scope, we will see that only
+that scope is listed>
+
+As we can see from the log output, we now also get information regarding the intend-
+ed audience for this access token. To strengthen security, we could add a test to our
+service that verifies that its URL, https://localhost:8443/product-composite
+in this case, is part of the audience list. This would, as mentioned earlier, prevent
+the situation where someone tries to use an access token issued for another purpose
+than to get access to our API.
+
+##### Acquiring access tokens using the client credentials grant flow
+If you want to acquire an access token from Auth0 yourself, you can do so by running the following
+command, using the client credentials grant flow:
+```
+export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+curl -X POST https://$TENANT/oauth/token \
+-d grant_type=client_credentials \
+-d audience=https://localhost:8443/product-composite \
+-d scope=product:read+product:write \
+-d client_id=$WRITER_CLIENT_ID \
+-d client_secret=$WRITER_CLIENT_SECRET
+```
+Set the values for the TENANT, WRITER_CLIENT_ID, and WRITER_CLIENT_SECRET environment
+variables in the preceding commands with the values returned by the setup-tenant.bash script.
+Following the instructions in the Calling protected APIs using access tokens section, you should be
+able to call the APIs using the acquired access token.
+##### Acquiring access tokens using the authorization code grant flow
+In this section, we will learn how to acquire an access token from Auth0 using the authorization
+code grant flow. As already described, we first need to acquire an authorization code using a web
+browser. Next, we can use server-side code to exchange the authorization code for an access token.
+Perform the following steps to execute the authorization code grant flow with Auth0:
+1. To get an authorization code for the default app client, use the following URL in the web
+browser:
+```
+https://${TENANT}/authorize?audience=https://localhost:8443/product-
+composite&scope=openid email product:read product:write&response_
+type=code&client_id=${WRITER_CLIENT_ID}&redirect_uri=https://my.redirect.
+uri&state=845361.
+```
+2. Replace ${TENANT} and ${WRITER_CLIENT_ID} in the preceding URL with the tenant do-
+main name and writer client ID returned by the setup-tenant.bash script.
+3. Auth0 should present the following login screen.
+4. Following a successful login, Auth0 will ask you to give the client application your consent:
+5. The authorization code is now in the URL in the browser, just like when we tried out the
+authorization code grant flow with our local authorization server:
+6. Extract the code and run the following command to get the access token:
+```
+CODE=...
+export TENANT=...
+export WRITER_CLIENT_ID=...
+export WRITER_CLIENT_SECRET=...
+curl -X POST https://$TENANT/oauth/token \
+-d grant_type=authorization_code \
+-d client_id=$WRITER_CLIENT_ID \
+-d client_secret=$WRITER_CLIENT_SECRET \
+-d code=$CODE \
+-d redirect_uri=https://my.redirect.uri -s | jq .
+```
+7. Set the values for the TENANT, WRITER_CLIENT_ID, and WRITER_CLIENT_SECRET environ-
+ment variables in the preceding commands to the values returned by the setup-tenant.
+bash script.
+Now that we have learned how to acquire access tokens using both grant flows, we are ready to
+try calling the external API using an access token acquired from Auth0 in the next section.
+##### Calling protected APIs using the Auth0 access tokens
+We can use access tokens issued by Auth0 to call our APIs, just like when we used access tokens
+issued by our local authorization server.
+For a read-only API, execute the following command:
+```
+ACCESS_TOKEN=...
+curl https://localhost:8443/product-composite/1 -k -H "Authorization:
+Bearer $ACCESS_TOKEN" -i
+```
+For an updating API, execute the following command:
+```
+ACCESS_TOKEN=...
+curl https://localhost:8443/product-composite/999 -k -H "Authorization:
+Bearer $ACCESS_TOKEN" -X DELETE -i
+```
+Since we have requested both scopes, product:read and product:write, both the preceding
+API calls are expected to return 200 OK.
+
+##### Getting extra information about the user
+From the log output in Figures 11.21 and 11.22 in the Running the test script with Auth0 as the OpenID
+Connect provider section, we could not see any information about the user that initiated the API
+request. If you want your API implementation to know a bit more about the user, it can call Auth0’s
+userinfo_endpoint. The URL of the userinfo endpoint can be found in the response of a request
+to the OIDC discovery endpoint, as described in the Changing the configuration in the OAuth resource
+servers section. To get user info related to an access token, make the following request:
+```
+Export TENANT=...
+curl -H "Authorization: Bearer $ACCESS_TOKEN" https://$TENANT/userinfo -s
+| jq
+```
+Set the values for the TENANT environment variable in the preceding commands to the values
+returned by the setup-tenant.bash script
+
+Note that this command only applies to access tokens issued using the authorization code grant
+flow. Access tokens issued using the client credentials grant flow don’t contain any user infor-
+mation and will result in an error response if tried.
+A sample response is as follows:
+
+This endpoint can also be used to verify that the user hasn’t revoked the access token in Auth0.
+Wrap up the tests by shutting down the system landscape with the following command:
+```
+docker compose down
+```
+This concludes the section, where we have learned how to replace the local OAuth 2.0 authoriza-
+tion server with an external alternative. We have also seen how to reconfigure the microservice
+landscape to validate access tokens using an external OIDC provider.
+
+## Summary
+In this Lab, we learned how to use Spring Security to protect our APIs.
+
+We saw how easy it is to enable HTTPS to prevent eavesdropping by third parties using Spring
+Security. With Spring Security, we also learned that it is straightforward to restrict access to the
+discovery server, Netflix Eureka, using HTTP Basic authentication. Finally, we saw how we can
+use Spring Security to simplify the use of OAuth 2.0 and OpenID Connect to allow third-party
+client applications to access our APIs in the name of a user, but without requiring that the user
+share credentials with the client applications. We learned both how to set up a local OAuth 2.0
+authorization server based on Spring Security and also how to change the configuration so that
+an external OpenID Connect provider, Auth0, can be used instead.
+
+One concern, however, is how to manage the configuration required. Each microservice instance
+must be provided with its own configuration, making it hard to get a good overview of the cur-
+rent configuration. Updating configuration that concerns multiple microservices will also be
+challenging. Added to the scattered configuration is the fact that some of the configurations we
+have seen so far contain sensitive information, such as credentials or certificates. It seems like
+we need a better way to handle the configuration for a number of cooperating microservices and
+also a solution for how to handle sensitive parts of the configuration.
+
+In the next Lab, we will explore Spring Cloud Config Server and see how it can be used to
+handle these types of problems.

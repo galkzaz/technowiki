@@ -1,0 +1,1190 @@
+# Comparable and Natural Ordering in Java
+
+`Comparable<T>` is a Java interface that allows a class to define its natural ordering — the default rule for determining whether one object should come before, after, or be considered equivalent in ordering to another object.
+
+A class's natural ordering means the default ordering rule that defines how objects of that class should be arranged relative to one another.
+
+In Java, a class usually defines its natural ordering by implementing `Comparable<T>` and providing the `compareTo()` method.
+
+For example:
+
+- `Integer` defines natural ordering by numerical value.
+- `String` defines natural ordering by lexicographical order.
+- A `Student` class might define natural ordering by student ID.
+- An `Employee` class might define natural ordering by employee number.
+
+
+Let's explore how this works, how to implement it, and how Java uses it.
+
+## What is `Comparable<T>`?
+
+`Comparable<T>` is part of the `java.lang` package, so you don't need to import it.
+
+Its essential method is:
+
+```Java
+public interface Comparable<T> {
+    int compareTo(T other);
+}
+```
+
+The interface requires a class to implement `compareTo()`, which compares the current object (`this`) with another object of type `T`.
+
+The result tells Java the relative ordering of the two objects.
+
+| Return value             | Meaning                                                 |
+| ------------------------ | ------------------------------------------------------- |
+| Negative integer (`< 0`) | This object comes before the other object.              |
+| Zero (`== 0`)            | Both objects are equivalent according to this ordering. |
+| Positive integer (`> 0`) | This object comes after the other object.               |
+
+The exact negative or positive number does not matter; only its sign matters.
+
+For example:
+
+```Java
+Integer a = 10;
+Integer b = 20;
+
+System.out.println(a.compareTo(b)); // Negative
+System.out.println(b.compareTo(a)); // Positive
+System.out.println(a.compareTo(10)); // 0
+```
+
+`Integer` already implements `Comparable<Integer>`, so its numerical ordering is built into the class.
+
+## Natural Ordering and Value Classes in Java
+
+Natural ordering is the default way Java compares objects of a class when you haven't supplied a custom comparison rule.
+
+For example, Java already knows how to order integers numerically, strings lexicographically, and dates chronologically. You don't need to write a sorting algorithm or a comparator for these common cases.
+
+Let's understand what natural ordering means, how value classes use it, and when you should define your own.
+
+### 1. What is natural ordering?
+
+A class has a natural ordering when it implements the `Comparable<T>` interface and defines how its instances should be ordered using `compareTo()`.
+
+```
+public interface Comparable<T> {
+    int compareTo(T other);
+}
+```
+
+The `compareTo()` method returns:
+
+| Result           | Meaning                                                   |
+| ---------------- | --------------------------------------------------------- |
+| Negative integer | This object comes before `other`.                         |
+| Zero             | This object is equivalent to `other` under this ordering. |
+| Positive integer | This object comes after `other`.                          |
+
+You should rely on the sign of the result, not its exact value.
+
+#### Example: integers
+
+```
+Integer a = 10;
+Integer b = 20;
+
+System.out.println(a.compareTo(b)); // Negative
+System.out.println(b.compareTo(a)); // Positive
+System.out.println(a.compareTo(10)); // 0
+```
+
+`Integer` implements `Comparable<Integer>`, so its natural ordering is numerical.
+
+Conceptually:
+
+```
+10 < 20 < 30 < 40
+```
+
+#### Example: strings
+
+```
+String a = "Apple";
+String b = "Banana";
+
+System.out.println(a.compareTo(b)); // Negative
+```
+
+`String` implements `Comparable<String>`. Its natural ordering is lexicographical, based on the sequence of UTF-16 code units—not dictionary rules that account for every language's alphabetization conventions.
+
+For example:
+
+```
+"Apple" < "Banana" < "Cherry"
+```
+
+Be careful: natural string ordering is case-sensitive.
+
+```
+System.out.println("Apple".compareTo("apple")); // Negative
+```
+
+Uppercase and lowercase letters do not necessarily appear in the order a human reader would expect from a dictionary.
+
+#### Example: dates
+
+```
+import java.time.LocalDate;
+
+LocalDate earlier = LocalDate.of(2025, 1, 10);
+LocalDate later = LocalDate.of(2025, 6, 15);
+
+System.out.println(earlier.compareTo(later)); // Negative
+```
+
+`LocalDate` uses chronological ordering:
+
+```
+2025-01-10 < 2025-06-15 < 2026-01-01
+```
+
+The class already defines what “earlier” and “later” mean.
+
+### 2. What are value classes, and why does natural ordering suit them?
+
+A value-oriented class represents a value rather than an object whose identity is the primary concern.
+
+Examples include:
+
+- A monetary amount
+- A date or time
+- A measurement
+- A numerical quantity
+- A version number
+
+For these objects, users commonly want to ask questions such as:
+
+- Which amount is greater?
+- Which date comes first?
+- Which version is newer?
+- Which measurement is smaller?
+
+A natural ordering is useful when there is an obvious, broadly accepted answer to those questions.
+
+Consider a simple `Temperature` class:
+
+```
+public final class Temperature
+        implements Comparable<Temperature> {
+
+    private final double celsius;
+
+    public Temperature(double celsius) {
+        this.celsius = celsius;
+    }
+
+    @Override
+    public int compareTo(Temperature other) {
+        return Double.compare(this.celsius, other.celsius);
+    }
+
+    public double getCelsius() {
+        return celsius;
+    }
+}
+```
+
+We can now compare temperatures naturally:
+
+```
+Temperature cold = new Temperature(5.0);
+Temperature warm = new Temperature(25.0);
+
+System.out.println(cold.compareTo(warm)); // Negative
+```
+
+The comparison is intuitive because the class has a clear default rule: lower temperatures come first.
+
+The example is simplified; a production temperature type might also validate values and address special floating-point values such as `NaN`.
+
+#### Natural ordering makes objects work with standard APIs
+
+Once a class implements `Comparable<T>`, many Java APIs can use its natural ordering without needing an extra comparator.
+
+```
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class Main {
+    public static void main(String[] args) {
+        List<Temperature> temperatures = new ArrayList<>();
+
+        temperatures.add(new Temperature(25.0));
+        temperatures.add(new Temperature(5.0));
+        temperatures.add(new Temperature(15.0));
+
+        Collections.sort(temperatures);
+
+        for (Temperature temperature : temperatures) {
+            System.out.println(temperature.getCelsius());
+        }
+    }
+}
+```
+
+Output:
+
+```
+5.0
+15.0
+25.0
+```
+
+The `Collections.sort(temperatures)` call knows to use `compareTo()`.
+
+The same idea applies to APIs such as `Collections.min()`, `Collections.max()`, `TreeSet`, and `TreeMap` when they use natural ordering.
+
+### 3. How Java's built-in value types define natural ordering
+
+Here are common examples from the Java API.
+
+| Type                        | Natural ordering                             |
+| --------------------------- | -------------------------------------------- |
+| `Integer`, `Long`, `Double` | Numerical ordering, with type-specific rules |
+| `BigInteger`                | Numerical ordering                           |
+| `BigDecimal`                | Numerical value ordering                     |
+| `String`                    | Lexicographical ordering                     |
+| `LocalDate`                 | Chronological date ordering                  |
+| `LocalTime`                 | Chronological time-of-day ordering           |
+| `LocalDateTime`             | Local date-time ordering                     |
+| `Instant`                   | Timeline ordering                            |
+| Enum types                  | Declaration order                            |
+
+One important distinction: the natural ordering of an enum follows the order in which its constants are declared, not necessarily their business priority.
+
+```
+enum Priority {
+    LOW,
+    MEDIUM,
+    HIGH
+}
+```
+
+```
+System.out.println(Priority.LOW.compareTo(Priority.HIGH));
+// Negative
+```
+
+If you reorder the enum declarations, the natural ordering changes. If your business rules require a specific priority independent of declaration order, a custom `Comparator` may be more appropriate.
+
+### 4. Natural ordering versus custom ordering
+
+Natural ordering and custom ordering solve related but different problems.
+
+- Natural ordering: the class's default ordering, defined by `Comparable<T>`.
+- Custom ordering: an alternative ordering, usually supplied through `Comparator<T>`.
+
+Suppose you have products with names and prices. You might want to order them by name in one screen and by price in another.
+
+#### Natural ordering — `Comparable`
+
+```
+public class Product implements Comparable<Product> {
+    private final String name;
+
+    public Product(String name) {
+        this.name = name;
+    }
+
+    @Override
+    public int compareTo(Product other) {
+        return this.name.compareTo(other.name);
+    }
+}
+```
+
+This defines the default ordering of products by name.
+
+#### Custom ordering — `Comparator`
+
+```
+Comparator<Product> byPrice =
+    Comparator.comparing(Product::getPrice);
+```
+
+This provides a separate ordering by price, assuming `Product` exposes a `getPrice()` method.
+
+You don't need to implement `Comparable` just because you want to sort a class. If there is no single sensible default ordering, using one or more comparators is often better.
+
+### 5. An important design decision: what should the natural ordering represent?
+
+When you design a value-oriented class, ask yourself:
+
+Is there one ordering that most users of this class would naturally expect?
+
+For example:
+
+| Class         | Possible natural ordering | Design consideration                                                                        |
+| ------------- | ------------------------- | ------------------------------------------------------------------------------------------- |
+| `Temperature` | Temperature value         | Usually intuitive when units are consistent                                                 |
+| `Money`       | Monetary amount           | Currency must be considered; comparing different currencies by raw amount can be misleading |
+| `Version`     | Semantic version order    | Must account for major, minor, patch, and possibly prerelease identifiers                   |
+| `Employee`    | Employee ID or name       | Neither is universally the obvious default                                                  |
+| `Task`        | Priority or creation time | Different use cases may need different orderings                                            |
+
+For a `Money` class, consider:
+
+```
+$100 USD
+€100 EUR
+```
+
+Comparing the numeric amounts alone does not necessarily provide a meaningful financial ordering. You need a defined policy—for example, compare only amounts in the same currency, or convert to a common currency using an explicit exchange-rate policy.
+
+This is why natural ordering should represent a stable, well-understood rule rather than an arbitrary convenience.
+
+### 6. Natural ordering and consistency with `equals()`
+
+A final design consideration is the relationship between `compareTo()` and `equals()`.
+
+Ideally, for many value classes:
+
+```
+a.compareTo(b) == 0
+```
+
+should mean the same thing as:
+
+```
+a.equals(b)
+```
+
+The `Comparable` contract strongly recommends this consistency, though it does not require it.
+
+`BigDecimal` is a notable exception:
+
+```
+import java.math.BigDecimal;
+
+BigDecimal a = new BigDecimal("2.0");
+BigDecimal b = new BigDecimal("2.00");
+
+System.out.println(a.compareTo(b) == 0); // true
+System.out.println(a.equals(b));         // false
+```
+
+Numerically, both values are equal. However, `BigDecimal.equals()` also considers scale.
+
+This difference affects sorted collections:
+
+```
+import java.util.HashSet;
+import java.util.TreeSet;
+
+var sorted = new TreeSet<BigDecimal>();
+sorted.add(a);
+sorted.add(b);
+
+var hashed = new HashSet<BigDecimal>();
+hashed.add(a);
+hashed.add(b);
+
+System.out.println(sorted.size()); // 1
+System.out.println(hashed.size()); // 2
+```
+
+`TreeSet` uses the ordering to determine whether elements are duplicates, whereas `HashSet` uses `equals()` and `hashCode()`.
+
+This matters especially when designing value classes for use in sorted collections.
+
+### Summary
+
+Natural ordering is the default ordering a class defines through `Comparable<T>`.
+
+- Use it when a class has one sensible, stable, widely understood ordering.
+- It makes the class work naturally with sorting methods and ordered collections.
+- Value-oriented classes often benefit because users expect their values to be comparable.
+- Use `Comparator<T>` when you need alternative orderings or when no single natural ordering is appropriate.
+- Design `compareTo()` carefully, particularly its contract and consistency with `equals()`.
+
+Where this fits in your Java TOC: this topic belongs under `Object Ordering and Comparison → Comparable and Natural Ordering → Natural Ordering and Value Classes`. The next logical topic is `Interoperability with Java APIs`, where you can explore how `Comparable` enables sorting, searching, and ordered collections.
+
+## Implementing `Comparable` in a custom class
+
+Imagine that we are building a student management system.
+
+Each student has an ID and a name:
+
+```Java
+public class Student {
+
+    private final int id;
+    private final String name;
+
+    public Student(int id, String name) {
+        this.id = id;
+        this.name = name;
+    }
+}
+```
+
+Suppose we want to sort students by their IDs.
+
+Java cannot automatically determine whether a student with ID `101` should come before a student with ID `102`. We must define that rule.
+
+We can do this by implementing `Comparable<Student>`.
+
+```Java
+
+public class Student implements Comparable<Student> {
+
+    private final int id;
+    private final String name;
+
+    public Student(int id, String name) {
+        this.id = id;
+        this.name = name;
+    }
+
+    @Override
+    public int compareTo(Student other) {
+        return Integer.compare(this.id, other.id);
+    }
+
+    @Override
+    public String toString() {
+        return "Student{id=" + id + ", name='" + name + "'}";
+    }
+}
+
+```
+
+Let's understand the important parts.
+
+`implements Comparable<Student>`
+
+This declares that `Student` has a natural ordering and that it compares itself with another `Student`.
+
+`compareTo(Student other)`
+
+This defines the ordering rule.
+
+`Integer.compare(this.id, other.id)`
+
+This compares the two IDs numerically:
+
+- If `this.id` is smaller, the result is negative.
+- If both IDs are equal, the result is zero.
+- If `this.id` is larger, the result is positive.
+
+Using `Integer.compare()` is safer than subtracting the IDs, which could overflow.
+
+## Understanding `this` and `other`
+
+Consider these two objects:
+
+```Java
+Student alice = new Student(101, "Alice");
+Student bob = new Student(102, "Bob");
+```
+
+When we execute:
+
+```Java
+alice.compareTo(bob);
+```
+
+Java invokes `compareTo()` on Alice's object.
+
+Inside the method:
+
+```Java
+this.id   // 101: Alice's ID
+other.id  // 102: Bob's ID
+```
+
+The comparison becomes:
+
+```Java
+Integer.compare(101, 102);
+```
+
+The result is negative, meaning Alice comes before Bob according to the student ID ordering.
+
+The reverse call:
+
+```Java
+bob.compareTo(alice);
+```
+
+produces a positive result.
+
+A useful way to remember it:
+
+```
+alice.compareTo(bob)
+
+       this              other
+         |                 |
+         v                 v
+    Student(101)      Student(102)
+         |                 |
+         +------ compare --+
+                  |
+                  v
+              Negative
+```
+
+## Complete example: sorting students
+
+Once a class implements `Comparable`, Java's sorting APIs can use its natural ordering without requiring a separate comparator.
+
+```Java
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class Main {
+
+    public static void main(String[] args) {
+
+        List<Student> students = new ArrayList<>();
+
+        students.add(new Student(103, "Charlie"));
+        students.add(new Student(101, "Alice"));
+        students.add(new Student(102, "Bob"));
+
+        // Uses Student's natural ordering.
+        Collections.sort(students);
+
+        for (Student student : students) {
+            System.out.println(student);
+        }
+    }
+}
+
+```
+
+Assuming the `Student` class from the previous example, the output is:
+
+```Java
+Student{id=101, name='Alice'}
+Student{id=102, name='Bob'}
+Student{id=103, name='Charlie'}
+```
+
+What happened?
+
+```
+                                                                                
+ +-------------------------------------------------------------------+          
+ | Sorting walkthrough                                               |   
+ |                                                                   |   
+ | Initial order                                                     | 
+ |                                                                   | 
+ |          103               101               102                  |          
+ |        Charlie            Alice              Bob                  |          
+ |                                                                   |                    
+ |               ↓ Collections.sort(students)                        |          
+ |                                                                   |          
+ | Sorted by natural ordering (student ID)                           |          
+ | +------------------+ +------------------+ +---------------------+ |          
+ | |       101        | |       102        | |         103         | |          
+ | |      Alice       | |       Bob        | |       Charlie       | |          
+ | |                  | |                  | |                     | |          
+ | +------------------+ +------------------+ +---------------------+ |          
+ |                                                                   |                    
+ +-------------------------------------------------------------------+          
+  
+```
+
+The sorting API uses `compareTo()` to determine the relative order of elements. You don't need to write the sorting algorithm yourself.
+
+Modern Java object sorting APIs can use natural ordering when the elements implement `Comparable`.
+
+## Natural ordering versus custom ordering
+
+What if we want to sort the same students by name rather than ID?
+
+We do not necessarily want to change the natural ordering of `Student`. Other parts of the application might depend on ID ordering.
+
+Instead, we can supply a `Comparator<Student>`.
+
+```Java
+Comparator<Student> byName =
+        Comparator.comparing(Student::getName);
+
+students.sort(byName);
+```
+
+This requires a `getName()` accessor in `Student`.
+
+The distinction is:
+
+| Feature             | `Comparable<T>`                 | `Comparator<T>`                       |
+| ------------------- | ------------------------------- | ------------------------------------- |
+| Purpose             | Defines natural ordering        | Defines an ordering rule              |
+| Main method         | `compareTo(T other)`            | `compare(T a, T b)`                   |
+| Location            | Inside the class being compared | Usually separate from that class      |
+| Number of orderings | Typically one natural ordering  | Can define many alternative orderings |
+| Example             | Student ID order                | Student name or grade order           |
+
+For Java API design, a useful guideline is to implement `Comparable` when a clear, meaningful natural ordering exists. Use `Comparator` when the ordering depends on the task.
+
+## The `compareTo()` contract
+
+Implementing `Comparable` means following a contract. The method must provide a consistent ordering, not just return arbitrary numbers.
+
+The most important requirements are:
+
+### A. Sign symmetry
+
+The signs of `a.compareTo(b)` and `b.compareTo(a)` must be opposite.
+
+```
+a.compareTo(b) < 0
+b.compareTo(a) > 0
+```
+
+If Alice's ID is smaller than Bob's, Bob must compare as greater than Alice.
+
+### B. Transitivity
+
+If A comes before B, and B comes before C, then A must come before C.
+
+```
+A < B
+B < C
+---------
+A < C
+```
+
+Without transitivity, sorting algorithms cannot rely on the ordering.
+
+### C. Consistent zero comparisons
+
+If `a.compareTo(b) == 0`, comparing either object with a third object must produce compatible signs.
+
+This keeps the ordering coherent.
+
+### D. Consistency with `equals()`
+
+The `Comparable` contract strongly recommends that:
+
+```
+a.compareTo(b) == 0
+```
+
+has the same meaning as:
+
+```
+a.equals(b)
+```
+
+However, consistency with `equals()` is not mandatory.
+
+For example, two students with the same ID but different names might compare as zero when ordering by ID, even if their `equals()` method considers their names too.
+
+This distinction becomes particularly important with `TreeSet` and `TreeMap`.
+## Comparing Objects of Different Types in Java
+Unlike the equals
+method, which imposes a global equivalence relation on all objects, compareTo
+doesn’t have to work across objects of different types: when confronted with
+objects of different types, compareTo is permitted to throw ClassCastException.
+Usually, that is exactly what it does. The contract does permit intertype compari-
+sons, which are typically defined in an interface implemented by the objects being
+compared.
+
+This topic answers three important questions:
+
+1. Why can `equals()` compare objects of different types, while `compareTo()` usually cannot?
+2. What happens when `compareTo()` receives an incompatible object?
+3. How can we compare different classes when they share a meaningful ordering rule?
+
+Let's go through each part with Java examples.
+
+### 1. `equals()` vs. `compareTo()`
+
+Although both methods compare objects, they solve different problems.
+
+- `equals()` asks: Are these two objects considered equal?
+- `compareTo()` asks: Which object comes first in an ordering, or are they equivalent under that ordering?
+
+#### `equals()` can receive any object type
+
+`equals()` can compare objects of different types
+
+The `equals()` method is declared in `Object`:
+
+```
+public boolean equals(Object obj)
+```
+
+Its parameter is `Object`, so you can pass an object of any reference type.
+
+```
+String text = "100";
+Integer number = 100;
+
+// Both calls are legal Java.
+System.out.println(text.equals(number));  // false
+System.out.println(number.equals(text));  // false
+```
+
+Both calls are valid Java. They return `false` because a `String` and an `Integer` are not equal according to their respective implementations.
+
+Why is this important? The `equals()` contract defines equality across objects generally, including symmetry:
+
+```
+x.equals(y) == y.equals(x)
+```
+
+If `x.equals(y)` is `true`, then `y.equals(x)` must also be `true`.
+
+This helps Java collections such as `HashSet` and `HashMap` determine whether objects represent equal values.
+
+The key point is that being allowed to compare two objects does not mean they must be equal.
+
+#### `compareTo()` usually compares objects of a specific type
+
+`compareTo()` usually compares objects of the same type
+
+Recall the interface:
+
+```
+public interface Comparable<T> {
+    int compareTo(T other);
+}
+```
+
+The type parameter `T` identifies the type the object is expected to compare against.
+
+Consider a `Product` class:
+
+```
+public class Product implements Comparable<Product> {
+
+    private final int id;
+
+    public Product(int id) {
+        this.id = id;
+    }
+
+    @Override
+    public int compareTo(Product other) {
+        return Integer.compare(this.id, other.id);
+    }
+}
+```
+Here, `Product` implements `Comparable<Product>`. The method compares one `Product` with another `Product`.
+
+The declaration:
+
+```
+implements Comparable<Product>
+```
+
+
+means that `Product` defines its natural ordering against other `Product` objects.
+
+```
+Product first = new Product(10);
+Product second = new Product(20);
+
+System.out.println(first.compareTo(second)); // Negative
+```
+
+But this is a compile-time error:
+
+```
+first.compareTo("Hello"); // Compile-time error
+```
+
+Why? Because `String` is not a `Product`, and the compiler knows that `compareTo()` expects a `Product`.
+
+#### Quick comparison
+
+| Feature         | `equals()`                          | `compareTo()`                                    |
+| --------------- | ----------------------------------- | ------------------------------------------------ |
+| Declared in     | `Object`                            | `Comparable<T>`                                  |
+| Parameter       | `Object`                            | Type `T`                                         |
+| Return type     | `boolean`                           | `int`                                            |
+| Main purpose    | Test equality                       | Determine ordering                               |
+| Typical results | `true` or `false`                   | Negative, zero, or positive                      |
+| Different types | Can be passed; often return `false` | Usually incompatible unless explicitly supported |
+
+One subtle but important distinction: `compareTo()` returning zero means the objects are equivalent under that ordering. It does not automatically mean that `equals()` returns `true`.
+
+For example:
+
+```
+BigDecimal a = new BigDecimal("2.0");
+BigDecimal b = new BigDecimal("2.00");
+
+System.out.println(a.compareTo(b)); // 0
+System.out.println(a.equals(b));    // false
+```
+
+`BigDecimal` compares numerical values using `compareTo()`, but `equals()` also considers scale.
+
+### 2. Type Compatibility and `ClassCastException`
+
+Java's type system helps prevent invalid comparisons. However, older APIs and raw types can bypass some of these protections.
+
+#### Case A: Generics prevent an incompatible comparison
+Generics provide compile-time protection, but raw types can bypass it:
+
+With our earlier declaration:
+
+```
+class Product implements Comparable<Product> {
+    // ...
+}
+```
+
+This is rejected by the compiler:
+
+```
+Product product = new Product(10);
+
+product.compareTo("Hello"); // Compile-time error
+```
+
+This is beneficial because the problem is detected before the program runs.
+
+#### Case B: Raw types can bypass generic type safety
+
+Consider this example:
+
+```
+public class RawComparableExample {
+
+    public static void main(String[] args) {
+
+        // Raw Comparable: the generic type is omitted.
+        Comparable value = Integer.valueOf(10);
+
+        // Compiles with an unchecked warning.
+        // Fails at runtime because Integer cannot compare itself
+        // with a String.
+        value.compareTo("Hello");
+    }
+}
+```
+
+This compiles with an unchecked warning, but `Integer.compareTo()` throws a `ClassCastException` at runtime because it cannot compare an `Integer` with a `String`.
+
+Why?
+
+1. `Integer` implements `Comparable<Integer>`.
+2. Its natural ordering is defined for other `Integer` objects.
+3. It cannot meaningfully compare an integer with a string.
+4. The comparison therefore fails at runtime.
+
+The generic declaration was omitted, so the compiler could not enforce the intended type as effectively.
+
+#### Case C: A `compareTo()` implementation can explicitly reject types
+
+A class can also implement `Comparable` without a type parameter:
+
+```
+@SuppressWarnings("rawtypes")
+class Product implements Comparable {
+
+    private final int id;
+
+    Product(int id) {
+        this.id = id;
+    }
+
+    @Override
+    public int compareTo(Object obj) {
+
+        if (!(obj instanceof Product other)) {
+            throw new ClassCastException(
+                "Product can only be compared with Product"
+            );
+        }
+
+        return Integer.compare(this.id, other.id);
+    }
+}
+```
+
+This code explicitly checks the argument's type and rejects incompatible objects.
+
+However, prefer `Comparable<Product>` over raw `Comparable` in normal application code. Generics provide compile-time type safety and make the intended ordering clearer.
+
+#### When should you expect `ClassCastException`?
+
+| Situation                                                | Expected behavior                                    |
+| -------------------------------------------------------- | ---------------------------------------------------- |
+| `Comparable<Product>` compared with a `String`           | Usually a compile-time error                         |
+| Raw `Comparable` used to compare incompatible objects    | May throw `ClassCastException` at runtime            |
+| An object of the expected type                           | Comparison proceeds according to the implementation  |
+| A heterogeneous collection sorted using natural ordering | May fail if its elements are not mutually comparable |
+
+For example, `TreeSet` and `Arrays.sort()` rely on compatible comparisons when using natural ordering. A collection containing unrelated types does not automatically acquire a sensible natural order.
+
+#### Why doesn't `compareTo()` need to work across all types?
+
+Imagine trying to establish a universal ordering between completely unrelated objects:
+
+```
+Product("Keyboard")
+LocalDate(2026-10-22)
+Thread(...)
+String("Hello")
+```
+
+What should come first: a product, a date, a thread, or a string?
+
+There is no obvious universal rule. `Comparable` lets each class define its own meaningful natural ordering without requiring it to compare itself with every other Java type.
+
+For example:
+
+- `Integer` compares integers numerically.
+- `String` compares strings lexicographically.
+- `LocalDate` compares dates chronologically.
+- `Product` might compare products by ID.
+
+Each comparison has a clear meaning within its domain.
+### 3. Cross-Type Ordering Through Shared Interfaces
+
+So far, we have seen that comparing different types is usually invalid for natural ordering.
+
+But what if two different classes represent things that genuinely can be ordered by the same rule?
+
+The `Comparable` contract does not forbid comparisons between different classes. Two types can participate in a shared ordering if the design defines how they compare.
+
+For example, suppose you have two classes representing different kinds of financial transactions:
+
+- A `Deposit` transaction
+- A `Withdrawal` transaction
+
+They are different classes, but both have a timestamp. We can define an ordering based on that timestamp.
+
+#### Step 1: Define a shared interface
+
+```
+public interface Transaction extends Comparable<Transaction> {
+
+    long getTimestamp();
+
+    @Override
+    default int compareTo(Transaction other) {
+        return Long.compare(
+            this.getTimestamp(),
+            other.getTimestamp()
+        );
+    }
+}
+```
+
+Notice this declaration:
+
+```
+Comparable<Transaction>
+```
+
+It says that any implementing transaction can be compared with another `Transaction`, regardless of its concrete class.
+
+The interface provides the shared ordering rule: earlier timestamp first.
+
+#### Step 2: Implement the interface in two different classes
+
+```
+public class Deposit implements Transaction {
+
+    private final long timestamp;
+
+    public Deposit(long timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    @Override
+    public long getTimestamp() {
+        return timestamp;
+    }
+}
+```
+
+```
+public class Withdrawal implements Transaction {
+
+    private final long timestamp;
+
+    public Withdrawal(long timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    @Override
+    public long getTimestamp() {
+        return timestamp;
+    }
+}
+```
+
+Although `Deposit` and `Withdrawal` are separate classes, both implement `Transaction` and inherit the same `compareTo()` implementation.
+
+#### Step 3: Compare different concrete types
+Now the two different concrete types can be compared:
+```
+public class Main {
+
+    public static void main(String[] args) {
+
+        Transaction deposit = new Deposit(1000);
+        Transaction withdrawal = new Withdrawal(2000);
+
+        System.out.println(deposit.compareTo(withdrawal)); // Negative
+        System.out.println(withdrawal.compareTo(deposit)); // Positive
+    }
+}
+```
+
+Both objects implement `Transaction`, and the interface defines a shared ordering rule: compare their timestamps..
+
+The logic is effectively:
+
+```
+return Long.compare(1000L, 2000L);
+```
+
+Since the deposit timestamp is earlier, the deposit comes first.
+
+This is useful when different implementations represent values that share a meaningful ordering criterion.
+
+One design caution: if the interface's comparison method uses only timestamps, two distinct transactions with identical timestamps compare as zero. That can cause a `TreeSet<Transaction>` to treat them as duplicates. If both transactions must remain distinct, include a suitable tie-breaker in the ordering.
+
+#### Visualizing the relationship
+
+```
+                 Transaction
+                      |
+          Comparable<Transaction>
+                      |
+             compareTo(Transaction)
+                      |
+              Compare timestamps
+                 /          \
+                /            \
+           Deposit        Withdrawal
+           time: 1000     time: 2000
+
+                  Deposit comes first
+```
+
+The important idea is that the common interface defines what it means to compare these different transaction types.
+
+#### A subtle design issue: equal timestamps
+
+What happens if both transactions have the same timestamp?
+
+```
+Transaction deposit = new Deposit(1000);
+Transaction withdrawal = new Withdrawal(1000);
+
+System.out.println(deposit.compareTo(withdrawal)); // 0
+```
+
+The comparison returns zero, even though one transaction is a deposit and the other is a withdrawal.
+
+This is valid if the intended ordering considers timestamps alone. But it has consequences for sorted collections.
+
+```
+Set<Transaction> transactions = new TreeSet<>();
+
+transactions.add(deposit);
+transactions.add(withdrawal);
+
+System.out.println(transactions.size()); // 1
+```
+
+`TreeSet` treats elements that compare as zero as duplicates, even when their `equals()` methods would consider them different.
+
+If you need to preserve both transactions, add a meaningful tie-breaker, such as a unique transaction ID:
+
+```
+@Override
+default int compareTo(Transaction other) {
+    int result = Long.compare(
+        this.getTimestamp(),
+        other.getTimestamp()
+    );
+
+    if (result != 0) {
+        return result;
+    }
+
+    return this.getId().compareTo(other.getId());
+}
+```
+
+Here, `getId()` would need to be added to the `Transaction` interface and implemented by both classes. This produces a more complete ordering, assuming IDs are unique and stable.
+
+Also, if the class's natural ordering is intended to distinguish every pair of objects that `equals()` considers different, the implementation should be designed and tested for consistency with `equals()`.
+
+### How these three topics fit together
+
+1\. `equals()` vs. `compareTo()`
+
+Understand equality versus ordering, and why the methods have different contracts.
+
+2\. Type Compatibility and `ClassCastException`
+
+Understand how generics prevent invalid comparisons and how runtime type errors can still occur.
+
+3\. Cross-Type Ordering Through Shared Interfaces
+
+Learn how different concrete classes can share one meaningful natural ordering.
+
+### The important distinction
+
+| Feature                  | `equals()`                                        | `compareTo()`                                                                               |
+| ------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Declared in              | `Object`                                          | `Comparable<T>`                                                                             |
+| Parameter                | `Object`                                          | Type `T`                                                                                    |
+| Main purpose             | Determine equality                                | Determine relative ordering                                                                 |
+| Different concrete types | Can be passed to the method; often return `false` | Can be compared if the implementation supports it; otherwise may throw `ClassCastException` |
+| Typical use              | `HashSet`, `HashMap`, equality checks             | Sorting, `TreeSet`, `TreeMap`, priority queues                                              |
+
+A final nuance: `equals()` accepting an `Object` parameter does not mean every class must consider all types. It means the method can be called with any reference, and the implementation decides whether the objects are equal.
+
+The key takeaway: `Comparable` normally defines an ordering within a type, but you can design a shared interface such as `Transaction` when different classes have a meaningful common ordering. The crucial requirement is that the resulting comparison still obeys the `Comparable` contract.
+### Key takeaways
+
+- `equals()` checks equality; `compareTo()` establishes ordering.
+- `Comparable<T>` uses generics to restrict comparisons to a compatible type.
+- `ClassCastException` can occur when incompatible objects reach a comparison at runtime.
+- Cross-type ordering is possible when a shared interface defines a meaningful comparison rule.
+- For `TreeSet` and `TreeMap`, comparison results affect which elements or keys are considered equivalent. Design the ordering carefully.
+
+These concepts prepare you for the next topic: the `compareTo()` contract and testing, where you'll learn the rules that every natural ordering must obey, regardless of whether it compares one concrete type or multiple types through a shared interface.
+## Common mistakes
+
+| Mistake                                                                           | Better approach                                        |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Comparing numbers using subtraction                                               | Use `Integer.compare()` or `Long.compare()`            |
+| Implementing an inconsistent comparison rule                                      | Follow the `compareTo()` contract                      |
+| Assuming `compareTo() == 0` always means `equals()` is true                       | Design and document equality and ordering deliberately |
+| Implementing `Comparable` when there is no sensible default ordering              | Supply a `Comparator` instead                          |
+| Changing fields used for ordering while objects are stored in a sorted collection | Prefer stable comparison fields                        |
+
+## Where Java uses natural ordering
+
+`Comparable` is useful well beyond sorting lists.
+
+- Sorting: `Collections.sort()` and `List.sort()`.
+- Arrays: `Arrays.sort()` and natural-order `Arrays.binarySearch()`.
+- Sorted sets: `TreeSet` uses ordering to maintain elements and identify comparison-equivalent elements.
+- Sorted maps: `TreeMap` uses ordering to organize keys.
+- Priority queues: `PriorityQueue` uses natural ordering when no comparator is supplied.
+
+One important detail: binary search requires the data to be sorted according to a compatible ordering. Searching with a different ordering can produce incorrect results.
+
+## Summary
+
+The main idea is simple:
+
+1. `Comparable<T>` lets a class define its natural ordering.
+2. `compareTo()` compares the current object with another object.
+3. A negative, zero, or positive result communicates the relative ordering.
+4. Java sorting APIs and ordered data structures can use this ordering automatically.
+5. `Comparator<T>` provides alternative ordering rules without requiring changes to the class.

@@ -1,0 +1,274 @@
+# Bidirectional Search
+
+Bidirectional Search is a graph-searching technique that can significantly reduce the amount of work required to find a path between two nodes, especially in very large graphs.
+
+The main idea is simple:
+
+> Instead of searching from the starting node until you reach the destination, search from both ends simultaneously until the two searches meet.
+
+## 1. The problem with unidirectional search
+
+Suppose you want to find a path from node `S` to node `T`.
+
+With ordinary BFS (Breadth-First Search), you start at `S` and explore outward, level by level.
+
+```
+S → A → B → C → D → E → T
+```
+
+BFS explores nodes in this order:
+
+```
+Level 0: S
+Level 1: A
+Level 2: B
+Level 3: C
+Level 4: D
+Level 5: E
+Level 6: T
+```
+
+If the graph is large, BFS might need to explore many nodes before reaching the destination.
+
+## 2. How Bidirectional Search works
+
+Bidirectional Search runs two BFS processes simultaneously:
+
+1. Forward search: Starts at `S` and explores toward `T`.
+2. Backward search: Starts at `T` and explores toward `S`.
+
+Each search maintains its own queue and visited set.
+
+Consider this example:
+
+```
+S — A — B — C — D — E — T
+```
+
+The searches expand as follows:
+
+Initial state
+
+```
+S                         T
+```
+
+After the first expansion
+
+```
+S → A                 E ← T
+```
+
+After the second expansion
+
+```
+S → A → B         D ← E ← T
+```
+
+Searches meet
+
+```
+S → A → B → C ← D ← E ← T
+            ↑
+        Meeting node
+```
+
+Once a node is discovered by both searches, we can reconstruct the complete path by combining their paths.
+
+The resulting path is:
+
+```
+S → A → B → C → D → E → T
+```
+
+## 3. Why is it faster?
+
+The main advantage comes from reducing the search depth.
+
+Suppose:
+
+- The branching factor is \\(b\\): each node has approximately \\(b\\) neighbors.
+- The shortest path has depth \\(d\\).
+
+### Unidirectional BFS
+
+BFS explores approximately:
+
+\\[ 1+b+b^2+\cdots+b^d \\]
+
+Its time complexity is:
+
+\\[ O(b^d) \\]
+
+### Bidirectional BFS
+
+Each search explores approximately half the depth:
+
+\\[ \frac{d}{2} \\]
+
+Together, the searches explore approximately:
+
+\\[ 2\left(1+b+b^2+\cdots+b^{d/2}\right) \\]
+
+Its time complexity becomes:
+
+\\[ O(b^{d/2}) \\]
+
+**Visual comparison of search depth**
+![](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/bidirectional-search/visual-comparison-of-search-depth.png)
+
+{/* Unidirectional BFS
+
+# d
+
+Search depth
+
+S ───────→ T
+
+Bidirectional BFS
+
+# d / 2
+
+Per search
+
+S ──→ ←── T
+
+For example, if the branching factor is 10 and the shortest path has depth 6: */}
+
+| Algorithm         | Approximate search scale |
+| ----------------- | ------------------------ |
+| BFS               | \\(10^6\\)               |
+| Bidirectional BFS | \\(2 \times 10^3\\)      |
+
+Potentially 500× fewer explored nodes
+
+Illustrative exponential-growth comparison, not a guaranteed runtime speedup.
+
+This is why Bidirectional Search is particularly useful for large graphs.
+
+## 4. How do the two searches know they have met?
+
+Each search maintains a visited set.
+
+For example:
+
+```
+Forward visited:
+{S, A, B}
+
+Backward visited:
+{T, E, D}
+```
+
+When the forward search discovers a node already visited by the backward search, the searches have connected.
+
+Conceptually:
+
+```
+if (visited_forward[neighbor] &&
+    visited_backward[neighbor]) {
+
+    // The searches have met.
+    // Reconstruct the complete path.
+}
+```
+
+In an actual implementation, we also need to store parent information to reconstruct the path.
+
+```
+Forward parents:
+
+S
+└── A
+    └── B
+        └── C
+
+Backward parents:
+
+T
+└── E
+    └── D
+        └── C
+```
+
+The final path is reconstructed by following parent pointers from the meeting node in both directions.
+
+## 5. Bidirectional BFS vs. BFS vs. DFS
+
+| Property         | BFS                    | Bidirectional BFS            | DFS                    |
+| ---------------- | ---------------------- | ---------------------------- | ---------------------- |
+| Search direction | One direction          | Two directions               | One direction          |
+| Data structure   | Queue                  | Two queues                   | Stack / recursion      |
+| Shortest path    | Yes, unweighted        | Yes, unweighted              | Not guaranteed         |
+| Search space     | \\(O(b^d)\\)           | \\(O(b^{d/2})\\)             | Depends on graph       |
+| Memory           | High                   | Can be high                  | Usually lower          |
+| Best use         | General shortest paths | Known source and destination | Exploring entire graph |
+
+## 6. Important limitations
+
+Bidirectional Search is not always the best choice.
+
+1\. You need to know the destination.
+
+It is designed for finding a path between two known nodes, rather than exploring an entire graph.
+
+2\. Backward traversal must be possible.
+
+For an undirected graph, this is straightforward.
+
+For a directed graph, the backward search must follow incoming edges (the reverse graph), not outgoing edges.
+
+3\. Memory is still required.
+
+You maintain two visited sets, two queues, and parent information.
+
+4\. Finding the meeting point correctly matters.
+
+You must expand the searches carefully to guarantee a shortest path. Simply stopping at an arbitrary intersection during uneven expansion is not necessarily correct.
+
+## 7. Real-world applications
+
+| Application         | How Bidirectional Search helps                                   |
+| ------------------- | ---------------------------------------------------------------- |
+| GPS navigation      | Finds routes between two known locations                         |
+| Social networks     | Finds connection paths between two people                        |
+| Word transformation | Finds the shortest sequence of transformations between two words |
+| Network routing     | Finds paths between two network endpoints                        |
+| Game AI             | Finds paths between a character's starting and target positions  |
+| Knowledge graphs    | Finds relationships between two known entities                   |
+
+For example, in a social network:
+
+```
+You → Friend A → Friend B → Friend C → Celebrity
+```
+
+Instead of searching all connections outward from you, one search starts from you and another from the celebrity. They meet somewhere in the middle.
+
+## 8. Where should this topic go in your DSA roadmap?
+
+I recommend organizing it under Graph Traversal Algorithms, alongside BFS and DFS.
+
+```
+Graph Algorithms
+│
+├── Graph Traversal
+│   ├── Breadth-First Search (BFS)
+│   ├── Depth-First Search (DFS)
+│   └── Bidirectional Search
+│
+├── Shortest Path Algorithms
+│   ├── BFS (Unweighted Graphs)
+│   ├── Dijkstra's Algorithm
+│   ├── Bellman-Ford Algorithm
+│   └── Floyd-Warshall Algorithm
+│
+└── Graph Applications
+    ├── Social Network Analysis
+    ├── GPS Navigation
+    └── Network Routing
+```
+
+My recommendation: Treat Bidirectional Search as a variation of BFS rather than an entirely independent traversal algorithm. Its implementation relies on BFS, but its two-direction search strategy deserves its own explanation and practical lab.
+
+A good next practical exercise would be implementing Bidirectional BFS in Java, comparing the visited-node counts against ordinary BFS on the same graph.

@@ -1,1 +1,825 @@
 # Architecture
+
+The Java Virtual Machine (JVM) architecture describes the internal components that load Java classes, organize runtime memory, execute bytecode, manage objects, and interact with the operating system.
+
+To understand JVM architecture, imagine running a Java backend application. The JVM must load your classes, allocate memory for objects, execute methods, manage threads, reclaim unused memory, and optimize frequently executed code.
+
+These responsibilities are handled by several cooperating components.
+
+## JVM architecture diagram
+
+```
+                   JAVA SOURCE CODE
+                      Main.java
+                          |
+                          v
+                   +--------------+
+                   | Java Compiler|
+                   |    javac     |
+                   +--------------+
+                          |
+                          v
+                   +--------------+
+                   | Java Bytecode|
+                   |   Main.class |
+                   +--------------+
+                          |
+                          v
++------------------------------------------------------+
+|                    JVM PROCESS                       |
+|                                                      |
+|  +-----------------------------------------------+   |
+|  |          CLASS LOADER SUBSYSTEM               |   |
+|  |                                               |   |
+|  |  Loading -> Linking -> Initialization         |   |
+|  +-----------------------------------------------+   |
+|                     |                                |
+|                     v                                |
+|  +-----------------------------------------------+   |
+|  |             RUNTIME DATA AREAS                |   |
+|  |                                               |   |
+|  |  Shared areas:                                |   |
+|  |    +------------------+  +-----------------+  |   |
+|  |    |      HEAP        |  |   METHOD AREA   |  |   |
+|  |    | Objects / arrays |  | Class metadata  |  |   |
+|  |    +------------------+  +-----------------+  |   |
+|  |                                               |   |
+|  |  Per-thread areas:                            |   |
+|  |    +------------------+  +-----------------+  |   |
+|  |    |   JAVA STACK     |  |   PC REGISTER   |  |   |
+|  |    | Method frames    |  | Current bytecode|  |   |
+|  |    +------------------+  +-----------------+  |   |
+|  |    | NATIVE METHOD STACK (where applicable)|  |   |
+|  |    +---------------------------------------+  |   |
+|  +-----------------------------------------------+   |
+|                     |                                |
+|                     v                                |
+|  +-----------------------------------------------+   |
+|  |              EXECUTION ENGINE                 |   |
+|  |                                               |   |
+|  |  +-------------+  +------------------------+  |   |
+|  |  | Interpreter |  | JIT Compiler            | |   |
+|  |  +-------------+  +------------------------+  |   |
+|  |                                               |   |
+|  |  Garbage Collector manages reclaimable heap   |   |
+|  +-----------------------------------------------+   |
+|                     |                                |
+|                     v                                |
+|  +-----------------------------------------------+   |
+|  |          JNI / NATIVE INTERFACE               |   |
+|  |          Native Libraries (C/C++)             |   |
+|  +-----------------------------------------------+   |
++------------------------------------------------------+
+                     |
+                     v
+              OPERATING SYSTEM
+                     |
+                     v
+                 CPU / RAM
+```
+
+This diagram is conceptual. In particular, garbage collection is a memory-management service rather than a stage through which every instruction passes, and native code can be invoked when needed.
+
+## Main components of JVM architecture
+
+There are three key components of the JVM: a class loader that initializes and links classes and interfaces;
+runtime data, which includes memory allocation; and the execution engine. 
+
+The architecture can be divided into four major areas:
+
+1. Class Loader Subsystem
+2. Runtime Data Areas
+3. Execution Engine
+4. Native interface and native libraries
+
+Let's examine each one.
+
+## Class Loader Subsystem
+
+The Class Loader Subsystem loads compiled Java classes into the JVM when they are needed.
+
+For example, after compiling:
+
+```
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello JVM");
+    }
+}
+```
+
+The compiler produces `Main.class`, containing Java bytecode.
+
+When you run:
+
+```
+java Main
+```
+
+the JVM loads the required class definitions and makes them available for execution.
+
+### The three main phases
+
+1\. **Loading**: Finds the class bytecode and creates its runtime representation.
+
+2\. **Linking**: Verifies the bytecode, prepares static storage, and resolves symbolic references as required.
+
+3\. **Initialization**: Executes class initialization code, including static field initializers and static initialization blocks.
+
+Linking itself consists of verification, preparation, and resolution. Resolution can happen lazily, so not every symbolic reference must be resolved immediately.
+
+### Types of class loaders
+
+| Class loader             | Responsibility                                                         |
+| ------------------------ | ---------------------------------------------------------------------- |
+| Bootstrap Class Loader   | Loads fundamental Java runtime classes                                 |
+| Platform Class Loader    | Loads platform-level classes and libraries                             |
+| Application Class Loader | Loads application classes from the configured classpath or module path |
+
+Custom class loaders can also load classes from sources such as application-specific repositories or network locations.
+
+Why this matters: Class loading is important for Java modules, application servers, plugin systems, dependency isolation, and frameworks such as Spring.
+
+## Runtime Data Areas
+
+Runtime Data Areas are the memory and execution-state areas used while a Java program runs.
+
+Some are shared by all threads in a JVM, while others are created for individual threads.
+
+### Memory-area classification
+
+| Area                | Scope                            | Purpose                                              |
+| ------------------- | -------------------------------- | ---------------------------------------------------- |
+| Heap                | Shared                           | Stores objects and arrays                            |
+| Method Area         | Shared                           | Stores class-level runtime structures and metadata   |
+| Java Stack          | Per-thread                       | Stores method frames and local execution state       |
+| PC Register         | Per-thread                       | Tracks the current bytecode instruction for a thread |
+| Native Method Stack | Typically per-thread, where used | Supports native method execution                     |
+
+Let's understand the most important areas individually.
+
+### Heap
+
+The heap is the runtime area primarily used for allocating Java objects and arrays.
+
+Example:
+
+```
+class Employee {
+    String name;
+
+    Employee(String name) {
+        this.name = name;
+    }
+}
+
+public class Main {
+    public static void main(String[] args) {
+        Employee employee = new Employee("Ali");
+    }
+}
+```
+
+Conceptually:
+
+```
+JAVA STACK                         HEAP
++------------------+              +---------------------+
+| employee         |------------->| Employee object     |
+| (reference)      |              | name                |
++------------------+              +---------------------+
+                                            |
+                                            v
+                                  +---------------------+
+                                  | String object "Ali" |
+                                  +---------------------+
+```
+
+The local variable `employee` refers to an `Employee` object. The object is conceptually allocated on the heap, although JVM optimizations can eliminate or transform some allocations.
+
+Important heap characteristics:
+
+- It is shared between Java threads.
+- It is managed by the garbage collector.
+- Its size can be configured.
+- Excessive allocation or retained objects can cause high memory usage or `OutOfMemoryError`.
+
+For example:
+
+```
+java -Xms256m -Xmx1g Main
+```
+
+Here, `-Xms256m` sets the initial heap size and `-Xmx1g` sets the maximum heap size.
+
+### Java Stack
+
+Each Java thread has its own JVM stack.
+
+The stack contains frames, with a frame created when a method is invoked and removed when that invocation completes.
+
+A frame contains information such as:
+
+- Local variables.
+- An operand stack used for bytecode operations.
+- Data supporting dynamic linking and method invocation.
+
+Example:
+
+```
+public class Main {
+    static int add(int a, int b) {
+        int result = a + b;
+        return result;
+    }
+
+    public static void main(String[] args) {
+        int total = add(10, 20);
+        System.out.println(total);
+    }
+}
+```
+
+Conceptual stack activity:
+
+```
+1. main() begins
+
++-----------------------+
+| main() frame          |
+| total                 |
++-----------------------+
+
+2. add(10, 20) is called
+
++-----------------------+
+| add() frame           |
+| a = 10                |
+| b = 20                |
+| result = 30           |
++-----------------------+
+| main() frame          |
+| total                 |
++-----------------------+
+
+3. add() returns
+
++-----------------------+
+| main() frame          |
+| total = 30            |
++-----------------------+
+```
+
+The top frame is the currently executing method invocation.
+
+If recursion or deeply nested calls consume too much stack space, the JVM may throw `StackOverflowError`.
+
+### Method Area
+
+The Method Area is a JVM specification concept describing storage for class-level runtime structures.
+
+It includes information such as:
+
+- Class and interface structures.
+- Runtime constant pools.
+- Method and field metadata.
+- Information needed for method execution.
+
+In HotSpot JVMs, much class metadata is stored in Metaspace, which uses native memory rather than being part of the Java heap.
+
+Do not confuse the Method Area with the Java Stack:
+
+- The Method Area contains class-level runtime information.
+- The Java Stack contains per-thread method frames.
+
+Static fields are associated with their declaring classes, but their exact storage representation is an implementation detail. It is therefore misleading to assume that all static fields simply live inside a separate physical Method Area.
+
+### PC Register
+
+PC stands for Program Counter.
+
+Each JVM thread has its own PC register, which tracks the current JVM instruction being executed.
+
+For example:
+
+```
+Thread A PC -> instruction 15
+Thread B PC -> instruction 42
+Thread C PC -> instruction 8
+```
+
+Each thread can execute a different part of the program. Its PC register represents its own execution position.
+
+Under the JVM specification, the PC register for a thread executing a non-native method identifies the current JVM instruction address. Its value is undefined while executing a native method.
+
+### Native Method Stack
+
+The Native Method Stack supports native method execution when required by a JVM implementation.
+
+For example, Java can invoke native code through JNI:
+
+```jav
+public class NativeExample {
+    public native void performNativeOperation();
+}
+```
+
+The `native` keyword indicates that the method implementation is provided outside ordinary Java bytecode.
+
+The native method stack is distinct conceptually from the Java stack, although implementations may combine or organize their underlying storage differently.
+
+## Execution Engine
+
+The Execution Engine executes the bytecode loaded into the JVM.
+
+Its principal components are the interpreter, JIT compiler, and garbage-collection facilities.
+
+The core responsibility of the execution engine is to convert bytecode so that it can be executed on
+the host central processing unit (CPU). There are three primary implementations of this process:
+- Interpretation
+- Ahead-of-Time (AOT) compilation
+- JIT compilation
+
+### Interpreter
+
+Interpretation is a technique that the JVM can use to read and execute bytecode without converting
+it into machine code native to the host CPU. We can invoke this mode by using the java command
+in a terminal window. 
+
+The interpreter executes JVM bytecode instructions.
+
+For example, an integer addition may be represented by a bytecode instruction that adds two values on the operand stack.
+
+Here is an example:
+```sh
+java Main.java
+```
+
+The only real advantage of using the interpretation mode is to save time by avoiding the compilation
+process. This can be useful for testing and is not recommended for production systems. Performance
+is a typical problem when using interpretation as compared to AOT and JIT.
+
+Advantages:
+
+- Code can begin executing without compiling every method into native code.
+- It is useful for code that runs only occasionally.
+
+Disadvantage:
+
+\- Repeated interpretation can introduce overhead for frequently executed code.
+
+### AOT compilation
+We can compile our bytecode into native machine code in advance of application execution. This
+approach is called AOT and can be used for performance enhancements. 
+
+Specific advantages to this approach include the following:
+- You can avoid normal application startup delays associated with the traditional JIT compilation process.
+- The startup execution speed is consistent.
+- Startup CPU load is typically reduced.
+- Mitigate security risks by avoiding other compilation approaches.
+- You can build optimization into your startup code.
+
+There are also a few disadvantages to using the AOT compilation approach:
+- When you compile ahead of time, you lose the ability to deploy on any device
+- It is possible that your application will be bloated, increasing storage and related costs.
+- Your application will not be able to take advantage of JVM optimizations that are associated with JIT compilation
+- The complexity of code maintenance increases.
+
+Understanding the benefits and disadvantages can help you decide when to, and when not to, use the
+AOT compilation process.
+
+### JIT compiler
+
+JIT means Just-in-Time compilation.
+
+The JIT compiler translates frequently executed bytecode into native machine code that the CPU can execute directly.
+
+The JIT compilation process is likely the one we are most familiar with. We invoke the JVM and have
+it convert our bytecode into machine code specific to the current host machine. This machine code
+is referred to as native machine code because it is native to the local CPU. This compilation occurs
+just in time, or just before execution. This means the entirety of the bytecode is not compiled at once.
+
+Conceptually:
+
+```
+Java Bytecode
+      |
+      v
+ Interpreter
+      |
+      v
+ Runtime profiling
+      |
+      v
+ Frequently executed code
+      |
+      v
+ JIT Compiler
+      |
+      v
+ Native Machine Code
+      |
+      v
+ CPU executes optimized code
+```
+
+Modern HotSpot JVMs can use tiered compilation and runtime profiling to decide which code benefits from compilation.
+
+For example, a method called millions of times in a loop may become a candidate for compilation and optimization.
+
+JIT compilation can improve performance, but it also consumes CPU time and memory. Short-lived applications may not benefit as much as long-running services.
+
+The advantages of JIT compilation are increased performance over the interpretation approach, the
+ability to deploy your application on any device (platform agnostic), and the ability to optimize.
+The JIT compiler process is capable of optimizing the code (for example, removing dead code, loop
+unrolling, and more. The disadvantages are the overhead required at the initial startup and the use of
+memory caused by the need to store native machine code translations.
+
+### Garbage Collector
+
+The garbage collector reclaims memory occupied by objects that are no longer reachable from relevant GC roots.
+
+Example:
+
+```Java
+Employee employee = new Employee("Ali");
+
+employee = null;
+```
+
+If no other reachable reference points to the object, the `Employee` instance becomes eligible for garbage collection.
+
+```
+Before:
+employee --------> Employee object
+
+After:
+employee --------> null
+
+Employee object:
+No reachable references
+        |
+        v
+Eligible for garbage collection
+```
+
+Eligibility does not mean that collection happens immediately.
+
+Common HotSpot collectors include G1 and ZGC. They offer different trade-offs involving throughput, latency, memory usage, and pause times.
+
+One important distinction: garbage collection is not the same as the Java Memory Model. Garbage collection manages object memory; the Java Memory Model defines rules for visibility and ordering of shared memory operations between threads.
+
+## JNI and Native Libraries
+
+The Java Native Interface (JNI) provides a mechanism for Java code to interact with native code, commonly written in C or C++.
+
+Typical use cases include:
+
+- Integrating an existing native library.
+- Accessing platform-specific functionality.
+- Interacting with specialized hardware or operating-system APIs.
+- Calling native implementations of selected operations.
+
+For example:
+
+```
+public class NativeExample {
+    static {
+        System.loadLibrary("nativeexample");
+    }
+
+    public native int calculate(int value);
+}
+```
+
+The library must provide a compatible native implementation.
+
+JNI is powerful, but native code introduces additional concerns:
+
+- Platform compatibility.
+- Native memory management.
+- Thread-safety issues.
+- Potential process crashes caused by native-code bugs.
+
+Ordinary Java applications do not need to use JNI directly to perform everyday tasks such as file operations or HTTP requests; Java libraries provide these capabilities.
+
+## How all the components work together
+
+Let's trace a Java application from compilation to execution.
+
+1. Compilation: `javac` compiles `.java` source files into `.class` bytecode files.
+2. Loading: The class loader loads the required class definitions.
+3. Linking: The JVM verifies class files, prepares class-level storage, and resolves references as necessary.
+4. Initialization: Static initializers execute when required by Java's initialization rules.
+5. Execution: The interpreter and JIT compiler execute the application's bytecode and compiled machine code.
+6. Memory management: The JVM manages runtime areas and garbage collection.
+7. Operating-system interaction: The JVM uses operating-system facilities for threads, networking, files, and other services.
+
+## JVM architecture vs. JVM implementation
+
+It is useful to distinguish the JVM specification from a particular JVM implementation.
+
+| JVM specification                            | JVM implementation                            |
+| -------------------------------------------- | --------------------------------------------- |
+| Defines required runtime behavior            | Implements that behavior                      |
+| Specifies runtime data areas conceptually    | Chooses concrete memory layouts               |
+| Defines bytecode instruction semantics       | Implements bytecode execution                 |
+| Defines class-loading and verification rules | Implements class loaders and verification     |
+| Defines the JVM's runtime contracts          | Chooses JIT strategies and garbage collectors |
+
+For example, HotSpot is a JVM implementation commonly used by OpenJDK distributions. Metaspace, tiered compilation, and specific garbage collectors describe implementation details rather than universal requirements for every JVM.
+
+## JVM vs. Linux architecture
+The JVM does resemble a small operating system in several ways: it manages memory, executes code, supports threads, provides runtime services, and isolates certain parts of program execution.
+
+However, there is one important distinction: Linux manages processes and system resources, while the JVM manages a Java execution environment inside a process that usually runs under Linux.
+
+Let's compare them from a systems-programming perspective.
+```
+|--------------------------------------------------------------------
+|                            Java Application                       | 
+|                                                                   |
+|        Your classes, objects, libraries and application threads   |
+|-------------------------------------------------------------------|
+|                            JVM                                    |
+|  ---------------------------  -------------------------           |
+|  |     Memory manager      |  |  Thread runtime       |           |
+|  |                         |  |                       |           |
+|  |   Heap, GC, allocation  |  |Java thread execution  |           |
+|  ---------------------------  -------------------------           |
+|                                                                   |
+|  ---------------------------  -------------------------           |
+|  |     Class loader        |  |   Execution engine    |           |
+|  |                         |  |                       |           |
+|  |Class loading and linking|  |  Interpreter and JIT  |           |
+|  --------------------------   -------------------------           |           
+|-------------------------------------------------------------------|
+                              ↓
+     System calls, native libraries and OS interfaces             
+|-------------------------------------------------------------------|
+|                           Linux Kernel                            |
+|  ---------------------------  -------------------------           |
+|  |     Scheduler           |  |  Virtual memory       |           |
+|  |                         |  |                       |           |
+|  |   CPU scheduling        |  |Address spaces, pages  |           |
+|  ---------------------------  -------------------------           |
+|                                                                   |
+|  ---------------------------  --------------------------          |
+|  |     Process / threads   |  |   I/O and networking   |          |
+|  |                         |  |                        |          |
+|  |Execution and lifecycle  |  |Files, sockets, devices |          |
+|  --------------------------  -------------------------------------|           
+                              ↓
+                           Hardware
+
+            CPU, RAM, storage and network devices
+```
+The JVM sits above Linux and uses the resources Linux provides. Some JVM responsibilities resemble kernel responsibilities, but others—such as Java bytecode verification and JIT compilation—have no direct equivalent in a general-purpose OS kernel.
+
+### Comparing their responsibilities
+
+| Responsibility    | JVM                                                         | Linux kernel                                                                 |
+| ----------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Execution         | Executes Java bytecode and JIT-compiled code                | Schedules processes and threads for CPU execution                            |
+| Memory management | Manages Java heap objects and garbage collection            | Manages virtual address spaces, physical pages and mappings                  |
+| Threads           | Provides Java thread semantics and runtime coordination     | Provides native thread primitives and CPU scheduling                         |
+| Synchronization   | Java monitors, `synchronized`, Java concurrency APIs        | Futexes and other lower-level synchronization mechanisms                     |
+| Loading code      | Loads and links Java classes                                | Loads executable files and shared libraries                                  |
+| Security          | Bytecode verification, access checks and runtime mechanisms | Process isolation, permissions, capabilities and security mechanisms         |
+| Networking        | Java sockets and networking APIs                            | TCP/IP stack, sockets and network-device interfaces                          |
+| Native execution  | JIT compilation and JNI                                     | Executes native machine instructions; the CPU executes them under OS control |
+
+Notice the pattern: the JVM provides a higher-level runtime abstraction, while Linux provides the lower-level operating-system facilities.
+
+### Memory management: JVM heap vs. Linux virtual memory
+
+This is one of the most interesting comparisons.
+
+#### Linux memory management
+
+Linux manages virtual address spaces and physical memory. A process sees a virtual address space that Linux and the CPU's memory-management hardware map onto physical memory.
+
+Conceptually:
+
+```
+Linux process virtual address space
++------------------------------+
+| Executable code              |
++------------------------------+
+| Shared libraries             |
++------------------------------+
+| Heap allocations             |
++------------------------------+
+| Memory-mapped regions        |
++------------------------------+
+| Thread stacks                |
++------------------------------+
+```
+
+This is simplified: actual layouts depend on architecture, configuration, and runtime behavior.
+
+Linux does not ordinarily understand that a particular allocation represents a Java `Employee` object. It manages memory pages and mappings rather than Java object lifecycles.
+
+#### JVM memory management
+
+The JVM manages Java objects within its own runtime.
+
+```
+Java application memory
++------------------------------+
+| Java objects and arrays       |
++------------------------------+
+| Garbage collector metadata    |
++------------------------------+
+| Allocation regions            |
++------------------------------+
+| Object references and fields  |
++------------------------------+
+```
+
+The JVM may request memory from the OS and organize it into heap regions. The garbage collector determines which Java objects are eligible for reclamation.
+
+For example:
+
+```
+Employee employee = new Employee("Ali");
+employee = null;
+```
+
+The JVM can determine that the object is unreachable if no other relevant references exist. Linux cannot make that Java-level determination; it only sees the memory used by the JVM process.
+
+The key relationship is:
+
+- Linux manages memory at the process and virtual-memory level.
+- The JVM manages Java objects and their lifetimes at the language-runtime level.
+
+These systems interact, but their responsibilities are different.
+
+### Threads: Java threads vs. Linux threads
+
+Consider:
+
+```
+public class Main {
+    public static void main(String[] args) {
+        Thread worker = new Thread(() -> {
+            System.out.println("Running in worker thread");
+        });
+
+        worker.start();
+    }
+}
+```
+
+On a conventional HotSpot JVM, `Thread.start()` typically results in a native OS thread being created for a platform thread.
+
+The relationship is approximately:
+
+```
+JVM process
+|
++-- Main Java platform thread
+|      |
+|      +-- Linux native thread
+|
++-- Worker Java platform thread
+       |
+       +-- Linux native thread
+```
+
+Linux schedules the native threads onto available CPU cores. The JVM manages Java-specific thread state and semantics, while Linux controls when those native threads run.
+
+### What about virtual threads?
+
+Modern Java also supports virtual threads.
+
+```
+Thread.startVirtualThread(() -> {
+    System.out.println("Running in a virtual thread");
+});
+```
+
+Virtual threads are managed by the Java runtime rather than requiring a dedicated native thread for each virtual thread.
+
+Many virtual threads can share a smaller set of carrier platform threads, which are backed by OS threads.
+
+```
+JVM
+|
++-- Virtual thread A --+
++-- Virtual thread B --+--> Carrier platform threads
++-- Virtual thread C --+          |
+                                  v
+                           Linux native threads
+```
+
+This is a particularly clear example of the JVM providing a higher-level execution abstraction on top of OS capabilities.
+
+One caveat: blocking operations and certain execution conditions can affect how virtual threads use carrier threads, so the mapping is not as simple as assigning one native thread to each virtual thread.
+
+### The Java Memory Model vs. Linux memory management
+
+These concepts sound similar, but they answer different questions.
+
+Linux virtual memory asks:
+
+- Which virtual addresses map to which memory pages?
+- Which memory is accessible to a process?
+- When should physical pages be allocated or reclaimed?
+
+The Java Memory Model (JMM) asks:
+
+- When does a write by one Java thread become visible to another?
+- What ordering guarantees exist between memory operations?
+- What behavior does synchronization establish?
+
+For example:
+
+```
+class Shared {
+    static boolean ready = false;
+}
+```
+
+If one Java thread writes `ready = true` while another reads it without appropriate synchronization, the reader is not guaranteed to observe the update promptly—or at all under the permitted execution behavior.
+
+Declaring the field `volatile` changes the memory-visibility and ordering guarantees:
+
+```
+class Shared {
+    static volatile boolean ready = false;
+}
+```
+
+The JMM specifies the guarantees that Java code receives. The JVM and JIT compiler must implement those guarantees, using appropriate CPU instructions, barriers, and runtime mechanisms where needed.
+
+Linux virtual memory alone does not provide the Java-level `volatile` contract.
+
+### Is the JVM really a mini operating system?
+
+A useful way to think about it is to compare the abstractions each system provides.
+
+| System concept                | JVM equivalent or analogy                     |
+| ----------------------------- | --------------------------------------------- |
+| Process execution environment | JVM runtime inside an OS process              |
+| Memory allocator              | JVM heap allocator                            |
+| Resource reclamation          | Garbage collector                             |
+| Thread abstraction            | Java platform and virtual threads             |
+| Executable loader             | Class loader subsystem                        |
+| Instruction execution         | Interpreter and JIT compiler                  |
+| Runtime access checks         | Java access control and bytecode verification |
+| Synchronization facilities    | Java monitors and concurrency APIs            |
+
+These are analogies, not exact one-to-one mappings. In particular, garbage collection is not equivalent to Linux's physical-memory reclamation, and Java class loading is not equivalent to loading an ELF executable.
+
+A JVM also normally does not provide the complete isolation that a separate OS process provides. Java classes in the same JVM generally share the same process, heap, and failure domain. A serious JVM crash can terminate all applications hosted inside that JVM.
+
+### A useful mental model for Java backend developers
+
+When you run a Spring Boot application on Linux, think about three layers:
+
+```
++--------------------------------------+
+| Application layer                    |
+|                                      |
+| Spring Boot, business logic, APIs    |
++--------------------------------------+
+| Java runtime layer                   |
+|                                      |
+| JVM, GC, JIT, class loaders, JMM     |
++--------------------------------------+
+| Operating-system layer               |
+|                                      |
+| Linux processes, threads, memory,    |
+| files, sockets, scheduler            |
++--------------------------------------+
+| Hardware layer                       |
+|                                      |
+| CPU, RAM, storage, network            |
++--------------------------------------+
+```
+
+This layered model is useful when diagnosing production problems:
+
+- High Java heap usage: investigate object allocation, retained references and garbage collection.
+- High process memory but low heap usage: investigate native memory, thread stacks, Metaspace, code cache and memory mappings.
+- High CPU usage: investigate application code, JIT compilation, GC and native execution.
+- Too many threads: examine Java thread creation, executor pools, virtual threads and OS thread limits.
+- Slow network requests: examine application behavior, connection pools, Linux sockets and network conditions.
+
+## Key takeaways
+
+| Component              | Main responsibility                                        |
+| ---------------------- | ---------------------------------------------------------- |
+| Class Loader Subsystem | Loads, links, and initializes classes                      |
+| Heap                   | Stores objects and arrays                                  |
+| Method Area            | Holds class-level runtime structures                       |
+| Java Stack             | Holds method frames and local execution state              |
+| PC Register            | Tracks a thread's bytecode execution position              |
+| Native Method Stack    | Supports native method execution                           |
+| Interpreter            | Executes bytecode instructions                             |
+| JIT Compiler           | Compiles frequently executed code into native machine code |
+| Garbage Collector      | Reclaims eligible object memory                            |
+| JNI                    | Enables interaction with native code                       |
+
+For your Java backend studies, a productive next step is to explore JVM Memory Management in depth: heap vs. stack, object allocation, Metaspace, garbage-collection roots, garbage-collection algorithms, and memory troubleshooting. These concepts are directly useful when diagnosing high memory usage, `OutOfMemoryError`, excessive GC pauses, and performance problems in Spring Boot services.

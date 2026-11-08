@@ -1,0 +1,1264 @@
+# Garbage Collection (GC) Algorithms in Java
+
+Let's build on what we discussed about heap objects, references, reachability, and `finalize()`.
+
+A Garbage Collection algorithm is a strategy the JVM uses to identify objects that are no longer needed and reclaim the heap memory they occupy.
+
+The important question is:
+
+> How does the JVM determine which objects can be removed, and how does it reclaim their memory?
+
+There are several GC algorithms. They use different approaches to identify garbage, reclaim memory, reduce fragmentation, and minimize application pauses.
+
+## The foundation: Reachability analysis
+
+Before looking at individual algorithms, remember this fundamental rule:
+
+An object is considered alive if it is reachable from a GC root.
+
+Typical GC roots include:
+
+- References in active Java stack frames.
+- References held by active threads.
+- Static fields of loaded classes (subject to class unloading and reachability rules).
+- JNI references.
+- Certain JVM-internal references.
+
+Consider this object graph:
+
+```
+                 GC Roots
+                    |
+                    v
+                [Object A]
+                 /      \
+                v        v
+          [Object B]  [Object C]
+                |
+                v
+          [Object D]
+
+          [Object E] ───► [Object F]
+```
+
+Objects A, B, C, and D are reachable.
+
+Objects E and F are unreachable from the roots, even though they reference each other.
+
+Therefore:
+
+| Object | Reachable? | Garbage? |
+| ------ | ---------- | -------- |
+| A      | Yes        | No       |
+| B      | Yes        | No       |
+| C      | Yes        | No       |
+| D      | Yes        | No       |
+| E      | No         | Yes      |
+| F      | No         | Yes      |
+
+This is why Java can collect circular references.
+
+## 1. Mark-Sweep Algorithm
+
+Mark-Sweep is one of the fundamental garbage collection algorithms.
+
+It has two main phases:
+
+1. Mark: Traverse objects reachable from GC roots and mark them as alive.
+2. Sweep: Scan the heap and reclaim objects that were not marked.
+
+### Phase 1: Mark
+
+Initially, imagine that all objects are unmarked.
+
+```
+Heap:
+
+[A]  [B]  [C]  [D]  [E]  [F]
+```
+
+Starting from GC roots, the collector traverses the object graph.
+
+Suppose A references B and C, and B references D.
+
+After marking:
+
+```
+[A✓] [B✓] [C✓] [D✓] [E ] [F ]
+```
+
+The check mark means the object is reachable.
+
+### Phase 2: Sweep
+
+The collector scans the heap and reclaims unmarked objects.
+
+```
+Before:
+
+[A✓] [B✓] [C✓] [D✓] [E ] [F ]
+
+After:
+
+[A ]  [B ]  [C ]  [D ]  [Free] [Free]
+```
+
+Illustrative representation; actual heap layout depends on the collector.
+
+### Advantages and disadvantages
+
+| Advantages                                | Disadvantages                                                 |
+| ----------------------------------------- | ------------------------------------------------------------- |
+| Relatively simple concept                 | Requires scanning the heap to find garbage                    |
+| Can collect circular references           | Can cause fragmentation                                       |
+| Does not require moving surviving objects | May need additional work to allocate large contiguous objects |
+
+What is fragmentation?
+
+Suppose the heap looks like this:
+
+```
+Before collection:
+
+[A][Garbage][B][Garbage][C][Garbage][D]
+
+After Mark-Sweep:
+
+[A][Free][B][Free][C][Free][D]
+```
+
+There is free memory, but it is divided into small gaps.
+
+A large object might not fit into any individual gap, even if the total free memory is sufficient.
+
+This is called heap fragmentation.
+
+
+### Educational simulation of the algorithm
+The Mark-Sweep algorithm uses graph traversal algorithms and auxiliary data structures to determine which heap objects are reachable and which can be reclaimed.
+
+The most important connection is:
+
+> Mark-Sweep is essentially a graph-reachability algorithm followed by a heap-scanning and memory-reclamation phase.
+
+Let's examine the data structures and algorithms first, then implement a simplified Mark-Sweep garbage collector in Java.
+
+#### How does Mark-Sweep represent the heap?
+
+Think of the heap as a directed graph:
+
+- Each heap object is a vertex (node).
+- Each object reference is a directed edge.
+- GC roots are the starting vertices.
+- Unreachable vertices represent garbage.
+
+For example:
+
+```
+                 GC Roots
+                    |
+                    v
+                   [A]
+                  /   \
+                 v     v
+                [B]   [C]
+                 |     |
+                 v     v
+                [D]   [E]
+
+                [F] ──► [G]
+```
+
+The graph has seven objects.
+
+Starting from A, the collector can reach:
+
+```
+A → B → D
+A → C → E
+```
+
+Objects F and G form a disconnected component. They are garbage because neither is reachable from a GC root.
+
+#### Data structures used by Mark-Sweep
+
+| Data structure       | Purpose                                            |
+| -------------------- | -------------------------------------------------- |
+| Object graph         | Represents objects and their references            |
+| Mark bit / mark flag | Records whether an object is reachable             |
+| Stack or queue       | Holds objects waiting to be examined               |
+| Root set             | Contains starting references                       |
+| Heap object registry | Allows the collector to scan all allocated objects |
+
+There are also implementation-specific structures for managing free memory, such as free lists, allocation bitmaps, and block metadata.
+
+##### 2.1 Mark bit
+
+Each object has a logical mark state:
+
+```
+class HeapObject {
+    boolean marked;
+}
+```
+
+Initially:
+
+```
+Object A: marked = false
+Object B: marked = false
+Object C: marked = false
+```
+
+When the collector discovers an object from a root, it marks it:
+
+```
+Object A: marked = true
+Object B: marked = true
+Object C: marked = false
+```
+
+Real JVMs generally use specialized metadata rather than a Java boolean field in every object.
+
+##### 2.2 Stack or Queue
+
+The collector needs a way to remember which objects still need their references examined.
+
+There are two common approaches:
+
+- DFS (Depth-First Search): Uses a stack.
+- BFS (Breadth-First Search): Uses a queue.
+
+Both can perform reachability analysis correctly.
+
+For a Mark-Sweep implementation, DFS with a stack is a straightforward choice.
+
+##### 2.3 Heap registry
+
+The collector needs to know which objects are allocated so it can sweep through all of them.
+
+Conceptually:
+
+```
+Heap:
+[A] [B] [C] [D] [E] [F] [G]
+```
+
+After marking, it examines every allocated object:
+
+```
+[A✓] [B✓] [C✓] [D✓] [E✓] [F ] [G ]
+```
+
+Unmarked objects are reclaimed.
+
+#### 3. Java implementation: Mark-Sweep using DFS
+
+We'll build a small simulated heap.
+
+Our implementation will have three main components:
+
+1. `HeapObject`: Represents an allocated object and its references.
+2. `Heap`: Maintains all allocated objects and GC roots.
+3. `markAndSweep()`: Performs marking and sweeping.
+
+##### 3.1 HeapObject class
+
+```
+import java.util.ArrayList;
+import java.util.List;
+
+class HeapObject {
+    private final String name;
+
+    // References to other heap objects
+    private final List<HeapObject> references = new ArrayList<>();
+
+    // GC mark flag
+    private boolean marked = false;
+
+    public HeapObject(String name) {
+        this.name = name;
+    }
+
+    public void addReference(HeapObject object) {
+        references.add(object);
+    }
+
+    public List<HeapObject> getReferences() {
+        return references;
+    }
+
+    public boolean isMarked() {
+        return marked;
+    }
+
+    public void setMarked(boolean marked) {
+        this.marked = marked;
+    }
+
+    public String getName() {
+        return name;
+    }
+}
+```
+
+Notice that `HeapObject` has:
+
+- `references`: Represents outgoing edges in our object graph.
+- `marked`: Indicates whether the object is reachable.
+- `name`: Helps us identify objects in the output.
+
+##### 3.2 Heap class
+
+This class maintains two important collections:
+
+```
+private final List<HeapObject> objects;
+private final List<HeapObject> roots;
+```
+
+- `objects`: Every allocated object in our simulated heap.
+- `roots`: Objects directly reachable from GC roots.
+
+```
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Queue;
+
+class Heap {
+
+    private final List<HeapObject> objects = new ArrayList<>();
+    private final List<HeapObject> roots = new ArrayList<>();
+
+    // Allocate an object in our simulated heap
+    public HeapObject allocate(String name) {
+        HeapObject object = new HeapObject(name);
+        objects.add(object);
+        return object;
+    }
+
+    // Add an object to the simulated GC root set
+    public void addRoot(HeapObject object) {
+        roots.add(object);
+    }
+
+    // Remove an object from the simulated GC root set
+    public void removeRoot(HeapObject object) {
+        roots.remove(object);
+    }
+
+    // Display all allocated objects
+    public void displayHeap() {
+        System.out.println("Heap objects:");
+
+        for (HeapObject object : objects) {
+            System.out.println("  " + object.getName());
+        }
+    }
+
+    // MARK + SWEEP
+    public void markAndSweep() {
+
+        System.out.println("\n=== MARK PHASE ===");
+
+        mark();
+
+        System.out.println("\n=== SWEEP PHASE ===");
+
+        sweep();
+    }
+
+    // MARK: DFS using a stack
+    private void mark() {
+
+        Queue<HeapObject> stack = new ArrayDeque<>();
+
+        // Start from GC roots
+        for (HeapObject root : roots) {
+
+            if (!root.isMarked()) {
+                root.setMarked(true);
+                stack.push(root);
+            }
+        }
+
+        // Traverse reachable objects
+        while (!stack.isEmpty()) {
+
+            HeapObject current = stack.pop();
+
+            System.out.println("Marking references of: "
+                    + current.getName());
+
+            for (HeapObject reference : current.getReferences()) {
+
+                if (!reference.isMarked()) {
+
+                    reference.setMarked(true);
+
+                    stack.push(reference);
+                }
+            }
+        }
+    }
+
+    // SWEEP: Reclaim unreachable objects
+    private void sweep() {
+
+        Iterator<HeapObject> iterator = objects.iterator();
+
+        while (iterator.hasNext()) {
+
+            HeapObject object = iterator.next();
+
+            if (!object.isMarked()) {
+
+                System.out.println("Collecting: "
+                        + object.getName());
+
+                iterator.remove();
+
+            } else {
+
+                System.out.println("Keeping: "
+                        + object.getName());
+
+                // Reset mark for the next GC cycle
+                object.setMarked(false);
+            }
+        }
+    }
+}
+```
+
+A small implementation detail: although the variable is named `stack`, its declared type is `Queue`. `ArrayDeque` supports both stack and queue operations. Here, `push()` and `pop()` make it behave as a stack, so this is DFS.
+
+##### 3.3 Main class: Testing Mark-Sweep
+
+Let's create the same graph we discussed:
+
+```
+                 GC Root
+                    |
+                    v
+                   [A]
+                  /   \
+                 v     v
+                [B]   [C]
+                 |     |
+                 v     v
+                [D]   [E]
+
+                [F] ──► [G]
+```
+
+Implementation:
+
+```
+public class MarkSweepDemo {
+
+    public static void main(String[] args) {
+
+        Heap heap = new Heap();
+
+        // Allocate objects
+        HeapObject A = heap.allocate("A");
+        HeapObject B = heap.allocate("B");
+        HeapObject C = heap.allocate("C");
+        HeapObject D = heap.allocate("D");
+        HeapObject E = heap.allocate("E");
+        HeapObject F = heap.allocate("F");
+        HeapObject G = heap.allocate("G");
+
+        // Build object graph
+        A.addReference(B);
+        A.addReference(C);
+
+        B.addReference(D);
+        C.addReference(E);
+
+        F.addReference(G);
+
+        // Define GC roots
+        heap.addRoot(A);
+
+        // Before GC
+        System.out.println("BEFORE GC");
+        heap.displayHeap();
+
+        // Execute garbage collection
+        heap.markAndSweep();
+
+        // After GC
+        System.out.println("\nAFTER GC");
+        heap.displayHeap();
+    }
+}
+```
+
+##### 3.4 Expected output
+
+```
+BEFORE GC
+Heap objects:
+  A
+  B
+  C
+  D
+  E
+  F
+  G
+
+=== MARK PHASE ===
+Marking references of: A
+Marking references of: C
+Marking references of: E
+Marking references of: B
+Marking references of: D
+
+=== SWEEP PHASE ===
+Keeping: A
+Keeping: B
+Keeping: C
+Keeping: D
+Keeping: E
+Collecting: F
+Collecting: G
+
+AFTER GC
+Heap objects:
+  A
+  B
+  C
+  D
+  E
+```
+
+The order of traversal is determined by the DFS stack. The important result is that A, B, C, D, and E survive, while F and G are reclaimed from our simulated heap.
+
+#### 4. How does the Mark phase handle circular references?
+
+This is particularly important because we previously discussed two objects referencing each other.
+
+Consider:
+
+```
+GC Roots
+   |
+   v
+  [A] ─────► [B]
+             |
+             |
+             └────► [A]
+```
+
+Suppose A is a GC root.
+
+Our implementation works as follows:
+
+1. Mark A and push it onto the stack.
+2. Pop A, discover B.
+3. Mark B and push it onto the stack.
+4. Pop B, discover A.
+5. A is already marked, so ignore it.
+
+The algorithm terminates without an infinite loop.
+
+Now remove A from the root set:
+
+```
+GC Roots: empty
+
+[A] ─────► [B]
+ ^          |
+ |          |
+ └──────────┘
+```
+
+Neither object is marked, so both are collected during the Sweep phase.
+
+This is exactly why Mark-Sweep can collect circular references.
+
+#### 5. Can we use BFS instead of DFS?
+
+Absolutely.
+
+We only need to replace the stack with a queue.
+
+The marking algorithm becomes:
+
+```
+private void markUsingBFS() {
+
+    Queue<HeapObject> queue = new ArrayDeque<>();
+
+    // Start from GC roots
+    for (HeapObject root : roots) {
+
+        if (!root.isMarked()) {
+            root.setMarked(true);
+            queue.offer(root);
+        }
+    }
+
+    // Traverse reachable objects
+    while (!queue.isEmpty()) {
+
+        HeapObject current = queue.poll();
+
+        for (HeapObject reference : current.getReferences()) {
+
+            if (!reference.isMarked()) {
+
+                reference.setMarked(true);
+                queue.offer(reference);
+            }
+        }
+    }
+}
+```
+
+The difference is simply:
+
+| DFS                                 | BFS                            |
+| ----------------------------------- | ------------------------------ |
+| Uses a stack                        | Uses a queue                   |
+| Explores deeply before backtracking | Explores level by level        |
+| `push()` / `pop()`                  | `offer()` / `poll()`           |
+| Correct reachability detection      | Correct reachability detection |
+
+Both have the same asymptotic complexity.
+
+#### 6. Time and space complexity
+
+Let:
+
+- $V$ = number of allocated objects.
+- $E$ = number of object references.
+- $R$ = number of GC roots.
+
+| Operation                 | Complexity     |
+| ------------------------- | -------------- |
+| Mark phase                | $O(V + E)$ |
+| Sweep phase               | $O(V)$     |
+| Total                     | $O(V + E)$ |
+| Auxiliary traversal space | $O(V)$     |
+
+The mark phase visits each reachable object once and examines its outgoing references.
+
+The sweep phase examines every allocated object.
+
+#### 7. Is this how the actual JVM implements Mark-Sweep?
+
+Not exactly. This is an educational simulation of the algorithm, not a real JVM garbage collector.
+
+There are important differences:
+
+| Our Java implementation                   | Actual JVM                                                                  |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| Objects are represented by Java objects   | Objects reside in JVM-managed heap memory                                   |
+| `marked` is a Java boolean                | Marking uses specialized GC metadata                                        |
+| `List` stores all heap objects            | JVM maintains its own heap and allocation metadata                          |
+| Java stack simulates graph traversal      | Collector uses specialized traversal structures                             |
+| `iterator.remove()` simulates reclamation | JVM reclaims memory using collector-specific mechanisms                     |
+| References are ordinary Java references   | JVM handles object references, relocation, and memory management internally |
+
+In particular, our `sweep()` method removes objects from the `List`, but it does not directly reclaim their physical heap memory. The Java garbage collector eventually handles those Java objects too.
+
+You cannot implement a replacement for the JVM's native garbage collector using ordinary Java code alone.
+
+#### 8. Summary: Mark-Sweep algorithm
+
+![](/docs/assets/software-systems/programming-languages/java/concepts/jvm/Mark-Sweep-workflow.png)
+{/* Mark-Sweep workflow
+
+GC Roots
+
+Starting references
+
+MARK PHASE
+
+DFS / BFS traversal
+
+Stack or queue + mark bits
+
+Reachable objects are marked
+
+These objects must survive this collection
+
+SWEEP PHASE
+
+Scan all allocated objects
+
+Marked
+
+Keep object
+
+Unmarked
+
+Reclaim memory */}
+
+The main takeaway: Mark-Sweep combines graph traversal (DFS or BFS) with a linear scan of the heap. The graph traversal determines what is alive, and the sweep determines what can be reclaimed.
+
+A useful next exercise would be to extend this Java implementation with Mark-Compact, reusing the same `HeapObject` and object graph, so you can compare how the two algorithms handle fragmentation.
+
+## 2. Mark-Compact Algorithm
+
+Mark-Compact solves the fragmentation problem of Mark-Sweep.
+
+It also has two main phases:
+
+1. Mark: Identify all reachable objects.
+2. Compact: Move surviving objects together, eliminating gaps.
+
+Let's use the same example.
+
+### Phase 1: Mark
+
+```
+[A✓][Garbage][B✓][Garbage][C✓][Garbage][D✓]
+```
+
+### Phase 2: Compact
+
+The collector moves surviving objects together:
+
+```
+Before:
+
+[A✓][Garbage][B✓][Garbage][C✓][Garbage][D✓]
+
+After:
+
+[A✓][B✓][C✓][D✓][     Free Space     ]
+```
+
+Now free memory is contiguous.
+
+Main benefit: Reduces fragmentation and makes allocating large objects easier.
+
+### Advantages and disadvantages
+
+| Advantages                                   | Disadvantages                               |
+| -------------------------------------------- | ------------------------------------------- |
+| Reduces fragmentation                        | Moving objects requires additional work     |
+| Produces contiguous free memory              | References to moved objects must be updated |
+| Does not require a separate destination heap | Compaction can increase pause time          |
+
+One important detail: when an object moves, the JVM must ensure that references pointing to it still point to its new location. The JVM handles this internally.
+
+## 3. Copying Algorithm (Mark-Copy)
+
+The Copying algorithm takes a different approach.
+
+Instead of compacting objects within the same memory area, it divides memory into two regions:
+
+- From-space: Where objects are currently allocated.
+- To-space: Where surviving objects will be copied.
+
+Only one region is used for allocation at a time.
+
+### Initial state
+
+Imagine two equally sized memory regions:
+
+```
++-----------------------+    +-----------------------+
+|       From-space      |    |       To-space        |
+|                       |    |                       |
+| [A] [B] [C] [D] [E]   |    |       Empty           |
+|                       |    |                       |
++-----------------------+    +-----------------------+
+```
+
+Assume A, B, C, and D are reachable, while E is garbage.
+
+### Collection
+
+The collector copies only reachable objects into To-space:
+
+```
++-----------------------+    +-----------------------+
+|       From-space      |    |       To-space        |
+|                       |    |                       |
+| [A] [B] [C] [D] [E]   |    | [A] [B] [C] [D]       |
+|                       |    |                       |
++-----------------------+    +-----------------------+
+```
+
+After copying, the roles of the spaces are exchanged:
+
+```
++-----------------------+    +-----------------------+
+|       New From-space  |    |       New To-space    |
+|                       |    |                       |
+| [A] [B] [C] [D]       |    |       Empty           |
+|                       |    |                       |
++-----------------------+    +-----------------------+
+```
+
+The old From-space can now be reused.
+
+### Advantages and disadvantages
+
+| Advantages                                                   | Disadvantages                                       |
+| ------------------------------------------------------------ | --------------------------------------------------- |
+| No fragmentation in the destination space                    | Requires additional memory space                    |
+| Allocation is very fast using a pointer                      | Surviving objects must be copied                    |
+| Garbage is discarded automatically when spaces are exchanged | Copying large amounts of live data can be expensive |
+
+### Where is this used in Java?
+
+Copying is particularly useful for areas where most objects die young.
+
+For example, HotSpot JVM's generational collectors traditionally use Eden and Survivor spaces in the young generation.
+
+This leads us to one of the most important GC concepts.
+
+## 4. Generational Garbage Collection
+
+Generational GC is based on an observation about typical application behavior:
+
+Most objects become unreachable shortly after they are created.
+
+For example:
+
+```
+public static void processRequest() {
+    String requestId = generateRequestId();
+    String temporaryResult = calculateSomething();
+    String response = buildResponse(temporaryResult);
+}
+```
+
+After the method finishes, some of these objects may become unreachable.
+
+However, other objects survive for a long time:
+
+```
+public class Application {
+    private static final Map<String, User> USERS = new HashMap<>();
+}
+```
+
+The map and some of its contents may remain reachable throughout much of the application's lifetime.
+
+Instead of treating all objects identically, generational GC divides the heap into generations.
+
+### 5.1 Young Generation
+
+Newly allocated objects are generally placed in the Young Generation.
+
+It traditionally contains three areas:
+
+- Eden
+- Survivor 0 (S0)
+- Survivor 1 (S1)
+
+```
+             Young Generation
++------------------------------------------+
+|                                          |
+|  +------------+  +------+  +------+      |
+|  |   Eden     |  | S0   |  | S1   |      |
+|  |            |  |      |  |      |      |
+|  +------------+  +------+  +------+      |
+|                                          |
++------------------------------------------+
+```
+
+Most objects are initially allocated in Eden.
+
+When Eden fills up, the JVM performs a Minor GC in collectors that use this terminology.
+
+### 5.2 Minor GC example
+
+Suppose Eden contains:
+
+```
+Eden:
+
+[A] [B] [C] [D] [E]
+```
+
+After checking reachability:
+
+```
+[A] [B] [C] [D] [E]
+     ↑       ↑
+   Dead    Alive
+```
+
+Assume A, C, and E are still reachable.
+
+The surviving objects are copied into a Survivor space:
+
+```
+Eden                 Survivor 0
+
+[A] [B] [C] [D] [E]  [A] [C] [E]
+```
+
+After collection, Eden can be reused.
+
+On subsequent young collections, surviving objects may be copied between Survivor spaces and their age increases.
+
+```
+First collection:
+
+Eden → Survivor 0
+
+Second collection:
+
+Eden + Survivor 0 → Survivor 1
+
+Third collection:
+
+Eden + Survivor 1 → Survivor 0
+```
+
+This is a simplified illustration. Actual behavior depends on the collector and its configuration.
+
+### Old Generation (Tenured Generation)
+
+Objects that survive enough young-generation collections may be promoted to the Old Generation.
+
+For example:
+
+```
+Young Generation                    Old Generation
++-----------------------+           +-------------------+
+| Eden                  |           |                   |
+|                       |           |  Long-lived       |
+| New objects           |           |  objects          |
+|                       |           |                   |
+| Survivor spaces       |           |  Promoted objects |
++-----------------------+           +-------------------+
+```
+
+The idea is that objects surviving multiple collections are more likely to be long-lived.
+
+The Old Generation is collected less frequently in many traditional generational collectors, although its collection can be more expensive.
+
+### Major GC and Full GC
+
+These terms are often used in Java GC discussions, but their exact meanings depend on the collector and context.
+
+| Term     | General meaning                                                                        |
+| -------- | -------------------------------------------------------------------------------------- |
+| Minor GC | Collection of the Young Generation                                                     |
+| Major GC | Often used to describe Old Generation collection                                       |
+| Full GC  | Collection involving the entire heap, often including other JVM memory-management work |
+
+Do not assume Major GC and Full GC always mean the same thing.
+
+### Why generational GC is effective
+
+Imagine an application creates one million temporary objects but retains only a small number.
+
+Without generations, the collector might repeatedly examine a large population of long-lived objects.
+
+With generational collection, the JVM can focus frequent collection work on the Young Generation.
+
+This exploits the generational hypothesis:
+
+- Most objects die young.
+- Objects that survive longer are more likely to continue surviving.
+
+##  Comparing the fundamental algorithms
+
+| Algorithm    | Main idea                             | Fragmentation          | Extra memory                          |
+| ------------ | ------------------------------------- | ---------------------- | ------------------------------------- |
+| Mark-Sweep   | Mark live objects, sweep garbage      | Possible               | Usually no separate destination space |
+| Mark-Compact | Mark live objects, move them together | Reduced                | Usually no second full heap           |
+| Copying      | Copy live objects to another region   | Avoided in destination | Requires destination space            |
+
+These are fundamental techniques, not mutually exclusive choices. A real garbage collector can combine them.
+
+For example, a generational collector may use copying for the Young Generation and a mark-compact approach for older objects.
+
+## 7. Stop-the-World vs Concurrent Garbage Collection
+
+So far, we have discussed how a collector identifies and reclaims objects.
+
+But there is another important question: What happens to application threads while garbage collection is running?
+
+There are two broad approaches.
+
+### 7.1 Stop-the-World (STW)
+
+The JVM temporarily pauses application threads while performing certain GC operations.
+
+For example:
+
+```
+Application threads:
+
+Thread 1: ─────── Running ────── PAUSED ─────── Running ──────
+Thread 2: ─────── Running ────── PAUSED ─────── Running ──────
+Thread 3: ─────── Running ────── PAUSED ─────── Running ──────
+
+GC thread:
+
+                              ┌──────────────┐
+                              │ GC operation │
+                              └──────────────┘
+```
+
+During this pause, application threads cannot execute Java application code.
+
+This is called a Stop-the-World pause.
+
+Advantages:
+
+- Makes certain GC operations easier and safer.
+- Allows the collector to inspect and manipulate object references without application threads changing them simultaneously.
+
+Disadvantages:
+
+- Application threads are temporarily blocked.
+- Long pauses can affect application response times.
+
+### 7.2 Concurrent Garbage Collection
+
+Some collectors perform significant GC work while application threads continue executing.
+
+```
+Application threads:
+
+Thread 1: ───── Running ───────────────── Running ─────
+Thread 2: ───── Running ───────────────── Running ─────
+Thread 3: ───── Running ───────────────── Running ─────
+
+GC thread:
+
+          ┌───────────────────────────────┐
+          │       Concurrent GC          │
+          └───────────────────────────────┘
+```
+
+This reduces the need to stop application threads for long periods.
+
+However, concurrent GC introduces additional complexity:
+
+- Application threads may modify object references while GC is running.
+- The collector must track those changes.
+- Extra CPU resources may be needed.
+- Some short Stop-the-World pauses may still be necessary.
+
+Important: Concurrent does not mean pause-free.
+
+## 8. GC Barriers: How can GC work while the application runs?
+
+Consider a concurrent collector scanning this object graph:
+
+```
+[A] ───► [B] ───► [C]
+```
+
+While the collector is working, an application thread changes a reference:
+
+```
+A.reference = D;
+```
+
+Now the graph becomes:
+
+```
+[A] ───► [D]
+
+[B] ───► [C]
+```
+
+What happens if the collector has already scanned A and is unaware of the new reference to D?
+
+It might incorrectly conclude that D is unreachable.
+
+To solve this problem, JVM collectors use mechanisms such as:
+
+- Write barriers: Extra operations associated with reference writes.
+- Read barriers: Extra operations associated with reading references, used by some collectors.
+- Remembered sets: Structures that track relevant references between regions.
+- Concurrent marking algorithms: Strategies that account for changes made during collection.
+
+These mechanisms help the collector maintain correctness while application threads continue running.
+
+One important distinction:
+
+A GC write barrier is not the same thing as Java's `volatile` or `synchronized`. It is JVM-internal machinery for garbage collection.
+
+## Real Garbage Collectors in HotSpot JVM
+
+Now let's connect the fundamental algorithms to actual Java garbage collectors.
+
+HotSpot JVM provides several collectors. They have different goals and trade-offs.
+
+### Serial GC
+
+The serial garbage collector is the JVM’s most basic algorithm. It is used for small heaps and single-
+threaded applications. This type of application can be characterized as sequential execution, not
+concurrent execution. Since there is only one thread to consider, memory management is much
+easier. Another characterizing feature is that single-threaded applications often only use a portion of
+the host’s CPU capabilities. Finally, since the execution is sequential, predicting the need for garbage
+collection is uncomplicated.
+
+Simple, single-threaded collector
+
+- Uses a single GC thread.
+- Performs collection with Stop-the-World pauses.
+- Suitable for small heaps and simple applications.
+
+JVM option: `-XX:+UseSerialGC`
+
+
+### Parallel GC
+
+Throughput-oriented
+
+The parallel garbage collector, also referred to as the throughput garbage collector, was the default
+for early Java releases through Java 8. Its capabilities exceed that of the serial collector in that it was
+designed for medium- to large-sized heaps and multithreaded applications.
+
+- Uses multiple GC threads.
+- Performs collection with Stop-the-World pauses.
+- Attempts to maximize application throughput.
+
+JVM option: `-XX:+UseParallelGC`
+
+### Garbage-First (G1) Collector
+
+General-purpose collector
+
+The G1 Collector became the default garbage collector in Java 9, dethroning the parallel collector. G1
+was designed to provide faster and more predictable response times and extremely high throughput.
+The G1 Collector can be considered the primary and default garbage collector.
+
+- Divides the heap into regions instead of using one contiguous Young/Old layout.
+- Collects regions with high amounts of reclaimable memory first.
+- Uses concurrent marking and parallel evacuation.
+- Aims to meet configurable pause-time goals.
+
+JVM option: `-XX:+UseG1GC`
+
+### Z Garbage Collector (ZGC)
+
+Low-latency collector
+
+Java 11 was released with the ZGC garbage collector as an experimental feature. ZGC’s aim was to
+provide a low-latency garbage collector that was scalable. The intention was for ZGC to handle a wide
+range of heap sizes, from very small to very large (for example, terabytes). ZGC delivered on these
+goals without sacrificing pause times. This success led to ZGC being released as a Java 15 feature.
+
+- Performs most expensive work concurrently.
+- Uses techniques such as colored pointers and load barriers.
+- Designed to keep GC pauses extremely short, even with large heaps.
+
+JVM option: `-XX:+UseZGC`
+
+### Shenandoah GC
+
+Low-pause collector
+
+- Performs much of its marking and compaction concurrently.
+- Uses forwarding pointers and barriers to manage object relocation.
+- Aims to minimize pause times independently of heap size.
+
+JVM option: `-XX:+UseShenandoahGC` (where supported).
+
+The images above are conceptual illustrations, not exact JVM heap layouts.
+
+### Collector comparison
+
+| Collector  | Main objective       | General approach                               |
+| ---------- | -------------------- | ---------------------------------------------- |
+| Serial     | Simplicity           | Single-threaded, STW                           |
+| Parallel   | Throughput           | Parallel, STW                                  |
+| G1         | Balanced performance | Region-based, generational, concurrent marking |
+| ZGC        | Very low latency     | Mostly concurrent, relocating                  |
+| Shenandoah | Very low latency     | Mostly concurrent, compacting                  |
+
+Note that availability depends on the JDK distribution and platform. Also, the JVM's default collector can vary by Java version and environment.
+
+## 10. Putting everything together
+
+There are actually three different levels of concepts here:
+
+Level 1: Fundamental GC algorithms
+
+How does the collector identify garbage and reclaim memory?
+
+- Mark-Sweep
+- Mark-Compact
+- Copying
+
+Level 2: GC strategies
+
+How does the collector organize collection work?
+
+- Generational GC
+- Stop-the-World
+- Concurrent GC
+- Parallel GC
+
+Level 3: Actual JVM collectors
+
+Which concrete implementation does the JVM use?
+
+- Serial GC
+- Parallel GC
+- G1 GC
+- ZGC
+- Shenandoah GC
+
+For example, G1 is not simply another name for Mark-Sweep. It is a complete collector that combines several techniques, including regional heap organization, concurrent marking, and evacuation (copying live objects from selected regions).
+
+## 11. Recommended Java GC study TOC
+
+For your JVM internals documentation, I would organize the subject as follows:
+
+```
+jvm/
+└── garbage-collection/
+    ├── overview
+    ├── object-reachability
+    │   ├── gc-roots
+    │   ├── reachability-analysis
+    │   ├── reachable-vs-unreachable
+    │   ├── circular-references
+    │   └── reference-types
+    ├── gc-algorithms
+    │   ├── mark-sweep
+    │   ├── mark-compact
+    │   ├── copying
+    │   └── algorithm-comparison
+    ├── gc-strategies
+    │   ├── generational-gc
+    │   ├── young-generation
+    │   ├── old-generation
+    │   ├── stop-the-world
+    │   ├── concurrent-collection
+    │   ├── parallel-collection
+    │   └── write-barriers
+    ├── hot-spot-collectors
+    │   ├── serial-gc
+    │   ├── parallel-gc
+    │   ├── g1-gc
+    │   ├── zgc
+    │   └── shenandoah
+    ├── gc-tuning
+    │   ├── heap-sizing
+    │   ├── gc-logging
+    │   ├── pause-time-goals
+    │   └── performance-analysis
+    └── memory-management
+        ├── object-allocation
+        ├── object-promotion
+        ├── class-unloading
+        ├── reference-processing
+        └── finalization
+```
+
+My recommendation for the next topic: Study Generational GC and G1 GC in depth, particularly how Eden, Survivor spaces, Old Generation, regions, object promotion, and evacuation work. These concepts connect the theoretical algorithms to what actually happens inside a modern JVM.

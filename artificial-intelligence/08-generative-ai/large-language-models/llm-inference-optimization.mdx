@@ -1,0 +1,190 @@
+This paragraph explains how model size, numerical precision, and context length affect LLM inference performance and hardware requirements.
+
+It covers three important resource considerations: memory, computation speed, and context-window memory.
+
+## 1. Memory considerations
+
+A model with 7 billion parameters needs memory to store its weights.
+
+Each parameter occupies a certain number of bytes depending on its numerical precision.
+
+| Precision | Bits per parameter | Memory for 7B parameters |
+| --------- | ------------------ | ------------------------ |
+| FP32      | 32 bits            | 28 GB                    |
+| FP16      | 16 bits            | 14 GB                    |
+| BF16      | 16 bits            | 14 GB                    |
+| INT8      | 8 bits             | 7 GB                     |
+| INT4      | 4 bits             | 3.5 GB                   |
+
+Approximate decimal GB, weights only; actual memory requirements are higher.
+
+For example:
+
+```
+7B Model
+
+FP32:
+7 billion × 4 bytes = 28 GB
+
+FP16:
+7 billion × 2 bytes = 14 GB
+
+INT8:
+7 billion × 1 byte = 7 GB
+
+INT4:
+7 billion × 0.5 bytes = 3.5 GB
+```
+
+Why does this matter?
+
+Suppose your GPU has 16 GB of VRAM:
+
+- FP32: the weights alone exceed available VRAM.
+- FP16: the weights need approximately 14 GB, leaving very little room for other inference data.
+- INT8: the weights need approximately 7 GB, leaving more room for the context and runtime.
+
+This is why quantization makes it possible to run larger models on hardware with limited memory.
+
+One important detail: the model's weights can be stored in GPU VRAM, system RAM, or distributed across multiple GPUs, depending on the inference setup.
+
+## 2. Inference speed
+
+Inference is the process of using a trained model to generate responses.
+
+For an autoregressive LLM, generating a response involves repeatedly:
+
+1. Processing the current input and available context.
+2. Computing the next-token probabilities.
+3. Selecting the next token.
+4. Adding it to the sequence.
+5. Repeating the process.
+
+Larger models generally require more computation per generated token.
+
+Quantization can improve inference speed because lower-precision operations can require less memory bandwidth and may be faster on hardware optimized for INT8 or INT4.
+
+For example:
+
+Illustrative comparison: same 7B model
+
+FP16
+
+# 14 GB
+
+Weight storage
+
+INT4
+
+# 3.5 GB
+
+Weight storage
+
+INT4 uses one-quarter of the weight storage of FP16. This does not mean it is automatically four times faster.
+
+Important clarification: Quantization does not guarantee faster inference. Actual speed depends on GPU architecture, supported operations, quantization method, memory bandwidth, and inference software.
+
+Accuracy can also decrease, especially with aggressive quantization, but the impact varies by model and task.
+
+## 3. Context windows
+
+A context window is the maximum amount of text (measured in tokens) that an LLM can consider during a processing operation.
+
+For example:
+
+- 1,000 tokens: a relatively short input.
+- 4,000 tokens: a longer input.
+- 32,000 tokens: a much larger input.
+
+Why does a longer context consume more memory?
+
+Transformers use intermediate representations called activations while processing tokens. They also commonly maintain a KV cache during autoregressive generation.
+
+The KV cache stores previously computed attention keys and values so that the model does not need to recompute them for every new token.
+
+```
+Prompt: 1,000 tokens
+       |
+       v
+Transformer processes tokens
+       |
+       v
+KV Cache: relatively small
+
+
+Prompt: 4,000 tokens
+       |
+       v
+Transformer processes tokens
+       |
+       v
+KV Cache: approximately 4x larger
+```
+
+For the same model and inference configuration, KV cache memory generally grows approximately linearly with the number of cached tokens.
+
+However, total memory usage does not consist only of the KV cache. It also includes model weights, temporary activations, and runtime buffers.
+
+### Why does this matter in a real application?
+
+Imagine you build a Spring Boot application using RAG (Retrieval-Augmented Generation).
+
+A user asks:
+
+> Explain how Dijkstra's algorithm works.
+
+Your application retrieves relevant documents from a vector database and adds them to the prompt.
+
+| Scenario                          | Context      |
+| --------------------------------- | ------------ |
+| User question only                | 100 tokens   |
+| Question + 3 retrieved documents  | 1,000 tokens |
+| Question + 15 retrieved documents | 4,000 tokens |
+
+More retrieved content can improve the answer by providing additional information, but it also increases memory consumption and processing costs.
+
+This is why RAG systems need to manage:
+
+- Number of retrieved documents.
+- Chunk size.
+- Maximum context length.
+- Prompt length.
+- KV cache memory.
+
+## 4. How the three factors work together
+
+| Factor              | Optimization technique                          | Main benefit                             |
+| ------------------- | ----------------------------------------------- | ---------------------------------------- |
+| Model weight memory | FP16, BF16, INT8, INT4                          | Reduce memory requirements               |
+| Computation speed   | Quantization, optimized kernels, FlashAttention | Improve inference throughput and latency |
+| Context memory      | KV cache optimization, GQA, context management  | Support longer contexts with less memory |
+
+## 5. Where should this go in your AI TOC?
+
+I recommend placing this material under:
+
+```
+large-language-models/
+│
+├── 06-llm-optimization-techniques/
+│   ├── model-quantization.mdx
+│   ├── model-pruning.mdx
+│   ├── knowledge-distillation.mdx
+│   └── flash-attention.mdx
+│
+└── 07-llm-inference-optimization/
+    ├── inference-performance-factors.mdx
+    ├── kv-cache.mdx
+    ├── gpu-memory-optimization.mdx
+    └── continuous-batching.mdx
+```
+
+I would use `inference-performance-factors.mdx` for this particular material because it introduces the three dimensions before explaining individual optimization techniques.
+
+The key distinction to remember:
+
+- Quantization reduces the memory required to store model weights.
+- Inference optimization reduces the resources or time required to generate tokens.
+- Context management controls the resources required to process and retain conversation history.
+
+These three areas are closely related, but optimizing one does not automatically optimize the others.

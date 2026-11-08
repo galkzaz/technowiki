@@ -1,0 +1,1915 @@
+---
+title: Java
+---
+
+# Standard Bellman–Ford (Edge List) – Java Implementation
+
+We will implement two separate versions of Bellman–Ford using an edge list:
+
+1. Normal version: Performs shortest-path calculations and returns the distances and predecessors.
+2. Debug version: Prints every edge relaxation, whether an edge was updated or skipped, and the distance and predecessor arrays after every pass.
+
+Both implementations will use the same graph and relaxation logic so you can compare their behavior.
+
+We will use:
+
+- An `Edge` class to represent graph edges.
+- An array of edges.
+- A distance array.
+- A predecessor array.
+- A separate negative-cycle detection step.
+
+## 1. Graph representation
+
+We will represent each edge using three properties:
+
+```Java
+public class BellmanFord {
+
+    static class Edge {
+        int source;
+        int destination;
+        int weight;
+
+        Edge(int source, int destination, int weight) {
+            this.source = source;
+            this.destination = destination;
+            this.weight = weight;
+        }
+    }
+}
+```
+
+For example:
+
+```
+A --6--> B
+```
+
+Is represented as:
+
+```
+new Edge(0, 1, 6)
+```
+
+We will use the following graph:
+
+```
+             6
+        A ---------> B
+        |          / | \
+      7 |       -2  |  \ -4
+        |        /  |   \
+        v       D   |    v
+        C ------>   |    E
+         \   -3     |    |
+          \         |    | 7
+           \--- 9 --+    |
+```
+
+The edges are:
+
+| Edge  | Weight |
+| ----- | ------ |
+| A → B | 6      |
+| A → C | 7      |
+| B → C | 8      |
+| B → D | 5      |
+| B → E | -4     |
+| C → D | -3     |
+| C → E | 9      |
+| D → B | -2     |
+| E → D | 7      |
+
+Source vertex: `A` (index 0).
+
+Expected shortest distances:
+
+| Vertex | Distance | Shortest path     |
+| ------ | -------- | ----------------- |
+| A      | 0        | A                 |
+| B      | 2        | A → C → D → B     |
+| C      | 7        | A → C             |
+| D      | 4        | A → C → D         |
+| E      | -2       | A → C → D → B → E |
+
+## 2. Normal version
+
+This implementation uses:
+
+- `Edge[]` for graph representation.
+- `long[] dist` for shortest distances.
+- `int[] predecessor` for shortest-path reconstruction.
+- \\(V-1\\) complete relaxation passes.
+- An additional pass for negative-cycle detection.
+
+```Java
+
+import java.util.Arrays;
+
+public class BellmanFord {
+
+    private static final long INF = Long.MAX_VALUE / 4;
+
+    // Represents a directed weighted edge.
+    static class Edge {
+        int source;
+        int destination;
+        int weight;
+
+        Edge(int source, int destination, int weight) {
+            this.source = source;
+            this.destination = destination;
+            this.weight = weight;
+        }
+    }
+
+    // Stores the algorithm's results.
+    static class Result {
+        long[] dist;
+        int[] predecessor;
+        boolean negativeCycle;
+
+        Result(long[] dist, int[] predecessor,
+               boolean negativeCycle) {
+
+            this.dist = dist;
+            this.predecessor = predecessor;
+            this.negativeCycle = negativeCycle;
+        }
+    }
+
+    // Standard Bellman-Ford implementation.
+    static Result bellmanFord(
+            int V,
+            Edge[] edges,
+            int source) {
+
+        long[] dist = new long[V];
+        int[] predecessor = new int[V];
+
+        // Step 1: Initialize.
+        Arrays.fill(dist, INF);
+        Arrays.fill(predecessor, -1);
+
+        dist[source] = 0;
+
+        // Step 2: Relax all edges V - 1 times.
+        for (int i = 1; i < V; i++) {
+
+            boolean updated = false;
+
+            for (Edge edge : edges) {
+
+                int u = edge.source;
+                int v = edge.destination;
+                int w = edge.weight;
+
+                // Skip unreachable vertices.
+                if (dist[u] == INF) {
+                    continue;
+                }
+
+                long candidate = dist[u] + w;
+
+                // Relaxation.
+                if (candidate < dist[v]) {
+
+                    dist[v] = candidate;
+                    predecessor[v] = u;
+
+                    updated = true;
+                }
+            }
+
+            // Early termination.
+            if (!updated) {
+                break;
+            }
+        }
+
+        // Step 3: Detect reachable negative cycles.
+        boolean negativeCycle = false;
+
+        for (Edge edge : edges) {
+
+            int u = edge.source;
+            int v = edge.destination;
+            int w = edge.weight;
+
+            if (dist[u] != INF &&
+                dist[u] + w < dist[v]) {
+
+                negativeCycle = true;
+                break;
+            }
+        }
+
+        return new Result(
+                dist,
+                predecessor,
+                negativeCycle
+        );
+    }
+
+    // Prints shortest paths using predecessors.
+    static void printPath(int destination, int[] predecessor) {
+
+        if (predecessor[destination] != -1) {
+            printPath(predecessor[destination], predecessor);
+            System.out.print(" -> ");
+        }
+
+        System.out.print(vertexName(destination));
+    }
+
+    static char vertexName(int vertex) {
+        return (char) ('A' + vertex);
+    }
+
+    public static void main(String[] args) {
+
+        int V = 5;
+        int source = 0;
+
+        Edge[] edges = {
+            new Edge(0, 1, 6),   // A -> B
+            new Edge(0, 2, 7),   // A -> C
+            new Edge(1, 2, 8),   // B -> C
+            new Edge(1, 3, 5),   // B -> D
+            new Edge(1, 4, -4),  // B -> E
+            new Edge(2, 3, -3),  // C -> D
+            new Edge(2, 4, 9),   // C -> E
+            new Edge(3, 1, -2),  // D -> B
+            new Edge(4, 3, 7)    // E -> D
+        };
+
+        Result result = bellmanFord(V, edges, source);
+
+        if (result.negativeCycle) {
+            System.out.println(
+                "Reachable negative-weight cycle detected."
+            );
+            return;
+        }
+
+        System.out.println("Shortest Distances:");
+
+        for (int i = 0; i < V; i++) {
+
+            System.out.println(
+                vertexName(i) + " = " +
+                (result.dist[i] == INF
+                    ? "INF"
+                    : result.dist[i])
+            );
+        }
+
+        System.out.println("\nShortest Paths:");
+
+        for (int i = 0; i < V; i++) {
+
+            if (result.dist[i] == INF) {
+                continue;
+            }
+
+            System.out.print(vertexName(i) + ": ");
+
+            printPath(i, result.predecessor);
+
+            System.out.println();
+        }
+    }
+}
+
+```
+
+### Expected output
+
+```
+Shortest Distances:
+A = 0
+B = 2
+C = 7
+D = 4
+E = -2
+
+Shortest Paths:
+A: A
+B: A -> C -> D -> B
+C: A -> C
+D: A -> C -> D
+E: A -> C -> D -> B -> E
+```
+
+Notice that we used `long` for distances instead of `int`.
+
+This helps avoid integer overflow when adding large edge weights or representing infinity.
+
+Also, the implementation uses an optimization:
+
+```Java
+if (!updated) {
+    break;
+}
+```
+
+If an entire pass produces no updates, there is no reason to continue relaxing edges. The negative-cycle detection step must still run.
+
+## 3. Debug version
+
+The debug implementation will provide a detailed execution trace.
+
+For every pass, it will print:
+
+1. Pass number.
+2. Every edge being examined.
+3. Current source and destination distances.
+4. Calculated candidate distance.
+5. Whether relaxation occurs.
+6. Updated distance and predecessor arrays after each pass.
+7. Negative-cycle detection results.
+
+### Debug implementation method
+
+Add the following methods to the previous `BellmanFord` class. They reuse the same `Edge`, `Result`, `INF`, and `vertexName()` definitions.
+
+```Java
+
+    // Debug version of Bellman-Ford.
+    static Result bellmanFordDebug(
+            int V,
+            Edge[] edges,
+            int source) {
+
+        long[] dist = new long[V];
+        int[] predecessor = new int[V];
+
+        // Step 1: Initialize.
+        Arrays.fill(dist, INF);
+        Arrays.fill(predecessor, -1);
+
+        dist[source] = 0;
+
+        System.out.println("========== BELLMAN-FORD DEBUG ==========");
+        System.out.println("Source: " + vertexName(source));
+
+        printArrays(dist, predecessor);
+
+        // Step 2: Relax all edges V - 1 times.
+        for (int i = 1; i < V; i++) {
+
+            boolean updated = false;
+
+            System.out.println("\n========================================");
+            System.out.println("PASS " + i);
+            System.out.println("========================================");
+
+            for (Edge edge : edges) {
+
+                int u = edge.source;
+                int v = edge.destination;
+                int w = edge.weight;
+
+                System.out.println("\nExamining edge: " +
+                        vertexName(u) + " -> " +
+                        vertexName(v) + " (weight = " + w + ")");
+
+                // Skip unreachable source vertices.
+                if (dist[u] == INF) {
+
+                    System.out.println(
+                        "SKIPPED: Source vertex is unreachable."
+                    );
+
+                    continue;
+                }
+
+                long oldDistance = dist[v];
+                long candidate = dist[u] + w;
+
+                System.out.println(
+                    "Source distance      : " + dist[u]
+                );
+
+                System.out.println(
+                    "Destination distance : " + formatDistance(oldDistance)
+                );
+
+                System.out.println(
+                    "Candidate distance   : " +
+                    dist[u] + " + (" + w + ") = " + candidate
+                );
+
+                // Relaxation condition.
+                if (candidate < oldDistance) {
+
+                    dist[v] = candidate;
+                    predecessor[v] = u;
+
+                    updated = true;
+
+                    System.out.println("RESULT: RELAXATION SUCCESSFUL");
+
+                    System.out.println(
+                        "Updated dist[" + vertexName(v) +
+                        "] = " + candidate
+                    );
+
+                    System.out.println(
+                        "Updated predecessor[" + vertexName(v) +
+                        "] = " + vertexName(u)
+                    );
+
+                } else {
+
+                    System.out.println("RESULT: NO UPDATE");
+
+                    System.out.println(
+                        "Reason: Candidate distance is not smaller."
+                    );
+                }
+            }
+
+            // Print arrays after completing the entire pass.
+            System.out.println("\n---------- END OF PASS " + i + " ----------");
+
+            printArrays(dist, predecessor);
+
+            // Early termination.
+            if (!updated) {
+
+                System.out.println(
+                    "\nEARLY TERMINATION: No distances changed."
+                );
+
+                break;
+            }
+        }
+
+        // Step 3: Negative-cycle detection.
+        System.out.println("\n========================================");
+        System.out.println("NEGATIVE-CYCLE DETECTION");
+        System.out.println("========================================");
+
+        boolean negativeCycle = false;
+
+        for (Edge edge : edges) {
+
+            int u = edge.source;
+            int v = edge.destination;
+            int w = edge.weight;
+
+            if (dist[u] == INF) {
+
+                System.out.println(
+                    vertexName(u) + " -> " + vertexName(v) +
+                    ": SKIPPED (unreachable source)"
+                );
+
+                continue;
+            }
+
+            long candidate = dist[u] + w;
+
+            System.out.println(
+                vertexName(u) + " -> " + vertexName(v) +
+                ": candidate = " + candidate +
+                ", current = " + formatDistance(dist[v])
+            );
+
+            if (candidate < dist[v]) {
+
+                System.out.println(
+                    "NEGATIVE CYCLE DETECTED!"
+                );
+
+                negativeCycle = true;
+                break;
+
+            } else {
+
+                System.out.println("No improvement.");
+            }
+        }
+
+        System.out.println("\n========== FINAL RESULT ==========");
+
+        printArrays(dist, predecessor);
+
+        if (negativeCycle) {
+            System.out.println(
+                "Result: Reachable negative-weight cycle exists."
+            );
+        } else {
+            System.out.println(
+                "Result: No reachable negative-weight cycle."
+            );
+        }
+
+        return new Result(dist, predecessor, negativeCycle);
+    }
+
+    // Print distance and predecessor arrays.
+    static void printArrays(
+            long[] dist,
+            int[] predecessor) {
+
+        System.out.println("\nDistance Array:");
+
+        for (int i = 0; i < dist.length; i++) {
+
+            System.out.print(
+                vertexName(i) + "=" + formatDistance(dist[i]) + "  "
+            );
+        }
+
+        System.out.println();
+
+        System.out.println("Predecessor Array:");
+
+        for (int i = 0; i < predecessor.length; i++) {
+
+            String pred = predecessor[i] == -1
+                    ? "NIL"
+                    : String.valueOf(vertexName(predecessor[i]));
+
+            System.out.print(
+                vertexName(i) + "=" + pred + "  "
+            );
+        }
+
+        System.out.println();
+    }
+
+    // Format infinity for readable debug output.
+    static String formatDistance(long distance) {
+
+        return distance == INF ? "INF" : String.valueOf(distance);
+    }
+
+```
+
+### Running the debug version
+
+In the previous `main()` method, replace:
+
+```Java
+Result result = bellmanFord(V, edges, source);
+```
+
+With:
+
+```Java
+Result result = bellmanFordDebug(V, edges, source);
+```
+
+The rest of `main()` can remain unchanged.
+
+## 4. Understanding the debug output
+
+Let's examine some important parts of the expected execution trace.
+
+### Initial state
+
+```
+========== BELLMAN-FORD DEBUG ==========
+Source: A
+
+Distance Array:
+A=0  B=INF  C=INF  D=INF  E=INF
+
+Predecessor Array:
+A=NIL  B=NIL  C=NIL  D=NIL  E=NIL
+```
+
+### Pass 1: First edge A → B
+
+```
+Examining edge: A -> B (weight = 6)
+
+Source distance      : 0
+Destination distance : INF
+Candidate distance   : 0 + (6) = 6
+
+RESULT: RELAXATION SUCCESSFUL
+
+Updated dist[B] = 6
+Updated predecessor[B] = A
+```
+
+The algorithm has discovered a path from A to B.
+
+### Pass 1: Edge B → C
+
+```
+Examining edge: B -> C (weight = 8)
+
+Source distance      : 6
+Destination distance : 7
+Candidate distance   : 6 + (8) = 14
+
+RESULT: NO UPDATE
+
+Reason: Candidate distance is not smaller.
+```
+
+The existing path to C costs 7, which is better than 14.
+
+### Pass 1: Edge C → D
+
+```
+Examining edge: C -> D (weight = -3)
+
+Source distance      : 7
+Destination distance : 11
+Candidate distance   : 7 + (-3) = 4
+
+RESULT: RELAXATION SUCCESSFUL
+
+Updated dist[D] = 4
+Updated predecessor[D] = C
+```
+
+A negative edge has improved our shortest distance.
+
+### Pass 1: Edge D → B
+
+```
+Examining edge: D -> B (weight = -2)
+
+Source distance      : 4
+Destination distance : 6
+Candidate distance   : 4 + (-2) = 2
+
+RESULT: RELAXATION SUCCESSFUL
+
+Updated dist[B] = 2
+Updated predecessor[B] = D
+```
+
+Notice that B's distance changes from 6 to 2.
+
+### End of Pass 1
+
+```
+---------- END OF PASS 1 ----------
+
+Distance Array:
+A=0  B=2  C=7  D=4  E=2
+
+Predecessor Array:
+A=NIL  B=D  C=A  D=C  E=B
+```
+
+### End of Pass 2
+
+The algorithm examines all edges again.
+
+The important update is B → E:
+
+```
+Examining edge: B -> E (weight = -4)
+
+Source distance      : 2
+Destination distance : 2
+Candidate distance   : 2 + (-4) = -2
+
+RESULT: RELAXATION SUCCESSFUL
+
+Updated dist[E] = -2
+Updated predecessor[E] = B
+```
+
+The arrays become:
+
+```
+Distance Array:
+A=0  B=2  C=7  D=4  E=-2
+
+Predecessor Array:
+A=NIL  B=D  C=A  D=C  E=B
+```
+
+### Pass 3
+
+No edge produces a shorter distance.
+
+```
+---------- END OF PASS 3 ----------
+
+Distance Array:
+A=0  B=2  C=7  D=4  E=-2
+
+Predecessor Array:
+A=NIL  B=D  C=A  D=C  E=B
+
+EARLY TERMINATION: No distances changed.
+```
+
+The algorithm then performs its negative-cycle detection pass.
+
+No edge can be relaxed, so the algorithm terminates successfully.
+
+## 5. Normal vs. Debug implementation
+
+| Feature                      | Normal      | Debug                                              |
+| ---------------------------- | ----------- | -------------------------------------------------- |
+| Edge list                    | Yes         | Yes                                                |
+| Distance array               | Yes         | Yes                                                |
+| Predecessor array            | Yes         | Yes                                                |
+| Edge relaxation              | Yes         | Yes                                                |
+| Print every edge             | No          | Yes                                                |
+| Print candidate distances    | No          | Yes                                                |
+| Print successful relaxations | No          | Yes                                                |
+| Print skipped edges          | No          | Yes                                                |
+| Print arrays after each pass | No          | Yes                                                |
+| Early termination            | Yes         | Yes                                                |
+| Negative-cycle detection     | Yes         | Yes                                                |
+| Time complexity              | \\(O(VE)\\) | \\(O(VE)\\) algorithmically, plus logging overhead |
+
+One important distinction: Debug printing can substantially increase actual execution time, particularly for large graphs. Use the normal implementation for performance measurements.
+
+## Testing
+
+I recommend testing these three cases:
+
+- Case 1: Positive weights only. Verify that Bellman–Ford produces the same shortest distances as Dijkstra.
+- Case 2: Negative edges without negative cycles. Observe how previously calculated distances change across passes.
+- Case 3: A reachable negative cycle. Observe how the additional detection pass identifies it.
+
+The most valuable exercise is Case 2: change the edge ordering in the edge list and compare the intermediate debug output. The intermediate distances may differ, but the final shortest distances must remain the same.
+
+Let's extend the previous `BellmanFord` class with a test harness that executes all three scenarios using the normal and debug implementations.
+
+We will test:
+
+| Test | Graph                              | Expected result                               |
+| ---- | ---------------------------------- | --------------------------------------------- |
+| 1    | Positive edge weights              | Correct shortest paths; compare with Dijkstra |
+| 2    | Negative edges, no negative cycles | Correct shortest paths                        |
+| 3    | Reachable negative cycle           | Detect the negative cycle                     |
+
+Each test will:
+
+- Execute Bellman–Ford.
+- Print the debug trace.
+- Validate the expected result.
+- Print `PASS` or `FAIL`.
+
+### 1. Add a Dijkstra reference implementation
+
+We use Dijkstra only for Test Case 1, because all edge weights in that graph are positive.
+
+Add this method inside the existing `BellmanFord` class:
+
+```Java
+
+    // Reference implementation for testing positive-weight graphs.
+    // Uses a linear scan to select the next minimum-distance vertex.
+    static long[] dijkstra(int V, Edge[] edges, int source) {
+
+        long[] dist = new long[V];
+        boolean[] visited = new boolean[V];
+
+        Arrays.fill(dist, INF);
+        dist[source] = 0;
+
+        for (int i = 0; i < V; i++) {
+
+            int u = -1;
+
+            // Find the unvisited vertex with minimum distance.
+            for (int v = 0; v < V; v++) {
+
+                if (!visited[v] &&
+                    (u == -1 || dist[v] < dist[u])) {
+
+                    u = v;
+                }
+            }
+
+            // No more reachable vertices.
+            if (u == -1 || dist[u] == INF) {
+                break;
+            }
+
+            visited[u] = true;
+
+            // Examine outgoing edges.
+            for (Edge edge : edges) {
+
+                if (edge.source != u) {
+                    continue;
+                }
+
+                int v = edge.destination;
+
+                if (!visited[v] &&
+                    dist[u] + edge.weight < dist[v]) {
+
+                    dist[v] = dist[u] + edge.weight;
+                }
+            }
+        }
+
+        return dist;
+    }
+
+```
+
+### 2. Add a reusable test method
+
+This method runs both Bellman–Ford implementations:
+
+- Normal version.
+- Debug version.
+
+It then checks whether their results match the expected outcome.
+
+```Java
+    static void runTest(
+            String testName,
+            int V,
+            Edge[] edges,
+            int source,
+            long[] expected,
+            boolean expectNegativeCycle) {
+
+        System.out.println("\n\n");
+        System.out.println("########################################");
+        System.out.println("TEST: " + testName);
+        System.out.println("########################################");
+
+        // Run normal implementation.
+        Result normal = bellmanFord(V, edges, source);
+
+        // Run debug implementation.
+        Result debug = bellmanFordDebug(V, edges, source);
+
+        // Check negative-cycle detection.
+        boolean cycleTestPassed =
+                normal.negativeCycle == expectNegativeCycle &&
+                debug.negativeCycle == expectNegativeCycle;
+
+        // Check shortest distances when no negative cycle exists.
+        boolean distanceTestPassed = true;
+
+        if (!expectNegativeCycle) {
+
+            distanceTestPassed =
+                    Arrays.equals(normal.dist, expected) &&
+                    Arrays.equals(debug.dist, expected);
+        }
+
+        // Check consistency between normal and debug versions.
+        boolean consistencyPassed =
+                normal.negativeCycle == debug.negativeCycle &&
+                Arrays.equals(normal.dist, debug.dist) &&
+                Arrays.equals(normal.predecessor, debug.predecessor);
+
+        // Display test results.
+        System.out.println("\n========== TEST VALIDATION ==========");
+
+        System.out.println(
+            "Negative-cycle detection: " +
+            (cycleTestPassed ? "PASS" : "FAIL")
+        );
+
+        if (!expectNegativeCycle) {
+
+            System.out.println(
+                "Shortest distances: " +
+                (distanceTestPassed ? "PASS" : "FAIL")
+            );
+        }
+
+        System.out.println(
+            "Normal vs Debug consistency: " +
+            (consistencyPassed ? "PASS" : "FAIL")
+        );
+
+        boolean allPassed =
+                cycleTestPassed &&
+                distanceTestPassed &&
+                consistencyPassed;
+
+        System.out.println(
+            "\nTEST RESULT: " +
+            (allPassed ? "PASS" : "FAIL")
+        );
+
+        // Print expected and actual distances.
+        if (!expectNegativeCycle) {
+
+            System.out.println("\nExpected distances: " +
+                    Arrays.toString(expected));
+
+            System.out.println("Actual distances:   " +
+                    Arrays.toString(normal.dist));
+        }
+    }
+
+```
+
+### 3. Add the three test cases
+
+Replace the previous `main()` method with the following:
+
+```Java
+
+    public static void main(String[] args) {
+
+        // =========================================
+        // TEST CASE 1:
+        // Positive weights only.
+        // Compare Bellman-Ford with Dijkstra.
+        // =========================================
+
+        int V1 = 5;
+
+        Edge[] positiveEdges = {
+
+            new Edge(0, 1, 4),  // A -> B
+            new Edge(0, 2, 2),  // A -> C
+            new Edge(2, 1, 1),  // C -> B
+            new Edge(1, 3, 5),  // B -> D
+            new Edge(2, 3, 8),  // C -> D
+            new Edge(2, 4, 10), // C -> E
+            new Edge(3, 4, 2)   // D -> E
+        };
+
+        long[] expected1 = {0, 3, 2, 8, 10};
+
+        // Compare Bellman-Ford with Dijkstra.
+        long[] dijkstraResult =
+                dijkstra(V1, positiveEdges, 0);
+
+        System.out.println("\n========== DIJKSTRA COMPARISON ==========");
+
+        System.out.println(
+            "Dijkstra distances: " +
+            Arrays.toString(dijkstraResult)
+        );
+
+        System.out.println(
+            "Expected distances: " +
+            Arrays.toString(expected1)
+        );
+
+        System.out.println(
+            "Dijkstra validation: " +
+            (Arrays.equals(dijkstraResult, expected1)
+                ? "PASS" : "FAIL")
+        );
+
+        runTest(
+            "CASE 1 - POSITIVE WEIGHTS",
+            V1,
+            positiveEdges,
+            0,
+            expected1,
+            false
+        );
+
+
+        // =========================================
+        // TEST CASE 2:
+        // Negative edges without negative cycles.
+        // =========================================
+
+        int V2 = 5;
+
+        Edge[] negativeEdges = {
+
+            new Edge(0, 1, 6),   // A -> B
+            new Edge(0, 2, 7),   // A -> C
+            new Edge(1, 2, 8),   // B -> C
+            new Edge(1, 3, 5),   // B -> D
+            new Edge(1, 4, -4),  // B -> E
+            new Edge(2, 3, -3),  // C -> D
+            new Edge(2, 4, 9),   // C -> E
+            new Edge(3, 1, -2),  // D -> B
+            new Edge(4, 3, 7)    // E -> D
+        };
+
+        long[] expected2 = {0, 2, 7, 4, -2};
+
+        runTest(
+            "CASE 2 - NEGATIVE EDGES, NO NEGATIVE CYCLE",
+            V2,
+            negativeEdges,
+            0,
+            expected2,
+            false
+        );
+
+
+        // =========================================
+        // TEST CASE 3:
+        // Reachable negative-weight cycle.
+        // =========================================
+
+        int V3 = 4;
+
+        Edge[] negativeCycleEdges = {
+
+            new Edge(0, 1, 1),   // A -> B
+            new Edge(1, 2, -2),  // B -> C
+            new Edge(2, 0, -2),  // C -> A
+            new Edge(2, 3, 2)    // C -> D
+        };
+
+        runTest(
+            "CASE 3 - REACHABLE NEGATIVE CYCLE",
+            V3,
+            negativeCycleEdges,
+            0,
+            null,
+            true
+        );
+
+
+        // =========================================
+        // FINAL SUMMARY
+        // =========================================
+
+        System.out.println("\n\n");
+        System.out.println("########################################");
+        System.out.println("ALL TEST CASES COMPLETED");
+        System.out.println("########################################");
+    }
+
+```
+
+### 4. Expected test results
+
+The important expected results are:
+
+Test Case 1: Positive weights
+
+PASS
+
+```
+Dijkstra:     [0, 3, 2, 8, 10]
+Bellman-Ford: [0, 3, 2, 8, 10]
+```
+
+Test Case 2: Negative edges
+
+PASS
+
+```
+Distances: [0, 2, 7, 4, -2]
+
+Negative cycle: Not detected
+```
+
+Test Case 3: Negative cycle
+
+PASS
+
+```
+A → B → C → A
+
+Cycle weight:
+1 + (-2) + (-2) = -3
+
+Negative cycle: Detected
+```
+
+### 5. What these tests verify
+
+| Concept                   | Tested in                      |
+| ------------------------- | ------------------------------ |
+| Standard edge relaxation  | All three                      |
+| Positive edge weights     | Case 1                         |
+| Negative edge weights     | Case 2                         |
+| Predecessor updates       | Cases 1 and 2                  |
+| Shortest-path correctness | Cases 1 and 2                  |
+| Dijkstra comparison       | Case 1                         |
+| Negative-cycle detection  | Case 3                         |
+| Normal/debug consistency  | All three                      |
+| Early termination         | Cases 1 and 2, when applicable |
+
+One additional experiment: Reverse the order of the edges in Case 2 and rerun the tests. You should still obtain `[0, 2, 7, 4, -2]`, although the intermediate debug traces may differ. This is an excellent way to understand in-place edge relaxation.
+
+Below is the complete, compilable Java implementation of Bellman–Ford using an Edge List.
+
+It includes:
+
+1. Standard Bellman–Ford implementation.
+2. Debug Bellman–Ford implementation:
+   - Prints every edge examination and relaxation.
+   - Prints the distance array after every pass.
+   - Prints the predecessor array after every pass.
+   - Shows negative-cycle detection.
+3. Dijkstra implementation for comparison.
+4. Three test cases:
+   - Positive weights only — compare Bellman–Ford with Dijkstra.
+   - Negative edges without negative cycles.
+   - A reachable negative cycle.
+5. Shortest-path reconstruction.
+6. Automatic PASS/FAIL test results.
+
+### Complete Java code
+
+```Java
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.ArrayList;
+
+public class BellmanFord {
+
+    private static final long INF = Long.MAX_VALUE / 4;
+
+    // --------------------------------------------------
+    // 1. EDGE
+    // --------------------------------------------------
+
+    static class Edge {
+        int source;
+        int destination;
+        int weight;
+
+        Edge(int source, int destination, int weight) {
+            this.source = source;
+            this.destination = destination;
+            this.weight = weight;
+        }
+
+        @Override
+        public String toString() {
+            return vertexName(source) + " -> "
+                    + vertexName(destination)
+                    + " (weight: " + weight + ")";
+        }
+    }
+
+    // --------------------------------------------------
+    // 2. RESULT
+    // --------------------------------------------------
+
+    static class Result {
+        long[] dist;
+        int[] predecessor;
+        boolean negativeCycle;
+
+        Result(long[] dist, int[] predecessor,
+               boolean negativeCycle) {
+            this.dist = dist;
+            this.predecessor = predecessor;
+            this.negativeCycle = negativeCycle;
+        }
+    }
+
+    // --------------------------------------------------
+    // 3. STANDARD BELLMAN-FORD
+    // --------------------------------------------------
+
+    static Result bellmanFord(
+            int vertices,
+            List<Edge> edges,
+            int source) {
+
+        long[] dist = new long[vertices];
+        int[] predecessor = new int[vertices];
+
+        Arrays.fill(dist, INF);
+        Arrays.fill(predecessor, -1);
+
+        dist[source] = 0;
+
+        // At most V - 1 relaxation passes.
+        for (int pass = 1; pass <= vertices - 1; pass++) {
+
+            boolean updated = false;
+
+            for (Edge edge : edges) {
+
+                int u = edge.source;
+                int v = edge.destination;
+                int weight = edge.weight;
+
+                // Ignore unreachable vertices.
+                if (dist[u] == INF) {
+                    continue;
+                }
+
+                long candidate = dist[u] + weight;
+
+                if (candidate < dist[v]) {
+
+                    dist[v] = candidate;
+                    predecessor[v] = u;
+
+                    updated = true;
+                }
+            }
+
+            // Optimization: stop if no distance changed.
+            if (!updated) {
+                break;
+            }
+        }
+
+        // Additional pass: detect a reachable negative cycle.
+        boolean negativeCycle = false;
+
+        for (Edge edge : edges) {
+
+            int u = edge.source;
+            int v = edge.destination;
+
+            if (dist[u] == INF) {
+                continue;
+            }
+
+            if (dist[u] + edge.weight < dist[v]) {
+                negativeCycle = true;
+                break;
+            }
+        }
+
+        return new Result(
+                dist,
+                predecessor,
+                negativeCycle
+        );
+    }
+
+    // --------------------------------------------------
+    // 4. DEBUG BELLMAN-FORD
+    // --------------------------------------------------
+
+    static Result bellmanFordDebug(
+            int vertices,
+            List<Edge> edges,
+            int source) {
+
+        long[] dist = new long[vertices];
+        int[] predecessor = new int[vertices];
+
+        Arrays.fill(dist, INF);
+        Arrays.fill(predecessor, -1);
+
+        dist[source] = 0;
+
+        System.out.println("\nInitial state:");
+        printArrays(dist, predecessor);
+
+        // V - 1 relaxation passes.
+        for (int pass = 1; pass <= vertices - 1; pass++) {
+
+            boolean updated = false;
+
+            System.out.println("\n======================================");
+            System.out.println("PASS " + pass);
+            System.out.println("======================================");
+
+            for (Edge edge : edges) {
+
+                int u = edge.source;
+                int v = edge.destination;
+                int weight = edge.weight;
+
+                System.out.println("\nExamining edge: " + edge);
+
+                // Source vertex must be reachable.
+                if (dist[u] == INF) {
+
+                    System.out.println(
+                            "SKIPPED: " + vertexName(u)
+                            + " is unreachable."
+                    );
+
+                    continue;
+                }
+
+                long candidate = dist[u] + weight;
+
+                System.out.println(
+                        "Current dist[" + vertexName(u) + "] = "
+                        + formatDistance(dist[u])
+                );
+
+                System.out.println(
+                        "Current dist[" + vertexName(v) + "] = "
+                        + formatDistance(dist[v])
+                );
+
+                System.out.println(
+                        "Candidate = " + formatDistance(dist[u])
+                        + " + (" + weight + ") = "
+                        + formatDistance(candidate)
+                );
+
+                if (candidate < dist[v]) {
+
+                    System.out.println("RELAXATION SUCCESSFUL");
+
+                    dist[v] = candidate;
+                    predecessor[v] = u;
+
+                    updated = true;
+
+                    System.out.println(
+                            "Updated dist[" + vertexName(v)
+                            + "] = " + formatDistance(dist[v])
+                    );
+
+                    System.out.println(
+                            "Updated predecessor[" + vertexName(v)
+                            + "] = " + vertexName(u)
+                    );
+
+                } else {
+
+                    System.out.println(
+                            "NO UPDATE: candidate is not smaller."
+                    );
+                }
+            }
+
+            System.out.println("\nState after pass " + pass + ":");
+            printArrays(dist, predecessor);
+
+            // Early termination.
+            if (!updated) {
+
+                System.out.println(
+                        "\nNo updates occurred. Algorithm converged."
+                );
+
+                break;
+            }
+        }
+
+        // Negative-cycle detection.
+        System.out.println("\n======================================");
+        System.out.println("NEGATIVE CYCLE DETECTION");
+        System.out.println("======================================");
+
+        boolean negativeCycle = false;
+
+        for (Edge edge : edges) {
+
+            int u = edge.source;
+            int v = edge.destination;
+
+            System.out.println("\nChecking edge: " + edge);
+
+            if (dist[u] == INF) {
+
+                System.out.println(
+                        "SKIPPED: source vertex is unreachable."
+                );
+
+                continue;
+            }
+
+            long candidate = dist[u] + edge.weight;
+
+            System.out.println(
+                    "Candidate = " + formatDistance(dist[u])
+                    + " + (" + edge.weight + ") = "
+                    + formatDistance(candidate)
+            );
+
+            if (candidate < dist[v]) {
+
+                System.out.println(
+                        "NEGATIVE CYCLE DETECTED!"
+                );
+
+                negativeCycle = true;
+                break;
+
+            } else {
+
+                System.out.println("No negative cycle through this edge.");
+            }
+        }
+
+        System.out.println("\nFinal state:");
+        printArrays(dist, predecessor);
+
+        System.out.println(
+                "\nNegative cycle: " + negativeCycle
+        );
+
+        return new Result(
+                dist,
+                predecessor,
+                negativeCycle
+        );
+    }
+
+    // --------------------------------------------------
+    // 5. DIJKSTRA (LINEAR-SCAN IMPLEMENTATION)
+    // --------------------------------------------------
+
+    // Used as a reference for the positive-weight test.
+    // This implementation assumes non-negative edge weights.
+
+    static long[] dijkstra(
+            int vertices,
+            List<Edge> edges,
+            int source) {
+
+        long[] dist = new long[vertices];
+        boolean[] visited = new boolean[vertices];
+
+        Arrays.fill(dist, INF);
+
+        dist[source] = 0;
+
+        for (int i = 0; i < vertices; i++) {
+
+            int u = -1;
+            long minDistance = INF;
+
+            // Find the unvisited vertex with minimum distance.
+            for (int v = 0; v < vertices; v++) {
+
+                if (!visited[v] && dist[v] < minDistance) {
+
+                    minDistance = dist[v];
+                    u = v;
+                }
+            }
+
+            if (u == -1) {
+                break;
+            }
+
+            visited[u] = true;
+
+            // Examine outgoing edges.
+            for (Edge edge : edges) {
+
+                if (edge.source != u) {
+                    continue;
+                }
+
+                int v = edge.destination;
+
+                if (visited[v]) {
+                    continue;
+                }
+
+                long candidate = dist[u] + edge.weight;
+
+                if (candidate < dist[v]) {
+                    dist[v] = candidate;
+                }
+            }
+        }
+
+        return dist;
+    }
+
+    // --------------------------------------------------
+    // 6. TEST RUNNER
+    // --------------------------------------------------
+
+    static void runTest(
+            String testName,
+            int vertices,
+            List<Edge> edges,
+            int source,
+            long[] expectedDistances,
+            boolean expectedNegativeCycle,
+            boolean compareWithDijkstra) {
+
+        System.out.println("\n\n");
+        System.out.println("######################################");
+        System.out.println(testName);
+        System.out.println("######################################");
+
+        // Run standard implementation.
+        Result normalResult =
+                bellmanFord(vertices, edges, source);
+
+        // Run debug implementation.
+        Result debugResult =
+                bellmanFordDebug(vertices, edges, source);
+
+        // Check negative-cycle detection.
+        boolean cycleTestPassed =
+                normalResult.negativeCycle == expectedNegativeCycle;
+
+        System.out.println("\n========== TEST RESULTS ==========");
+
+        System.out.println(
+                "Negative cycle test: "
+                + (cycleTestPassed ? "PASS" : "FAIL")
+        );
+
+        // Compare expected distances when there is no
+        // expected negative cycle.
+        boolean distanceTestPassed = true;
+
+        if (!expectedNegativeCycle) {
+
+            distanceTestPassed =
+                    Arrays.equals(
+                            normalResult.dist,
+                            expectedDistances
+                    );
+
+            System.out.println(
+                    "Expected distances: "
+                    + formatArray(expectedDistances)
+            );
+
+            System.out.println(
+                    "Actual distances:   "
+                    + formatArray(normalResult.dist)
+            );
+
+            System.out.println(
+                    "Distance test: "
+                    + (distanceTestPassed ? "PASS" : "FAIL")
+            );
+        }
+
+        // Check that normal and debug versions agree.
+        boolean consistencyPassed =
+                Arrays.equals(
+                        normalResult.dist,
+                        debugResult.dist
+                )
+                &&
+                Arrays.equals(
+                        normalResult.predecessor,
+                        debugResult.predecessor
+                )
+                &&
+                normalResult.negativeCycle
+                        == debugResult.negativeCycle;
+
+        System.out.println(
+                "Normal/debug consistency: "
+                + (consistencyPassed ? "PASS" : "FAIL")
+        );
+
+        // Compare Bellman-Ford with Dijkstra.
+        boolean dijkstraTestPassed = true;
+
+        if (compareWithDijkstra) {
+
+            long[] dijkstraDistances =
+                    dijkstra(vertices, edges, source);
+
+            dijkstraTestPassed =
+                    Arrays.equals(
+                            normalResult.dist,
+                            dijkstraDistances
+                    );
+
+            System.out.println(
+                    "Dijkstra distances: "
+                    + formatArray(dijkstraDistances)
+            );
+
+            System.out.println(
+                    "Bellman-Ford vs Dijkstra: "
+                    + (dijkstraTestPassed ? "PASS" : "FAIL")
+            );
+        }
+
+        boolean overallPassed =
+                cycleTestPassed
+                && distanceTestPassed
+                && consistencyPassed
+                && dijkstraTestPassed;
+
+        System.out.println("--------------------------------------");
+
+        System.out.println(
+                "OVERALL RESULT: "
+                + (overallPassed ? "PASS" : "FAIL")
+        );
+
+        System.out.println("--------------------------------------");
+
+        // Print shortest paths only when no negative cycle
+        // is expected or detected.
+        if (!normalResult.negativeCycle
+                && !expectedNegativeCycle) {
+
+            System.out.println("\nShortest paths:");
+
+            for (int v = 0; v < vertices; v++) {
+
+                System.out.print(
+                        vertexName(source) + " -> "
+                        + vertexName(v) + ": "
+                );
+
+                printPath(
+                        normalResult.predecessor,
+                        source,
+                        v
+                );
+
+                System.out.println(
+                        " | Cost: "
+                        + formatDistance(normalResult.dist[v])
+                );
+            }
+        }
+    }
+
+    // --------------------------------------------------
+    // 7. PRINTING UTILITIES
+    // --------------------------------------------------
+
+    static void printArrays(
+            long[] dist,
+            int[] predecessor) {
+
+        System.out.println(
+                "Distance:     " + formatArray(dist)
+        );
+
+        System.out.println(
+                "Predecessor:  " + formatPredecessors(predecessor)
+        );
+    }
+
+    static String formatArray(long[] array) {
+
+        StringBuilder sb = new StringBuilder("[ ");
+
+        for (int i = 0; i < array.length; i++) {
+
+            sb.append(formatDistance(array[i]));
+
+            if (i < array.length - 1) {
+                sb.append(", ");
+            }
+        }
+
+        sb.append(" ]");
+
+        return sb.toString();
+    }
+
+    static String formatPredecessors(int[] predecessor) {
+
+        StringBuilder sb = new StringBuilder("[ ");
+
+        for (int i = 0; i < predecessor.length; i++) {
+
+            if (predecessor[i] == -1) {
+                sb.append("null");
+            } else {
+                sb.append(vertexName(predecessor[i]));
+            }
+
+            if (i < predecessor.length - 1) {
+                sb.append(", ");
+            }
+        }
+
+        sb.append(" ]");
+
+        return sb.toString();
+    }
+
+    static String formatDistance(long distance) {
+
+        if (distance == INF) {
+            return "INF";
+        }
+
+        return String.valueOf(distance);
+    }
+
+    static String vertexName(int vertex) {
+        return String.valueOf((char) ('A' + vertex));
+    }
+
+    // --------------------------------------------------
+    // 8. SHORTEST-PATH RECONSTRUCTION
+    // --------------------------------------------------
+
+    static void printPath(
+            int[] predecessor,
+            int source,
+            int destination) {
+
+        List<Integer> path = new ArrayList<>();
+
+        int current = destination;
+
+        // Follow predecessors backwards.
+        while (current != -1) {
+
+            path.add(current);
+
+            if (current == source) {
+                break;
+            }
+
+            current = predecessor[current];
+        }
+
+        // Destination is unreachable from source.
+        if (path.get(path.size() - 1) != source) {
+
+            System.out.print("No path");
+            return;
+        }
+
+        // Print path in source-to-destination order.
+        for (int i = path.size() - 1; i >= 0; i--) {
+
+            System.out.print(vertexName(path.get(i)));
+
+            if (i > 0) {
+                System.out.print(" -> ");
+            }
+        }
+    }
+
+    // --------------------------------------------------
+    // 9. MAIN: THREE TEST CASES
+    // --------------------------------------------------
+
+    public static void main(String[] args) {
+
+        // ==============================================
+        // CASE 1: POSITIVE WEIGHTS ONLY
+        // ==============================================
+
+        int vertices1 = 5;
+
+        List<Edge> edges1 = new ArrayList<>();
+
+        edges1.add(new Edge(0, 1, 4));  // A -> B
+        edges1.add(new Edge(0, 2, 2));  // A -> C
+        edges1.add(new Edge(2, 1, 1));  // C -> B
+        edges1.add(new Edge(1, 3, 5));  // B -> D
+        edges1.add(new Edge(2, 3, 8));  // C -> D
+        edges1.add(new Edge(2, 4, 10)); // C -> E
+        edges1.add(new Edge(3, 4, 2));  // D -> E
+
+        long[] expected1 = {
+                0, 3, 2, 8, 10
+        };
+
+        runTest(
+                "CASE 1: POSITIVE WEIGHTS ONLY",
+                vertices1,
+                edges1,
+                0,
+                expected1,
+                false,
+                true
+        );
+
+        // ==============================================
+        // CASE 2: NEGATIVE EDGES, NO NEGATIVE CYCLE
+        // ==============================================
+
+        int vertices2 = 5;
+
+        List<Edge> edges2 = new ArrayList<>();
+
+        edges2.add(new Edge(0, 1, 6));   // A -> B
+        edges2.add(new Edge(0, 2, 7));   // A -> C
+        edges2.add(new Edge(1, 2, 8));   // B -> C
+        edges2.add(new Edge(1, 3, 5));   // B -> D
+        edges2.add(new Edge(1, 4, -4));  // B -> E
+        edges2.add(new Edge(2, 3, -3));  // C -> D
+        edges2.add(new Edge(2, 4, 9));   // C -> E
+        edges2.add(new Edge(3, 1, -2));  // D -> B
+        edges2.add(new Edge(4, 3, 7));   // E -> D
+
+        long[] expected2 = {
+                0, 2, 7, 4, -2
+        };
+
+        runTest(
+                "CASE 2: NEGATIVE EDGES, NO NEGATIVE CYCLE",
+                vertices2,
+                edges2,
+                0,
+                expected2,
+                false,
+                false
+        );
+
+        // ==============================================
+        // CASE 3: REACHABLE NEGATIVE CYCLE
+        // ==============================================
+
+        int vertices3 = 4;
+
+        List<Edge> edges3 = new ArrayList<>();
+
+        edges3.add(new Edge(0, 1, 1));   // A -> B
+        edges3.add(new Edge(1, 2, -2));  // B -> C
+        edges3.add(new Edge(2, 0, -2));  // C -> A
+        edges3.add(new Edge(2, 3, 2));   // C -> D
+
+        // Cycle:
+        //
+        // A -> B -> C -> A
+        //
+        // Total weight = 1 + (-2) + (-2) = -3
+        //
+        // This is a reachable negative cycle from A.
+
+        runTest(
+                "CASE 3: REACHABLE NEGATIVE CYCLE",
+                vertices3,
+                edges3,
+                0,
+                null,
+                true,
+                false
+        );
+    }
+}
+
+```
+
+### How to run
+
+Save the code as:
+
+```
+BellmanFord.java
+```
+
+Compile and execute:
+
+```
+javac BellmanFord.java
+java BellmanFord
+```
+
+### Expected test results
+
+Case 1 — Positive weights
+
+PASS
+
+Expected distances:
+
+```
+A = 0
+B = 3
+C = 2
+D = 8
+E = 10
+```
+
+Bellman–Ford and Dijkstra should produce identical distances.
+
+Case 2 — Negative edges
+
+PASS
+
+Expected distances:
+
+```
+A = 0
+B = 2
+C = 7
+D = 4
+E = -2
+```
+
+Negative edges are supported, and no negative cycle exists.
+
+Case 3 — Negative cycle
+
+PASS
+
+```
+A -> B -> C -> A
+
+Cycle weight = 1 - 2 - 2 = -3
+```
+
+Bellman–Ford should detect the reachable negative cycle.
+
+### Complexity analysis
+
+| Component                         | Time complexity  |
+| --------------------------------- | ---------------- |
+| Standard Bellman–Ford             | \\(O(VE)\\)      |
+| Negative-cycle detection          | \\(O(E)\\)       |
+| Dijkstra reference implementation | \\(O(V^2 + E)\\) |
+| Path reconstruction (per path)    | \\(O(V)\\)       |
+| Distance and predecessor arrays   | \\(O(V)\\)       |
+
+Important: The debug version uses the same in-place relaxation logic as the normal version. Therefore, the edge ordering can affect how quickly distances propagate between passes, but it does not change the final shortest-path distances when no reachable negative cycle exists.
+
+Also, Dijkstra is used only in Case 1 because it does not support negative edge weights.

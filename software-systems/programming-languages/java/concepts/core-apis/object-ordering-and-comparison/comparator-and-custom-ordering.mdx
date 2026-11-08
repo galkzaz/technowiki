@@ -1,0 +1,505 @@
+# Java `Comparator` and Custom Ordering
+
+In Java, `Comparator` lets you define how objects should be ordered without requiring the class itself to define that order.
+
+This is the natural next topic after `Comparable` and `compareTo()`.
+
+Imagine you have a `Student` class. Sometimes you want to sort students by ID, sometimes by name, and sometimes by grade. Which order should `Student.compareTo()` implement?
+
+You could make one ordering the natural order using `Comparable<Student>`, but you would need another mechanism for the other orderings. That's where `Comparator<Student>` comes in.
+
+## 1. `Comparable` vs. `Comparator`
+
+`Comparable<T>` — natural ordering
+
+The class defines its preferred default ordering through `compareTo()`.
+
+```
+class Student implements Comparable<Student> {
+    public int compareTo(Student other) {
+        return Integer.compare(id, other.id);
+    }
+}
+```
+
+`Comparator<T>` — custom ordering
+
+A separate object defines a particular way to compare two objects.
+
+```
+Comparator<Student> byName =
+    Comparator.comparing(Student::getName);
+```
+
+| Feature             | `Comparable`                                   | `Comparator`                                                  |
+| ------------------- | ---------------------------------------------- | ------------------------------------------------------------- |
+| Main method         | `compareTo(a)`                                 | `compare(a, b)`                                               |
+| Defined by          | The class being compared                       | A separate comparator                                         |
+| Number of orderings | Usually one natural order                      | Any number of custom orders                                   |
+| Change the class?   | Usually yes, to implement it                   | Usually no                                                    |
+| Used by             | `Collections.sort(list)` and `list.sort(null)` | `list.sort(comparator)`, `TreeSet`, `TreeMap`, and other APIs |
+
+Both methods follow the same basic rule:
+
+- Negative: the first object comes before the second.
+- Zero: they are equivalent for this ordering.
+- Positive: the first object comes after the second.
+
+The actual numeric result doesn't matter; only its sign matters.
+
+## 2. Example: multiple orderings for `Student`
+
+Let's define a student with an ID, name, and grade. We'll use the same student objects for three different orderings.
+
+```Java
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
+public class ComparatorDemo {
+
+    static class Student {
+        private final int id;
+        private final String name;
+        private final double grade;
+
+        Student(int id, String name, double grade) {
+            this.id = id;
+            this.name = name;
+            this.grade = grade;
+        }
+
+        int getId() {
+            return id;
+        }
+
+        String getName() {
+            return name;
+        }
+
+        double getGrade() {
+            return grade;
+        }
+
+        @Override
+        public String toString() {
+            return id + " | " + name + " | " + grade;
+        }
+    }
+
+    public static void main(String[] args) {
+        List<Student> students = new ArrayList<>(List.of(
+                new Student(103, "Mona", 88.5),
+                new Student(101, "Ali", 95.0),
+                new Student(102, "Omar", 78.5),
+                new Student(104, "Ali", 91.0)
+        ));
+
+        // Ordering 1: by ID, ascending.
+        Comparator<Student> byId =
+                Comparator.comparingInt(Student::getId);
+
+        // Ordering 2: by name, alphabetically.
+        Comparator<Student> byName =
+                Comparator.comparing(Student::getName);
+
+        // Ordering 3: by grade, highest first.
+        Comparator<Student> byGradeDescending =
+                Comparator.comparingDouble(Student::getGrade)
+                          .reversed();
+
+        System.out.println("By ID:");
+        students.sort(byId);
+        students.forEach(System.out::println);
+
+        System.out.println("\nBy name:");
+        students.sort(byName);
+        students.forEach(System.out::println);
+
+        System.out.println("\nBy grade (highest first):");
+        students.sort(byGradeDescending);
+        students.forEach(System.out::println);
+    }
+}
+
+```
+
+Notice that `Student` does not implement `Comparable<Student>`. We can still sort it because we supply a comparator to `sort()`.
+
+### Walkthrough
+
+The same list can be sorted in different ways:
+
+**By ID — ascending**
+| ID | Name | Grade | 
+| 101 | Ali | 95.0 | 
+| 102 | Omar | 78.5 | 
+| 103 | Mona | 88.5 | 
+| 104 | Ali | 91.0 | 
+
+**By name — A to Z**
+| ID | Name | Grade | 
+| 104 | Ali | 91.0 | 
+| 103 | Mona | 88.5 | 
+| 102 | Omar | 78.5 | 
+
+**By grade — highest first**
+| ID | Name | Grade | 
+| 104 | Ali | 91.0 | 
+| 103 | Mona | 88.5 | 
+| 102 | Omar | 78.5 | 
+When sorting by name, both students named Ali compare as zero. A comparator can therefore consider two different objects equivalent even though the objects are not equal according to `equals()`.
+
+This is allowed, but it matters when using sorted sets or maps, as we'll see below.
+
+## 3. Creating custom comparators
+
+Java provides several ways to create a `Comparator`. You generally don't need to implement the interface manually.
+
+### A. Lambda expression
+
+The `compare()` method takes two objects and returns a negative, zero, or positive result.
+
+```Java
+Comparator<Student> byId = (a, b) ->
+        Integer.compare(a.getId(), b.getId());
+```
+
+For example, when comparing students with IDs `101` and `103`:
+
+```
+compare(Student(101), Student(103))
+    |
+    v
+Integer.compare(101, 103)
+    |
+    v
+Negative result
+    |
+    v
+Student 101 comes first
+```
+
+Use `Integer.compare(a, b)` instead of `a - b`. Subtraction can overflow when comparing extreme integer values.
+
+### B. `Comparator.comparing()`
+
+This is usually the most readable option when sorting by a field or property.
+
+```Java
+Comparator<Student> byName =
+        Comparator.comparing(Student::getName);
+```
+
+You can also write:
+
+```Java
+Comparator<Student> byName =
+        Comparator.comparing(s -> s.getName());
+```
+
+The method extracts a value from each student and compares those values using their natural ordering.
+
+For primitive properties, Java provides specialized methods:
+
+```Java
+Comparator<Student> byId =
+        Comparator.comparingInt(Student::getId);
+
+Comparator<Student> byGrade =
+        Comparator.comparingDouble(Student::getGrade);
+```
+
+These avoid boxing primitive values into wrapper objects during key extraction.
+
+### C. Reverse an ordering
+
+Call `reversed()` to reverse an existing comparator.
+
+```Java
+Comparator<Student> byGradeDescending =
+        Comparator.comparingDouble(Student::getGrade)
+                  .reversed();
+```
+
+If the ascending order is:
+
+```
+78.5 → 88.5 → 91.0 → 95.0
+```
+
+The reversed order is:
+
+```
+95.0 → 91.0 → 88.5 → 78.5
+```
+
+This is generally clearer and safer than manually swapping comparison arguments.
+
+## 4. Chaining comparators with `thenComparing()`
+
+A common requirement is to sort by one field and use another field to break ties.
+
+For example:
+
+1. Sort by grade, highest first.
+2. If grades are equal, sort by name.
+3. If both are equal, sort by ID.
+
+You can express all three rules in one comparator:
+
+```Java
+Comparator<Student> ranking =
+        Comparator.comparingDouble(Student::getGrade)
+                  .reversed()
+                  .thenComparing(Student::getName)
+                  .thenComparingInt(Student::getId);
+```
+
+The comparison process looks like this:
+
+```
+Compare students A and B
+          |
+          v
+Compare grades (descending)
+          |
+     +----+----+
+     |         |
+   Unequal    Equal
+     |         |
+     v         v
+ Use grade   Compare names
+               |
+          +----+----+
+          |         |
+        Unequal    Equal
+          |         |
+          v         v
+      Use name   Compare IDs
+                     |
+                     v
+                 Use ID
+```
+
+The next comparator is consulted only if the previous comparator returns zero.
+
+One subtle point: `reversed()` reverses the comparator built before that call. If you want only grades descending and names ascending, the example above is correct. If you reverse the entire chained comparator at the end, names and IDs will also be descending.
+
+## 5. Custom ordering with a traditional class
+
+Lambdas are concise, but you can implement `Comparator<T>` as a named class when the ordering has a meaningful name, needs configuration, or is reused widely.
+
+```Java
+import java.util.Comparator;
+
+class StudentNameComparator implements Comparator<Student> {
+
+    @Override
+    public int compare(Student a, Student b) {
+        return a.getName().compareTo(b.getName());
+    }
+}
+```
+
+Use it like this:
+
+```Java
+students.sort(new StudentNameComparator());
+```
+
+This approach is useful when the comparison logic is complex. For ordinary field-based sorting, `Comparator.comparing()` and method references are usually easier to read.
+
+## 6. How `Comparator` relates to `Comparable`
+
+Suppose a class implements `Comparable<Student>` and defines ID as its natural order:
+
+```Java
+class Student implements Comparable<Student> {
+    private final int id;
+
+    Student(int id) {
+        this.id = id;
+    }
+
+    @Override
+    public int compareTo(Student other) {
+        return Integer.compare(this.id, other.id);
+    }
+}
+```
+
+You can use its natural ordering:
+
+```Java
+students.sort(null);
+```
+
+Or use a custom comparator:
+
+```Java
+students.sort(
+        Comparator.comparing(Student::getName)
+);
+```
+
+You can even override the natural order for a particular operation:
+
+```Java
+students.sort(
+        Comparator.comparingInt(Student::getId).reversed()
+);
+```
+
+The class's `compareTo()` method remains unchanged. This separation is one of the biggest advantages of `Comparator`.
+
+## 7. Handling `null` values
+
+By default, `Comparator.comparing(Student::getName)` will throw a `NullPointerException` if a student's name is `null`.
+
+If null names are valid in your application, define how they should be ordered explicitly.
+
+```Java
+Comparator<Student> byNameNullsLast =
+        Comparator.comparing(
+                Student::getName,
+                Comparator.nullsLast(Comparator.naturalOrder())
+        );
+```
+
+This puts students with non-null names first and students with null names last.
+
+You can also handle a null `Student` object itself:
+
+```Java
+Comparator<Student> nullStudentsLast =
+        Comparator.nullsLast(
+                Comparator.comparing(Student::getName)
+        );
+```
+
+These are two different cases:
+
+- `nullsLast(...)` around the key comparator handles a null name.
+- `nullsLast(...)` around the student comparator handles a null student object.
+
+Use these only if nulls are expected and their ordering is part of your design.
+
+## 8. `Comparator` and sorted collections
+
+A comparator does more than control display order. It can affect which elements a sorted collection considers duplicates.
+
+Consider these two students:
+
+```Java
+Student a = new Student(101, "Ali", 90.0);
+Student b = new Student(102, "Ali", 95.0);
+```
+
+If a `TreeSet` uses a comparator based only on name:
+
+```Java
+TreeSet<Student> studentsByName = new TreeSet<>(
+        Comparator.comparing(Student::getName)
+);
+
+studentsByName.add(a);
+studentsByName.add(b);
+
+System.out.println(studentsByName.size()); // 1
+```
+
+Both students have the name `"Ali"`, so the comparator returns zero. The `TreeSet` treats them as equivalent for its ordering and retains only one.
+
+If you want both students, add a tie-breaker:
+
+```Java
+TreeSet<Student> studentsByNameAndId = new TreeSet<>(
+        Comparator.comparing(Student::getName)
+                  .thenComparingInt(Student::getId)
+);
+
+studentsByNameAndId.add(a);
+studentsByNameAndId.add(b);
+
+System.out.println(studentsByNameAndId.size()); // 2
+```
+
+This is an important design decision:
+
+- Use a name-only comparator if equal names should be treated as the same ordering key.
+- Add a unique or suitable tie-breaker if distinct students must remain distinct in the sorted set.
+
+The same concern applies to `TreeMap` keys. For sorted collections, comparator equality is based on `compare(a, b) == 0`, not necessarily on `a.equals(b)`.
+
+## 9. The `Comparator` contract
+
+A comparator must obey essentially the same ordering rules as `Comparable`.
+
+| Rule               | Meaning                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| Sign symmetry      | `sign(compare(a, b)) == -sign(compare(b, a))`                                               |
+| Transitivity       | If `a < b` and `b < c`, then `a < c`                                                        |
+| Zero consistency   | If `compare(a, b) == 0`, their comparisons against any third object must have the same sign |
+| Exception symmetry | If one comparison direction throws, the reverse direction must also throw                   |
+
+A broken comparator can cause incorrect ordering, unexpected behavior in `TreeSet` and `TreeMap`, or sorting failures.
+
+For example, this comparator is incorrect:
+
+```Java
+Comparator<Integer> broken = (a, b) -> a > b ? 1 : -1;
+```
+
+When `a == b`, it returns `-1` rather than `0`, violating sign symmetry.
+
+Correct it with:
+
+```Java
+Comparator<Integer> correct = Integer::compare;
+```
+
+For a project, reuse the contract-testing approach from your `compareTo()` tests, substituting `comparator.compare(x, y)` for `x.compareTo(y)`.
+
+## 10. Design guidelines and common pitfalls
+
+| Guideline                                                       | Why it matters                                                |
+| --------------------------------------------------------------- | ------------------------------------------------------------- |
+| Prefer `Comparator.comparing()` for simple field-based ordering | More readable and less error-prone                            |
+| Use `Integer.compare()` or `Long.compare()`                     | Avoid subtraction overflow                                    |
+| Chain with `thenComparing()`                                    | Provides deterministic tie-breaking                           |
+| Define null behavior explicitly                                 | Prevents unexpected `NullPointerException`s                   |
+| Keep comparison keys stable while in a `TreeSet` or `TreeMap`   | Changing keys can break the collection's ordering assumptions |
+| Consider consistency with `equals()`                            | Avoids surprising duplicate behavior in sorted collections    |
+| Test the comparator contract                                    | Detects invalid ordering logic before production              |
+
+## 11. Where this topic belongs in your Java TOC
+
+For your Java Core APIs section, I'd organize the material as follows:
+
+```
+Core APIs
+└── Object Ordering and Comparison
+    ├── Equality vs. Ordering
+    ├── Comparable and Natural Ordering
+    │   ├── compareTo() Contract
+    │   ├── Consistency with equals()
+    │   └── Testing compareTo()
+    ├── Comparator and Custom Ordering
+    │   ├── Creating Comparators
+    │   ├── Lambda Expressions and Method References
+    │   ├── Comparator.comparing()
+    │   ├── Reversed Ordering
+    │   ├── Chaining with thenComparing()
+    │   ├── Null Handling
+    │   ├── Comparator Contract and Testing
+    │   └── Comparators with TreeSet and TreeMap
+    ├── Sorting APIs
+    │   ├── Arrays.sort()
+    │   ├── Collections.sort()
+    │   └── List.sort()
+    └── Ordering in the Collections Framework
+```
+
+The key takeaway: use `Comparable` to define a class's natural order, and use `Comparator` whenever you need a different or additional ordering without changing that class.

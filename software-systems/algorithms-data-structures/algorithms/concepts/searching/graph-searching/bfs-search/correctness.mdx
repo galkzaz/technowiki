@@ -1,0 +1,468 @@
+# Breadth-First Search (BFS): Correctness and Key Properties
+
+These six topics explain why BFS works, not just how to implement it. The central idea is that BFS explores vertices in layers: first the source, then its neighbors, then vertices two edges away, and so on.
+
+Let's use this graph throughout the explanation:
+
+```
+          A
+        /   \
+       B     C
+      / \     \
+     D   E     F
+          \
+           G
+```
+
+Assume the graph is undirected and BFS starts at `A`.
+
+The distances from `A` are:
+
+```
+Level 0:        A
+               distance = 0
+
+Level 1:      B   C
+             distance = 1
+
+Level 2:    D   E   F
+           distance = 2
+
+Level 3:        G
+               distance = 3
+```
+
+Here, distance means the minimum number of edges needed to reach a vertex from the source. It does not mean physical distance or the sum of arbitrary edge weights.
+
+## 1. BFS levels and distance from the source
+
+### What is a BFS level?
+
+The level of a vertex is its shortest-path distance from the source.
+
+If the source is $s$, define:
+
+$$
+d(s,v)=\text{minimum number of edges from }s\text{ to }v
+$$
+
+For example, starting from `A`:
+
+- `A` is at level 0 because no edges are needed to reach it.
+- `B` and `C` are at level 1 because each requires one edge.
+- `D`, `E`, and `F` are at level 2 because their shortest paths use two edges.
+- `G` is at level 3 because its shortest path is `A → B → E → G`.
+
+More formally, the set of vertices at level $k$ is:
+
+$$
+L_k=\\{v\in V\mid d(s,v)=k\\}
+$$
+
+For our graph:
+
+| Level | Vertices | Distance |
+| ----- | -------- | -------- |
+| 0     | A        | 0        |
+| 1     | B, C     | 1        |
+| 2     | D, E, F  | 2        |
+| 3     | G        | 3        |
+
+### How does BFS discover these levels?
+
+BFS uses a FIFO queue. A vertex discovered earlier is placed in the queue earlier, and the queue processes earlier entries first.
+
+Consider this trace:
+
+| Step | Vertex processed | Newly discovered | Queue afterward |
+| ---- | ---------------- | ---------------- | --------------- |
+| 1    | A                | B, C             | B, C            |
+| 2    | B                | D, E             | C, D, E         |
+| 3    | C                | F                | D, E, F         |
+| 4    | D                | —                | E, F            |
+| 5    | E                | G                | F, G            |
+| 6    | F                | —                | G               |
+| 7    | G                | —                | Empty           |
+
+Notice that BFS processes all level-1 vertices before level-2 vertices, and all level-2 vertices before level-3 vertices.
+
+That is the foundation of BFS correctness.
+
+Important distinction: a BFS level is not simply the number of edges in any path from the source. It is the number of edges in a shortest path.
+
+## 2. The invariant: vertices are processed in nondecreasing distance order
+
+An invariant is a property that remains true throughout an algorithm's execution.
+
+For BFS, the important invariant is:
+
+> Vertices are dequeued for processing in nondecreasing order of their shortest-path distance from the source.
+
+"Nondecreasing" means the distances can stay the same or increase, but never decrease.
+
+A valid processing order for our graph is:
+
+```
+A  B  C  D  E  F  G
+0  1  1  2  2  2  3   <- distances
+```
+
+The distances are:
+
+```
+0, 1, 1, 2, 2, 2, 3
+```
+
+They never go backward.
+
+If the adjacency order differs, BFS might process `C` before `B`, or `F` before `E`. That is fine because vertices within the same level can be processed in different orders.
+
+### Why does this invariant hold?
+
+It follows from two properties working together:
+
+1. FIFO queue: vertices discovered earlier are processed earlier.
+2. Neighbor discovery: processing a vertex at distance $k$ can discover new vertices at distance $k+1$, never at a smaller distance.
+
+Suppose the queue contains vertices from level 2. Any level-3 vertices discovered while processing them are appended to the back of the queue. They cannot jump ahead of level-2 vertices that are already waiting.
+
+The queue therefore preserves the layer-by-layer order.
+
+### Why is this useful?
+
+It explains why BFS finds shortest paths in unweighted graphs. When BFS first discovers a vertex, it has reached that vertex through the earliest possible layer.
+
+This is a correctness argument, not just a description of the queue's behavior.
+
+## 3. Why a vertex is discovered at its shortest distance
+
+This is the central correctness property of BFS:
+
+> When BFS first discovers a vertex $v$, the distance assigned to it is the shortest possible distance from the source.
+
+Suppose BFS discovers `E` while processing `B`.
+
+```
+A
+|
+B
+|
+E
+```
+
+The path is actually `A → B → E`, so its length is 2. BFS assigns:
+
+```
+distance[E] = distance[B] + 1;  // 1 + 1 = 2
+parent[E] = B;
+```
+
+Could there be a shorter path to `E` that BFS has not found yet?
+
+A shorter path would have length 0 or 1. Length 0 is impossible because `E` is not the source. A path of length 1 would mean `E` is directly adjacent to `A`.
+
+But BFS processes `A` first and examines all its neighbors. If `E` were directly adjacent to `A`, BFS would have discovered it at distance 1 already.
+
+So no shorter path exists.
+
+### The general reasoning
+
+Suppose BFS first discovers `v` from a vertex `u`, and assigns:
+
+$$
+d[v]=d[u]+1
+$$
+
+Assume, for contradiction, that a shorter path to `v` exists.
+
+If that path had length less than $d[v]$, its predecessor of `v` would be at a distance smaller than $d[u]$. BFS processes vertices in nondecreasing distance order, so that predecessor would have been processed earlier. Since it is adjacent to `v`, it would have discovered `v` earlier as well.
+
+That contradicts the claim that `v` was first discovered from `u`.
+
+Therefore, the assigned distance is shortest.
+
+### Why discovery time matters
+
+Consider this pseudocode:
+
+```
+if visited[v] == false:
+    visited[v] = true
+    distance[v] = distance[u] + 1
+    parent[v] = u
+    ENQUEUE(Q, v)
+```
+
+BFS assigns the distance and parent at discovery time. It does not wait until `v` is dequeued.
+
+That works because BFS's queue order guarantees that the first discovery uses a shortest path.
+
+The `parent` field records one shortest path, not necessarily the only shortest path. If multiple shortest paths exist, the path selected can depend on neighbor order.
+
+## 4. Proof sketch by induction on distance
+
+Induction gives us a systematic way to prove that BFS discovers every reachable vertex at its correct shortest distance.
+
+We prove the claim level by level.
+
+### Claim
+
+For every reachable vertex $v$, BFS discovers $v$ with:
+
+$$
+d[v]=d(s,v)
+$$
+
+where $d(s,v)$ is the true shortest-path distance from source $s$ to $v$.
+
+### Base case: distance 0
+
+The source $s$ is assigned:
+
+```
+distance[s] = 0
+parent[s] = NIL
+```
+
+The shortest path from the source to itself uses zero edges. Therefore, the claim holds for level 0.
+
+### Inductive hypothesis
+
+Assume every vertex at distance $k$ is discovered with its correct distance $k$.
+
+For example, if $k=1$, we assume all vertices directly reachable from the source have been discovered with distance 1.
+
+### Inductive step
+
+Take any vertex $v$ whose true shortest-path distance is $k+1$.
+
+There must be a vertex $u$ immediately before $v$ on a shortest path such that:
+
+$$
+d(s,u)=k
+$$
+
+and $u$ is adjacent to $v$.
+
+By the inductive hypothesis, BFS discovers $u$ with distance $k$. BFS eventually dequeues $u$ and examines its neighbors, including $v$.
+
+There are two possibilities:
+
+1. $v$ has not been discovered. BFS discovers it and assigns $d[v]=k+1$, which is correct.
+2. $v$ has already been discovered. It cannot have been assigned a distance greater than $k+1$, because its discovery came from a vertex processed no later in the distance order than $u$. Nor can it have a smaller distance than its true shortest-path distance. Thus, its assigned distance is also correct.
+
+Therefore, the claim holds for distance $k+1$.
+
+By induction, BFS assigns the correct shortest-path distance to every reachable vertex.
+
+### What does this proof establish?
+
+- BFS computes shortest-path distances in an unweighted graph.
+- The `parent` array can reconstruct a shortest path.
+- The queue's level order is essential to the proof.
+
+The proof does not say that BFS finds the shortest path in every weighted graph. That limitation matters and is covered in section 6.
+
+## 5. Why marking a vertex on discovery prevents repeated exploration
+
+Consider a triangle:
+
+```
+    A
+   / \
+  B---C
+```
+
+Start BFS at `A`.
+
+When `A` is processed, BFS discovers `B` and `C`:
+
+```
+Queue: [B, C]
+Visited: A, B, C
+```
+
+When BFS later processes `B`, it examines `C`. But `C` is already visited, so BFS does not enqueue it again.
+
+When BFS processes `C`, it similarly sees that `B` is already visited.
+
+This prevents the same vertex from entering the queue multiple times.
+
+### Why mark when enqueuing?
+
+Use this order:
+
+```
+if visited[v] == false:
+    visited[v] = true
+    ENQUEUE(Q, v)
+```
+
+The moment a vertex is enqueued, it is marked as discovered.
+
+Imagine instead that you mark it only when dequeuing:
+
+```
+if visited[v] == false:
+    ENQUEUE(Q, v)
+```
+
+In the triangle, `A` can enqueue both `B` and `C`. Then `B` can enqueue `C` again because `C` has not yet been marked. `C` can also enqueue `B` again.
+
+Now the queue contains duplicates. With careless handling, those duplicates can cause unnecessary work and repeated neighbor scans.
+
+### Three important consequences
+
+1\. Each vertex is enqueued at most once.
+
+Once `visited[v]` becomes `true`, later encounters cannot enqueue `v` again.
+
+2\. Each vertex is processed at most once.
+
+A vertex is dequeued once because it is enqueued once.
+
+3\. The complexity remains efficient.
+
+With adjacency lists, BFS runs in:
+
+$$
+O(|V|+|E|)
+$$
+
+Each vertex is handled a constant number of times, and each adjacency-list entry is examined once when its source vertex is processed. For undirected graphs, each edge normally appears in two adjacency lists, which does not change the asymptotic complexity.
+
+One subtle point: marking a vertex visited prevents repeated discovery; it does not mean that every vertex in the graph is reachable. BFS from a single source visits only the source's reachable component.
+
+## 6. Assumptions and limitations
+
+BFS is powerful, but its guarantees depend on the graph and the problem being solved.
+
+### 6.1 BFS finds shortest paths by number of edges
+
+BFS guarantees a shortest path in an unweighted graph, or a graph where every edge has the same cost.
+
+Consider this graph:
+
+```
+          1
+      A ------ B
+       \       |
+      10\      | 1
+         \     |
+           C ---
+```
+
+The edge costs are:
+
+- `A → B`: cost 1
+- `A → C`: cost 10
+- `C → B`: cost 1
+
+BFS finds `B` directly from `A`, using one edge and a total cost of 1. In this example, that is also the cheapest route.
+
+But if the direct edge `A → B` had cost 100, while `A → C → B` cost $10+1=11$, BFS would still prefer the one-edge path. It minimizes the number of edges, not total weight.
+
+For nonnegative weighted graphs, use Dijkstra's algorithm when you need minimum total cost. For graphs with negative edge weights, other algorithms, such as Bellman–Ford, may be appropriate.
+
+### 6.2 BFS only visits vertices reachable from its source
+
+Suppose the graph has two disconnected components:
+
+```
+Component 1:       Component 2:
+
+    A --- B            C --- D
+```
+
+Running `BFS(G, A)` visits only `A` and `B`.
+
+It does not visit `C` or `D`, because no path connects them to `A`.
+
+To traverse the entire graph, run BFS from every still-unvisited vertex:
+
+```
+BFS-ALL(G):
+    for each vertex v:
+        visited[v] = false
+
+    for each vertex v:
+        if visited[v] == false:
+            BFS-FROM-SOURCE(G, v, visited)
+```
+
+This produces a BFS forest rather than a single BFS tree.
+
+### 6.3 Directed graphs follow edge direction
+
+For a directed graph:
+
+```
+A ---> B ---> C
+```
+
+Starting BFS at `A` can reach `B` and `C`.
+
+Starting at `C` cannot reach `A` or `B`, because the edges point the other way.
+
+The same BFS algorithm works for both directed and undirected graphs. What changes is the definition of a vertex's neighbors:
+
+- Undirected graph: follow edges in either direction.
+- Directed graph: follow outgoing edges from the current vertex.
+
+Running BFS from every vertex does not, by itself, identify strongly connected components in a directed graph. That requires additional logic or a dedicated algorithm.
+
+### 6.4 BFS requires a finite, explorable graph for guaranteed termination
+
+For a finite graph, BFS terminates because each vertex is discovered at most once and the queue eventually becomes empty.
+
+For an infinite graph, BFS might continue forever if infinitely many vertices are reachable. It may also consume substantial memory because many vertices can be waiting in the queue simultaneously.
+
+### 6.5 BFS does not guarantee the shortest path in every sense
+
+BFS provides a shortest path measured by edge count. It does not automatically optimize:
+
+- Total cost when edge weights differ.
+- Travel time when edges have different durations.
+- Risk, distance, or other custom costs.
+- The number of transfers when the graph's edges do not correctly represent individual transfers.
+
+To solve these problems, first define what an edge represents and what cost you want to minimize, then choose the appropriate algorithm.
+
+### Summary of assumptions and limitations
+
+| Property                  | BFS guarantee or limitation                                     |
+| ------------------------- | --------------------------------------------------------------- |
+| Unweighted graph          | Finds shortest paths by edge count                              |
+| Equal-cost edges          | Finds minimum-cost paths when every edge has the same cost      |
+| Different edge weights    | Does not generally find minimum-cost paths                      |
+| Disconnected graph        | A single-source BFS visits only reachable vertices              |
+| Directed graph            | Follows outgoing edges only                                     |
+| Finite graph              | Terminates when the reachable queue becomes empty               |
+| Memory usage              | Can be $O(\|V\|)$, including the queue and auxiliary arrays |
+| Adjacency-list complexity | $O(\|V\|+\|E\|)$ for a full traversal                       |
+
+## How the six topics fit together
+
+The correctness argument forms a chain:
+
+```
+FIFO queue
+    |
+    v
+Vertices are processed in nondecreasing distance order
+    |
+    v
+Vertices are discovered through progressively deeper levels
+    |
+    v
+First discovery gives the shortest distance
+    |
+    v
+Marking on discovery prevents duplicate queue entries
+    |
+    v
+BFS is correct and runs in O(V + E)
+    for a graph represented with adjacency lists
+```
+
+The key point to remember is that BFS correctness comes from the combination of FIFO queue ordering and marking vertices when they are discovered. The queue preserves the level order, and the visited array ensures each vertex is discovered and enqueued only once. Together, these properties let BFS compute shortest-path distances in unweighted graphs.

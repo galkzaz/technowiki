@@ -1,0 +1,3949 @@
+
+## Adjacency List + Linear Scan
+
+We'll implement Dijkstra's algorithm using an adjacency-list graph and a linear scan to find the minimum-distance unprocessed vertex.
+
+This is Linear Scan, before introducing a min-priority queue or binary heap.
+
+We'll also include a debug mode that prints the algorithm's internal state after every iteration:
+
+- The selected (processed) vertex.
+- The distance array.
+- The visited/finalized array.
+- The predecessor array.
+- Every edge relaxation attempt and whether it updates a distance.
+
+We'll use a custom graph representation and Java arrays rather than Java collection classes.
+
+### 1. Graph example
+
+We'll use the following directed, weighted graph:
+
+```
+             4
+        A --------> B
+        |           |
+      10|           |3
+        |           |
+        v           v
+        C --------> D
+             2
+```
+
+Edges:
+
+```
+A -> B : 4
+A -> C : 10
+B -> D : 3
+C -> D : 2
+```
+
+Source vertex: `A`.
+
+The expected shortest paths are:
+
+| Vertex | Distance | Shortest path |
+| ------ | -------- | ------------- |
+| A      | 0        | A             |
+| B      | 4        | A → B         |
+| C      | 10       | A → C         |
+| D      | 7        | A → B → D     |
+
+Remember that Dijkstra minimizes the sum of edge weights, not the number of edges.
+
+### 2. Algorithm idea: linear scan
+
+In this version, we don't use a priority queue.
+
+Instead, we maintain:
+
+- `distance[]`: current best-known distance from the source.
+- `visited[]`: whether a vertex has been finalized.
+- `predecessor[]`: previous vertex on the best-known path.
+
+At each iteration, we scan the entire distance array to find the unvisited vertex with the smallest distance.
+
+For example:
+
+```
+Vertex:       A   B   C   D
+Distance:     0   4  10   ∞
+Visited:      T   F   F   F
+```
+
+The minimum unvisited distance is `4`, so we select `B`.
+
+We then relax all outgoing edges from `B`.
+
+The process continues until no reachable unvisited vertex remains.
+
+### Complete Java implementation with debug mode
+
+```Java
+
+public class DijkstraLinearScan {
+
+    private static final int INF = Integer.MAX_VALUE;
+
+    // An edge in an adjacency list
+    static class Edge {
+        int destination;
+        int weight;
+        Edge next;
+
+        Edge(int destination, int weight) {
+            this.destination = destination;
+            this.weight = weight;
+            this.next = null;
+        }
+    }
+
+    // Directed, weighted graph
+    static class Graph {
+        int numVertices;
+        Edge[] adjLists;
+
+        Graph(int numVertices) {
+            if (numVertices <= 0) {
+                throw new IllegalArgumentException(
+                    "Number of vertices must be positive"
+                );
+            }
+
+            this.numVertices = numVertices;
+            this.adjLists = new Edge[numVertices];
+        }
+
+        void addEdge(int src, int dest, int weight) {
+            validateVertex(src);
+            validateVertex(dest);
+
+            if (weight < 0) {
+                throw new IllegalArgumentException(
+                    "Dijkstra does not support negative weights"
+                );
+            }
+
+            Edge edge = new Edge(dest, weight);
+
+            // Insert at the head of the adjacency list
+            edge.next = adjLists[src];
+            adjLists[src] = edge;
+        }
+
+        private void validateVertex(int vertex) {
+            if (vertex < 0 || vertex >= numVertices) {
+                throw new IllegalArgumentException(
+                    "Invalid vertex: " + vertex
+                );
+            }
+        }
+    }
+
+    // Find the unvisited vertex with the smallest distance
+    static int findMinDistance(
+        int[] distance,
+        boolean[] visited
+    ) {
+        int minDistance = INF;
+        int minVertex = -1;
+
+        for (int v = 0; v < distance.length; v++) {
+
+            if (!visited[v] && distance[v] < minDistance) {
+                minDistance = distance[v];
+                minVertex = v;
+            }
+        }
+
+        return minVertex;
+    }
+
+    // Dijkstra's Single-Source Shortest Path
+    static void dijkstra(
+        Graph graph,
+        int source,
+        boolean debug
+    ) {
+        int n = graph.numVertices;
+
+        if (source < 0 || source >= n) {
+            throw new IllegalArgumentException("Invalid source");
+        }
+
+        int[] distance = new int[n];
+        int[] predecessor = new int[n];
+        boolean[] visited = new boolean[n];
+
+        char[] labels = new char[n];
+
+        // Initialize arrays
+        for (int i = 0; i < n; i++) {
+            distance[i] = INF;
+            predecessor[i] = -1;
+            visited[i] = false;
+            labels[i] = (char) ('A' + i);
+        }
+
+        // Source has distance zero
+        distance[source] = 0;
+
+        if (debug) {
+            System.out.println("INITIAL STATE");
+            printState(distance, visited, predecessor, labels);
+            System.out.println();
+        }
+
+        // Process at most V vertices
+        for (int iteration = 1; iteration <= n; iteration++) {
+
+            // Step 1: Find minimum-distance unvisited vertex
+            int u = findMinDistance(distance, visited);
+
+            // No reachable unvisited vertex remains
+            if (u == -1) {
+                if (debug) {
+                    System.out.println(
+                        "No more reachable unvisited vertices."
+                    );
+                }
+                break;
+            }
+
+            if (debug) {
+                System.out.println(
+                    "========== ITERATION " + iteration + " =========="
+                );
+
+                System.out.println(
+                    "Selected vertex: " + labels[u]
+                    + " (distance = " + distance[u] + ")"
+                );
+            }
+
+            // Step 2: Finalize selected vertex
+            visited[u] = true;
+
+            if (debug) {
+                System.out.println(
+                    "Finalized vertex: " + labels[u]
+                );
+            }
+
+            // Step 3: Relax outgoing edges
+            Edge current = graph.adjLists[u];
+
+            while (current != null) {
+
+                int v = current.destination;
+                int weight = current.weight;
+
+                if (debug) {
+                    System.out.println(
+                        "\nExamining edge: "
+                        + labels[u] + " -> " + labels[v]
+                        + " (weight = " + weight + ")"
+                    );
+                }
+
+                if (visited[v]) {
+
+                    if (debug) {
+                        System.out.println(
+                            "Destination already finalized. Skip."
+                        );
+                    }
+
+                } else {
+
+                    // Avoid integer overflow when distance is INF
+                    long candidate =
+                        (long) distance[u] + weight;
+
+                    if (debug) {
+                        System.out.println(
+                            "Candidate distance = "
+                            + distance[u] + " + " + weight
+                            + " = " + candidate
+                        );
+
+                        System.out.println(
+                            "Current distance to "
+                            + labels[v] + " = "
+                            + formatDistance(distance[v])
+                        );
+                    }
+
+                    if (candidate < distance[v]) {
+
+                        distance[v] = (int) candidate;
+                        predecessor[v] = u;
+
+                        if (debug) {
+                            System.out.println(
+                                "UPDATE: distance[" + labels[v]
+                                + "] = " + distance[v]
+                            );
+
+                            System.out.println(
+                                "UPDATE: predecessor[" + labels[v]
+                                + "] = " + labels[u]
+                            );
+                        }
+
+                    } else if (debug) {
+
+                        System.out.println(
+                            "No update. Existing path is better."
+                        );
+                    }
+                }
+
+                current = current.next;
+            }
+
+            // Step 4: Print state after this iteration
+            if (debug) {
+                System.out.println("\nSTATE AFTER ITERATION "
+                                   + iteration);
+
+                printState(
+                    distance,
+                    visited,
+                    predecessor,
+                    labels
+                );
+
+                System.out.println();
+            }
+        }
+
+        // Display final results
+        System.out.println("\nFINAL SHORTEST PATHS FROM "
+                           + labels[source]);
+
+        printResults(distance, predecessor, source, labels);
+    }
+
+    // Print all algorithm arrays
+    static void printState(
+        int[] distance,
+        boolean[] visited,
+        int[] predecessor,
+        char[] labels
+    ) {
+        System.out.println(
+            "Vertex:      " + formatLabels(labels)
+        );
+
+        System.out.println(
+            "Distance:    " + formatDistances(distance)
+        );
+
+        System.out.println(
+            "Visited:     " + formatVisited(visited)
+        );
+
+        System.out.println(
+            "Predecessor: " + formatPredecessors(
+                predecessor, labels
+            )
+        );
+    }
+
+    static String formatLabels(char[] labels) {
+        StringBuilder result = new StringBuilder("[");
+        for (int i = 0; i < labels.length; i++) {
+            if (i > 0) result.append(", ");
+            result.append(labels[i]);
+        }
+        return result.append("]").toString();
+    }
+
+    static String formatDistances(int[] distance) {
+        StringBuilder result = new StringBuilder("[");
+        for (int i = 0; i < distance.length; i++) {
+            if (i > 0) result.append(", ");
+            result.append(formatDistance(distance[i]));
+        }
+        return result.append("]").toString();
+    }
+
+    static String formatVisited(boolean[] visited) {
+        StringBuilder result = new StringBuilder("[");
+        for (int i = 0; i < visited.length; i++) {
+            if (i > 0) result.append(", ");
+            result.append(visited[i] ? "T" : "F");
+        }
+        return result.append("]").toString();
+    }
+
+    static String formatPredecessors(
+        int[] predecessor,
+        char[] labels
+    ) {
+        StringBuilder result = new StringBuilder("[");
+        for (int i = 0; i < predecessor.length; i++) {
+            if (i > 0) result.append(", ");
+
+            result.append(
+                predecessor[i] == -1
+                ? "-"
+                : labels[predecessor[i]]
+            );
+        }
+        return result.append("]").toString();
+    }
+
+    static String formatDistance(int distance) {
+        return distance == INF ? "∞" : String.valueOf(distance);
+    }
+
+    // Print final paths and distances
+    static void printResults(
+        int[] distance,
+        int[] predecessor,
+        int source,
+        char[] labels
+    ) {
+        for (int v = 0; v < distance.length; v++) {
+
+            System.out.print(labels[v] + ": ");
+
+            if (distance[v] == INF) {
+                System.out.println("Unreachable");
+            } else {
+                System.out.print(
+                    "Distance = " + distance[v] + ", Path = "
+                );
+
+                printPath(predecessor, source, v, labels);
+                System.out.println();
+            }
+        }
+    }
+
+    // Reconstruct a path using the predecessor array
+    static void printPath(
+        int[] predecessor,
+        int source,
+        int target,
+        char[] labels
+    ) {
+        int[] path = new int[predecessor.length];
+        int length = 0;
+
+        int current = target;
+
+        while (current != -1 && length < path.length) {
+            path[length++] = current;
+            current = predecessor[current];
+        }
+
+        if (length == 0 || path[length - 1] != source) {
+            System.out.print("No path");
+            return;
+        }
+
+        for (int i = length - 1; i >= 0; i--) {
+            System.out.print(labels[path[i]]);
+
+            if (i > 0) {
+                System.out.print(" -> ");
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+
+        Graph graph = new Graph(4);
+
+        // Construct the directed weighted graph
+        graph.addEdge(0, 1, 4);  // A -> B
+        graph.addEdge(0, 2, 10); // A -> C
+        graph.addEdge(1, 3, 3);  // B -> D
+        graph.addEdge(2, 3, 2);  // C -> D
+
+        // Run Dijkstra with debugging enabled
+        dijkstra(graph, 0, true);
+    }
+}
+
+```
+
+### Understanding the implementation
+
+Let's examine the important parts of the code.
+
+#### A. Initialization
+
+```Java
+int[] distance = new int[n];
+int[] predecessor = new int[n];
+boolean[] visited = new boolean[n];
+
+for (int i = 0; i < n; i++) {
+    distance[i] = INF;
+    predecessor[i] = -1;
+    visited[i] = false;
+}
+
+distance[source] = 0;
+```
+
+The arrays have different responsibilities:
+
+| Array            | Meaning                                           |
+| ---------------- | ------------------------------------------------- |
+| `distance[v]`    | Best-known distance from source to vertex `v`     |
+| `predecessor[v]` | Previous vertex on the best-known path            |
+| `visited[v]`     | Whether the shortest distance of `v` is finalized |
+
+Initially, for source `A`:
+
+```
+Vertex:      [A, B, C, D]
+Distance:    [0, ∞, ∞, ∞]
+Visited:     [F, F, F, F]
+Predecessor: [-, -, -, -]
+```
+
+#### B. Finding the minimum-distance unprocessed vertex
+
+This is the most important part of Linear Scan:
+
+```Java
+static int findMinDistance(
+    int[] distance,
+    boolean[] visited
+) {
+    int minDistance = INF;
+    int minVertex = -1;
+
+    for (int v = 0; v < distance.length; v++) {
+
+        if (!visited[v] && distance[v] < minDistance) {
+            minDistance = distance[v];
+            minVertex = v;
+        }
+    }
+
+    return minVertex;
+}
+```
+
+It scans the entire distance array.
+
+For example:
+
+```
+Vertex:      [A, B, C, D]
+Distance:    [0, 4, 10, 7]
+Visited:     [T, F, F, F]
+```
+
+The scan proceeds:
+
+| Vertex | Distance | Visited? | Selection       |
+| ------ | -------- | -------- | --------------- |
+| A      | 0        | Yes      | Ignore          |
+| B      | 4        | No       | Current minimum |
+| C      | 10       | No       | Ignore          |
+| D      | 7        | No       | New minimum     |
+
+The selected vertex is `D` with distance `7` only if `B` has already been finalized and the scan is performed again.
+
+The function returns `-1` if no reachable unvisited vertex remains. This is how we detect that the algorithm has finished, even if the graph contains disconnected vertices.
+
+#### C. Finalizing the selected vertex
+
+```Java
+int u = findMinDistance(distance, visited);
+
+if (u == -1) {
+    break;
+}
+
+visited[u] = true;
+```
+
+Once the minimum-distance unvisited vertex is selected, we mark it visited.
+
+This means its distance is now final.
+
+For example:
+
+```
+Selected: B
+Distance: 4
+
+Visited:
+[A, B, C, D]
+[T, T, F, F]
+```
+
+We will not need to improve `B` again.
+
+#### D. Relaxing outgoing edges
+
+```Java
+Edge current = graph.adjLists[u];
+
+while (current != null) {
+
+    int v = current.destination;
+    int weight = current.weight;
+
+    if (!visited[v]) {
+
+        long candidate = (long) distance[u] + weight;
+
+        if (candidate < distance[v]) {
+
+            distance[v] = (int) candidate;
+            predecessor[v] = u;
+        }
+    }
+
+    current = current.next;
+}
+```
+
+For every outgoing edge from `u`:
+
+1. Read its destination `v`.
+2. Read its weight.
+3. Calculate the candidate path cost.
+4. Compare it with the existing distance.
+5. Update the distance and predecessor if the candidate is smaller.
+
+For example:
+
+```
+B --3--> D
+
+distance[B] = 4
+distance[D] = ∞
+```
+
+Relaxation:
+
+```
+candidate = 4 + 3 = 7
+
+7 < ∞
+
+distance[D] = 7
+predecessor[D] = B
+```
+
+The cast to `long` in the calculation prevents integer overflow during addition. The code stores distances as `int`, so a path whose cost exceeds `Integer.MAX_VALUE` is not representable and is treated as unreachable. For applications requiring larger path costs, use `long` for the distance array and a corresponding long-valued infinity sentinel.
+
+### 5. Debug walkthrough: every iteration
+
+Now let's follow the actual implementation.
+
+One detail affects the edge traversal order: adjacency-list insertion is at the head, so:
+
+```
+A: C(10) -> B(4)
+B: D(3)
+C: D(2)
+D: empty
+```
+
+However, Dijkstra does not process vertices in adjacency-list order. It selects the minimum-distance unvisited vertex by scanning the distance array.
+
+#### Initial state
+
+```
+Vertex:      [A, B, C, D]
+Distance:    [0, ∞, ∞, ∞]
+Visited:     [F, F, F, F]
+Predecessor: [-, -, -, -]
+```
+
+#### Iteration 1: Select A
+
+`A` has the minimum distance of `0`.
+
+Finalize `A`, then examine its outgoing edges.
+
+```
+A -> C (10)
+
+candidate = 0 + 10 = 10
+
+distance[C] = 10
+predecessor[C] = A
+```
+
+Then:
+
+```
+A -> B (4)
+
+candidate = 0 + 4 = 4
+
+distance[B] = 4
+predecessor[B] = A
+```
+
+State after iteration 1
+
+```
+Vertex:      [A, B, C, D]
+Distance:    [0, 4, 10, ∞]
+Visited:     [T, F, F, F]
+Predecessor: [-, A, A, -]
+```
+
+#### Iteration 2: Select B
+
+The unvisited vertices have distances:
+
+```
+B = 4
+C = 10
+D = ∞
+```
+
+The minimum is `B`.
+
+Examine:
+
+```
+B -> D (3)
+
+candidate = 4 + 3 = 7
+
+7 < ∞
+```
+
+Update:
+
+```
+distance[D] = 7
+predecessor[D] = B
+```
+
+State after iteration 2
+
+```
+Vertex:      [A, B, C, D]
+Distance:    [0, 4, 10, 7]
+Visited:     [T, T, F, F]
+Predecessor: [-, A, A, B]
+```
+
+#### Iteration 3: Select D
+
+The unvisited vertices have distances:
+
+```
+C = 10
+D = 7
+```
+
+The minimum is `D`.
+
+Finalize `D`.
+
+There are no outgoing edges, so no relaxation occurs.
+
+State after iteration 3
+
+```
+Vertex:      [A, B, C, D]
+Distance:    [0, 4, 10, 7]
+Visited:     [T, T, F, T]
+Predecessor: [-, A, A, B]
+```
+
+#### Iteration 4: Select C
+
+Only `C` remains unvisited and reachable.
+
+Examine:
+
+```
+C -> D (2)
+
+candidate = 10 + 2 = 12
+```
+
+But:
+
+```
+distance[D] = 7
+```
+
+Also, `D` has already been finalized.
+
+Therefore, the edge is skipped and no update occurs.
+
+State after iteration 4
+
+```
+Vertex:      [A, B, C, D]
+Distance:    [0, 4, 10, 7]
+Visited:     [T, T, T, T]
+Predecessor: [-, A, A, B]
+```
+
+There are no more unvisited vertices. Dijkstra terminates.
+
+#### Complete iteration summary
+
+| Iteration | Selected | Distance when selected | Updated vertices |
+| --------- | -------- | ---------------------- | ---------------- |
+| 1         | A        | 0                      | C, B             |
+| 2         | B        | 4                      | D                |
+| 3         | D        | 7                      | None             |
+| 4         | C        | 10                     | None             |
+
+Notice the important distinction from BFS:
+
+```
+BFS processing order:      A, C, B, F, E, D, G
+Dijkstra processing order: A, B, D, C
+```
+
+BFS processes by number of edges from the source. Dijkstra processes by minimum accumulated path cost.
+
+### 6. Expected debug output
+
+The actual debug output from the supplied program follows this sequence. I've shortened the explanatory messages slightly to make the state changes easier to see.
+
+```
+INITIAL STATE
+Vertex:      [A, B, C, D]
+Distance:    [0, ∞, ∞, ∞]
+Visited:     [F, F, F, F]
+Predecessor: [-, -, -, -]
+
+========== ITERATION 1 ==========
+Selected vertex: A (distance = 0)
+Finalized vertex: A
+
+Examining edge: A -> C (weight = 10)
+Candidate distance = 0 + 10 = 10
+Current distance to C = ∞
+UPDATE: distance[C] = 10
+UPDATE: predecessor[C] = A
+
+Examining edge: A -> B (weight = 4)
+Candidate distance = 0 + 4 = 4
+Current distance to B = ∞
+UPDATE: distance[B] = 4
+UPDATE: predecessor[B] = A
+
+STATE AFTER ITERATION 1
+Vertex:      [A, B, C, D]
+Distance:    [0, 4, 10, ∞]
+Visited:     [T, F, F, F]
+Predecessor: [-, A, A, -]
+
+========== ITERATION 2 ==========
+Selected vertex: B (distance = 4)
+Finalized vertex: B
+
+Examining edge: B -> D (weight = 3)
+Candidate distance = 4 + 3 = 7
+Current distance to D = ∞
+UPDATE: distance[D] = 7
+UPDATE: predecessor[D] = B
+
+STATE AFTER ITERATION 2
+Vertex:      [A, B, C, D]
+Distance:    [0, 4, 10, 7]
+Visited:     [T, T, F, F]
+Predecessor: [-, A, A, B]
+
+========== ITERATION 3 ==========
+Selected vertex: D (distance = 7)
+Finalized vertex: D
+
+STATE AFTER ITERATION 3
+Vertex:      [A, B, C, D]
+Distance:    [0, 4, 10, 7]
+Visited:     [T, T, F, T]
+Predecessor: [-, A, A, B]
+
+========== ITERATION 4 ==========
+Selected vertex: C (distance = 10)
+Finalized vertex: C
+
+Examining edge: C -> D (weight = 2)
+Destination already finalized. Skip.
+
+STATE AFTER ITERATION 4
+Vertex:      [A, B, C, D]
+Distance:    [0, 4, 10, 7]
+Visited:     [T, T, T, T]
+Predecessor: [-, A, A, B]
+
+FINAL SHORTEST PATHS FROM A
+A: Distance = 0, Path = A
+B: Distance = 4, Path = A -> B
+C: Distance = 10, Path = A -> C
+D: Distance = 7, Path = A -> B -> D
+```
+
+### 7. Running without debug output
+
+The implementation has a `debug` parameter:
+
+```
+dijkstra(graph, 0, true);
+```
+
+- `true`: prints the selected vertex, relaxation details, and arrays after each iteration.
+- `false`: suppresses the internal debugging output and prints only the final shortest paths.
+
+For example:
+
+```
+// Debug version
+dijkstra(graph, 0, true);
+
+// Normal version
+dijkstra(graph, 0, false);
+```
+
+Compile and run:
+
+```
+javac DijkstraLinearScan.java
+java DijkstraLinearScan
+```
+
+### 8. Complexity analysis
+
+This is Linear Scan, which uses a linear scan instead of a priority queue.
+
+Each iteration calls:
+
+```
+findMinDistance(distance, visited);
+```
+
+That method scans all `V` vertices.
+
+Since we can process up to `V` vertices:
+
+$$
+V \times O(V) = O(V^2)
+$$
+
+We also examine the adjacency lists. Across the entire algorithm, this takes $O(E)$.
+
+| Operation                        | Complexity               |
+| -------------------------------- | ------------------------ |
+| Initialize arrays                | $O(V)$               |
+| Find minimum vertex              | $O(V)$ per iteration |
+| Find minimum over all iterations | $O(V^2)$             |
+| Relax all edges                  | $O(E)$               |
+| Path reconstruction              | $O(V)$               |
+| Total                            | $O(V^2+E)$           |
+| Auxiliary space                  | $O(V)$               |
+| Graph storage                    | $O(V+E)$             |
+
+Since $E \leq V^2$ for a simple graph, the total time complexity is:
+
+$$
+\boxed{O(V^2)}
+$$
+
+### 9. Linear Scan versus Version 2
+
+This is how I recommend studying the two implementations:
+
+| Feature             | Linear Scan: Linear scan  | Version 2: Binary min-heap                       |
+| ------------------- | ----------------------- | ------------------------------------------------ |
+| Find minimum vertex | Scan distance array     | Extract minimum from heap                        |
+| Minimum selection   | $O(V)$              | $O(\log V)$                                  |
+| Update priority     | Update distance array   | Insert new entry or decrease-key                 |
+| Overall time        | $O(V^2+E)$          | $O((V+E)\log V)$ with lazy duplicate entries |
+| Implementation      | Simpler                 | More complex                                     |
+| Best suited for     | Dense graphs / learning | Sparse graphs / practical use                    |
+
+The most important thing to understand before moving to Version 2:
+
+Both versions use exactly the same Dijkstra logic:
+
+1. Initialize distances.
+2. Select the unprocessed vertex with the smallest distance.
+3. Finalize that vertex.
+4. Relax its outgoing edges.
+5. Repeat.
+
+The only fundamental difference is how we find the next minimum-distance vertex.
+
+In Linear Scan, we scan the array. In Version 2, the priority queue performs that selection more efficiently.
+
+That separation is useful when studying algorithms: the shortest-path logic stays the same, while the data structure used to optimize vertex selection changes.
+
+## Adjacency List + Min-Priority Queue
+
+In Linear Scan, we found the minimum-distance unprocessed vertex by scanning the entire distance array.
+
+In Version 2, we'll replace that linear scan with a min-priority queue, which allows us to efficiently extract the vertex with the smallest tentative distance.
+
+As requested, we'll provide two separate methods:
+
+1. `dijkstra()` — normal implementation, prints only the final shortest paths.
+2. `dijkstraDebug()` — debug implementation, prints the priority queue, distance array, visited array, predecessor array, and relaxation details after every iteration.
+
+Both methods use the same graph representation and shortest-path logic.
+
+### What changes from Linear Scan?
+
+In Linear Scan, we used:
+
+```Java
+int u = findMinDistance(distance, visited);
+```
+
+This required scanning all vertices, taking $O(V)$ per selection.
+
+In Version 2, we use:
+
+```Java
+int u = priorityQueue.remove().vertex;
+```
+
+The priority queue automatically returns the vertex with the smallest priority.
+
+We'll use Java's `PriorityQueue` with a comparator. This is appropriate here because the goal is to study Dijkstra's algorithm using a min-priority queue, rather than implement the heap itself.
+
+### Graph and priority queue representation
+
+We'll use the same directed weighted graph:
+
+```
+             4
+        A --------> B
+        |           |
+      10|           |3
+        |           |
+        v           v
+        C --------> D
+             2
+```
+
+Edges:
+
+```
+A -> B : 4
+A -> C : 10
+B -> D : 3
+C -> D : 2
+```
+
+The priority queue stores objects containing a vertex and its tentative distance.
+
+```Java
+static class VertexDistance {
+    int vertex;
+    int distance;
+
+    VertexDistance(int vertex, int distance) {
+        this.vertex = vertex;
+        this.distance = distance;
+    }
+}
+```
+
+For example:
+
+```
+Priority Queue:
+
+(Vertex, Distance)
+
+(B, 4)
+(C, 10)
+(D, 7)
+```
+
+The queue always extracts the entry with the smallest distance.
+
+Note that a priority queue is not necessarily displayed as a fully sorted list internally. It guarantees that its head is the minimum element.
+
+### Complete Java implementation
+
+We'll use:
+
+- `Graph`: adjacency-list representation.
+- `Edge`: destination and weight.
+- `VertexDistance`: vertex and priority-queue distance.
+- `ShortestPathResult`: final distance, predecessor, and visited arrays.
+- `dijkstra()`: normal version.
+- `dijkstraDebug()`: debugging version.
+
+The implementation uses lazy deletion: when a shorter path is found, we insert a new queue entry instead of modifying an existing one. Old entries are skipped when extracted.
+
+```Java
+
+import java.util.PriorityQueue;
+import java.util.Comparator;
+
+public class DijkstraPriorityQueue {
+
+    private static final long INF = Long.MAX_VALUE;
+
+    // An edge in an adjacency list
+    static class Edge {
+        int destination;
+        int weight;
+        Edge next;
+
+        Edge(int destination, int weight) {
+            this.destination = destination;
+            this.weight = weight;
+        }
+    }
+
+    // Directed, weighted graph
+    static class Graph {
+        int numVertices;
+        Edge[] adjLists;
+
+        Graph(int numVertices) {
+            if (numVertices <= 0) {
+                throw new IllegalArgumentException(
+                    "Number of vertices must be positive"
+                );
+            }
+
+            this.numVertices = numVertices;
+            this.adjLists = new Edge[numVertices];
+        }
+
+        void addEdge(int src, int dest, int weight) {
+            validateVertex(src);
+            validateVertex(dest);
+
+            if (weight < 0) {
+                throw new IllegalArgumentException(
+                    "Dijkstra does not support negative weights"
+                );
+            }
+
+            Edge edge = new Edge(dest, weight);
+
+            // Insert at the head of the adjacency list
+            edge.next = adjLists[src];
+            adjLists[src] = edge;
+        }
+
+        private void validateVertex(int vertex) {
+            if (vertex < 0 || vertex >= numVertices) {
+                throw new IllegalArgumentException(
+                    "Invalid vertex: " + vertex
+                );
+            }
+        }
+    }
+
+    // An entry in the min-priority queue
+    static class VertexDistance {
+        int vertex;
+        long distance;
+
+        VertexDistance(int vertex, long distance) {
+            this.vertex = vertex;
+            this.distance = distance;
+        }
+    }
+
+    // Holds the results of Dijkstra
+    static class ShortestPathResult {
+        long[] distance;
+        int[] predecessor;
+        boolean[] visited;
+
+        ShortestPathResult(int n) {
+            distance = new long[n];
+            predecessor = new int[n];
+            visited = new boolean[n];
+
+            for (int i = 0; i < n; i++) {
+                distance[i] = INF;
+                predecessor[i] = -1;
+                visited[i] = false;
+            }
+        }
+    }
+
+    // Create a min-priority queue
+    static PriorityQueue<VertexDistance> createPriorityQueue() {
+
+        return new PriorityQueue<>(
+            Comparator.comparingLong(entry -> entry.distance)
+        );
+    }
+
+    // =====================================================
+    // VERSION 2A: NORMAL DIJKSTRA
+    // =====================================================
+
+    static ShortestPathResult dijkstra(Graph graph, int source) {
+
+        int n = graph.numVertices;
+
+        if (source < 0 || source >= n) {
+            throw new IllegalArgumentException("Invalid source");
+        }
+
+        ShortestPathResult result = new ShortestPathResult(n);
+
+        long[] distance = result.distance;
+        int[] predecessor = result.predecessor;
+        boolean[] visited = result.visited;
+
+        PriorityQueue<VertexDistance> pq = createPriorityQueue();
+
+        // Source has distance zero
+        distance[source] = 0;
+
+        pq.add(new VertexDistance(source, 0));
+
+        while (!pq.isEmpty()) {
+
+            // Extract the vertex with the smallest distance
+            VertexDistance entry = pq.poll();
+
+            int u = entry.vertex;
+
+            // Skip an outdated queue entry
+            if (entry.distance != distance[u]) {
+                continue;
+            }
+
+            // Skip if already finalized
+            if (visited[u]) {
+                continue;
+            }
+
+            // Finalize vertex u
+            visited[u] = true;
+
+            // Relax all outgoing edges
+            Edge current = graph.adjLists[u];
+
+            while (current != null) {
+
+                int v = current.destination;
+                int weight = current.weight;
+
+                if (!visited[v]) {
+
+                    long candidate = distance[u] + weight;
+
+                    if (candidate < distance[v]) {
+
+                        distance[v] = candidate;
+                        predecessor[v] = u;
+
+                        // Insert the improved distance
+                        pq.add(new VertexDistance(v, candidate));
+                    }
+                }
+
+                current = current.next;
+            }
+        }
+
+        return result;
+    }
+
+    // =====================================================
+    // VERSION 2B: DEBUG DIJKSTRA
+    // =====================================================
+
+    static ShortestPathResult dijkstraDebug(
+        Graph graph,
+        int source
+    ) {
+
+        int n = graph.numVertices;
+
+        if (source < 0 || source >= n) {
+            throw new IllegalArgumentException("Invalid source");
+        }
+
+        ShortestPathResult result = new ShortestPathResult(n);
+
+        long[] distance = result.distance;
+        int[] predecessor = result.predecessor;
+        boolean[] visited = result.visited;
+
+        PriorityQueue<VertexDistance> pq = createPriorityQueue();
+
+        // Source has distance zero
+        distance[source] = 0;
+
+        pq.add(new VertexDistance(source, 0));
+
+        char[] labels = createLabels(n);
+
+        System.out.println("INITIAL STATE");
+
+        printState(result, labels);
+        printPriorityQueue(pq, labels);
+
+        System.out.println();
+
+        int iteration = 0;
+
+        while (!pq.isEmpty()) {
+
+            iteration++;
+
+            System.out.println(
+                "========== ITERATION " + iteration + " =========="
+            );
+
+            // Extract minimum-distance entry
+            VertexDistance entry = pq.poll();
+
+            int u = entry.vertex;
+
+            System.out.println(
+                "Extracted: (" + labels[u]
+                + ", " + entry.distance + ")"
+            );
+
+            // Skip outdated entries
+            if (entry.distance != distance[u]) {
+
+                System.out.println(
+                    "STALE ENTRY: current distance is "
+                    + distance[u] + ". Skipping."
+                );
+
+                printIterationState(
+                    result, pq, labels, iteration
+                );
+
+                continue;
+            }
+
+            // Skip already finalized vertices
+            if (visited[u]) {
+
+                System.out.println(
+                    "Vertex already finalized. Skipping."
+                );
+
+                printIterationState(
+                    result, pq, labels, iteration
+                );
+
+                continue;
+            }
+
+            // Finalize vertex u
+            visited[u] = true;
+
+            System.out.println(
+                "Finalized vertex: " + labels[u]
+                + " (distance = " + distance[u] + ")"
+            );
+
+            // Examine outgoing edges
+            Edge current = graph.adjLists[u];
+
+            while (current != null) {
+
+                int v = current.destination;
+                int weight = current.weight;
+
+                System.out.println(
+                    "\nExamining edge: "
+                    + labels[u] + " -> " + labels[v]
+                    + " (weight = " + weight + ")"
+                );
+
+                if (visited[v]) {
+
+                    System.out.println(
+                        "Destination already finalized. Skip."
+                    );
+
+                } else {
+
+                    long candidate = distance[u] + weight;
+
+                    System.out.println(
+                        "Candidate distance = "
+                        + distance[u] + " + " + weight
+                        + " = " + candidate
+                    );
+
+                    System.out.println(
+                        "Current distance to " + labels[v]
+                        + " = " + formatDistance(distance[v])
+                    );
+
+                    if (candidate < distance[v]) {
+
+                        distance[v] = candidate;
+                        predecessor[v] = u;
+
+                        System.out.println(
+                            "UPDATE: distance[" + labels[v]
+                            + "] = " + candidate
+                        );
+
+                        System.out.println(
+                            "UPDATE: predecessor[" + labels[v]
+                            + "] = " + labels[u]
+                        );
+
+                        // Insert new improved entry
+                        pq.add(
+                            new VertexDistance(v, candidate)
+                        );
+
+                        System.out.println(
+                            "Inserted into priority queue: ("
+                            + labels[v] + ", " + candidate + ")"
+                        );
+
+                    } else {
+
+                        System.out.println(
+                            "No update. Existing path is better."
+                        );
+                    }
+                }
+
+                current = current.next;
+            }
+
+            // Print state after this iteration
+            printIterationState(
+                result, pq, labels, iteration
+            );
+        }
+
+        System.out.println("\nPRIORITY QUEUE IS EMPTY");
+
+        System.out.println("\nFINAL SHORTEST PATHS FROM "
+                           + labels[source]);
+
+        printResults(result, source, labels);
+
+        return result;
+    }
+
+    // =====================================================
+    // DEBUG AND PRINTING HELPERS
+    // =====================================================
+
+    static void printIterationState(
+        ShortestPathResult result,
+        PriorityQueue<VertexDistance> pq,
+        char[] labels,
+        int iteration
+    ) {
+        System.out.println(
+            "\nSTATE AFTER ITERATION " + iteration
+        );
+
+        printState(result, labels);
+        printPriorityQueue(pq, labels);
+
+        System.out.println();
+    }
+
+    static void printState(
+        ShortestPathResult result,
+        char[] labels
+    ) {
+        System.out.println(
+            "Vertex:      " + formatLabels(labels)
+        );
+
+        System.out.println(
+            "Distance:    " + formatDistances(result.distance)
+        );
+
+        System.out.println(
+            "Visited:     " + formatVisited(result.visited)
+        );
+
+        System.out.println(
+            "Predecessor: "
+            + formatPredecessors(result.predecessor, labels)
+        );
+    }
+
+    // Display queue entries in extraction order.
+    // Copying the queue prevents modifying the original queue.
+    static void printPriorityQueue(
+        PriorityQueue<VertexDistance> pq,
+        char[] labels
+    ) {
+        PriorityQueue<VertexDistance> copy =
+            new PriorityQueue<>(pq);
+
+        System.out.print("Priority Queue: [");
+
+        boolean first = true;
+
+        while (!copy.isEmpty()) {
+
+            VertexDistance entry = copy.poll();
+
+            if (!first) {
+                System.out.print(", ");
+            }
+
+            System.out.print(
+                "(" + labels[entry.vertex]
+                + ", " + entry.distance + ")"
+            );
+
+            first = false;
+        }
+
+        System.out.println("]");
+    }
+
+    static char[] createLabels(int n) {
+        char[] labels = new char[n];
+
+        for (int i = 0; i < n; i++) {
+            labels[i] = (char) ('A' + i);
+        }
+
+        return labels;
+    }
+
+    static String formatLabels(char[] labels) {
+        StringBuilder result = new StringBuilder("[");
+
+        for (int i = 0; i < labels.length; i++) {
+            if (i > 0) result.append(", ");
+            result.append(labels[i]);
+        }
+
+        return result.append("]").toString();
+    }
+
+    static String formatDistances(long[] distance) {
+        StringBuilder result = new StringBuilder("[");
+
+        for (int i = 0; i < distance.length; i++) {
+            if (i > 0) result.append(", ");
+            result.append(formatDistance(distance[i]));
+        }
+
+        return result.append("]").toString();
+    }
+
+    static String formatVisited(boolean[] visited) {
+        StringBuilder result = new StringBuilder("[");
+
+        for (int i = 0; i < visited.length; i++) {
+            if (i > 0) result.append(", ");
+            result.append(visited[i] ? "T" : "F");
+        }
+
+        return result.append("]").toString();
+    }
+
+    static String formatPredecessors(
+        int[] predecessor,
+        char[] labels
+    ) {
+        StringBuilder result = new StringBuilder("[");
+
+        for (int i = 0; i < predecessor.length; i++) {
+            if (i > 0) result.append(", ");
+
+            result.append(
+                predecessor[i] == -1
+                ? "-"
+                : labels[predecessor[i]]
+            );
+        }
+
+        return result.append("]").toString();
+    }
+
+    static String formatDistance(long distance) {
+        return distance == INF
+            ? "∞"
+            : String.valueOf(distance);
+    }
+
+    // =====================================================
+    // FINAL PATH PRINTING
+    // =====================================================
+
+    static void printResults(
+        ShortestPathResult result,
+        int source,
+        char[] labels
+    ) {
+        for (int v = 0; v < result.distance.length; v++) {
+
+            System.out.print(labels[v] + ": ");
+
+            if (result.distance[v] == INF) {
+
+                System.out.println("Unreachable");
+
+            } else {
+
+                System.out.print(
+                    "Distance = " + result.distance[v]
+                    + ", Path = "
+                );
+
+                printPath(
+                    result.predecessor,
+                    source,
+                    v,
+                    labels
+                );
+
+                System.out.println();
+            }
+        }
+    }
+
+    static void printPath(
+        int[] predecessor,
+        int source,
+        int target,
+        char[] labels
+    ) {
+        int[] path = new int[predecessor.length];
+        int length = 0;
+
+        int current = target;
+
+        while (current != -1 && length < path.length) {
+            path[length++] = current;
+            current = predecessor[current];
+        }
+
+        if (length == 0 || path[length - 1] != source) {
+            System.out.print("No path");
+            return;
+        }
+
+        for (int i = length - 1; i >= 0; i--) {
+            System.out.print(labels[path[i]]);
+
+            if (i > 0) {
+                System.out.print(" -> ");
+            }
+        }
+    }
+
+    // =====================================================
+    // MAIN
+    // =====================================================
+
+    public static void main(String[] args) {
+
+        Graph graph = new Graph(4);
+
+        // Construct directed weighted graph
+        graph.addEdge(0, 1, 4);  // A -> B
+        graph.addEdge(0, 2, 10); // A -> C
+        graph.addEdge(1, 3, 3);  // B -> D
+        graph.addEdge(2, 3, 2);  // C -> D
+
+        int source = 0;
+
+        System.out.println("===== NORMAL DIJKSTRA =====");
+
+        ShortestPathResult normalResult =
+            dijkstra(graph, source);
+
+        printResults(
+            normalResult,
+            source,
+            createLabels(graph.numVertices)
+        );
+
+        System.out.println("\n===== DEBUG DIJKSTRA =====");
+
+        dijkstraDebug(graph, source);
+    }
+}
+
+```
+
+### Understanding the min-priority queue
+
+The most important difference from Linear Scan is how we select the next vertex.
+
+#### A. Creating the priority queue
+
+```Java
+static PriorityQueue<VertexDistance> createPriorityQueue() {
+
+    return new PriorityQueue<>(
+        Comparator.comparingLong(entry -> entry.distance)
+    );
+}
+```
+
+The comparator tells Java to order entries by their `distance` field in ascending order.
+
+For example, suppose we insert:
+
+```Java
+pq.add(new VertexDistance(0, 0));
+pq.add(new VertexDistance(1, 4));
+pq.add(new VertexDistance(2, 10));
+```
+
+Conceptually, the queue contains:
+
+```
+(A, 0)
+(B, 4)
+(C, 10)
+```
+
+The next extraction returns `(A, 0)`.
+
+Important: Java's `PriorityQueue` does not maintain a fully sorted array. It maintains a heap, guaranteeing that the minimum element is available at the head.
+
+#### B. Extracting the minimum
+
+In Linear Scan:
+
+```Java
+int u = findMinDistance(distance, visited);
+```
+
+In Version 2:
+
+```Java
+VertexDistance entry = pq.poll();
+
+int u = entry.vertex;
+```
+
+`poll()` removes and returns the minimum-priority entry.
+
+Its complexity is:
+
+$$
+O(\log V)
+$$
+
+for a heap containing $O(V)$ entries.
+
+#### C. Relaxation and inserting improved distances
+
+Consider:
+
+```Java
+if (candidate < distance[v]) {
+
+    distance[v] = candidate;
+    predecessor[v] = u;
+
+    pq.add(new VertexDistance(v, candidate));
+}
+```
+
+Whenever we find a better path, we:
+
+1. Update the distance.
+2. Update the predecessor.
+3. Insert a new queue entry containing the improved distance.
+
+This introduces an important implementation detail.
+
+### Lazy deletion: why can a vertex appear more than once?
+
+Java's `PriorityQueue` does not provide a direct decrease-key operation that modifies an existing entry's priority.
+
+Instead, we use lazy deletion.
+
+Suppose we have this graph:
+
+```
+A --10--> B
+A --3---> C
+C --2---> B
+```
+
+Starting from `A`:
+
+Initially:
+
+```
+Distance: [0, ∞, ∞]
+Queue:    [(A, 0)]
+```
+
+After processing `A`:
+
+```
+A -> B (10)
+A -> C (3)
+
+Distance: [0, 10, 3]
+Queue:    [(C, 3), (B, 10)]
+```
+
+Next, we extract `C`, because its distance is smaller.
+
+We examine:
+
+```
+C -> B (2)
+
+candidate = 3 + 2 = 5
+```
+
+Since `5 < 10`, we improve `B`:
+
+```
+Distance: [0, 5, 3]
+Queue:    [(B, 5), (B, 10)]
+```
+
+Notice that the old `(B, 10)` entry is still in the queue.
+
+We do not need to search for it and remove it.
+
+Instead, when it is eventually extracted, we check:
+
+```Java
+if (entry.distance != distance[u]) {
+    continue;
+}
+```
+
+For the old entry:
+
+```
+entry.distance = 10
+distance[B]     = 5
+```
+
+Since they are different, the entry is outdated and skipped.
+
+Why this works
+
+The distance array is the authoritative record of the best-known distance.
+
+The priority queue may contain older entries, but only an entry whose distance matches the current distance is eligible for processing.
+
+This technique is called lazy deletion.
+
+### Debug walkthrough for our implementation
+
+Let's trace the graph used in the Java code.
+
+```
+A --4--> B
+A --10-> C
+B --3--> D
+C --2--> D
+```
+
+The initial state:
+
+```
+Distance:    [0, ∞, ∞, ∞]
+Visited:     [F, F, F, F]
+Predecessor: [-, -, -, -]
+
+Priority Queue:
+[(A, 0)]
+```
+
+#### Iteration 1: Extract A
+
+Extract:
+
+```
+(A, 0)
+```
+
+Relax `A → C`:
+
+```
+candidate = 0 + 10 = 10
+
+distance[C] = 10
+predecessor[C] = A
+```
+
+Relax `A → B`:
+
+```
+candidate = 0 + 4 = 4
+
+distance[B] = 4
+predecessor[B] = A
+```
+
+State:
+
+```
+Distance:    [0, 4, 10, ∞]
+Visited:     [T, F, F, F]
+Predecessor: [-, A, A, -]
+
+Priority Queue:
+[(B, 4), (C, 10)]
+```
+
+#### Iteration 2: Extract B
+
+Extract:
+
+```
+(B, 4)
+```
+
+Relax `B → D`:
+
+```
+candidate = 4 + 3 = 7
+
+distance[D] = 7
+predecessor[D] = B
+```
+
+State:
+
+```
+Distance:    [0, 4, 10, 7]
+Visited:     [T, T, F, F]
+Predecessor: [-, A, A, B]
+
+Priority Queue:
+[(D, 7), (C, 10)]
+```
+
+#### Iteration 3: Extract D
+
+Extract:
+
+```
+(D, 7)
+```
+
+`D` has no outgoing edges.
+
+State:
+
+```
+Distance:    [0, 4, 10, 7]
+Visited:     [T, T, F, T]
+Predecessor: [-, A, A, B]
+
+Priority Queue:
+[(C, 10)]
+```
+
+#### Iteration 4: Extract C
+
+Extract:
+
+```
+(C, 10)
+```
+
+Examine `C → D`:
+
+```
+candidate = 10 + 2 = 12
+```
+
+But `D` is already finalized, so the edge is skipped.
+
+State:
+
+```
+Distance:    [0, 4, 10, 7]
+Visited:     [T, T, T, T]
+Predecessor: [-, A, A, B]
+
+Priority Queue:
+[]
+```
+
+The queue is empty, so the algorithm terminates.
+
+#### Final output
+
+```
+A: Distance = 0, Path = A
+B: Distance = 4, Path = A -> B
+C: Distance = 10, Path = A -> C
+D: Distance = 7, Path = A -> B -> D
+```
+
+The debug method prints the queue in extraction order by copying it and repeatedly polling the copy. This is important because directly iterating over a Java `PriorityQueue` does not guarantee sorted order.
+
+### Normal method versus debug method
+
+The two methods share the same algorithm, but have different output responsibilities.
+
+| Feature                      | `dijkstra()` | `dijkstraDebug()` |
+| ---------------------------- | ------------ | ----------------- |
+| Initialize arrays            | Yes          | Yes               |
+| Create priority queue        | Yes          | Yes               |
+| Extract minimum              | Yes          | Yes               |
+| Skip stale entries           | Yes          | Yes               |
+| Relax edges                  | Yes          | Yes               |
+| Print queue after iterations | No           | Yes               |
+| Print distance array         | No           | Yes               |
+| Print predecessor array      | No           | Yes               |
+| Print relaxation details     | No           | Yes               |
+| Return shortest-path result  | Yes          | Yes               |
+
+You can call them independently:
+
+```
+// Normal implementation
+ShortestPathResult result = dijkstra(graph, 0);
+
+printResults(
+    result,
+    0,
+    createLabels(graph.numVertices)
+);
+```
+
+```
+// Debug implementation
+dijkstraDebug(graph, 0);
+```
+
+### Complexity analysis
+
+Let:
+
+- $V$ = number of vertices.
+- $E$ = number of edges.
+
+With lazy deletion and an adjacency list:
+
+| Operation                  | Complexity                              |
+| -------------------------- | --------------------------------------- |
+| Initialize arrays          | $O(V)$                              |
+| Insert into priority queue | $O(\log E)$                         |
+| Extract minimum            | $O(\log E)$                         |
+| Relax all edges            | $O(E)$ relaxation attempts          |
+| Total                      | $O((V+E)\log V)$ for a simple graph |
+| Auxiliary space            | $O(V+E)$                            |
+
+Why can the queue contain $O(E)$ entries?
+
+A vertex can receive multiple improved distances before it is finalized. Each successful relaxation can insert another entry, and there are at most $O(E)$ successful relaxations.
+
+Therefore, the more precise lazy-heap time bound is:
+
+$$
+O((V+E)\log E)
+$$
+
+For a simple graph, $E=O(V^2)$, so $\log E=O(\log V)$, giving:
+
+$$ O((V+E)\log V) $$
+
+### Linear Scan versus Version 2
+
+| Feature              | Linear Scan: Linear scan | Version 2: Min-heap               |
+| -------------------- | ---------------------- | --------------------------------- |
+| Minimum selection    | Scan all vertices      | Extract minimum from heap         |
+| Selection complexity | $O(V)$             | $O(\log V)$ per extraction    |
+| Distance update      | Update array           | Update array + insert queue entry |
+| Data structures      | Arrays                 | Arrays + priority queue           |
+| Time complexity      | $O(V^2)$           | $O((V+E)\log V)$              |
+| Dense graphs         | Often competitive      | Usually useful                    |
+| Sparse graphs        | Less efficient         | Usually preferred                 |
+
+One important distinction for your DSA study: Version 2 does not change Dijkstra's greedy algorithm or its relaxation rule. It changes the data structure used to select the next vertex.
+
+The next natural topic is comparing lazy deletion versus decrease-key using an indexed binary heap. That will show how a more specialized priority queue can avoid accumulating outdated entries.
+
+## Lazy Deletion vs. Decrease-Key in Dijkstra's Algorithm
+
+In Version 2, we used Java's `PriorityQueue` to select the vertex with the smallest tentative distance.
+
+However, there is an important implementation detail: what happens when we discover a shorter path to a vertex that is already inside the priority queue?
+
+There are two common approaches:
+
+1. Lazy deletion — insert a new entry and leave the old entry in the queue.
+2. Decrease-key — update the existing entry's priority in the queue.
+
+Let's understand both approaches and then see how an indexed binary min-heap implements decrease-key.
+
+### 1. The problem: a vertex gets a shorter distance
+
+Consider this directed weighted graph:
+
+```
+          10
+     A --------> B
+      \          ^
+       \         | 2
+      3 \         |
+         v        |
+          C ------+
+```
+
+Edges:
+
+```
+A → B : 10
+A → C : 3
+C → B : 2
+```
+
+We want to find the shortest paths from `A`.
+
+Initially:
+
+```
+distance[A] = 0
+distance[B] = ∞
+distance[C] = ∞
+```
+
+#### Step 1: Process A
+
+Extract `(A, 0)` from the priority queue.
+
+Relax its outgoing edges:
+
+- `A → B`: distance[B] becomes 10.
+- `A → C`: distance[C] becomes 3.
+
+Priority queue:
+
+```
+(B, 10)
+(C, 3)
+```
+
+The next vertex to process is `C`, because its distance is smaller.
+
+#### Step 2: Process C
+
+Extract `(C, 3)`.
+
+Relax `C → B`:
+
+$$
+candidate = distance[C] + weight(C,B)
+$$
+
+$$
+candidate = 3 + 2 = 5
+$$
+
+Previously:
+
+```
+distance[B] = 10
+```
+
+Now we have found a better path:
+
+```
+distance[B] = 5
+predecessor[B] = C
+```
+
+But notice: the priority queue already contains `(B, 10)`.
+
+What should we do with that old entry?
+
+There are two solutions.
+
+### 2. Approach 1: Lazy deletion
+
+This is the approach used in our Version 2 implementation.
+
+Instead of modifying the existing queue entry, we insert a new entry with the improved distance.
+
+After discovering the shorter path to `B`:
+
+```
+Priority Queue:
+
+(B, 5)    ← new entry
+(B, 10)   ← old entry
+```
+
+The queue now contains two entries for the same vertex.
+
+This is intentional.
+
+#### How does the algorithm handle the old entry?
+
+When an entry is extracted, compare its stored distance with the current distance array:
+
+```
+VertexDistance entry = pq.poll();
+
+int u = entry.vertex;
+
+if (entry.distance != distance[u]) {
+    continue;
+}
+```
+
+For vertex `B`, the current distance is 5.
+
+When `(B, 5)` is extracted:
+
+```
+entry.distance = 5
+distance[B]    = 5
+```
+
+The entry is valid, so we process `B`.
+
+Later, `(B, 10)` is extracted:
+
+```
+entry.distance = 10
+distance[B]    = 5
+```
+
+The entry is outdated, so we skip it.
+
+Lazy deletion
+
+```
+Insert improved entry
+        |
+        v
+Keep old entry in queue
+        |
+        v
+Extract an entry
+        |
+        v
+Compare with distance[]
+        |
+        +---- Equal ------> Process vertex
+        |
+        +---- Different --> Skip outdated entry
+```
+
+#### Complete execution
+
+| Operation | Extracted entry | Distance array `[A,B,C]` | Queue after relaxation |
+| --------- | --------------- | ------------------------ | ---------------------- |
+| Initial   | —               | `[0, ∞, ∞]`              | `(A,0)`                |
+| 1         | `(A,0)`         | `[0, 10, 3]`             | `(C,3), (B,10)`        |
+| 2         | `(C,3)`         | `[0, 5, 3]`              | `(B,5), (B,10)`        |
+| 3         | `(B,5)`         | `[0, 5, 3]`              | `(B,10)`               |
+| 4         | `(B,10)`        | `[0, 5, 3]`              | Empty                  |
+
+At operation 4, the old entry is discarded.
+
+The final shortest distances are:
+
+```
+A = 0
+B = 5
+C = 3
+```
+
+#### Advantages and disadvantages
+
+| Advantages                        | Disadvantages                             |
+| --------------------------------- | ----------------------------------------- |
+| Simple implementation             | Queue can contain duplicate entries       |
+| Works with Java `PriorityQueue`   | More queue insertions                     |
+| No need to implement decrease-key | Outdated entries consume temporary memory |
+| Easy to understand and maintain   | Some extracted entries are discarded      |
+
+This is why lazy deletion is popular in practical Dijkstra implementations.
+
+### 3. Approach 2: Decrease-key
+
+Instead of inserting a duplicate entry, we update the priority of the existing entry.
+
+When we discover:
+
+```
+distance[B] = 5
+```
+
+We locate the existing entry:
+
+```
+(B, 10)
+```
+
+And change it to:
+
+```
+(B, 5)
+```
+
+The queue becomes:
+
+```
+(B, 5)
+```
+
+There is only one entry for `B`.
+
+Decrease-key
+
+```
+Discover a shorter path
+        |
+        v
+Find existing vertex in heap
+        |
+        v
+Decrease its priority
+        |
+        v
+Restore min-heap property
+```
+
+The important part is restoring the heap property.
+
+For example, consider this min-heap:
+
+```
+             A:0
+           /     \
+        B:10      C:3
+```
+
+After decreasing `B` from 10 to 2:
+
+```
+             A:0
+           /     \
+         B:2      C:3
+```
+
+This still satisfies the min-heap property because `A` is smaller than both children.
+
+But consider this heap:
+
+```
+             A:0
+           /     \
+        B:10      C:3
+       /
+     D:12
+```
+
+If `D` decreases from 12 to 1:
+
+```
+             A:0
+           /     \
+        B:10      C:3
+       /
+      D:1
+```
+
+Now the heap property is violated: `D` is smaller than its parent `B`.
+
+We must move `D` upward:
+
+```
+             A:0
+           /     \
+         D:1      C:3
+       /
+     B:10
+```
+
+This operation is called sift-up (or bubble-up).
+
+Its time complexity is:
+
+$$
+O(\log V)
+$$
+
+because a binary heap has height $O(\log V)$.
+
+### 4. Why do we need an indexed binary min-heap?
+
+A normal binary heap stores elements in an array.
+
+For example:
+
+```
+Heap array:
+
+Index:    0      1      2      3      4
+        +------+------+------+------+------+
+Value:  | A:0  | B:10 | C:3  | D:12 | E:8  |
+        +------+------+------+------+------+
+```
+
+The array position of a vertex is not necessarily its vertex ID.
+
+If we want to decrease the priority of vertex `D`, how do we find its current heap position?
+
+Searching the entire heap would take:
+
+$$
+O(V)
+$$
+
+That would defeat the purpose of using a heap.
+
+An indexed binary heap solves this problem by maintaining a second array that maps each vertex to its current heap position.
+
+#### The two arrays
+
+```
+heap[] — stores vertices in heap order
+
+position[] — stores the heap position of each vertex
+```
+
+For example:
+
+```
+heap[]:
+
+Index:    0      1      2      3      4
+        +------+------+------+------+------+
+Value:  | A    | B    | C    | D    | E    |
+        +------+------+------+------+------+
+
+position[]:
+
+Vertex:   A   B   C   D   E
+Index:    0   1   2   3   4
+```
+
+Here:
+
+```
+position[A] = 0
+position[B] = 1
+position[C] = 2
+position[D] = 3
+position[E] = 4
+```
+
+Now suppose we need to decrease the priority of `D`.
+
+We can immediately find its heap position:
+
+```
+int index = position[D];
+```
+
+Then update its priority and perform sift-up.
+
+The important rule is:
+
+Whenever a vertex moves inside the heap, update its corresponding position in `position[]`.
+
+For example, if `D` moves from index 3 to index 1:
+
+```
+heap[]:
+
+Index:    0      1      2      3
+        +------+------+------+------+
+Value:  | A    | D    | C    | B    |
+        +------+------+------+------+
+
+position[]:
+
+A = 0
+B = 3
+C = 2
+D = 1
+```
+
+This mapping allows us to locate any vertex in constant time.
+
+### 5. The main indexed-heap operations
+
+An indexed binary min-heap needs these operations:
+
+| Operation                       | Purpose                                 | Time complexity |
+| ------------------------------- | --------------------------------------- | --------------- |
+| `insert(vertex, distance)`      | Insert a new vertex                     | $O(\log V)$ |
+| `extractMin()`                  | Remove the vertex with minimum distance | $O(\log V)$ |
+| `decreaseKey(vertex, distance)` | Improve an existing vertex's priority   | $O(\log V)$ |
+| `contains(vertex)`              | Check whether a vertex is in the heap   | $O(1)$      |
+| `isEmpty()`                     | Check whether the heap is empty         | $O(1)$      |
+
+The most important operation for this discussion is `decreaseKey()`.
+
+Its conceptual implementation:
+
+```
+decreaseKey(vertex, newDistance):
+
+    index = position[vertex]
+
+    if newDistance >= distance[vertex]:
+        return
+
+    distance[vertex] = newDistance
+
+    siftUp(index)
+```
+
+The `siftUp()` operation:
+
+```
+siftUp(index):
+
+    while index > 0:
+
+        parent = (index - 1) / 2
+
+        if heap[parent] has smaller priority:
+            break
+
+        swap(heap[parent], heap[index])
+
+        update position[] for both vertices
+
+        index = parent
+```
+
+The actual Java implementation would use integer vertex IDs in `heap[]`, while the `distance[]` array provides their priorities.
+
+### 6. Lazy deletion vs. decrease-key: comparison
+
+| Feature            | Lazy deletion             | Indexed heap / decrease-key   |
+| ------------------ | ------------------------- | ----------------------------- |
+| Priority update    | Insert a new entry        | Update existing entry         |
+| Duplicate vertices | Possible                  | No                            |
+| Finding a vertex   | Not required              | `position[]` lookup           |
+| Priority update    | $O(\log V)$ insertion | $O(\log V)$ decrease-key  |
+| Queue size         | Can grow to $O(E)$    | At most $O(V)$            |
+| Implementation     | Simpler                   | More complex                  |
+| Java support       | Built-in `PriorityQueue`  | Usually custom implementation |
+
+#### Dijkstra complexity comparison
+
+Assuming an adjacency-list graph and a binary min-heap:
+
+| Implementation            | Time complexity      | Auxiliary space |
+| ------------------------- | -------------------- | --------------- |
+| Linear scan (Linear Scan)   | $O(V^2+E)$       | $O(V)$      |
+| Lazy deletion (Version 2) | $O((V+E)\log E)$ | $O(V+E)$    |
+| Indexed binary heap       | $O((V+E)\log V)$ | $O(V)$      |
+
+For simple graphs, the lazy-deletion complexity is commonly written as $O((V+E)\log V)$, since $E=O(V^2)$.
+
+The indexed heap keeps at most one entry per vertex, which makes its queue-space requirement $O(V)$.
+
+### 7. How the two approaches fit into Dijkstra
+
+Both approaches implement the same Dijkstra algorithm. They differ only in how they manage the priority queue.
+
+```
+                  Dijkstra
+                     |
+                     v
+          Select minimum-distance
+                  vertex
+                     |
+          +----------+----------+
+          |                     |
+          v                     v
+     Lazy deletion          Decrease-key
+          |                     |
+          v                     v
+    Insert improved       Update existing
+       entry                 entry
+          |                     |
+          v                     v
+    Skip outdated          Sift-up in
+    entries later          indexed heap
+          |                     |
+          +----------+----------+
+                     |
+                     v
+              Relaxation
+```
+
+My recommendation for your DSA learning sequence:
+
+1. Linear Scan: Dijkstra with linear scanning.
+2. Version 2: Dijkstra with Java `PriorityQueue` and lazy deletion.
+3. Binary Min-Heap: array representation, parent/child indexes, sift-up, sift-down.
+4. Indexed Binary Min-Heap: maintain the `position[]` mapping.
+5. Version 3: Dijkstra using an indexed binary min-heap and decrease-key.
+
+This progression makes the reason for an indexed heap clear: it is not a different shortest-path algorithm; it is a more controlled way to implement the priority queue used by Dijkstra.
+
+The natural next implementation is Version 3 in Java, with separate `dijkstra()` and `dijkstraDebug()` methods, using a custom indexed binary min-heap rather than `PriorityQueue`.
+
+## Version 3: Indexed Binary Min-Heap
+
+In this version, we'll replace Java's built-in `PriorityQueue` with our own indexed binary min-heap.
+
+We'll keep the same design you requested in Version 2:
+
+- `dijkstra()` — normal implementation without debug output.
+- `dijkstraDebug()` — separate implementation that displays every important operation.
+- A custom adjacency-list graph.
+- A custom indexed min-heap supporting `insert()`, `extractMin()`, and `decreaseKey()`.
+
+The key difference from Version 2 is that each vertex can appear in the heap at most once. When we discover a shorter path, we update its existing heap entry instead of inserting a duplicate.
+
+### 1. Indexed min-heap structure
+
+We need three arrays:
+
+```
+heap[]       Stores vertex IDs in min-heap order.
+position[]   Maps each vertex to its current heap index.
+distance[]   Stores the current shortest-known distance.
+```
+
+For example:
+
+```
+heap[]:
+
+Index:       0       1       2
+           +-------+-------+-------+
+           |   A   |   B   |   C   |
+           +-------+-------+-------+
+
+position[]:
+
+Vertex:      A       B       C
+Index:       0       1       2
+
+distance[]:
+
+Vertex:      A       B       C
+Distance:    0       4      10
+```
+
+The heap compares vertices using `distance[vertex]`.
+
+For a vertex `v`, its parent and children are calculated using:
+
+$$
+parent(i) = \lfloor (i-1)/2 \rfloor
+$$
+
+$$
+left(i) = 2i+1,\qquad right(i)=2i+2
+$$
+
+The `position[]` array is essential: it lets `decreaseKey(v)` find the vertex immediately in $O(1)$, then restore heap order in $O(\log V)$.
+
+### 2. Complete Java implementation
+
+We'll use this graph in `main()`:
+
+```
+             4
+        A --------> B
+        |           |
+      10|           |3
+        |           |
+        v           v
+        C --------> D
+             2
+
+        A --------> D
+             20
+```
+
+Edges:
+
+| Edge  | Weight |
+| ----- | ------ |
+| A → B | 4      |
+| A → C | 10     |
+| B → D | 3      |
+| C → D | 2      |
+| A → D | 20     |
+
+The additional edge `A → D : 20` is intentional. It allows us to see `decreaseKey()` in action: D is initially inserted with distance 20, then improved to 7 through B.
+
+```Java
+
+import java.util.Arrays;
+
+public class DijkstraIndexedHeap {
+
+    private static final long INF = Long.MAX_VALUE;
+
+    // =========================================================
+    // 1. Graph representation
+    // =========================================================
+
+    static class Edge {
+        int destination;
+        long weight;
+        Edge next;
+
+        Edge(int destination, long weight, Edge next) {
+            this.destination = destination;
+            this.weight = weight;
+            this.next = next;
+        }
+    }
+
+    static class Graph {
+        int vertices;
+        Edge[] adjacencyList;
+
+        Graph(int vertices) {
+            if (vertices <= 0) {
+                throw new IllegalArgumentException(
+                    "Graph must contain at least one vertex."
+                );
+            }
+
+            this.vertices = vertices;
+            this.adjacencyList = new Edge[vertices];
+        }
+
+        void addEdge(int source, int destination, long weight) {
+            checkVertex(source);
+            checkVertex(destination);
+
+            if (weight < 0) {
+                throw new IllegalArgumentException(
+                    "Dijkstra does not support negative weights."
+                );
+            }
+
+            adjacencyList[source] = new Edge(
+                destination,
+                weight,
+                adjacencyList[source]
+            );
+        }
+
+        private void checkVertex(int vertex) {
+            if (vertex < 0 || vertex >= vertices) {
+                throw new IllegalArgumentException(
+                    "Invalid vertex: " + vertex
+                );
+            }
+        }
+    }
+
+    // =========================================================
+    // 2. Shortest path result
+    // =========================================================
+
+    static class ShortestPathResult {
+        long[] distance;
+        int[] predecessor;
+        boolean[] visited;
+
+        ShortestPathResult(int vertices) {
+            distance = new long[vertices];
+            predecessor = new int[vertices];
+            visited = new boolean[vertices];
+
+            Arrays.fill(distance, INF);
+            Arrays.fill(predecessor, -1);
+        }
+    }
+
+    // =========================================================
+    // 3. Indexed Binary Min-Heap
+    // =========================================================
+
+    static class IndexedMinHeap {
+
+        private final int[] heap;
+        private final int[] position;
+        private final long[] distance;
+
+        private int size;
+
+        IndexedMinHeap(int capacity, long[] distance) {
+            this.heap = new int[capacity];
+            this.position = new int[capacity];
+            this.distance = distance;
+
+            this.size = 0;
+
+            // -1 means that the vertex is not currently in the heap.
+            Arrays.fill(position, -1);
+        }
+
+        boolean isEmpty() {
+            return size == 0;
+        }
+
+        boolean contains(int vertex) {
+            return position[vertex] != -1;
+        }
+
+        int size() {
+            return size;
+        }
+
+        // -----------------------------------------------------
+        // Insert
+        // -----------------------------------------------------
+
+        void insert(int vertex) {
+            if (contains(vertex)) {
+                throw new IllegalArgumentException(
+                    "Vertex is already in the heap."
+                );
+            }
+
+            if (size == heap.length) {
+                throw new IllegalStateException(
+                    "Heap capacity exceeded."
+                );
+            }
+
+            heap[size] = vertex;
+            position[vertex] = size;
+
+            siftUp(size);
+
+            size++;
+        }
+
+        // -----------------------------------------------------
+        // Extract minimum
+        // -----------------------------------------------------
+
+        int extractMin() {
+            if (isEmpty()) {
+                throw new IllegalStateException(
+                    "Cannot extract from an empty heap."
+                );
+            }
+
+            int minVertex = heap[0];
+
+            // Move the last element to the root.
+            int lastVertex = heap[size - 1];
+
+            size--;
+
+            if (size > 0) {
+                heap[0] = lastVertex;
+                position[lastVertex] = 0;
+
+                siftDown(0);
+            }
+
+            // The extracted vertex is no longer in the heap.
+            position[minVertex] = -1;
+
+            return minVertex;
+        }
+
+        // -----------------------------------------------------
+        // Decrease key
+        // -----------------------------------------------------
+
+        void decreaseKey(int vertex) {
+            int index = position[vertex];
+
+            if (index == -1) {
+                throw new IllegalArgumentException(
+                    "Vertex is not in the heap."
+                );
+            }
+
+            siftUp(index);
+        }
+
+        // -----------------------------------------------------
+        // Sift up
+        // -----------------------------------------------------
+
+        private void siftUp(int index) {
+
+            while (index > 0) {
+
+                int parent = (index - 1) / 2;
+
+                if (distance[heap[parent]] <= distance[heap[index]]) {
+                    break;
+                }
+
+                swap(parent, index);
+
+                index = parent;
+            }
+        }
+
+        // -----------------------------------------------------
+        // Sift down
+        // -----------------------------------------------------
+
+        private void siftDown(int index) {
+
+            while (true) {
+
+                int left = 2 * index + 1;
+                int right = 2 * index + 2;
+
+                int smallest = index;
+
+                if (left < size &&
+                    distance[heap[left]] < distance[heap[smallest]]) {
+
+                    smallest = left;
+                }
+
+                if (right < size &&
+                    distance[heap[right]] < distance[heap[smallest]]) {
+
+                    smallest = right;
+                }
+
+                if (smallest == index) {
+                    break;
+                }
+
+                swap(index, smallest);
+
+                index = smallest;
+            }
+        }
+
+        // -----------------------------------------------------
+        // Swap two heap elements and update position[]
+        // -----------------------------------------------------
+
+        private void swap(int i, int j) {
+
+            int temp = heap[i];
+            heap[i] = heap[j];
+            heap[j] = temp;
+
+            position[heap[i]] = i;
+            position[heap[j]] = j;
+        }
+
+        // -----------------------------------------------------
+        // Display heap in its internal array order.
+        // This is NOT necessarily sorted order.
+        // -----------------------------------------------------
+
+        String toHeapString() {
+
+            StringBuilder sb = new StringBuilder("[");
+            
+            for (int i = 0; i < size; i++) {
+
+                if (i > 0) {
+                    sb.append(", ");
+                }
+
+                int vertex = heap[i];
+
+                sb.append(label(vertex))
+                  .append(":")
+                  .append(formatDistance(distance[vertex]));
+            }
+
+            sb.append("]");
+
+            return sb.toString();
+        }
+    }
+
+    // =========================================================
+    // 4. Normal Dijkstra implementation
+    // =========================================================
+
+    static ShortestPathResult dijkstra(Graph graph, int source) {
+
+        checkSource(graph, source);
+
+        ShortestPathResult result =
+            new ShortestPathResult(graph.vertices);
+
+        IndexedMinHeap heap =
+            new IndexedMinHeap(graph.vertices, result.distance);
+
+        result.distance[source] = 0;
+
+        heap.insert(source);
+
+        while (!heap.isEmpty()) {
+
+            // Extract the vertex with the smallest tentative distance.
+            int u = heap.extractMin();
+
+            result.visited[u] = true;
+
+            // Relax all outgoing edges.
+            Edge edge = graph.adjacencyList[u];
+
+            while (edge != null) {
+
+                int v = edge.destination;
+
+                if (!result.visited[v] &&
+                    result.distance[u] <= INF - edge.weight) {
+
+                    long candidate =
+                        result.distance[u] + edge.weight;
+
+                    if (candidate < result.distance[v]) {
+
+                        result.distance[v] = candidate;
+                        result.predecessor[v] = u;
+
+                        if (heap.contains(v)) {
+
+                            // Update the existing heap entry.
+                            heap.decreaseKey(v);
+
+                        } else {
+
+                            // First discovery of this vertex.
+                            heap.insert(v);
+                        }
+                    }
+                }
+
+                edge = edge.next;
+            }
+        }
+
+        return result;
+    }
+
+    // =========================================================
+    // 5. Debug Dijkstra implementation
+    // =========================================================
+
+    static ShortestPathResult dijkstraDebug(
+        Graph graph,
+        int source
+    ) {
+
+        checkSource(graph, source);
+
+        ShortestPathResult result =
+            new ShortestPathResult(graph.vertices);
+
+        IndexedMinHeap heap =
+            new IndexedMinHeap(graph.vertices, result.distance);
+
+        result.distance[source] = 0;
+
+        heap.insert(source);
+
+        int iteration = 1;
+
+        System.out.println("\n========== DIJKSTRA DEBUG ==========");
+
+        System.out.println("Initial state:");
+
+        printState(result);
+        System.out.println("Heap: " + heap.toHeapString());
+
+        while (!heap.isEmpty()) {
+
+            System.out.println("\n------------------------------------");
+            System.out.println("Iteration " + iteration);
+
+            // Extract minimum-distance vertex.
+            int u = heap.extractMin();
+
+            System.out.println(
+                "Extract minimum: " + label(u) +
+                " (distance = " + result.distance[u] + ")"
+            );
+
+            result.visited[u] = true;
+
+            System.out.println(
+                "Finalize vertex: " + label(u)
+            );
+
+            // Relax outgoing edges.
+            Edge edge = graph.adjacencyList[u];
+
+            while (edge != null) {
+
+                int v = edge.destination;
+
+                System.out.println(
+                    "\nExamine edge: " + label(u) +
+                    " -> " + label(v) +
+                    " (weight = " + edge.weight + ")"
+                );
+
+                if (result.visited[v]) {
+
+                    System.out.println(
+                        "Skip: destination is already finalized."
+                    );
+
+                } else if (result.distance[u] > INF - edge.weight) {
+
+                    System.out.println(
+                        "Skip: distance would overflow."
+                    );
+
+                } else {
+
+                    long candidate =
+                        result.distance[u] + edge.weight;
+
+                    System.out.println(
+                        "Candidate distance = " +
+                        result.distance[u] + " + " +
+                        edge.weight + " = " + candidate
+                    );
+
+                    System.out.println(
+                        "Current distance[" + label(v) + "] = " +
+                        formatDistance(result.distance[v])
+                    );
+
+                    if (candidate < result.distance[v]) {
+
+                        long oldDistance = result.distance[v];
+
+                        result.distance[v] = candidate;
+                        result.predecessor[v] = u;
+
+                        System.out.println(
+                            "UPDATE: " + label(v) +
+                            " distance changes from " +
+                            formatDistance(oldDistance) +
+                            " to " + candidate
+                        );
+
+                        if (heap.contains(v)) {
+
+                            System.out.println(
+                                "Operation: decreaseKey(" +
+                                label(v) + ")"
+                            );
+
+                            heap.decreaseKey(v);
+
+                        } else {
+
+                            System.out.println(
+                                "Operation: insert(" +
+                                label(v) + ")"
+                            );
+
+                            heap.insert(v);
+                        }
+
+                    } else {
+
+                        System.out.println(
+                            "No update: existing distance is shorter."
+                        );
+                    }
+                }
+
+                edge = edge.next;
+            }
+
+            System.out.println("\nState after iteration " + iteration + ":");
+
+            printState(result);
+            System.out.println("Heap: " + heap.toHeapString());
+
+            iteration++;
+        }
+
+        System.out.println("\n========== FINAL RESULT ==========");
+
+        printResults(result);
+
+        return result;
+    }
+
+    // =========================================================
+    // 6. Output and formatting helpers
+    // =========================================================
+
+    static void checkSource(Graph graph, int source) {
+        if (source < 0 || source >= graph.vertices) {
+            throw new IllegalArgumentException(
+                "Invalid source vertex."
+            );
+        }
+    }
+
+    static String label(int vertex) {
+        if (vertex < 26) {
+            return String.valueOf((char) ('A' + vertex));
+        }
+
+        return "V" + vertex;
+    }
+
+    static String formatDistance(long distance) {
+        return distance == INF ? "INF" : String.valueOf(distance);
+    }
+
+    static void printState(ShortestPathResult result) {
+
+        System.out.println(
+            "Distance:     " + Arrays.toString(
+                Arrays.stream(result.distance)
+                    .mapToObj(DijkstraIndexedHeap::formatDistance)
+                    .toArray()
+            )
+        );
+
+        System.out.println(
+            "Visited:      " + Arrays.toString(result.visited)
+        );
+
+        System.out.println(
+            "Predecessor:  " +
+            Arrays.toString(
+                Arrays.stream(result.predecessor)
+                    .mapToObj(
+                        v -> v == -1 ? "-" : label(v)
+                    )
+                    .toArray()
+            )
+        );
+    }
+
+    static void printResults(ShortestPathResult result) {
+
+        System.out.println("\nVertex | Distance | Shortest path");
+        System.out.println("----------------------------------");
+
+        for (int v = 0; v < result.distance.length; v++) {
+
+            System.out.printf(
+                "%-6s | %-8s | %s%n",
+                label(v),
+                formatDistance(result.distance[v]),
+                buildPath(result.predecessor, v)
+            );
+        }
+    }
+
+    static String buildPath(int[] predecessor, int target) {
+
+        int[] path = new int[predecessor.length];
+        int count = 0;
+
+        int current = target;
+
+        while (current != -1) {
+
+            path[count++] = current;
+            current = predecessor[current];
+        }
+
+        StringBuilder sb = new StringBuilder();
+
+        // Print from source to destination.
+        for (int i = count - 1; i >= 0; i--) {
+
+            if (sb.length() > 0) {
+                sb.append(" -> ");
+            }
+
+            sb.append(label(path[i]));
+        }
+
+        return sb.toString();
+    }
+
+    // =========================================================
+    // 7. Main
+    // =========================================================
+
+    public static void main(String[] args) {
+
+        Graph graph = new Graph(4);
+
+        graph.addEdge(0, 1, 4);   // A -> B
+        graph.addEdge(0, 2, 10);  // A -> C
+        graph.addEdge(1, 3, 3);   // B -> D
+        graph.addEdge(2, 3, 2);   // C -> D
+        graph.addEdge(0, 3, 20);  // A -> D
+
+        int source = 0;
+
+        // Normal execution.
+        System.out.println("========== NORMAL EXECUTION ==========");
+
+        ShortestPathResult result = dijkstra(graph, source);
+
+        printResults(result);
+
+        // Debug execution.
+        dijkstraDebug(graph, source);
+    }
+}
+
+```
+
+### 3. Understanding the important operations
+
+Let's examine the three heap operations that make this implementation work.
+
+#### A. `insert(vertex)`
+
+When a vertex is discovered for the first time, we insert it into the heap.
+
+```
+void insert(int vertex) {
+    heap[size] = vertex;
+    position[vertex] = size;
+
+    siftUp(size);
+
+    size++;
+}
+```
+
+For example, suppose the heap contains:
+
+```
+          A:0
+         /   \
+       B:10  C:3
+```
+
+We discover a new vertex D with distance 2:
+
+```
+          A:0
+         /   \
+       B:10  C:3
+       /
+     D:2
+```
+
+Because D has a smaller distance than its parent B, `siftUp()` moves D upward:
+
+```
+          A:0
+         /   \
+        D:2  C:3
+       /
+     B:10
+```
+
+The `swap()` operation also updates `position[]`, so the mapping remains correct.
+
+#### B. `extractMin()`
+
+Dijkstra must always process the vertex with the smallest tentative distance.
+
+`extractMin()` removes the root of the min-heap.
+
+Suppose:
+
+```
+          A:0
+         /   \
+        B:4  C:10
+       /
+     D:20
+```
+
+After extracting A:
+
+1. Remove A.
+2. Move the last vertex D to the root.
+3. Perform `siftDown()`.
+4. Update the positions.
+
+Result:
+
+```
+          B:4
+         /   \
+       D:20  C:10
+```
+
+The extracted vertex's position becomes `-1`, indicating that it is no longer in the heap.
+
+#### C. `decreaseKey(vertex)`
+
+This is the operation that distinguishes Version 3 from Version 2.
+
+Suppose the heap contains:
+
+```
+          C:10
+         /
+       D:20
+```
+
+We discover a better path to D:
+
+```
+distance[D] = 7
+```
+
+First, the Dijkstra implementation updates the shared distance array:
+
+```
+result.distance[v] = candidate;
+```
+
+Then it calls:
+
+```
+heap.decreaseKey(v);
+```
+
+The heap uses `position[D]` to locate D immediately and calls `siftUp()`.
+
+Result:
+
+```
+          D:7
+         /
+       C:10
+```
+
+Notice that we did not insert another D entry.
+
+### 4. Step-by-step Dijkstra execution
+
+Let's trace the actual example from `main()`.
+
+Initial state:
+
+```
+distance = [0, INF, INF, INF]
+visited  = [F, F, F, F]
+pred     = [-, -, -, -]
+
+Heap:
+[A:0]
+```
+
+#### Iteration 1: Extract A
+
+Extract the minimum:
+
+```
+A (distance = 0)
+```
+
+Examine A's outgoing edges.
+
+Because we inserted edges at the head of the adjacency list, their examination order is:
+
+```
+A → D : 20
+A → C : 10
+A → B : 4
+```
+
+After relaxation:
+
+| Vertex | Distance | Predecessor |
+| ------ | -------- | ----------- |
+| A      | 0        | —           |
+| B      | 4        | A           |
+| C      | 10       | A           |
+| D      | 20       | A           |
+
+Heap:
+
+```
+          B:4
+         /   \
+       D:20  C:10
+```
+
+Internal heap array:
+
+```
+[B:4, D:20, C:10]
+```
+
+State:
+
+```
+distance = [0, 4, 10, 20]
+visited  = [T, F, F, F]
+pred     = [-, A, A, A]
+```
+
+#### Iteration 2: Extract B
+
+Extract the minimum:
+
+```
+B (distance = 4)
+```
+
+After extraction:
+
+```
+          C:10
+         /
+       D:20
+```
+
+Now examine:
+
+```
+B → D : 3
+```
+
+Calculate:
+
+$$
+candidate = distance[B] + weight(B,D)
+$$
+
+$$
+candidate = 4 + 3 = 7
+$$
+
+Previously:
+
+```
+distance[D] = 20
+```
+
+Since 7 is smaller than 20, update:
+
+```
+distance[D] = 7
+predecessor[D] = B
+```
+
+Now comes the important part.
+
+D is already inside the heap, so we call:
+
+```
+heap.decreaseKey(D);
+```
+
+Before:
+
+```
+          C:10
+         /
+       D:20
+```
+
+After:
+
+```
+          D:7
+         /
+       C:10
+```
+
+Decrease-key executed
+
+State:
+
+```
+distance = [0, 4, 10, 7]
+visited  = [T, T, F, F]
+pred     = [-, A, A, B]
+```
+
+#### Iteration 3: Extract D
+
+Extract:
+
+```
+D (distance = 7)
+```
+
+D has no outgoing edges.
+
+State:
+
+```
+distance = [0, 4, 10, 7]
+visited  = [T, T, F, T]
+pred     = [-, A, A, B]
+```
+
+Heap:
+
+```
+[C:10]
+```
+
+#### Iteration 4: Extract C
+
+Extract:
+
+```
+C (distance = 10)
+```
+
+Examine:
+
+```
+C → D : 2
+```
+
+Calculate:
+
+$$
+candidate = 10 + 2 = 12
+$$
+
+But D has already been finalized:
+
+```
+distance[D] = 7
+visited[D] = true
+```
+
+Therefore, we skip this edge.
+
+Final state:
+
+```
+distance = [0, 4, 10, 7]
+visited  = [T, T, T, T]
+pred     = [-, A, A, B]
+```
+
+Heap is empty, so Dijkstra terminates.
+
+### 5. Expected final output
+
+The normal execution produces:
+
+```
+========== NORMAL EXECUTION ==========
+
+Vertex | Distance | Shortest path
+----------------------------------
+A      | 0        | A
+B      | 4        | A -> B
+C      | 10       | A -> C
+D      | 7        | A -> B -> D
+```
+
+The debug execution additionally shows:
+
+- Every extracted vertex.
+- Every examined edge.
+- Candidate distance calculations.
+- Distance and predecessor updates.
+- Whether `insert()` or `decreaseKey()` is called.
+- The heap's internal array after each iteration.
+- Distance, visited, and predecessor arrays after each iteration.
+
+Important: The displayed heap array represents heap order, not sorted order. Only the root is guaranteed to contain the minimum.
+
+### 6. Why `position[]` must always be updated
+
+This is probably the most important implementation detail in the indexed heap.
+
+Consider:
+
+```
+heap[]:
+
+Index:       0       1       2       3
+           +-------+-------+-------+-------+
+           |   A   |   B   |   C   |   D   |
+           +-------+-------+-------+-------+
+```
+
+And:
+
+```
+position[]:
+
+A = 0
+B = 1
+C = 2
+D = 3
+```
+
+Suppose D moves upward after `decreaseKey()`:
+
+```
+heap[]:
+
+Index:       0       1       2       3
+           +-------+-------+-------+-------+
+           |   A   |   D   |   C   |   B   |
+           +-------+-------+-------+-------+
+```
+
+Now the position mapping must become:
+
+```
+position[]:
+
+A = 0
+B = 3
+C = 2
+D = 1
+```
+
+If we forget to update this mapping, a later `decreaseKey(B)` might modify the wrong heap element.
+
+That's why our `swap()` method contains:
+
+```
+position[heap[i]] = i;
+position[heap[j]] = j;
+```
+
+Every heap swap maintains the mapping.
+
+### 7. Complexity analysis
+
+Let:
+
+- $V$ = number of vertices.
+- $E$ = number of edges.
+
+| Operation          | Complexity       |
+| ------------------ | ---------------- |
+| Initialize heap    | $O(V)$       |
+| Insert vertex      | $O(\log V)$  |
+| Extract minimum    | $O(\log V)$  |
+| Decrease key       | $O(\log V)$  |
+| Check `contains()` | $O(1)$       |
+| Relax all edges    | $O(E)$ total |
+
+Each vertex is inserted at most once and extracted at most once. Each edge is examined once when its source is processed.
+
+Therefore:
+
+$$
+T(V,E) = O(V + E + V\log V + E\log V)
+$$
+
+Simplifying:
+
+$$ O((V+E) \log V) $$
+
+Auxiliary space:
+
+$$
+\boxed{O(V)}
+$$
+
+The indexed heap contains at most V vertices, unlike lazy deletion, where duplicate entries can increase the priority queue size to O(E).
+
+### 8. Comparing all three Dijkstra implementations
+
+| Feature                   | Linear Scan      | Version 2            | Version 3               |
+| ------------------------- | -------------- | -------------------- | ----------------------- |
+| Minimum selection         | Linear scan    | Binary min-heap      | Indexed binary min-heap |
+| Heap implementation       | None           | Java `PriorityQueue` | Custom                  |
+| Priority update           | Update array   | Insert duplicate     | Decrease-key            |
+| Duplicate entries         | No             | Yes                  | No                      |
+| Time                      | $O(V^2+E)$ | $O((V+E)\log E)$ | $O((V+E)\log V)$    |
+| Auxiliary space           | $O(V)$     | $O(V+E)$         | $O(V)$              |
+| Implementation difficulty | Easy           | Moderate             | Advanced                |
+
+### 9. Recommended next topics
+
+To complete your understanding of the data structures behind Dijkstra, I recommend this sequence:
+
+1. Binary Min-Heap: array representation, parent/child indexes, insertion, extraction, sift-up, and sift-down.
+2. Indexed Binary Min-Heap: heap-position mapping, maintaining `position[]`, and decrease-key.
+3. Priority Queue implementations: binary heap vs. Fibonacci heap.
+4. Dijkstra optimization: early termination for Single-Pair Shortest Path.
+5. Dijkstra limitations: negative edges and why Bellman-Ford is needed.
+
+One important distinction for your documentation: the indexed binary min-heap is a reusable data structure, not a Dijkstra-specific structure. It can also be useful in Prim's Minimum Spanning Tree algorithm and other algorithms that need efficient priority updates.
+
+## Dijkstra's Algorithm: Summary Comparison of Three Implementations
+
+All three versions solve the same Single-Source Shortest Path (SSSP) problem. They differ in how they select the next vertex with the smallest tentative distance and how they handle priority updates.
+
+### 1. High-level comparison
+
+| Feature                   | Linear Scan: Linear Scan      | Version 2: Priority Queue                    | Version 3: Indexed Min-Heap               |
+| ------------------------- | --------------------------- | -------------------------------------------- | ----------------------------------------- |
+| Minimum selection         | Scan all vertices           | Extract minimum from heap                    | Extract minimum from indexed heap         |
+| Data structure            | Distance + visited arrays   | Java `PriorityQueue`                         | Custom indexed binary min-heap            |
+| Priority update           | Update distance array       | Insert new entry                             | `decreaseKey()`                           |
+| Duplicate entries         | No                          | Yes, possible                                | No                                        |
+| Outdated entries          | Not applicable              | Skipped when extracted                       | Not applicable                            |
+| Heap implementation       | None                        | Built-in Java implementation                 | Custom implementation                     |
+| Implementation complexity | Low                         | Medium                                       | High                                      |
+| Best learning purpose     | Understand Dijkstra's logic | Understand priority queues and lazy deletion | Understand indexed heaps and decrease-key |
+
+### 2. How each version selects the next vertex
+
+Linear Scan — Linear Scan
+
+Search the entire vertex collection to find the unvisited vertex with the smallest distance.
+
+```
+For every vertex:
+    If not visited and distance is smaller:
+        Remember this vertex
+
+Return the minimum-distance vertex
+```
+
+- Selection: $O(V)$
+- No priority queue required.
+
+Version 2 — Java PriorityQueue (Lazy Deletion)
+
+Use Java's `PriorityQueue` to extract the minimum-distance entry.
+
+```
+Extract minimum entry
+
+If entry.distance != distance[vertex]:
+    Skip outdated entry
+Else:
+    Process vertex
+```
+
+When a shorter path is discovered, insert a new entry rather than updating the old one.
+
+- Extract minimum: $O(\log E)$ in the worst-case queue size.
+- Priority update: $O(\log E)$ insertion.
+- May contain multiple entries for the same vertex.
+
+Version 3 — Indexed Binary Min-Heap (Decrease-Key)
+
+Use a custom heap with a `position[]` array to locate vertices.
+
+```
+If vertex already exists in heap:
+    decreaseKey(vertex)
+Else:
+    insert(vertex)
+```
+
+- Extract minimum: $O(\log V)$.
+- Decrease-key: $O(\log V)$.
+- Each vertex appears at most once in the heap.
+
+### 3. Complexity comparison
+
+Assuming an adjacency-list graph:
+
+| Complexity       | Linear Scan          | Version 2                  | Version 3                  |
+| ---------------- | ------------------ | -------------------------- | -------------------------- |
+| Vertex selection | $O(V^2)$ total | $O((V+E)\log E)$ total | $O((V+E)\log V)$ total |
+| Edge relaxation  | $O(E)$         | $O(E)$                 | $O(E)$                 |
+| Overall time     | $O(V^2+E)$     | $O((V+E)\log E)$       | $O((V+E)\log V)$       |
+| Auxiliary space  | $O(V)$         | $O(V+E)$               | $O(V)$                 |
+
+For Version 2, the commonly quoted bound for simple graphs is $O((V+E)\log V)$, because $E=O(V^2)$.
+
+### 4. When should you use each version?
+
+| Version   | When to use it                                                                                          |
+| --------- | ------------------------------------------------------------------------------------------------------- |
+| Linear Scan | Small or dense graphs; teaching the greedy selection process; simple implementation.                    |
+| Version 2 | General practical use; straightforward Java implementation; when built-in `PriorityQueue` is preferred. |
+| Version 3 | When you want explicit control over heap operations, bounded queue size, and efficient decrease-key.    |
+
+### 5. Visual comparison of priority updates
+
+Suppose vertex B initially has distance 10, then a shorter path gives it distance 5.
+
+Linear Scan — Linear Scan
+
+```
+distance[B] = 10
+       |
+       v
+distance[B] = 5
+```
+
+Version 2 — Lazy Deletion
+
+```
+Before:  [B:10]
+
+Insert:  [B:5, B:10]
+
+Extract B:5  → process
+Extract B:10 → skip (outdated)
+```
+
+Version 3 — Decrease-Key
+
+```
+Before:  [B:10]
+
+Update:  decreaseKey(B)
+
+After:   [B:5]
+```
+
+No duplicate entries in Version 3.
+
+### 6. Final takeaway
+
+The three versions implement the same Dijkstra algorithm:
+
+- Linear Scan teaches how the greedy selection works.
+- Version 2 teaches how a priority queue improves vertex selection and how lazy deletion handles priority updates.
+- Version 3 teaches how an indexed binary min-heap supports efficient priority updates without duplicate entries.
+
+The most important conceptual distinction is:
+
+> Dijkstra's algorithm determines which vertex to process next. The priority queue or min-heap determines how efficiently that vertex is selected.
+
+For your DSA documentation, I recommend keeping all three implementations under:
+
+```
+algorithms/
+└── graph-algorithms/
+    └── shortest-path-algorithms/
+        └── single-source-shortest-path/
+            └── dijkstra/
+                ├── overview.mdx
+                ├── algorithm-and-pseudocode.mdx
+                ├── java-linear-scan.mdx
+                ├── java-priority-queue.mdx
+                ├── java-indexed-min-heap.mdx
+                └── complexity-comparison.mdx
+```
+
+Keep Binary Min-Heap and Indexed Binary Min-Heap as separate reusable data-structure topics under `data-structures/`, then link to them from the Dijkstra documentation.
+
+## Adjacency Matrix + Linear Scan
+Dijkstra’s algorithm is commonly implemented using a min-priority queue (binary heap). However, for dense graphs, a simpler implementation that uses an adjacency matrix and linear search to find the next vertex can be more efficient.
+
+The important point is that the best implementation depends on the relationship between the number of vertices \\(V\\) and edges \\(E\\).

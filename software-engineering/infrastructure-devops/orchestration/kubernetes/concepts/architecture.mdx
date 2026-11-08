@@ -1,0 +1,792 @@
+{/* # Kubernetes Architecture */}
+
+{/* Kubernetes runtime components */}
+
+
+Kubernetes architecture explains how a cluster receives instructions, stores its configuration, decides where applications should run, starts containers, and continuously corrects failures.
+
+A Kubernetes cluster contains two types of nodes: master nodes and worker nodes. Master nodes
+manage the cluster, while the main purpose of worker nodes is to run the actual workload – for
+example, the containers we deploy in the cluster.
+
+The most important idea is this:
+
+The control plane decides and coordinates; worker nodes run the application workloads. Controllers continuously reconcile the actual cluster state with the desired state.
+
+Let's use a Spring Boot microservices application as a running example: `product-service`, `review-service`, and `recommendation-service`.
+
+## Cluster architecture
+
+A Kubernetes cluster is a collection of machines—physical or virtual—that work together to run containerized applications.
+
+At a high level, it contains two groups of components:
+
+- Control plane: manages the cluster and makes scheduling and management decisions.
+- Worker nodes: provide the compute resources where application Pods run.
+
+![](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/Cluster-architecture.png)
+{/* ## Control plane
+
+Cluster management and coordination
+
+API server
+
+Receives and validates API requests
+
+etcd
+
+Stores cluster state
+
+Scheduler
+
+Chooses nodes for Pods
+
+Controller managers
+
+Reconcile cluster resources
+
+Kubernetes API and control operations
+
+### Worker node A
+
+kubelet · container runtime · networking
+
+Pod A
+
+product-service
+
+Pod B
+
+review-service
+
+### Worker node B
+
+kubelet · container runtime · networking
+
+Pod C
+
+product-service
+
+Pod D
+
+recommendation-service
+
+Conceptual architecture: production clusters may have multiple control-plane and worker nodes, and some components can be deployed differently depending on the distribution. */}
+
+A few important details:
+
+- A Pod is Kubernetes' smallest deployable unit. It contains one or more closely related containers.
+- A node is a machine that provides CPU, memory, networking, and other resources.
+- The control plane usually runs separately from application workloads, although small learning clusters can run everything on one machine.
+- The API server is the main interface through which Kubernetes components coordinate.
+- A worker node does not independently decide the application's desired replica count. It executes the workloads assigned to it.
+
+The most important components are as follows:
+- **There are components that run on master nodes, constituting the control plane**:
+    - **API server**, the entry point to the control plane. This exposes a RESTful API, which,
+    for example, the Kubernetes CLI tool known as kubectl uses.
+    - **etcd**, a highly available and distributed key/value store, used as a database for
+    all cluster data.
+    - **A controller manager**, which contains a number of controllers that continuously
+    evaluate the desired state versus the current state for the objects defined in the
+    etcd database. Whenever the desired or current state changes, a controller that’s
+    responsible for that type of state takes action to move the current state to the de-
+    sired state. For example, a replication controller that’s responsible for managing
+    Pods will react if a new Pod is added through the API server or a running Pod is
+    deleted and ensures that new Pods are started. Another example of a controller
+    is the node controller. It is responsible for acting if a node becomes unavailable,
+    ensuring that Pods running on a failing node are rescheduled on other nodes in
+    the cluster.
+    - **A scheduler**, which is responsible for assigning newly created Pods to a node with
+    available capacity – for example, in terms of memory and CPU. Affinity rules can
+    be used to control how Pods are assigned to nodes. For example, Pods that perform
+    a lot of disk I/O operations can be assigned to a group of worker nodes that have
+    fast SSD disks. Anti-affinity rules can be defined to separate Pods – for example,
+    to avoid scheduling Pods from the same Deployment to the same worker node.
+
+- **There are also components that run on all the nodes, constituting the data plane**:
+    - **kubelet**, a node agent that executes as a process directly in the nodes’ operating
+    system and not as a container. A kubelet ensures that the Pods that are scheduled
+    to its node have their containers up and running and that they are healthy. It acts
+    as a conduit between the API server and the container runtime on its node.
+    
+    -** kube-proxy**, a network proxy that enables the Service concept in Kubernetes and is
+    capable of forwarding requests to the appropriate Pods, typically in a round-robin
+    fashion if more than one Pod is available for the specific Service. kube-proxy is
+    deployed as a DaemonSet.
+    
+    - **Container runtime**, which is the software that runs the containers on a node.
+    Historically, Kubernetes used Docker Engine, but today, any implementation of
+    the Kubernetes Container Runtime Interface (CRI) can be used, such as cri-o
+    (https://cri-o.io) and containerd (https://containerd.io/). Support for
+    Docker Engine was removed in Kubernetes v1.24.
+    - **Kubernetes DNS**, which is a DNS server that’s used in the cluster’s internal net-
+    work. Services and Pods are assigned a DNS name, and Pods are configured to use
+    this DNS server to resolve the internal DNS names. The DNS server is deployed as
+    a Deployment object and a Service object.
+
+The following diagram summarizes the Kubernetes runtime components described previously:
+![Overview of Kubernetes runtime components](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/Overview-of-Kubernetes-compoenents.png)
+
+Based on the diagram, we can imagine the following sequence of events:
+1. An operator uses **kubectl** to send in a new desired state to Kubernetes, containing manifests declaring a new **Deployment**, **Service**, and **Ingress** object. The Ingress defines a route
+to the Service object and the Service object is defined to select Pods that are configured by the Deployment object.
+2. **kubectl** talks to the **API server** and it stores the new desired state as objects in the **etcd** database.
+3. Various controllers will react to the creation of the new objects and take the following
+actions:
+    - **For the Deployment object**:
+        - New **ReplicaSet** and **Pod** objects will be registered in the API server.
+        - The **scheduler** will see the new Pod(s) and schedule them to the appropriate worker nodes.
+        - On each **worker node**, the **kubelet** agent will launch containers as described by the Pods. The kubelet will use the container runtime on the worker node to manage the containers.
+    - **For the Service object**:
+        - A DNS name will be registered in the internal DNS server for the Service object and the **kube-proxies** will be able to route requests that use the DNS name to one of the available Pods.
+    - **For the Ingress object**:
+        - An **Ingress controller** will set up routes according to the Ingress object and be ready to accept requests from outside of the Kubernetes cluster. External requests that match the routes defined by the Ingress object will be forwarded by the Ingress controller to the Service object. These requests will be forwarded by the kube-proxy to a Pod, as described previously.
+## Control plane
+
+The control plane manages the overall state of the cluster. It accepts resource definitions, stores them, schedules workloads, and coordinates corrective actions.
+
+Its principal components are:
+
+| Component                | Primary responsibility                                  |
+| ------------------------ | ------------------------------------------------------- |
+| API server               | Entry point for Kubernetes API operations               |
+| etcd                     | Persistent storage for cluster state                    |
+| Scheduler                | Assigns unscheduled Pods to nodes                       |
+| Controller manager       | Runs controllers that reconcile resources               |
+| Cloud controller manager | Integrates Kubernetes with a cloud provider when needed |
+
+These are logical roles, not necessarily five separate physical machines. Several control-plane components can run on the same machine in a small cluster, while production clusters commonly distribute control-plane responsibilities across multiple machines for availability.
+
+### How the control plane interacts
+
+Suppose you submit a Deployment requesting three replicas of `product-service`.
+
+1. The API server receives and validates the request.
+2. The desired configuration is persisted in etcd.
+3. The Deployment controller observes the Deployment and creates a ReplicaSet as needed.
+4. The ReplicaSet controller ensures that the required number of Pods exists.
+5. The scheduler assigns newly created, unscheduled Pods to suitable nodes.
+6. The kubelet on each selected node arranges for its assigned Pods to run through the container runtime.
+7. Controllers and node agents continue monitoring the system and responding to changes.
+
+These steps can overlap. Kubernetes is asynchronous and controller-driven, so this is a conceptual sequence rather than one atomic transaction.
+
+Notice that the API server, controllers, scheduler, and kubelet have different responsibilities. Understanding that separation makes troubleshooting much easier.
+
+## API server (`kube-apiserver`)
+
+The API server is the front door to the Kubernetes control plane. Almost all cluster management operations pass through it.
+
+It exposes the Kubernetes API, usually over HTTPS. Clients and components use that API to create, read, update, watch, and delete Kubernetes resources.&#x20;
+
+### Who communicates with the API server?
+
+```
+             Administrator
+                 |
+                 | kubectl apply -f deployment.yaml
+                 v
+     +----------------------+
+     | Kubernetes API Server|
+     +----------------------+
+     ^          ^           ^
+     |          |           |
+ Scheduler     Controllers  Kubelet
+```
+
+For example, when you execute:
+
+```
+kubectl apply -f product-service.yaml
+```
+
+`kubectl` sends an API request. The API server authenticates and authorizes the request, runs applicable admission checks, and processes the resource change.
+
+For a persistent resource, the API server coordinates storage in etcd. Other components then observe the changed resource through the API and act accordingly.
+
+The API server does not directly run your Spring Boot application. It accepts and manages the resource definitions that tell the rest of Kubernetes what should happen.
+
+### Why is the API server important?
+
+- It provides a consistent interface to cluster state.
+- It enforces authentication, authorization, validation, and admission policies.
+- It lets components communicate without requiring direct communication between every pair of components.
+- It supports watches, allowing controllers and other clients to react to changes.
+
+Think of it as the central API interface, rather than the component that performs every operational task.
+
+## etcd
+
+etcd is a distributed, consistent key-value store that Kubernetes uses to persist cluster data.&#x20;
+
+It stores information about Kubernetes resources, including Deployments, Pods, Services, ConfigMaps, Secrets, and node records.
+
+Conceptually, the stored data describes objects like this:
+
+```yml
+Deployment: product-service
+    desired replicas: 3
+    container image: product-service:1.0
+
+Pod: product-service-abc
+    assigned node: worker-a
+    recorded status: Running
+
+Service: product-service
+    selector: app=product-service
+    port: 8080
+```
+
+This is a simplified representation, not the literal internal key layout of etcd.
+
+### What happens when you change a Deployment?
+
+Suppose you change the desired replica count from three to five.
+
+1. The API server validates and processes the change.
+2. The updated resource is persisted in etcd.
+3. Controllers observe the new desired replica count.
+4. They create the additional Pods needed to reach five.
+5. The scheduler and kubelets participate in placing and starting the new workloads.
+
+The distinction is important: etcd stores the cluster's declared and recorded state; it does not run controllers, schedule Pods, or start containers.
+
+### What if etcd fails?
+
+If etcd becomes unavailable, the API server may be unable to complete operations that require persistent storage. Existing application containers can sometimes continue running, but Kubernetes' ability to manage and repair the cluster is impaired.
+
+For production clusters:
+
+- Protect etcd with appropriate access controls and network isolation.
+- Maintain tested backups.
+- Plan for availability and recovery.
+- Protect sensitive stored data, including Secrets, using appropriate encryption and access controls.
+
+A backup strategy matters because the cluster's state store is a critical part of its management infrastructure.
+
+## Scheduler (`kube-scheduler`)
+
+The scheduler decides which node should run a Pod that has not yet been assigned to a node.
+
+It does not normally start the container itself.
+
+Suppose your cluster has two worker nodes:
+
+| Resource           | Worker A | Worker B |
+| ------------------ | -------- | -------- |
+| Available CPU      | 1 core   | 4 cores  |
+| Available memory   | 1 GiB    | 6 GiB    |
+| Existing workloads | Heavy    | Light    |
+
+A newly created Pod requests two CPU cores and 3 GiB of memory. Worker A cannot satisfy those resource requests, while Worker B potentially can.
+
+The scheduler evaluates eligible nodes and selects a suitable placement.
+
+Its decisions can consider:
+
+- CPU and memory requests.
+- Node selectors and node affinity.
+- Pod affinity and anti-affinity.
+- Taints and tolerations.
+- Topology-spread constraints.
+- Storage and other scheduling constraints.
+
+The scheduler's goal is not simply to choose the emptiest machine. It evaluates constraints and scoring policies to choose an appropriate node.
+
+### The scheduling sequence
+
+```
+Pod created without a node assignment
+                 |
+                 v
+        kube-scheduler observes it
+                 |
+                 v
+        Filter ineligible nodes
+                 |
+                 v
+        Score eligible nodes
+                 |
+                 v
+        Select a suitable node
+                 |
+                 v
+        Record the Pod's node assignment
+                 |
+                 v
+        kubelet on that node acts on the Pod
+```
+
+If no node satisfies the required constraints, the Pod can remain `Pending`. Kubernetes does not magically create capacity unless additional infrastructure or autoscaling components are configured to provide it.
+
+## Controller manager (`kube-controller-manager`)
+
+The controller manager runs multiple Kubernetes controllers. Each controller is responsible for maintaining a particular aspect of the system.
+
+A controller generally follows this pattern:
+
+1. Observe relevant resources through the API.
+2. Compare the actual state with the desired state.
+3. Calculate the required changes.
+4. Request those changes through the API.
+5. Repeat.
+
+This pattern is called a **reconciliation loop**.
+
+### Important controllers
+
+| Controller               | Responsibility                                                       |
+| ------------------------ | -------------------------------------------------------------------- |
+| Deployment controller    | Coordinates ReplicaSets for Deployments and their rollout behavior   |
+| ReplicaSet controller    | Maintains the required number of matching Pods                       |
+| Node controller          | Monitors node health and responds to node failures                   |
+| Job controller           | Manages Pods for Jobs until the required completion criteria are met |
+| EndpointSlice controller | Maintains EndpointSlices representing eligible Service backends      |
+| Namespace controller     | Helps handle namespace lifecycle and cleanup                         |
+
+These are logically separate controllers, even though many of them run together inside the `kube-controller-manager` process. Some other controllers run in separate components or add-ons.
+
+### Example: a Pod disappears
+
+Your Deployment requires three `product-service` replicas, but one Pod is deleted.
+
+```
+Desired: 3 replicas
+
+Actual:
+  product-service Pod A  Running
+  product-service Pod B  Running
+  product-service Pod C  Missing
+
+                       |
+                       v
+             ReplicaSet controller
+                       |
+                       v
+             Creates replacement Pod
+                       |
+                       v
+             Scheduler assigns a node
+                       |
+                       v
+             kubelet starts its containers
+```
+
+The controller does not need to receive a human instruction to create the replacement. It notices the difference and acts to correct it.
+
+One subtle distinction: the ReplicaSet controller responds to the missing Pod, while the scheduler and kubelet handle placement and execution. The work is distributed across components.
+
+## Cloud controller manager (`cloud-controller-manager`)
+
+The cloud controller manager connects Kubernetes to infrastructure-specific APIs provided by cloud platforms. It is optional and is mainly relevant when a cluster uses a supported cloud integration.
+
+For example, your Kubernetes cluster may run on a cloud provider where you want Kubernetes to request:
+
+- A cloud load balancer for a `Service` of type `LoadBalancer`.
+- Infrastructure-specific routing configuration.
+- Cloud-aware node information and lifecycle checks.
+
+The cloud controller manager delegates these tasks to provider-specific controllers.
+
+```
+Kubernetes resources
+        |
+        v
+Cloud controller manager
+        |
+        v
+Cloud provider API
+        |
+        +---- Cloud load balancer
+        +---- Network routes
+        +---- Cloud-aware node operations
+```
+
+Not every cloud-related Kubernetes operation is handled by this component. Cloud storage integration, for example, commonly involves Container Storage Interface (CSI) drivers and their controllers.
+
+### Example: exposing a service
+
+Suppose you deploy `product-service` and create a Service of type `LoadBalancer`.
+
+Kubernetes records the Service request. If your environment has the appropriate cloud integration and load-balancer implementation, that integration can provision an external load balancer and update the Service's status.
+
+On a local cluster, the same manifest may not provision an external load balancer unless an appropriate implementation is installed.
+
+Remember: Kubernetes defines the desired infrastructure-facing behavior; the cloud integration connects that behavior to the actual provider.
+
+![](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/worknode.png)
+
+{/* ## Worker nodes
+
+Worker nodes are the machines that run your application workloads. They can be physical servers or virtual machines.
+
+Each node needs components that make it possible to run Pods, monitor them, and participate in cluster networking. The standard architecture includes the kubelet and a container runtime; networking components depend on the cluster's configuration.
+
+A worker node looks conceptually like this:
+
+## Worker node
+
+kubelet
+
+Ensures assigned Pods are running as specified.
+
+Container runtime
+
+Creates and runs containers.
+
+Networking
+
+CNI networking implementation and, when used, kube-proxy for Service traffic.
+
+### Application Pods
+
+Pod A
+
+Spring Boot
+
+Pod B
+
+Spring Boot */}
+
+### What happens when a node joins the cluster?
+
+A node can register itself through its kubelet, or an administrator or provisioning system can create the Node object. The control plane then tracks its reported condition and available capacity.
+
+The scheduler can assign Pods to a suitable node. The kubelet on that node obtains the necessary Pod specification, works with the runtime to start the containers, and reports status through the Kubernetes API.
+
+If a node becomes unavailable, Kubernetes can detect the problem and arrange replacement workloads on other eligible nodes. However, detection and recovery take time, and replacement may be impossible if the cluster lacks capacity or required storage and scheduling constraints cannot be satisfied.
+
+## Kubelet
+
+The kubelet is the node-level agent responsible for making sure that Pods assigned to its node run as specified.
+
+Its responsibilities include:
+
+- Obtaining Pod specifications from the Kubernetes control plane or supported local sources.
+- Working with the container runtime to create and manage containers.
+- Monitoring container and Pod health.
+- Reporting node and Pod status to the API server.
+- Executing configured container health checks and restart behavior.
+
+### What the kubelet does not do
+
+The kubelet does not decide the application's overall desired replica count, and it is not the cluster scheduler.
+
+For example, if a Deployment requests three replicas but only two exist, the ReplicaSet controller arranges for another Pod to be created. The scheduler assigns that Pod to a node. The selected node's kubelet then works to make that Pod run.
+
+This separation is essential:
+
+- Controller: decides what needs to change.
+- Scheduler: decides where an unassigned Pod should run.
+- Kubelet: makes the assigned Pod run on its node.
+
+### What if a container crashes?
+
+The kubelet and runtime cooperate to manage containers according to the Pod's restart policy and current state. A container may be restarted inside its existing Pod.
+
+That is different from deleting the Pod and creating a new one. If the Pod itself is lost, a higher-level controller such as a ReplicaSet or Job controller may be responsible for creating a replacement, depending on the workload.
+
+## Kube-proxy
+
+Kube-proxy is a node-level component that implements part of Kubernetes Service networking by maintaining network rules that direct traffic to eligible backend endpoints.
+
+It is commonly associated with Service types such as `ClusterIP` and `NodePort`. The actual behavior depends on the Service configuration and networking implementation.
+
+Consider this arrangement:
+
+```
+product-composite
+        |
+        | request to product-service:8080
+        v
+Kubernetes Service
+        |
+        +-------------------+
+        |                   |
+        v                   v
+  product Pod A       product Pod B
+  10.1.0.10:8080      10.1.0.11:8080
+```
+
+The client uses a stable Service name rather than needing to track the individual Pod IP addresses.
+
+The Service represents a stable logical endpoint. The actual traffic-forwarding behavior is implemented by the cluster networking setup.
+
+### Is kube-proxy always required?
+
+No. Kubernetes documents kube-proxy as optional when a networking implementation provides the required Service-proxy behavior itself.
+
+Also, kube-proxy is not the same thing as:
+
+- An application-level HTTP reverse proxy.
+- An API gateway such as Spring Cloud Gateway.
+- An external cloud load balancer.
+- A CNI plugin responsible for Pod networking.
+
+They can all contribute to networking, but they operate at different layers.
+
+## Container runtime
+
+The container runtime is the software responsible for running containers on a node.
+
+Examples include:
+
+- `containerd`
+- CRI-O
+
+Kubernetes communicates with compatible runtimes through the Container Runtime Interface (CRI). The runtime handles operations such as creating containers, starting and stopping them, and managing their execution environment.
+
+### How it relates to Docker
+
+Docker remains useful for building images, testing containers, and publishing them to a registry. However, Kubernetes does not require Docker Engine as the runtime on every node.
+
+For example:
+
+```
+Developer
+    |
+    v
+Build Docker image
+    |
+    v
+Publish image to registry
+    |
+    v
+Kubernetes schedules Pod
+    |
+    v
+kubelet requests container operations
+    |
+    v
+CRI-compatible runtime
+    |
+    v
+Spring Boot container starts
+```
+
+A container image built using Docker can generally run with a compatible Kubernetes runtime because the image format is interoperable.
+
+The important distinction is that the image-building workflow and the runtime used to execute containers are separate concerns.
+
+## Reconciliation loops
+
+Reconciliation is the mechanism that makes Kubernetes more than a tool for starting containers. It allows Kubernetes to keep working toward a declared state even when failures, manual changes, or other events cause the system to drift.
+
+A reconciliation loop repeatedly compares what should exist with what currently exists, then takes actions to reduce the difference.
+
+![](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/reconciliation-loop.png)
+{/* 1\. Desired state
+
+Deployment requests 3 replicas
+
+2\. Observe actual state
+
+Only 2 matching Pods exist
+
+3\. Calculate the difference
+
+One additional Pod is needed
+
+4\. Take corrective action
+
+Create another Pod through the API
+
+5\. Repeat
+
+Observe again and continue reconciling */}
+
+The loop is continuous in the logical sense, but it does not necessarily run as a fixed-frequency polling task. Controllers often use watches, events, work queues, retries, and periodic resynchronization to decide when reconciliation should happen.
+
+### Different controllers reconcile different things
+
+Kubernetes does not have just one giant reconciliation loop. It has many cooperating controllers.
+
+| Controller or component  | What it reconciles or manages                   |
+| ------------------------ | ----------------------------------------------- |
+| Deployment controller    | Deployment rollout and ReplicaSet relationships |
+| ReplicaSet controller    | Number of matching Pods                         |
+| Scheduler                | Placement of unscheduled Pods                   |
+| kubelet                  | Running state of Pods assigned to its node      |
+| EndpointSlice controller | Service backend endpoint information            |
+| Cloud controller         | Cloud-specific resources, where configured      |
+
+This explains why deleting a Pod usually does not permanently reduce a Deployment's replica count: the ReplicaSet controller notices the mismatch and attempts to restore the desired number.
+
+### What reconciliation does not guarantee
+
+Reconciliation is not a promise that every desired state can always be achieved.
+
+For example, Kubernetes may be unable to create a replacement Pod if:
+
+- No node has enough available resources.
+- The image cannot be pulled.
+- A scheduling constraint cannot be satisfied.
+- Required storage is unavailable.
+- The application repeatedly crashes.
+
+Kubernetes continues attempting appropriate corrective actions, but a workload can remain unhealthy or pending.
+
+Also, the existence of a running Pod does not guarantee that its application is functioning correctly. Readiness and liveness probes, resource settings, and application-level health checks serve different purposes.
+
+## Desired state vs. actual state
+
+These two concepts are at the heart of Kubernetes architecture.
+
+Desired state is what you declare should exist. Actual state is what is currently happening in the cluster.
+
+For example, you can declare:
+
+```yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: product-service
+  template:
+    metadata:
+      labels:
+        app: product-service
+    spec:
+      containers:
+        - name: product-service
+          image: product-service:1.0
+          ports:
+            - containerPort: 8080
+```
+
+The desired state includes three replicas using the specified image and matching labels. The actual state may initially have zero Pods, or it may later differ because of a failure.
+
+{/* ### Explore how reconciliation responds
+
+## Reconciliation simulator
+
+Change the declared replica count and cluster conditions to see how a controller reasons about the difference. This is a simplified model, not a live Kubernetes cluster.
+
+Desired replicas
+
+### 3
+
+1
+
+3
+
+6
+
+Currently running replicas before reconciliation
+
+### 2
+
+0
+
+3
+
+6
+
+Replicas the available capacity can support
+
+### 5
+
+0
+
+3
+
+6
+
+Simulated workload condition
+
+No new failure
+
+A running Pod crashes
+
+A node failure reduces running replicas by one
+
+Simulate failure
+
+### Reconciliation result
+
+Desired
+
+# 3
+
+Effective actual
+
+# 2
+
+Corrective action: attempt to create 1 additional replica.
+
+Simplification: real Kubernetes scheduling depends on resource requests, node eligibility, health, storage, and other constraints. Running and ready replicas are not necessarily the same. */}
+
+### Important distinction: actual state has multiple layers
+
+When troubleshooting, don't assume that a single status tells you everything.
+
+Consider these different states:
+
+- The Deployment declares three replicas.
+- The ReplicaSet has created three Pod objects.
+- The scheduler has assigned those Pods to nodes.
+- The kubelet has started their containers.
+- The containers are running.
+- The application is ready to receive traffic.
+
+These are separate conditions. A Pod may exist but be unscheduled, a container may be running but not ready, or a ready Pod may later become unhealthy.
+
+This is why Kubernetes exposes resource status and health information at different levels.
+
+## Putting everything together: what happens when you deploy?
+
+Imagine you submit a new `product-service` Deployment requesting three replicas.
+
+1. You declare the desired state. You submit a YAML manifest using `kubectl` or another Kubernetes API client.
+2. The API server processes the request. It authenticates, authorizes, validates, and persists the resource change.
+3. etcd stores the cluster data. The desired Deployment specification becomes part of the cluster's persisted state.
+4. Controllers reconcile resources. The Deployment and ReplicaSet controllers arrange for the required Pods to exist.
+5. The scheduler chooses nodes. Each unscheduled Pod is assigned to an eligible node.
+6. The kubelet and runtime start containers. The node obtains the necessary images and launches the application containers.
+7. Networking makes the service reachable. Service and endpoint controllers, the networking implementation, and possibly kube-proxy or an external load balancer support traffic routing.
+8. Reconciliation continues. If a Pod disappears or the desired replica count changes, the relevant controllers work toward the updated state.
+
+This is the core lifecycle to remember. In a real cluster, these operations overlap and communicate asynchronously rather than forming one strictly sequential pipeline.
+
+## Quick reference
+
+| Component                | Think of it as...                      | Main responsibility                      |
+| ------------------------ | -------------------------------------- | ---------------------------------------- |
+| Cluster                  | The whole managed environment          | Control plane plus worker nodes          |
+| Control plane            | The management system                  | Cluster-wide decisions and coordination  |
+| API server               | The front door                         | Kubernetes API and resource operations   |
+| etcd                     | The state database                     | Persistent cluster data                  |
+| Scheduler                | The placement decision-maker           | Selects nodes for unscheduled Pods       |
+| Controller manager       | The reconciliation engine              | Runs core resource controllers           |
+| Cloud controller manager | The cloud integration layer            | Cloud-specific infrastructure operations |
+| Worker node              | The execution machine                  | Runs Pods                                |
+| kubelet                  | The node agent                         | Ensures assigned Pods run as specified   |
+| kube-proxy               | One possible Service traffic mechanism | Implements Service networking rules      |
+| Container runtime        | The container execution engine         | Runs containers                          |
+| Reconciliation loop      | The correction process                 | Works toward the desired state           |
+
+The best mental model is to remember three distinct responsibilities: the API server manages access to declared cluster resources, controllers and the scheduler coordinate what should happen, and the kubelet/runtime execute workloads on worker nodes. etcd preserves the cluster's data, while networking components make workloads communicate.
+
+For further reading, the official [Kubernetes Cluster Architecture documentation](https://kubernetes.io/docs/concepts/architecture/?utm_source=chatgpt.com) and [Kubernetes Components documentation](https://kubernetes.io/docs/concepts/overview/components/?utm_source=chatgpt.com) provide the authoritative reference.
+
+## Summary
+
+Using Kubernetes, we can handle a cluster of servers as one big logical server that runs our con-
+tainers. We declare a desired state for the Kubernetes cluster, and it ensures that the actual state is
+the same as the desired state at all times, provided that enough hardware resources are available
+in the cluster.
+
+The desired state is declared by creating resources using the **Kubernetes API server**. The **controller
+manager** in Kubernetes and its controllers react to the various resources that were created by
+the API server and take actions to ensure that the current state meets the new desired state. The
+**scheduler** assigns nodes to newly created containers – that is, Pods that contain one or more
+containers. On each node, an agent (a **kubelet**) runs and ensures that the Pods that were scheduled to its node are up and running. The **kube-proxy** acts as a network proxy, enabling a Service
+abstraction by forwarding requests that are sent to the Service to available Pods in the cluster.
+External requests can be handled either by a Kubernetes-aware **load balancer** that can provision
+a public IP address and/or DNS name for the Service, a node port that’s available on all of the
+nodes in the cluster, or through a dedicated Ingress resource.

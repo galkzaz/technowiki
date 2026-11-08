@@ -1,0 +1,527 @@
+# BFS Variants and Applications
+
+These six topics extend ordinary Breadth-First Search beyond the basic case of starting from one vertex and exploring its reachable neighbors.
+
+The underlying idea stays the same: use a FIFO queue to explore states in nondecreasing order of distance. What changes is where the search starts, which direction it follows, how far it explores, or how it represents the graph.
+
+We'll use small ASCII diagrams and examples to show when each variant is useful.
+
+## 1. BFS from multiple sources
+
+Ordinary BFS starts with one source vertex. Multi-source BFS starts with several source vertices at the same time.
+
+Instead of asking, "How far is every vertex from `A`?", we ask:
+
+> How far is every vertex from its nearest source?
+
+This is useful for problems such as finding the nearest hospital, nearest emergency exit, or nearest cell containing a particular value.
+
+### Example
+
+Suppose `A` and `F` are two hospitals:
+
+```
+A --- B --- C --- D --- E --- F
+```
+
+If we start BFS only at `A`, the distances are:
+
+```
+A: 0
+B: 1
+C: 2
+D: 3
+E: 4
+F: 5
+```
+
+But if both `A` and `F` are sources, the nearest-source distances become:
+
+```
+A   B   C   D   E   F
+0   1   2   2   1   0
+```
+
+Vertices `C` and `D` are each two edges from their nearest source.
+
+### How does it work?
+
+The main change is initialization. Instead of enqueuing one source, enqueue every source before starting the normal BFS loop.
+
+```
+MULTI-SOURCE-BFS(G, sources):
+    create empty queue Q
+
+    for each vertex v:
+        distance[v] = INFINITY
+        parent[v] = NIL
+
+    for each source s in sources:
+        if distance[s] == INFINITY:
+            distance[s] = 0
+            ENQUEUE(Q, s)
+
+    while Q is not empty:
+        u = DEQUEUE(Q)
+
+        for each neighbor v of u:
+            if distance[v] == INFINITY:
+                distance[v] = distance[u] + 1
+                parent[v] = u
+                ENQUEUE(Q, v)
+```
+
+The first discovered path to each vertex comes from a nearest source, because all sources start at distance zero.
+
+### Important details
+
+- Every source starts with distance zero.
+- All sources enter the queue before traversal begins.
+- The first source that reaches a vertex determines its recorded parent.
+- If multiple sources are equally close, the selected parent can depend on queue and neighbor order.
+
+Complexity: $O(V+E)$ for a full traversal using adjacency lists.
+
+## 2. BFS for disconnected graphs
+
+A graph is disconnected when some vertices cannot be reached from others.
+
+A normal BFS started at `A` visits only vertices reachable from `A`. It does not automatically visit every vertex in the graph.
+
+Consider this undirected graph:
+
+```
+Component 1:      Component 2:      Isolated vertex:
+
+    A --- B           C --- D              E
+```
+
+Starting BFS at `A` visits `A` and `B`, but not `C`, `D`, or `E`.
+
+To traverse the entire graph, use an outer loop that starts a new BFS whenever it finds an unvisited vertex.
+
+### BFS forest
+
+```
+BFS-ALL(G):
+    initialize visited[v] = false for every vertex v
+
+    for each vertex v:
+        if visited[v] == false:
+            BFS-FROM-SOURCE(G, v, visited)
+```
+
+The important detail is that the same `visited[]` array is shared across all BFS runs. Do not reset it each time you start a new component.
+
+The result is a BFS forest:
+
+```
+Tree 1:        Tree 2:        Tree 3:
+
+    A              C              E
+    |              |
+    B              D
+```
+
+Each tree corresponds to a connected component in an undirected graph.
+
+### What about directed graphs?
+
+In directed graphs, the outer-loop technique still visits every vertex, but the resulting trees do not necessarily represent strongly connected components. They represent groups reached during each traversal according to edge direction.
+
+If you specifically need strongly connected components, algorithms such as Kosaraju's or Tarjan's are appropriate.
+
+Complexity: $O(V+E)$ for the full graph, using adjacency lists.
+
+## 3. Reverse-graph BFS
+
+Reverse-graph BFS is useful when you want to find which vertices can reach a particular destination.
+
+The key is to reverse every directed edge, then run ordinary BFS from the destination.
+
+### Example
+
+Suppose the original directed graph is:
+
+```
+A ---> C <--- B
+      |
+      v
+      D
+      |
+      v
+      E
+```
+
+The edges include:
+
+```
+A -> C
+B -> C
+C -> D
+D -> E
+```
+
+Imagine the question is:
+
+> Which vertices can reach `E`?
+
+Running ordinary BFS from `E` in the original graph will not help: `E` has no outgoing edges, so the search cannot move backward to `D`, `C`, `A`, or `B`.
+
+Instead, reverse the edges:
+
+```
+Original:              Reversed:
+
+A ---> C               C ---> A
+B ---> C               C ---> B
+C ---> D               D ---> C
+D ---> E               E ---> D
+```
+
+Now run BFS from `E` in the reversed graph:
+
+```
+E -> D -> C -> A
+             \
+              -> B
+```
+
+The vertices reached from `E` in the reversed graph are exactly the vertices that can reach `E` in the original graph.
+
+### Why does reversing edges work?
+
+An original edge
+
+```
+u -> v
+```
+
+becomes
+
+```
+v -> u
+```
+
+So every path from `u` to `E` in the original graph corresponds to a reversed path from `E` to `u`.
+
+The number of edges stays the same. Therefore, reverse-graph BFS can also find the minimum number of edges from every vertex to the destination.
+
+### Pseudocode
+
+```
+REVERSE-GRAPH-BFS(G, destination):
+    G_reverse = reverse every directed edge in G
+    BFS(G_reverse, destination)
+```
+
+If `distance_reverse[u]` is finite, then `u` can reach `destination` in the original graph, and:
+
+$$
+d_G(u,t)=d\_{G\_{\text{reverse}}}(t,u)
+$$
+
+Here, $t$ is the destination.
+
+### When is it useful?
+
+- Finding every city that can reach a particular airport.
+- Finding every page that can eventually link to a target page.
+- Finding which states can reach a goal state.
+- Computing shortest distances to one destination from many starting vertices.
+
+If the graph is undirected, reversing edges is unnecessary because every edge can already be traversed in either direction.
+
+Complexity: building the reversed graph takes $O(V+E)$, and BFS takes $O(V+E)$. The total remains $O(V+E)$.
+
+## 4. Bidirectional BFS
+
+Bidirectional BFS searches from both ends of a path:
+
+- Forward BFS starts at the source.
+- Backward BFS starts at the destination.
+- The searches continue until they meet.
+
+This can dramatically reduce the number of explored vertices in certain large graphs.
+
+### Example
+
+Suppose we want the shortest path from `S` to `T`:
+
+```
+S -- A -- B -- C -- D -- E -- T
+```
+
+Ordinary BFS explores outward from `S` until it reaches `T`.
+
+Bidirectional BFS expands from both ends:
+
+```
+Forward search:              Backward search:
+
+S -> A -> B                  T -> E -> D
+          \                  /
+           \---- meet ------/
+```
+
+Once the frontiers connect, the searches can combine their paths.
+
+### Why can it be faster?
+
+Suppose a graph has a branching factor $b$, meaning that each vertex has roughly $b$ neighbors to explore.
+
+If the shortest path has length $d$, ordinary BFS may explore on the order of:
+
+$$
+O(b^d)
+$$
+
+vertices in a tree-like search space.
+
+Bidirectional BFS may explore roughly half the path depth from each direction:
+
+$$
+O(b^{d/2})
+$$
+
+This is an intuitive estimate, not a universal complexity bound. Actual performance depends on the graph's structure, branching, and how the frontiers meet.
+
+### Basic approach
+
+```
+BIDIRECTIONAL-BFS(G, source, target):
+    if source == target:
+        return [source]
+
+    initialize forward search from source
+    initialize backward search from target
+
+    while both searches have work:
+        expand one search frontier
+        check whether a discovered vertex intersects
+            the other search's discovered set
+
+        if the searches meet:
+            reconstruct and combine both paths
+
+    return "no path"
+```
+
+A correct implementation needs to keep the two parent structures separate and reconstruct the two halves in opposite directions. For a directed graph, the backward search must traverse incoming edges, usually by searching the reversed graph.
+
+### When should you use it?
+
+Bidirectional BFS is especially useful when:
+
+- You know both the source and target.
+- You need one shortest path, not distances to every vertex.
+- The graph is large and has relatively short paths.
+- You can efficiently generate neighbors in both search directions.
+
+It is less useful if you need shortest paths from one source to every vertex, or if backward traversal is difficult.
+
+Important: bidirectional BFS is still a shortest-path method for unweighted graphs. It does not solve arbitrary weighted shortest-path problems.
+
+## 5. Level-limited BFS
+
+Sometimes you do not want to explore the entire reachable graph. You only want vertices within a maximum distance from the source.
+
+Level-limited BFS stops after exploring up to a specified depth $K$.
+
+### Example: friends within two connections
+
+Suppose a social network looks like this:
+
+```
+             A
+           /   \
+          B     C
+         / \     \
+        D   E     F
+       /
+      G
+```
+
+Starting from `A`, with a depth limit of 2:
+
+```
+Level 0:        A
+Level 1:      B   C
+Level 2:    D   E   F
+
+Excluded:       G     (level 3)
+```
+
+This is useful when you want to find:
+
+- Friends within two connections.
+- Locations within a maximum number of moves.
+- Nearby states in a game.
+- Routes requiring no more than a certain number of edges.
+
+### Pseudocode
+
+```
+LEVEL-LIMITED-BFS(G, source, K):
+    create empty queue Q
+
+    distance[v] = INFINITY for every vertex v
+    distance[source] = 0
+    ENQUEUE(Q, source)
+
+    while Q is not empty:
+        u = DEQUEUE(Q)
+
+        if distance[u] == K:
+            continue
+
+        for each neighbor v of u:
+            if distance[v] == INFINITY:
+                distance[v] = distance[u] + 1
+                ENQUEUE(Q, v)
+```
+
+The condition
+
+```
+if distance[u] == K:
+    continue
+```
+
+prevents BFS from expanding vertices at the limit. Those vertices are still included in the result, but their neighbors are not explored.
+
+### What if the limit is zero?
+
+If $K=0$, only the source is included.
+
+If $K=1$, the source and all its immediate neighbors are included.
+
+### Complexity
+
+Let $V_K$ be the number of vertices discovered within distance $K$, and let $E_K$ be the number of adjacency-list entries scanned from vertices at distances less than $K$.
+
+The traversal takes:
+
+$$
+O(V_K+E_K)
+$$
+
+excluding full-graph initialization. If you initialize arrays for all $V$ vertices, add $O(V)$ initialization time.
+
+Important distinction: level-limited BFS finds vertices whose shortest distance from the source is at most $K$. It does not necessarily enumerate every possible path of length at most $K$.
+
+## 6. BFS on implicit graphs, such as state spaces
+
+So far, our graphs have been represented using explicit vertices and edges. But sometimes the graph is never stored at all.
+
+An implicit graph is a graph whose vertices and edges are defined by rules. Instead of storing all neighbors in advance, the algorithm generates them when needed.
+
+This is common in puzzles, games, scheduling, and search problems.
+
+### Example: a maze
+
+Consider this grid:
+
+```
+S . # .
+. . # .
+# . . G
+```
+
+Legend:
+
+- `S`: starting cell
+- `G`: goal
+- `.`: open cell
+- `#`: blocked cell
+
+Each open cell is a vertex. An edge connects two cells when you can move directly between them, for example up, down, left, or right, without crossing a wall.
+
+You do not have to build a graph containing every cell and every edge first. When BFS processes a cell, it generates its valid neighboring cells.
+
+```
+BFS-MAZE(grid, start):
+    create empty queue Q
+    mark start as discovered
+    distance[start] = 0
+    ENQUEUE(Q, start)
+
+    while Q is not empty:
+        current = DEQUEUE(Q)
+
+        if current == goal:
+            return distance[current]
+
+        for each possible move from current:
+            next = resulting cell
+
+            if next is inside the grid
+               and next is not a wall
+               and next has not been discovered:
+
+                mark next as discovered
+                distance[next] = distance[current] + 1
+                parent[next] = current
+                ENQUEUE(Q, next)
+
+    return "no path"
+```
+
+The `for each possible move` section generates the graph's neighbors dynamically.
+
+### Other implicit-graph examples
+
+[Free AI Cube Solver Scanner 3x3 & 3D Simulator | Cubzor](https://images.openai.com/static-rsc-4/QEOlf7GZxkffarPXRQG3m-dOAd3swd5XIE9Qln6LFJZbZCqlrbkw5CKcl_5qYQdPC-Y01jpsEdgzGcOXIv2OoXZ2KxL57MozcXR2hlGGBTe4g7iYGUwVU7CPEiq4PB6GvbZsl19Xhc2EL6pwmQhMgZLlpQGf8-yGc-sknIsx-SI?purpose=inline)
+
+Puzzle solving
+
+A vertex is a puzzle configuration. An edge represents one legal move. BFS finds a solution with the fewest moves when every move has equal cost.
+
+[Fierce Knight 3.5" Staunton Chess Set Combo in Ebonised Boxwood with Board](https://images.openai.com/static-rsc-4/ACxEvB0KzlbYalx-zjUX8kt5vOSrnUhulJd3LAcZ6NTulrQs336uoJchYhEGGSk8dDI3LgjiWYLq5_TbdEJYweLUH3Tc62mQGZaG2elmwVXuWbvuALuOXp8y2RgWsXwaIlE0WPPfaGSwXA5FlsxZq7sr3eGWjk64v_Rnn-NFOko?purpose=inline)
+
+Knight moves
+
+A vertex is a board square. Edges represent legal knight moves. BFS finds the minimum number of moves between two squares on an otherwise empty board.
+
+[Understanding the Word Ladder Problem | Rui Tao's Portfolio – MS Student in ECE @ UW](https://images.openai.com/static-rsc-4/qcjeSyl-iyJrEFVnNULXaGNZ-kOsL6XYQNB5MxW63VTBe-7ZcQhAqpeofYDZlpt1nr_H9yzMvEGYJpTfNo8GVst10GTwjoXDvGCasbf_nYhYyzOnGyYikjDQ5Pvxb9EE_2SkjmTceTH98AhcONfdQcMP7jWb6EAMVxhtmp7KLBE?purpose=inline)
+
+Word transformation
+
+A vertex is a word, and an edge connects words that differ by one permitted change. BFS can find a transformation using the fewest changes.
+
+### What defines a state?
+
+When solving a state-space problem, define three things clearly:
+
+1. State: what information uniquely identifies a vertex?
+2. Transition: what legal operation moves from one state to another?
+3. Goal: how do you recognize a state that solves the problem?
+
+For a maze, the state might simply be the current row and column. For a more complicated puzzle, it might include the board arrangement and whose turn it is.
+
+A common mistake is to leave out information that affects future moves. If two configurations at the same position have different legal actions, they may need to be represented as different states.
+
+### Complexity of implicit-graph BFS
+
+If the reachable state space has $V$ states and $E$ valid transitions, BFS still has the usual graph complexity:
+
+$$
+O(V+E)
+$$
+
+But this assumes that generating each state's neighbors takes time proportional to the number of transitions generated.
+
+In practice, the state space may be enormous or infinite. Memory can become the main limitation because BFS stores discovered states and its frontier. Efficient state encoding, visited-state hashing, and pruning can be essential.
+
+## Summary: which BFS variant should you choose?
+
+| Variant                     | Main purpose                                      | Typical example                  |
+| --------------------------- | ------------------------------------------------- | -------------------------------- |
+| Multi-source BFS            | Find distance from the nearest of several sources | Nearest hospital                 |
+| BFS for disconnected graphs | Visit every component                             | Full graph traversal             |
+| Reverse-graph BFS           | Find vertices that can reach a destination        | Cities that can reach an airport |
+| Bidirectional BFS           | Find a shortest path between two known endpoints  | Large unweighted route search    |
+| Level-limited BFS           | Explore only within a maximum number of edges     | Friends within two connections   |
+| Implicit-graph BFS          | Search states generated from rules                | Maze or puzzle solving           |
+
+The unifying idea is that BFS preserves its shortest-path guarantee whenever each transition has equal cost and the algorithm explores states in nondecreasing distance order. These variants change the search strategy without changing that fundamental principle.

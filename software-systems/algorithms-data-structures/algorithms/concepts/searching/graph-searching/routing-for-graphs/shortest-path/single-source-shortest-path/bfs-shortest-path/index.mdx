@@ -1,0 +1,884 @@
+# Breadth-First Search (BFS) for Shortest Paths
+
+BFS is one of the simplest algorithms for finding shortest paths in a graph. We have already seen BFS as a graph traversal algorithm; now we'll extend it to solve a shortest-path problem.
+
+The key idea is:
+
+BFS explores vertices in increasing order of their distance from the source.
+
+Because of this, when BFS first discovers a vertex, it has found a path to that vertex containing the minimum possible number of edges.
+
+There is one important limitation: BFS finds shortest paths by number of edges, not by arbitrary edge weights. It works for unweighted graphs or graphs where every edge has the same weight.
+
+## What problem does BFS solve?
+
+BFS can solve the Single-Source Shortest Path (SSSP) problem when the graph is unweighted.
+
+Given a graph $G=(V,E)$ and a source vertex $s$, we want to find the shortest path from $s$ to every reachable vertex.
+
+For example:
+
+```
+             A
+           /   \
+          B     C
+         / \     \
+        D   E --- F
+             \   
+               G
+```
+
+Assume every edge has a cost of 1.
+
+Starting from `A`, the shortest distances are:
+
+| Vertex | Shortest path | Distance |
+| ------ | ------------- | -------- |
+| A      | A             | 0        |
+| B      | A → B         | 1        |
+| C      | A → C         | 1        |
+| D      | A → B → D     | 2        |
+| E      | A → B → E     | 2        |
+| F      | A → C → F     | 2        |
+| G      | A → B → E → G | 3        |
+
+Notice that BFS explores vertices in layers:
+
+```
+                 A
+                (0)
+               /   \
+              B     C
+             (1)   (1)
+            /  \     \
+           D    E     F
+          (2)  (2)   (2)
+                \
+                 G
+                (3)
+```
+
+- Level 0: source vertex.
+- Level 1: vertices one edge away.
+- Level 2: vertices two edges away.
+- Level 3: vertices three edges away.
+
+This level-by-level exploration is what makes BFS suitable for shortest paths in unweighted graphs.
+
+## Why does BFS find the shortest path?
+
+Consider how BFS works.
+
+It uses a FIFO queue (First In, First Out):
+
+1. Start by inserting the source into the queue.
+2. Remove the vertex at the front.
+3. Visit its unvisited neighbors.
+4. Insert those neighbors into the queue.
+5. Continue until the queue is empty.
+
+The important property is that vertices discovered at distance $d$ are processed before vertices at distance $d+1$.
+
+For example:
+
+```
+             A
+           /   \
+          B     C
+          |     |
+          D     E
+           \   /
+             F
+```
+
+There are two paths from A to F:
+
+```
+A → B → D → F    (3 edges)
+A → C → E → F    (3 edges)
+```
+
+BFS discovers vertices by increasing distance:
+
+```
+Level 0: A
+Level 1: B, C
+Level 2: D, E
+Level 3: F
+```
+
+When BFS discovers `F`, it has found a shortest path from `A` to `F`.
+
+There might be multiple shortest paths. BFS generally records one of them, depending on the order in which neighbors are processed.
+
+## Data structures and arrays used by BFS
+
+To turn ordinary BFS traversal into a shortest-path algorithm, we need to maintain additional information.
+
+| Data structure           | Purpose                                            |
+| ------------------------ | -------------------------------------------------- |
+| Graph `G`                | Stores vertices and edges                          |
+| Queue `Q`                | Stores vertices waiting to be processed            |
+| `dist[]`                 | Stores the shortest known distance from the source |
+| `pred[]`                 | Stores the predecessor of each vertex              |
+| `visited[]` or `color[]` | Tracks whether a vertex has been discovered        |
+
+Let's examine the arrays.
+
+### 1. Distance array
+
+`dist[v]` stores the number of edges in the shortest path currently known from the source to vertex `v`.
+
+Initialization:
+
+```
+dist[v] = ∞    for every vertex v
+dist[s] = 0    for the source
+```
+
+Why?
+
+- We initially know nothing about the distance to other vertices, so we use infinity.
+- The distance from the source to itself is zero because no edges are needed.
+
+Example:
+
+```
+Source = A
+
+dist[A] = 0
+dist[B] = ∞
+dist[C] = ∞
+dist[D] = ∞
+dist[E] = ∞
+```
+
+### 2. Predecessor array
+
+`pred[v]` stores the vertex immediately preceding `v` on the selected shortest path.
+
+Initialization:
+
+```
+pred[v] = NIL
+```
+
+For example, if the shortest path is:
+
+```
+A → B → D → F
+```
+
+Then:
+
+```
+pred[A] = NIL
+pred[B] = A
+pred[D] = B
+pred[F] = D
+```
+
+This allows us to reconstruct the actual path, not just its distance.
+
+### 3 Visited array or color array
+
+We must ensure that each vertex is discovered and enqueued only once.
+
+One approach is:
+
+```
+visited[v] = false
+```
+
+When we discover a vertex:
+
+```
+visited[v] = true
+```
+
+You can also use the three-color representation:
+
+| Color | Meaning                                                           |
+| ----- | ----------------------------------------------------------------- |
+| White | Not discovered                                                    |
+| Gray  | Discovered and waiting in the queue, or currently being processed |
+| Black | Fully processed                                                   |
+
+For BFS shortest paths, marking a vertex Gray when it is enqueued is essential. It prevents another vertex from discovering and enqueuing it again.
+
+## BFS shortest-path algorithm
+
+The main difference between ordinary BFS traversal and BFS shortest paths is that we update the distance and predecessor when discovering a new vertex.
+
+### Pseudocode
+
+```
+BFS-Shortest-Path(G, s)
+
+    for each vertex v in G.V:
+        dist[v] = ∞
+        pred[v] = NIL
+        color[v] = WHITE
+
+    dist[s] = 0
+    color[s] = GRAY
+
+    Q = empty queue
+    ENQUEUE(Q, s)
+
+    while Q is not empty:
+
+        u = DEQUEUE(Q)
+
+        for each neighbor v of u:
+
+            if color[v] == WHITE:
+
+                color[v] = GRAY
+
+                dist[v] = dist[u] + 1
+                pred[v] = u
+
+                ENQUEUE(Q, v)
+
+        color[u] = BLACK
+```
+
+Let's understand the important operations:
+
+| Operation               | Purpose                                              |
+| ----------------------- | ---------------------------------------------------- |
+| `dist[s] = 0`           | The source is zero edges away from itself            |
+| `ENQUEUE(Q, s)`         | Start BFS from the source                            |
+| `DEQUEUE(Q)`            | Process the oldest discovered vertex                 |
+| `color[v] == WHITE`     | Check whether the neighbor has never been discovered |
+| `dist[v] = dist[u] + 1` | Calculate the distance through `u`                   |
+| `pred[v] = u`           | Record how we reached `v`                            |
+| `ENQUEUE(Q, v)`         | Schedule the newly discovered vertex for processing  |
+
+Notice: We assign `dist[v]` and `pred[v]` only when `v` is first discovered. We do not repeatedly relax edges as Dijkstra does.
+
+Why is that safe? Because FIFO queue ordering guarantees that the first discovered path to a vertex has the minimum number of edges.
+
+## Step-by-step walkthrough
+
+Let's use this directed graph, with every edge having weight 1:
+
+```
+             A
+           /   \
+          B     C
+         / \     \
+        D   E     F
+             \   /
+               G
+```
+
+Edges:
+
+```
+A → B
+A → C
+B → D
+B → E
+C → F
+E → G
+F → G
+```
+
+We want to find the shortest paths from source `A`.
+
+### Step 1: Initialization
+
+Initially, all vertices are undiscovered.
+
+```
+dist[A] = 0
+dist[B] = ∞
+dist[C] = ∞
+dist[D] = ∞
+dist[E] = ∞
+dist[F] = ∞
+dist[G] = ∞
+```
+
+All predecessors are `NIL`.
+
+```
+pred[A] = NIL
+pred[B] = NIL
+pred[C] = NIL
+pred[D] = NIL
+pred[E] = NIL
+pred[F] = NIL
+pred[G] = NIL
+```
+
+Queue:
+
+```
+FRONT → [A] ← REAR
+```
+
+Colors:
+
+```
+A = GRAY
+B = WHITE
+C = WHITE
+D = WHITE
+E = WHITE
+F = WHITE
+G = WHITE
+```
+
+### Step 2: Process A
+
+Dequeue `A`.
+
+```
+Q = []
+```
+
+Neighbors of `A` are `B` and `C`.
+
+Both are White, so discover them:
+
+```
+dist[B] = dist[A] + 1 = 1
+pred[B] = A
+
+dist[C] = dist[A] + 1 = 1
+pred[C] = A
+```
+
+Enqueue both:
+
+```
+FRONT → [B, C] ← REAR
+```
+
+Colors:
+
+```
+A = BLACK
+B = GRAY
+C = GRAY
+```
+
+Current distances:
+
+```
+A = 0
+B = 1
+C = 1
+D = ∞
+E = ∞
+F = ∞
+G = ∞
+```
+
+### Step 3: Process B
+
+Dequeue `B`.
+
+```
+FRONT → [C] ← REAR
+```
+
+Neighbors of `B` are `D` and `E`.
+
+Both are White:
+
+```
+dist[D] = dist[B] + 1 = 2
+pred[D] = B
+
+dist[E] = dist[B] + 1 = 2
+pred[E] = B
+```
+
+Enqueue them:
+
+```
+FRONT → [C, D, E] ← REAR
+```
+
+Colors:
+
+```
+A = BLACK
+B = BLACK
+C = GRAY
+D = GRAY
+E = GRAY
+```
+
+### Step 4: Process C
+
+Dequeue `C`.
+
+```
+FRONT → [D, E] ← REAR
+```
+
+Neighbor of `C` is `F`.
+
+`F` is White, so discover it:
+
+```
+dist[F] = dist[C] + 1 = 2
+pred[F] = C
+```
+
+Enqueue `F`:
+
+```
+FRONT → [D, E, F] ← REAR
+```
+
+### Step 5: Process D
+
+Dequeue `D`.
+
+```
+FRONT → [E, F] ← REAR
+```
+
+`D` has no outgoing neighbors, so nothing changes.
+
+### Step 6: Process E
+
+Dequeue `E`.
+
+```
+FRONT → [F] ← REAR
+```
+
+Neighbor of `E` is `G`.
+
+`G` is White, so discover it:
+
+```
+dist[G] = dist[E] + 1 = 3
+pred[G] = E
+```
+
+Enqueue `G`:
+
+```
+FRONT → [F, G] ← REAR
+```
+
+### Step 7: Process F
+
+Dequeue `F`.
+
+```
+FRONT → [G] ← REAR
+```
+
+Neighbor of `F` is `G`, but `G` is already Gray.
+
+Therefore, we do nothing.
+
+This is important: we do not overwrite `pred[G]` or `dist[G]`.
+
+Although `F` also provides a path to `G`, it has the same length:
+
+```
+A → B → E → G    (3 edges)
+A → C → F → G    (3 edges)
+```
+
+Our algorithm keeps the first shortest path it discovers.
+
+### Step 8: Process G
+
+Dequeue `G`.
+
+It has no outgoing neighbors.
+
+The queue is now empty, so BFS terminates.
+
+## 6. Final result
+
+BFS completed
+
+The final distance and predecessor arrays are:
+
+| Vertex | Distance | Predecessor | Shortest path |
+| ------ | -------- | ----------- | ------------- |
+| A      | 0        | NIL         | A             |
+| B      | 1        | A           | A → B         |
+| C      | 1        | A           | A → C         |
+| D      | 2        | B           | A → B → D     |
+| E      | 2        | B           | A → B → E     |
+| F      | 2        | C           | A → C → F     |
+| G      | 3        | E           | A → B → E → G |
+
+The resulting shortest-path tree is:
+
+```
+             A
+           /   \
+          B     C
+         / \     \
+        D   E     F
+             \
+              G
+```
+
+This tree represents one selected shortest path from `A` to every reachable vertex.
+
+The edge `F → G` is not included because `G` already has a predecessor (`E`) in the selected shortest-path tree.
+
+## Reconstructing the shortest path
+
+The distance array tells us the shortest distance, but sometimes we need the actual sequence of vertices.
+
+We can reconstruct it using `pred[]`.
+
+Suppose we want the shortest path from `A` to `G`.
+
+The predecessor array contains:
+
+```
+pred[G] = E
+pred[E] = B
+pred[B] = A
+pred[A] = NIL
+```
+
+Starting at the destination and following predecessors:
+
+```
+G ← E ← B ← A
+```
+
+Reverse the sequence:
+
+```
+A → B → E → G
+```
+
+### Path reconstruction pseudocode
+
+```
+RECONSTRUCT-PATH(pred, s, target)
+
+    path = empty list
+    current = target
+
+    while current != NIL:
+        add current to path
+
+        if current == s:
+            reverse(path)
+            return path
+
+        current = pred[current]
+
+    return "No path exists"
+```
+
+Why do we check whether we reached `s`?
+
+Because if the destination is unreachable, its predecessor remains `NIL`. We must distinguish an unreachable destination from the source itself.
+
+For example:
+
+```
+A → B → C
+
+D
+```
+
+Starting from `A`, vertex `D` is unreachable:
+
+```
+dist[D] = ∞
+pred[D] = NIL
+```
+
+So reconstructing a path from `A` to `D` returns no path.
+
+## Why is the algorithm correct?
+
+The correctness of BFS shortest paths depends on two important properties.
+
+### 8.1 FIFO queue ordering
+
+The queue processes vertices in the order they are discovered.
+
+Suppose the source is at distance 0.
+
+- BFS processes the source and discovers distance-1 vertices.
+- It processes all distance-1 vertices and discovers distance-2 vertices.
+- It processes all distance-2 vertices and discovers distance-3 vertices.
+
+Therefore, vertices are processed in nondecreasing order of their shortest-path distance.
+
+```
+Queue processing order:
+
+Distance 0: A
+Distance 1: B, C
+Distance 2: D, E, F
+Distance 3: G
+```
+
+### 8.2 First discovery gives the shortest distance
+
+Suppose BFS discovers vertex `v` from vertex `u`.
+
+It assigns:
+
+$$
+dist[v] = dist[u] + 1
+$$
+
+Could another path reach `v` with fewer edges later?
+
+No. Such a path would have to pass through a vertex at a smaller distance than `u`, and BFS would have processed that vertex before `u`.
+
+Therefore, the first discovery of `v` already gives its shortest distance.
+
+This is why BFS doesn't need to revisit vertices to improve their distances.
+
+## 9. Time and space complexity
+
+Let:
+
+- $V$ = number of vertices.
+- $E$ = number of edges.
+
+### Time complexity
+
+| Operation                                          | Complexity |
+| -------------------------------------------------- | ---------- |
+| Initialize distance, predecessor, and color arrays | $O(V)$ |
+| Enqueue each vertex                                | $O(V)$ |
+| Dequeue each vertex                                | $O(V)$ |
+| Examine all adjacency-list entries                 | $O(E)$ |
+
+Therefore:
+
+$$
+\boxed{O(V+E)}
+$$
+
+Every vertex is enqueued at most once, and every edge is examined at most once for a directed graph's adjacency list.
+
+For an undirected graph, each edge normally appears twice in the adjacency lists, once for each endpoint. The complexity remains $O(V+E)$.
+
+### Space complexity
+
+| Structure           | Space        |
+| ------------------- | ------------ |
+| Adjacency list      | $O(V+E)$ |
+| Queue               | $O(V)$   |
+| Distance array      | $O(V)$   |
+| Predecessor array   | $O(V)$   |
+| Visited/color array | $O(V)$   |
+
+Total auxiliary space, excluding the graph itself:
+
+$$
+\boxed{O(V)}
+$$
+
+Including the graph representation:
+
+$$
+\boxed{O(V+E)}
+$$
+
+### Adjacency matrix implementation
+
+If the graph is represented using an adjacency matrix, examining the neighbors of each vertex requires scanning an entire row.
+
+Therefore, BFS takes:
+
+$$
+\boxed{O(V^2)}
+$$
+
+This is one reason adjacency lists are commonly preferred for sparse graphs.
+
+## 10. Important edge cases
+
+### 10.1 Disconnected graphs
+
+BFS only finds shortest paths to vertices reachable from the source.
+
+```
+Component 1:       Component 2:
+
+    A                  X
+   / \                 |
+  B   C                Y
+```
+
+Starting from `A`:
+
+```
+dist[A] = 0
+dist[B] = 1
+dist[C] = 1
+
+dist[X] = ∞
+dist[Y] = ∞
+```
+
+BFS does not automatically visit other disconnected components.
+
+If you want to traverse the entire graph, you need an outer loop that starts BFS from every remaining undiscovered vertex. However, that is a graph traversal over all components, not a single-source shortest-path search.
+
+### 10.2 Multiple shortest paths
+
+Consider:
+
+```
+       A
+      / \
+     B   C
+      \ /
+       D
+```
+
+There are two shortest paths:
+
+```
+A → B → D
+A → C → D
+```
+
+Both have a distance of 2.
+
+BFS records whichever path discovers `D` first.
+
+If you need all shortest paths, a single predecessor array is insufficient. You can instead maintain a collection of predecessors for each vertex and record another predecessor when:
+
+$$
+dist[u] + 1 = dist[v]
+$$
+
+### 10.3 Source equals destination
+
+If the source and destination are the same:
+
+```
+source = A
+target = A
+```
+
+The shortest path is:
+
+```
+A
+```
+
+Its distance is zero.
+
+### 10.4 Weighted graphs
+
+Consider:
+
+```
+       10
+   A ------> B
+    \         ^
+     \        |
+      1       1
+       \      |
+        > C --
+```
+
+There are two paths from `A` to `B`:
+
+```
+A → B       cost = 10
+A → C → B   cost = 2
+```
+
+BFS considers the direct path shorter because it has fewer edges.
+
+But the second path has a lower total weight.
+
+This illustrates the limitation:
+
+BFS minimizes the number of edges, not the sum of arbitrary edge weights.
+
+If every edge has the same positive weight $k$, BFS still works because minimizing the number of edges also minimizes the total cost.
+
+For nonnegative, unequal edge weights, use Dijkstra instead.
+
+## 11. BFS versus Dijkstra
+
+Both algorithms solve SSSP, but they use different strategies.
+
+| Feature                                     | BFS                                       | Dijkstra                                                 |
+| ------------------------------------------- | ----------------------------------------- | -------------------------------------------------------- |
+| Graph                                       | Unweighted / equal weights                | Nonnegative edge weights                                 |
+| Main data structure                         | FIFO queue                                | Min-priority queue                                       |
+| Processing order                            | Increasing number of edges                | Increasing tentative distance                            |
+| Distance update                             | On first discovery                        | Whenever a shorter route is found                        |
+| Can improve an already discovered distance? | No                                        | Yes                                                      |
+| Negative edge weights                       | Not supported for weighted shortest paths | Not supported                                            |
+| Typical complexity                          | $O(V+E)$                              | $O((V+E)\log V)$ with binary heap and adjacency list |
+
+The key conceptual difference is:
+
+- BFS: The first time you discover a vertex, its shortest distance is known.
+- Dijkstra: A discovered vertex might later receive a better distance, so the algorithm must continue relaxing edges.
+
+This is why Dijkstra needs a priority queue instead of a normal FIFO queue.
+
+## 12. Implementation considerations
+
+When implementing BFS shortest paths, pay attention to these details:
+
+1. Mark vertices when enqueuing them, not when dequeuing them. Otherwise, multiple vertices may enqueue the same neighbor.
+2. Initialize every distance to infinity and every predecessor to `NIL`.
+3. Initialize the source distance to zero before starting the queue.
+4. Update the predecessor at the same time you assign the distance.
+5. Use an appropriate queue implementation. In Java, `ArrayDeque` is a good choice.
+6. For disconnected graphs, leave unreachable vertices at infinity.
+7. Be careful when reconstructing paths: an unreachable destination must return no path.
+8. If you want all shortest paths, maintain multiple predecessors rather than just one.
+
+## 13. Where BFS shortest paths fit in your DSA roadmap
+
+I recommend organizing the topic as follows:
+
+```
+Algorithms
+└── Graph Algorithms
+    ├── Graph Traversal
+    │   ├── Breadth-First Search (BFS)
+    │   └── Depth-First Search (DFS)
+    │
+    └── Shortest Path Algorithms
+        ├── Single-Source Shortest Path (SSSP)
+        │   ├── BFS Shortest Path
+        │   ├── Dijkstra
+        │   ├── Bellman-Ford
+        │   └── DAG Shortest Path
+        │
+        ├── Single-Pair Shortest Path (SPSP)
+        │   ├── Bidirectional BFS
+        │   ├── Bidirectional Dijkstra
+        │   └── A*
+        │
+        └── All-Pairs Shortest Path (APSP)
+            └── Floyd-Warshall
+```
+
+BFS itself belongs to graph traversal, but BFS shortest path is an application of BFS under the SSSP problem.
+
+### Recommended next step
+
+Implement BFS shortest paths in C and Java, then compare the implementations with your existing BFS traversal implementation.
+
+The most useful exercise is to add `dist[]` and `pred[]` to your existing BFS code and observe that the traversal logic barely changes. You're extending BFS with shortest-path information rather than introducing an entirely new traversal algorithm.

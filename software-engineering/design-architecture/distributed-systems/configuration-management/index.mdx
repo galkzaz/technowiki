@@ -1,0 +1,4606 @@
+# Configuration Management in Distributed Systems
+
+{/* These five topics fit naturally at the beginning of your `software-engineering/design-architecture/distributed-systems` configuration-management section. They explain why configuration exists, how it is managed, where it lives, how it differs from secrets, and what makes it difficult in a distributed environment. */}
+
+Externalized configuration is an architectural approach in which an application's configuration is managed separately from its application code and deployed binaries. Centralized configuration takes this idea further by providing a common place to manage and distribute configuration for multiple microservices.
+
+This is an important microservices design principle because a service's behavior often depends on its environment, infrastructure, security settings, and connections to other services.
+
+
+## The problem: configuration is coupled to deployment
+
+Traditional applications were usually packaged as a bundle, including the
+source code and a series of configuration files containing data for different environments, with the appropriate configuration being selected through a flag at runtime. The implication was that you had to make a new application build every time
+you needed to update the configuration data for a specific environment. A variant of this process was to create a different build for each environment, meaning that you had no guarantee whether what you ran in a staging environment would work the same way in production because they were different artifacts.
+
+Imagine you are building an online shopping system with these microservices:
+
+- `api-gateway`
+- `product-service`
+- `order-service`
+- `payment-service`
+- `notification-service`
+
+Each service needs configuration to determine how it behaves and how it communicates with the rest of the system.
+
+For example, `order-service` might need:
+
+```yml
+server:
+  port: 8082
+
+services:
+  product:
+    url: http://product-service:8081
+  payment:
+    url: http://payment-service:8083
+
+database:
+  url: jdbc:postgresql://orders-db:5432/orders
+  username: orders_user
+
+logging:
+  level: INFO
+```
+
+These settings describe how the application runs, not the business logic that implements placing an order.
+
+With environment variables, you can externalize your application’s configuration and follow the 15-Factor methodology. However, there are some issues they cannot handle:
+
+* Configuration data is as important as the application code, so it should be handled with the same care and attention, starting from its persistence. Where should you store configuration data? Environment variables don’t provide granular access control features. How can you control access to configuration data?
+* Configuration data will evolve and require changes, just like application code. How should you keep track of the revisions to configuration data? How should you audit the configuration used in a release?
+* After changing your configuration data, how can you make your application read it at runtime without requiring a full restart?
+* When the number of application instances increases, it can be challenging to handle configuration in a distributed fashion for each instance. How can you
+overcome such challenges?
+* Neither Spring Boot properties(for xample) nor environment variables support configuration encryption, so you can’t safely store passwords. How should you manage secrets?
+
+### Problem A: Configuration embedded in application code
+
+Consider this Java code:
+
+```Java
+public class PaymentClient {
+
+    private static final String PAYMENT_URL =
+            "http://localhost:8083";
+
+    // Send payment requests to PAYMENT_URL
+}
+```
+
+This creates a problem when the application moves from a developer's machine to a production environment.
+
+```excalidraw
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "id": "UCnGBC7fOM1vFGNMVI17w",
+      "type": "text",
+      "x": 198.30312728881836,
+      "y": 92,
+      "width": 325.99999999999994,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a1",
+      "roundness": null,
+      "seed": 994620716,
+      "version": 647,
+      "versionNonce": 1363531229,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792572326761,
+      "created": 1792434200272,
+      "link": null,
+      "locked": false,
+      "text": "Eureka Discovery Server",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Eureka Discovery Server",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "EG-CPGYs2LQkCEE_Hw2CI",
+      "type": "text",
+      "x": 287.15312576293945,
+      "y": 136,
+      "width": 112.30000305175781,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a2",
+      "roundness": null,
+      "seed": 155007916,
+      "version": 420,
+      "versionNonce": 789627507,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792572326761,
+      "created": 1792442717724,
+      "link": null,
+      "locked": false,
+      "text": "Service registry",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Service registry",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "hlUWXjTA3t59QbFB-tj6R",
+      "type": "text",
+      "x": 41.266666412353516,
+      "y": 113,
+      "width": 101.46666717529297,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a3",
+      "roundness": null,
+      "seed": 2076935956,
+      "version": 98,
+      "versionNonce": 1434391603,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442765358,
+      "link": null,
+      "locked": false,
+      "text": "Initial array",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Initial array",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "e9miYzobg_Q_irPLTetw8",
+      "type": "rectangle",
+      "x": 37.30000305175781,
+      "y": 171.809375,
+      "width": 189.5,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a4",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 907436564,
+      "version": 201,
+      "versionNonce": 349289597,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "D6I0PwLVPXT4eZ5BvbLv3"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442784709,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "D6I0PwLVPXT4eZ5BvbLv3",
+      "type": "text",
+      "x": 124.71666955947876,
+      "y": 183.44062499999998,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a4V",
+      "roundness": null,
+      "seed": 1757900948,
+      "version": 159,
+      "versionNonce": 664016339,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442801934,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "e9miYzobg_Q_irPLTetw8",
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "SsDeokVES5FGRPe_cJpll",
+      "type": "rectangle",
+      "x": 242.95781326293948,
+      "y": 172.7375,
+      "width": 192.99999999999994,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a5",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 278899116,
+      "version": 277,
+      "versionNonce": 1539253469,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "CLMMphBKNBXJwomUelNiT"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442790111,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "CLMMphBKNBXJwomUelNiT",
+      "type": "text",
+      "x": 332.67447996139526,
+      "y": 184.36875,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a5V",
+      "roundness": null,
+      "seed": 1323757972,
+      "version": 174,
+      "versionNonce": 517464947,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442804237,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "SsDeokVES5FGRPe_cJpll",
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "6lY3AZHm2E2bXQtkIkraJ",
+      "type": "rectangle",
+      "x": 450.3125,
+      "y": 171.5,
+      "width": 184.49999999999997,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 401073324,
+      "version": 243,
+      "versionNonce": 1168146749,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "6epJMRN8JUOkTb0sYIDJ-"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442794856,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "6epJMRN8JUOkTb0sYIDJ-",
+      "type": "text",
+      "x": 535.8125,
+      "y": 183.13125,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6V",
+      "roundness": null,
+      "seed": 1758219948,
+      "version": 161,
+      "versionNonce": 1133575443,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443204321,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "6lY3AZHm2E2bXQtkIkraJ",
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "UIGe73Iq5OLWOv4-X9o7x",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 270.5,
+      "width": 354.73333740234375,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a8",
+      "roundness": null,
+      "seed": 121108884,
+      "version": 118,
+      "versionNonce": 936858013,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442972985,
+      "link": null,
+      "locked": false,
+      "text": "Step 1: Compare the first two elements",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 1: Compare the first two elements",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "A1gX1fFjWKDRQ8pwfvSoq",
+      "type": "text",
+      "x": 180.66666650772095,
+      "y": 317.5,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a9",
+      "roundness": null,
+      "seed": 1740808724,
+      "version": 102,
+      "versionNonce": 1362485939,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442985056,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "ohDyGbzyv_lWlKr7TakbN",
+      "type": "text",
+      "x": 465.7166666984558,
+      "y": 317.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aA",
+      "roundness": null,
+      "seed": 1070164628,
+      "version": 156,
+      "versionNonce": 1872041469,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442989501,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "-FQ63PgydbBW6xRdTnSap",
+      "type": "arrow",
+      "x": 321.84072494477346,
+      "y": 337,
+      "width": 20.736456238139024,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aC",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1257068436,
+      "version": 164,
+      "versionNonce": 1349325907,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443017496,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20.736456238139024,
+          -1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "moveMidPointsWithElement": true
+    },
+    {
+      "id": "ioGFWcAp2pFNrYxepqKq7",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 402,
+      "width": 269.73333740234375,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aD",
+      "roundness": null,
+      "seed": 1724302356,
+      "version": 147,
+      "versionNonce": 131812957,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443035700,
+      "link": null,
+      "locked": false,
+      "text": "Step 2: Compare the next pair",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 2: Compare the next pair",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "sguHkWnZ2Xaiif9IWC6AB",
+      "type": "text",
+      "x": 183.19166660308838,
+      "y": 450.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aE",
+      "roundness": null,
+      "seed": 1357943444,
+      "version": 175,
+      "versionNonce": 1896681971,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "0vZdNcYDVUTAiIFdJEpmv",
+      "type": "text",
+      "x": 468.24166679382324,
+      "y": 450.5,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aF",
+      "roundness": null,
+      "seed": 334045204,
+      "version": 229,
+      "versionNonce": 1065056957,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "ruKnUpyd8gXi4cLtk98jN",
+      "type": "arrow",
+      "x": 340.5715246191928,
+      "y": 452,
+      "width": 16.589164990511218,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aG",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 807525012,
+      "version": 266,
+      "versionNonce": 605838227,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -16.589164990511218,
+          1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "LDjhc0M5hmo7t-ogyed7Q",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 355,
+      "width": 524.9000244140625,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aH",
+      "roundness": null,
+      "seed": 577825172,
+      "version": 141,
+      "versionNonce": 2132220701,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "id": "7g7_G6X4vuSrCjYT8OXqc",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1792571507394,
+      "created": 1792443062023,
+      "link": null,
+      "locked": false,
+      "text": "A.compareTo(B) is negative, so the run is ascending so far.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "A.compareTo(B) is negative, so the run is ascending so far.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "Ill1X3fA_tLk27_3ZywaR",
+      "type": "arrow",
+      "x": 321.74894243386814,
+      "y": 475.68085239399215,
+      "width": 20.736456238139024,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aI",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 229730324,
+      "version": 245,
+      "versionNonce": 1976660275,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443089151,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20.736456238139024,
+          -1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "LzNgkZwSuilRs6lCKwDnH",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 492,
+      "width": 539.7666625976562,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aJ",
+      "roundness": null,
+      "seed": 907889044,
+      "version": 137,
+      "versionNonce": 522170237,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443148006,
+      "link": null,
+      "locked": false,
+      "text": "B.compareTo(C) is negative, so the ascending run continues.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B.compareTo(C) is negative, so the ascending run continues.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "cIPbgyJfFZxsQBSQ9rf-4",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 537,
+      "width": 201.06666564941406,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aK",
+      "roundness": null,
+      "seed": 220271252,
+      "version": 108,
+      "versionNonce": 34540413,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571707072,
+      "created": 1792443154966,
+      "link": null,
+      "locked": false,
+      "text": "Step 3: Accept the run",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 3: Accept the run",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "IirBEJIdXoGSSfRdmmDfC",
+      "type": "rectangle",
+      "x": 89.80000305175781,
+      "y": 248.75,
+      "width": 256.5,
+      "height": 85,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aKG",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 1873986324,
+      "version": 666,
+      "versionNonce": 98141,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "sw_uSR4UAr1bstWjIAp2g"
+        }
+      ],
+      "updated": 1792572328396,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "sw_uSR4UAr1bstWjIAp2g",
+      "type": "text",
+      "x": 150.68333435058594,
+      "y": 253.75,
+      "width": 134.73333740234375,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aKV",
+      "roundness": null,
+      "seed": 1374351788,
+      "version": 621,
+      "versionNonce": 442396915,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792572328396,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Config Server\n\nRegisters itself",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "IirBEJIdXoGSSfRdmmDfC",
+      "originalText": "Config Server\n\nRegisters itself",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "4ntyCTMsqj_K6KGBPI4ck",
+      "type": "rectangle",
+      "x": 364.3062515258789,
+      "y": 248.75,
+      "width": 266.49999999999994,
+      "height": 85,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aL",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 140163092,
+      "version": 779,
+      "versionNonce": 422122045,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "wcPFKxxquAgD9sd88_Fh5"
+        }
+      ],
+      "updated": 1792572326761,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "wcPFKxxquAgD9sd88_Fh5",
+      "type": "text",
+      "x": 392.87291717529297,
+      "y": 253.75,
+      "width": 209.36666870117188,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aLG",
+      "roundness": null,
+      "seed": 84113068,
+      "version": 674,
+      "versionNonce": 928381971,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792572326761,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Config Client\n\nLooks up Config Server",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "4ntyCTMsqj_K6KGBPI4ck",
+      "originalText": "Config Client\n\nLooks up Config Server",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "paRuBDzSCq-5csYRSAjRp",
+      "type": "rectangle",
+      "x": 234.3125,
+      "y": 96,
+      "width": 178.49999999999994,
+      "height": 70.49999999999997,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aLV",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 772533524,
+      "version": 419,
+      "versionNonce": 1441600179,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "qSJj_B1xVqESBJelxbuah"
+        }
+      ],
+      "updated": 1792571991362,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "qSJj_B1xVqESBJelxbuah",
+      "type": "text",
+      "x": 283.36249923706055,
+      "y": 118.75,
+      "width": 80.4000015258789,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aM",
+      "roundness": null,
+      "seed": 1434368940,
+      "version": 334,
+      "versionNonce": 422110717,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571991362,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Gateway",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "paRuBDzSCq-5csYRSAjRp",
+      "originalText": "Gateway",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "tOe5o53lr8-1wBnt9evlF",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 671.5,
+      "width": 617.7000122070314,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aW",
+      "roundness": null,
+      "seed": 1797304468,
+      "version": 210,
+      "versionNonce": 852965075,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571707072,
+      "created": 1792443234326,
+      "link": null,
+      "locked": false,
+      "text": "TimSort can recognize the whole array as an ascending run and\nleave it unchanged. It has no reason to compare C against A during\nthis scan.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "TimSort can recognize the whole array as an ascending run and leave it unchanged. It has no reason to compare C against A during this scan.",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "7g7_G6X4vuSrCjYT8OXqc",
+      "type": "arrow",
+      "x": 341.9916018838546,
+      "y": 320.90432213838733,
+      "width": 21.65819465352797,
+      "height": 0.13772144489394123,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aX",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 555248788,
+      "version": 403,
+      "versionNonce": 663933651,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443705595,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -21.65819465352797,
+          0.13772144489394123
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "XPr_DMZ875l8WgNMvKfxz",
+      "type": "arrow",
+      "x": 342.05312728881836,
+      "y": 223.5,
+      "width": 0.5,
+      "height": 34,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aY",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 167182451,
+      "version": 236,
+      "versionNonce": 764856285,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792572133160,
+      "created": 1792571516813,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0.5,
+          34
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "_rUmBpUsO-gArgBG4RLNs",
+      "type": "text",
+      "x": -26.713542938232422,
+      "y": 40.5,
+      "width": 250.03334045410156,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aZ",
+      "roundness": null,
+      "seed": 1134664285,
+      "version": 191,
+      "versionNonce": 1055476061,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792572117689,
+      "created": 1792571521935,
+      "link": null,
+      "locked": false,
+      "text": "HTTP configuration request",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "HTTP configuration request",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "-QeAte5IrEW6fai5QjWQ3",
+      "type": "rectangle",
+      "x": -156.4437484741211,
+      "y": 89,
+      "width": 544,
+      "height": 108.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aa",
+      "roundness": null,
+      "seed": 709795635,
+      "version": 122,
+      "versionNonce": 1054904157,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571980663,
+      "created": 1792571532277,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "KznHgyoKadSt_maH3yYoK",
+      "type": "text",
+      "x": -56.977088928222656,
+      "y": 100.5,
+      "width": 345.0666809082031,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ab",
+      "roundness": null,
+      "seed": 1875452157,
+      "version": 140,
+      "versionNonce": 146301171,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571980663,
+      "created": 1792571537415,
+      "link": null,
+      "locked": false,
+      "text": "Spring Cloud Config Server",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Spring Cloud Config Server",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "f_64nb1ayoaEozoWbEfon",
+      "type": "embeddable",
+      "x": 134.5,
+      "y": 455,
+      "width": 50,
+      "height": 37.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ac",
+      "roundness": null,
+      "seed": 266444061,
+      "version": 13,
+      "versionNonce": 1812560285,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571779852,
+      "created": 1792571771038,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "E2vAb45SVBGK_MO88a9w3",
+      "type": "arrow",
+      "x": 678,
+      "y": -2.5,
+      "width": 308.883371169126,
+      "height": 371.25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ad",
+      "roundness": null,
+      "seed": 1087599987,
+      "version": 5,
+      "versionNonce": 721217821,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571792587,
+      "created": 1792571790671,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -308.883371169126,
+          371.25
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": {
+        "elementId": "4ntyCTMsqj_K6KGBPI4ck",
+        "mode": "orbit",
+        "fixedPoint": [
+          0.43024013606646583,
+          1.277777777777778
+        ]
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "GtBy56UKp0znivQDFD6AV",
+      "type": "text",
+      "x": -37.743751525878906,
+      "y": 149.5,
+      "width": 306.6000061035156,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ae",
+      "roundness": null,
+      "seed": 645623485,
+      "version": 106,
+      "versionNonce": 1177590717,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571980663,
+      "created": 1792571852473,
+      "link": null,
+      "locked": false,
+      "text": "Reads, resolves and exposes configuration",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Reads, resolves and exposes configuration",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "HoXoL6o0f3F3qj880KWc6",
+      "type": "arrow",
+      "x": 216.5,
+      "y": 238,
+      "width": 0,
+      "height": 33,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "af",
+      "roundness": null,
+      "seed": 1653326909,
+      "version": 235,
+      "versionNonce": 237355677,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792572326761,
+      "created": 1792572136450,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          -33
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "fixedSegments": null
+    },
+    {
+      "id": "p-R98V-iQ6toO2nNUgXCr",
+      "type": "arrow",
+      "x": 487.5655096258238,
+      "y": 240.75,
+      "width": 0.06550962582377906,
+      "height": 38.75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ag",
+      "roundness": null,
+      "seed": 1857128125,
+      "version": 288,
+      "versionNonce": 570622387,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792572326761,
+      "created": 1792572174691,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -0.06550962582377906,
+          -38.75
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "fixedSegments": null
+    },
+    {
+      "id": "kbkjm2Xsz0BzKvHtkhCgp",
+      "type": "image",
+      "x": 431,
+      "y": 407,
+      "width": 20,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "transparent",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ah",
+      "roundness": null,
+      "seed": 2055231347,
+      "version": 56,
+      "versionNonce": 1938733533,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573103692,
+      "created": 1792572310232,
+      "link": null,
+      "locked": false,
+      "status": "saved",
+      "fileId": "a19fe517a73629cf759d9f32e354cb40f4aaf2e2",
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    },
+    {
+      "id": "uGNHNmS6mTpQmFMRzDgB8",
+      "type": "text",
+      "x": 36.133331298828125,
+      "y": 51.5,
+      "width": 172.73333740234375,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ai",
+      "roundness": null,
+      "seed": 1402409011,
+      "version": 13,
+      "versionNonce": 1563958899,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573103692,
+      "created": 1792572331162,
+      "link": null,
+      "locked": false,
+      "text": "Git repository",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Git repository",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "iuDBVs0q2qi5l5V9Itt6r",
+      "type": "text",
+      "x": 39.5,
+      "y": 101,
+      "width": 570.9000244140625,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aj",
+      "roundness": null,
+      "seed": 1180334355,
+      "version": 71,
+      "versionNonce": 1219851837,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573103692,
+      "created": 1792572335756,
+      "link": null,
+      "locked": false,
+      "text": "Stores application settings, environment profiles and non-\nsensitive defaults. Repository access is restricted and changes\nare reviewed.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Stores application settings, environment profiles and non-sensitive defaults. Repository access is restricted and changes are reviewed.",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "aIi8qxe1z5j6uDLO5VHys",
+      "type": "text",
+      "x": -149.13333129882812,
+      "y": -119.5,
+      "width": 170.39999389648438,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ak",
+      "roundness": null,
+      "seed": 800115453,
+      "version": 147,
+      "versionNonce": 2014154109,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792573565438,
+      "created": 1792573109664,
+      "link": null,
+      "locked": false,
+      "text": "Development",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Development",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "5vceT7SKGYeGjTaq49mjr",
+      "type": "text",
+      "x": -149.13333129882812,
+      "y": -81,
+      "width": 234.3000030517578,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "al",
+      "roundness": null,
+      "seed": 2027106131,
+      "version": 176,
+      "versionNonce": 1767429597,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792573565438,
+      "created": 1792573109664,
+      "link": null,
+      "locked": false,
+      "text": "Payment service: localhost:8083",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Payment service: localhost:8083",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "B5GQ5eOjY7wbOTwE6L0eJ",
+      "type": "text",
+      "x": -149.13333129882812,
+      "y": -48,
+      "width": 244.23333740234375,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "am",
+      "roundness": null,
+      "seed": 347628381,
+      "version": 173,
+      "versionNonce": 920392253,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792573565438,
+      "created": 1792573109664,
+      "link": null,
+      "locked": false,
+      "text": "Same compiled application binary",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Same compiled application binary",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "OBVhMOLTNt9SV_UgE2oE4",
+      "type": "text",
+      "x": -149.13333129882812,
+      "y": 2.5,
+      "width": 137.10000610351562,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "an",
+      "roundness": null,
+      "seed": 2079837427,
+      "version": 185,
+      "versionNonce": 2105066141,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792573565438,
+      "created": 1792573109665,
+      "link": null,
+      "locked": false,
+      "text": "Production",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Production",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "D_CCjgbKAKU__wTxgx6_c",
+      "type": "text",
+      "x": -149.13333129882812,
+      "y": 48,
+      "width": 286.23333740234375,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ao",
+      "roundness": null,
+      "seed": 971894717,
+      "version": 183,
+      "versionNonce": 1105225469,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792573565438,
+      "created": 1792573109665,
+      "link": null,
+      "locked": false,
+      "text": "Payment service: payment.prod.internal",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Payment service: payment.prod.internal",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "RHvMMTduKB3Ck9HkRwSOu",
+      "type": "text",
+      "x": -176,
+      "y": 88.5,
+      "width": 411.26666259765625,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#e03131",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ap",
+      "roundness": null,
+      "seed": 402110099,
+      "version": 234,
+      "versionNonce": 1989443421,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792573565438,
+      "created": 1792573109665,
+      "link": null,
+      "locked": false,
+      "text": "The hardcoded URL is incorrect in production.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "The hardcoded URL is incorrect in production.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "Bx2OBZJrN2Wt3r5atmgTA",
+      "type": "text",
+      "x": 38.5,
+      "y": -6,
+      "width": 795.9666748046875,
+      "height": 400,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aq",
+      "roundness": null,
+      "seed": 1517026451,
+      "version": 4,
+      "versionNonce": 458430461,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573215362,
+      "created": 1792573212059,
+      "link": null,
+      "locked": false,
+      "text": "svg width=\"1em\" height=\"1em\" viewBox=\"0 0 24 24\" fill=\"currentColor\" data-d-component=\"icon\"\nstyle=\"font-size: 20px;\"><path d=\"M6.16133 3.5H17.8384C18.3656 3.49998 18.8203 3.49997 19.1949\n3.53057C19.5903 3.56287 19.9835 3.63419 20.3619 3.82698C20.9263 4.1146 21.3853 4.57354 21.6729\n5.13803C21.8657 5.51641 21.937 5.90963 21.9693 6.30497C21.9999 6.67954 21.9999 7.1343 21.9999\n7.66144V15.5C22.5521 15.5 22.9998 15.9477 22.9998 16.5V17.5C22.9998 19.1569 21.6567 20.5 19.9998\n20.5H3.99609C2.33924 20.5 0.996094 19.1569 0.996094 17.5V16.5C0.996094 15.9477 1.44381 15.5\n1.99609 15.5H1.99988L1.99988 7.66146C1.99986 7.13431 1.99984 6.67955 2.03045 6.30497C2.06275\n5.90963 2.13406 5.51641 2.32686 5.13803C2.61448 4.57354 3.07342 4.1146 3.63791 3.82698C4.01629\n3.63419 4.4095 3.56287 4.80485 3.53057C5.17942 3.49997 5.63418 3.49998 6.16133 3.5ZM3.00127\n17.5L2.99988 17.5L2.99848 17.5H2.99609C2.99609 18.0523 3.44381 18.5 3.99609\n18.5H19.9998C20.5521 18.5 20.9998 18.0523 20.9998 17.5H20.9985H15.2359L14.447 17.8944C14.3082\n17.9639 14.1551 18 13.9998 18H9.99982C9.84458 18 9.69147 17.9639 9.55261 17.8944L8.76376\n17.5H3.00127ZM19.9999 15.5V7.7C19.9999 7.12345 19.9991 6.75118 19.976 6.46784C19.9538 6.19617\n19.9161 6.09546 19.8909 6.04601C19.795 5.85785 19.642 5.70487 19.4539 5.609C19.4044 5.5838\n19.3037 5.54612 19.032 5.52393C18.7487 5.50078 18.3764 5.5 17.7999 5.5H6.19988C5.62332 5.5\n5.25105 5.50078 4.96771 5.52393C4.69605 5.54612 4.59533 5.5838 4.54589 5.609C4.35773 5.70487\n4.20474 5.85785 4.10887 6.04601C4.08368 6.09546 4.046 6.19617 4.02381 6.46784C4.00066 6.75117\n3.99988 7.12345 3.99988 7.7V15.5H8.99982C9.15507 15.5 9.30818 15.5361 9.44704 15.6056L10.2359\n16H13.7638L14.5526 15.6056C14.6915 15.5361 14.8446 15.5 14.9998 15.5H19.9999Z\"\nfill=\"currentColor\"></path></svg>",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "svg width=\"1em\" height=\"1em\" viewBox=\"0 0 24 24\" fill=\"currentColor\" data-d-component=\"icon\" style=\"font-size: 20px;\"><path d=\"M6.16133 3.5H17.8384C18.3656 3.49998 18.8203 3.49997 19.1949 3.53057C19.5903 3.56287 19.9835 3.63419 20.3619 3.82698C20.9263 4.1146 21.3853 4.57354 21.6729 5.13803C21.8657 5.51641 21.937 5.90963 21.9693 6.30497C21.9999 6.67954 21.9999 7.1343 21.9999 7.66144V15.5C22.5521 15.5 22.9998 15.9477 22.9998 16.5V17.5C22.9998 19.1569 21.6567 20.5 19.9998 20.5H3.99609C2.33924 20.5 0.996094 19.1569 0.996094 17.5V16.5C0.996094 15.9477 1.44381 15.5 1.99609 15.5H1.99988L1.99988 7.66146C1.99986 7.13431 1.99984 6.67955 2.03045 6.30497C2.06275 5.90963 2.13406 5.51641 2.32686 5.13803C2.61448 4.57354 3.07342 4.1146 3.63791 3.82698C4.01629 3.63419 4.4095 3.56287 4.80485 3.53057C5.17942 3.49997 5.63418 3.49998 6.16133 3.5ZM3.00127 17.5L2.99988 17.5L2.99848 17.5H2.99609C2.99609 18.0523 3.44381 18.5 3.99609 18.5H19.9998C20.5521 18.5 20.9998 18.0523 20.9998 17.5H20.9985H15.2359L14.447 17.8944C14.3082 17.9639 14.1551 18 13.9998 18H9.99982C9.84458 18 9.69147 17.9639 9.55261 17.8944L8.76376 17.5H3.00127ZM19.9999 15.5V7.7C19.9999 7.12345 19.9991 6.75118 19.976 6.46784C19.9538 6.19617 19.9161 6.09546 19.8909 6.04601C19.795 5.85785 19.642 5.70487 19.4539 5.609C19.4044 5.5838 19.3037 5.54612 19.032 5.52393C18.7487 5.50078 18.3764 5.5 17.7999 5.5H6.19988C5.62332 5.5 5.25105 5.50078 4.96771 5.52393C4.69605 5.54612 4.59533 5.5838 4.54589 5.609C4.35773 5.70487 4.20474 5.85785 4.10887 6.04601C4.08368 6.09546 4.046 6.19617 4.02381 6.46784C4.00066 6.75117 3.99988 7.12345 3.99988 7.7V15.5H8.99982C9.15507 15.5 9.30818 15.5361 9.44704 15.6056L10.2359 16H13.7638L14.5526 15.6056C14.6915 15.5361 14.8446 15.5 14.9998 15.5H19.9999Z\" fill=\"currentColor\"></path></svg>",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "7VFwHiPRyXksR-LHGRltN",
+      "type": "text",
+      "x": 38.5,
+      "y": 209,
+      "width": 795.9666748046875,
+      "height": 400,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ar",
+      "roundness": null,
+      "seed": 1897987261,
+      "version": 22,
+      "versionNonce": 1884112627,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573224677,
+      "created": 1792573216603,
+      "link": null,
+      "locked": false,
+      "text": "svg width=\"1em\" height=\"1em\" viewBox=\"0 0 24 24\" fill=\"currentColor\" data-d-component=\"icon\"\nstyle=\"font-size: 20px;\"><path d=\"M6.16133 3.5H17.8384C18.3656 3.49998 18.8203 3.49997 19.1949\n3.53057C19.5903 3.56287 19.9835 3.63419 20.3619 3.82698C20.9263 4.1146 21.3853 4.57354 21.6729\n5.13803C21.8657 5.51641 21.937 5.90963 21.9693 6.30497C21.9999 6.67954 21.9999 7.1343 21.9999\n7.66144V15.5C22.5521 15.5 22.9998 15.9477 22.9998 16.5V17.5C22.9998 19.1569 21.6567 20.5 19.9998\n20.5H3.99609C2.33924 20.5 0.996094 19.1569 0.996094 17.5V16.5C0.996094 15.9477 1.44381 15.5\n1.99609 15.5H1.99988L1.99988 7.66146C1.99986 7.13431 1.99984 6.67955 2.03045 6.30497C2.06275\n5.90963 2.13406 5.51641 2.32686 5.13803C2.61448 4.57354 3.07342 4.1146 3.63791 3.82698C4.01629\n3.63419 4.4095 3.56287 4.80485 3.53057C5.17942 3.49997 5.63418 3.49998 6.16133 3.5ZM3.00127\n17.5L2.99988 17.5L2.99848 17.5H2.99609C2.99609 18.0523 3.44381 18.5 3.99609\n18.5H19.9998C20.5521 18.5 20.9998 18.0523 20.9998 17.5H20.9985H15.2359L14.447 17.8944C14.3082\n17.9639 14.1551 18 13.9998 18H9.99982C9.84458 18 9.69147 17.9639 9.55261 17.8944L8.76376\n17.5H3.00127ZM19.9999 15.5V7.7C19.9999 7.12345 19.9991 6.75118 19.976 6.46784C19.9538 6.19617\n19.9161 6.09546 19.8909 6.04601C19.795 5.85785 19.642 5.70487 19.4539 5.609C19.4044 5.5838\n19.3037 5.54612 19.032 5.52393C18.7487 5.50078 18.3764 5.5 17.7999 5.5H6.19988C5.62332 5.5\n5.25105 5.50078 4.96771 5.52393C4.69605 5.54612 4.59533 5.5838 4.54589 5.609C4.35773 5.70487\n4.20474 5.85785 4.10887 6.04601C4.08368 6.09546 4.046 6.19617 4.02381 6.46784C4.00066 6.75117\n3.99988 7.12345 3.99988 7.7V15.5H8.99982C9.15507 15.5 9.30818 15.5361 9.44704 15.6056L10.2359\n16H13.7638L14.5526 15.6056C14.6915 15.5361 14.8446 15.5 14.9998 15.5H19.9999Z\"\nfill=\"currentColor\"></path></svg>",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "svg width=\"1em\" height=\"1em\" viewBox=\"0 0 24 24\" fill=\"currentColor\" data-d-component=\"icon\" style=\"font-size: 20px;\"><path d=\"M6.16133 3.5H17.8384C18.3656 3.49998 18.8203 3.49997 19.1949 3.53057C19.5903 3.56287 19.9835 3.63419 20.3619 3.82698C20.9263 4.1146 21.3853 4.57354 21.6729 5.13803C21.8657 5.51641 21.937 5.90963 21.9693 6.30497C21.9999 6.67954 21.9999 7.1343 21.9999 7.66144V15.5C22.5521 15.5 22.9998 15.9477 22.9998 16.5V17.5C22.9998 19.1569 21.6567 20.5 19.9998 20.5H3.99609C2.33924 20.5 0.996094 19.1569 0.996094 17.5V16.5C0.996094 15.9477 1.44381 15.5 1.99609 15.5H1.99988L1.99988 7.66146C1.99986 7.13431 1.99984 6.67955 2.03045 6.30497C2.06275 5.90963 2.13406 5.51641 2.32686 5.13803C2.61448 4.57354 3.07342 4.1146 3.63791 3.82698C4.01629 3.63419 4.4095 3.56287 4.80485 3.53057C5.17942 3.49997 5.63418 3.49998 6.16133 3.5ZM3.00127 17.5L2.99988 17.5L2.99848 17.5H2.99609C2.99609 18.0523 3.44381 18.5 3.99609 18.5H19.9998C20.5521 18.5 20.9998 18.0523 20.9998 17.5H20.9985H15.2359L14.447 17.8944C14.3082 17.9639 14.1551 18 13.9998 18H9.99982C9.84458 18 9.69147 17.9639 9.55261 17.8944L8.76376 17.5H3.00127ZM19.9999 15.5V7.7C19.9999 7.12345 19.9991 6.75118 19.976 6.46784C19.9538 6.19617 19.9161 6.09546 19.8909 6.04601C19.795 5.85785 19.642 5.70487 19.4539 5.609C19.4044 5.5838 19.3037 5.54612 19.032 5.52393C18.7487 5.50078 18.3764 5.5 17.7999 5.5H6.19988C5.62332 5.5 5.25105 5.50078 4.96771 5.52393C4.69605 5.54612 4.59533 5.5838 4.54589 5.609C4.35773 5.70487 4.20474 5.85785 4.10887 6.04601C4.08368 6.09546 4.046 6.19617 4.02381 6.46784C4.00066 6.75117 3.99988 7.12345 3.99988 7.7V15.5H8.99982C9.15507 15.5 9.30818 15.5361 9.44704 15.6056L10.2359 16H13.7638L14.5526 15.6056C14.6915 15.5361 14.8446 15.5 14.9998 15.5H19.9999Z\" fill=\"currentColor\"></path></svg>",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "wXzBRVvscfvkgf9K2OYYm",
+      "type": "text",
+      "x": 283.5333251953125,
+      "y": -112,
+      "width": 795.9666748046875,
+      "height": 400,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "as",
+      "roundness": null,
+      "seed": 273180211,
+      "version": 4,
+      "versionNonce": 1307692861,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573228288,
+      "created": 1792573227450,
+      "link": null,
+      "locked": false,
+      "text": "svg width=\"1em\" height=\"1em\" viewBox=\"0 0 24 24\" fill=\"currentColor\" data-d-component=\"icon\"\nstyle=\"font-size: 20px;\"><path d=\"M6.16133 3.5H17.8384C18.3656 3.49998 18.8203 3.49997 19.1949\n3.53057C19.5903 3.56287 19.9835 3.63419 20.3619 3.82698C20.9263 4.1146 21.3853 4.57354 21.6729\n5.13803C21.8657 5.51641 21.937 5.90963 21.9693 6.30497C21.9999 6.67954 21.9999 7.1343 21.9999\n7.66144V15.5C22.5521 15.5 22.9998 15.9477 22.9998 16.5V17.5C22.9998 19.1569 21.6567 20.5 19.9998\n20.5H3.99609C2.33924 20.5 0.996094 19.1569 0.996094 17.5V16.5C0.996094 15.9477 1.44381 15.5\n1.99609 15.5H1.99988L1.99988 7.66146C1.99986 7.13431 1.99984 6.67955 2.03045 6.30497C2.06275\n5.90963 2.13406 5.51641 2.32686 5.13803C2.61448 4.57354 3.07342 4.1146 3.63791 3.82698C4.01629\n3.63419 4.4095 3.56287 4.80485 3.53057C5.17942 3.49997 5.63418 3.49998 6.16133 3.5ZM3.00127\n17.5L2.99988 17.5L2.99848 17.5H2.99609C2.99609 18.0523 3.44381 18.5 3.99609\n18.5H19.9998C20.5521 18.5 20.9998 18.0523 20.9998 17.5H20.9985H15.2359L14.447 17.8944C14.3082\n17.9639 14.1551 18 13.9998 18H9.99982C9.84458 18 9.69147 17.9639 9.55261 17.8944L8.76376\n17.5H3.00127ZM19.9999 15.5V7.7C19.9999 7.12345 19.9991 6.75118 19.976 6.46784C19.9538 6.19617\n19.9161 6.09546 19.8909 6.04601C19.795 5.85785 19.642 5.70487 19.4539 5.609C19.4044 5.5838\n19.3037 5.54612 19.032 5.52393C18.7487 5.50078 18.3764 5.5 17.7999 5.5H6.19988C5.62332 5.5\n5.25105 5.50078 4.96771 5.52393C4.69605 5.54612 4.59533 5.5838 4.54589 5.609C4.35773 5.70487\n4.20474 5.85785 4.10887 6.04601C4.08368 6.09546 4.046 6.19617 4.02381 6.46784C4.00066 6.75117\n3.99988 7.12345 3.99988 7.7V15.5H8.99982C9.15507 15.5 9.30818 15.5361 9.44704 15.6056L10.2359\n16H13.7638L14.5526 15.6056C14.6915 15.5361 14.8446 15.5 14.9998 15.5H19.9999Z\"\nfill=\"currentColor\"></path></svg>",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "svg width=\"1em\" height=\"1em\" viewBox=\"0 0 24 24\" fill=\"currentColor\" data-d-component=\"icon\" style=\"font-size: 20px;\"><path d=\"M6.16133 3.5H17.8384C18.3656 3.49998 18.8203 3.49997 19.1949 3.53057C19.5903 3.56287 19.9835 3.63419 20.3619 3.82698C20.9263 4.1146 21.3853 4.57354 21.6729 5.13803C21.8657 5.51641 21.937 5.90963 21.9693 6.30497C21.9999 6.67954 21.9999 7.1343 21.9999 7.66144V15.5C22.5521 15.5 22.9998 15.9477 22.9998 16.5V17.5C22.9998 19.1569 21.6567 20.5 19.9998 20.5H3.99609C2.33924 20.5 0.996094 19.1569 0.996094 17.5V16.5C0.996094 15.9477 1.44381 15.5 1.99609 15.5H1.99988L1.99988 7.66146C1.99986 7.13431 1.99984 6.67955 2.03045 6.30497C2.06275 5.90963 2.13406 5.51641 2.32686 5.13803C2.61448 4.57354 3.07342 4.1146 3.63791 3.82698C4.01629 3.63419 4.4095 3.56287 4.80485 3.53057C5.17942 3.49997 5.63418 3.49998 6.16133 3.5ZM3.00127 17.5L2.99988 17.5L2.99848 17.5H2.99609C2.99609 18.0523 3.44381 18.5 3.99609 18.5H19.9998C20.5521 18.5 20.9998 18.0523 20.9998 17.5H20.9985H15.2359L14.447 17.8944C14.3082 17.9639 14.1551 18 13.9998 18H9.99982C9.84458 18 9.69147 17.9639 9.55261 17.8944L8.76376 17.5H3.00127ZM19.9999 15.5V7.7C19.9999 7.12345 19.9991 6.75118 19.976 6.46784C19.9538 6.19617 19.9161 6.09546 19.8909 6.04601C19.795 5.85785 19.642 5.70487 19.4539 5.609C19.4044 5.5838 19.3037 5.54612 19.032 5.52393C18.7487 5.50078 18.3764 5.5 17.7999 5.5H6.19988C5.62332 5.5 5.25105 5.50078 4.96771 5.52393C4.69605 5.54612 4.59533 5.5838 4.54589 5.609C4.35773 5.70487 4.20474 5.85785 4.10887 6.04601C4.08368 6.09546 4.046 6.19617 4.02381 6.46784C4.00066 6.75117 3.99988 7.12345 3.99988 7.7V15.5H8.99982C9.15507 15.5 9.30818 15.5361 9.44704 15.6056L10.2359 16H13.7638L14.5526 15.6056C14.6915 15.5361 14.8446 15.5 14.9998 15.5H19.9999Z\" fill=\"currentColor\"></path></svg>",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "hYtErARM92PjqI46AGKBi",
+      "type": "image",
+      "x": 236,
+      "y": 395,
+      "width": 20,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "transparent",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "at",
+      "roundness": null,
+      "seed": 1227040339,
+      "version": 5,
+      "versionNonce": 1399829149,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573240180,
+      "created": 1792573237397,
+      "link": null,
+      "locked": false,
+      "status": "saved",
+      "fileId": "a19fe517a73629cf759d9f32e354cb40f4aaf2e2",
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    },
+    {
+      "id": "TvacuU4azrcErmhvXkLOy",
+      "type": "image",
+      "x": 101,
+      "y": 296.5,
+      "width": 100,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "transparent",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "au",
+      "roundness": null,
+      "seed": 115835123,
+      "version": 3,
+      "versionNonce": 710635645,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573253735,
+      "created": 1792573253726,
+      "link": null,
+      "locked": false,
+      "status": "pending",
+      "fileId": null,
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    },
+    {
+      "id": "hyng-HGMQWLU5FvyL6XZG",
+      "type": "image",
+      "x": 231,
+      "y": 408.5,
+      "width": 100,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "transparent",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "av",
+      "roundness": null,
+      "seed": 1403121523,
+      "version": 3,
+      "versionNonce": 200076979,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573256650,
+      "created": 1792573256644,
+      "link": null,
+      "locked": false,
+      "status": "pending",
+      "fileId": null,
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    },
+    {
+      "id": "jqMqr-uQjxfGP4MHghu7W",
+      "type": "image",
+      "x": 171,
+      "y": 285,
+      "width": 100,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "transparent",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aw",
+      "roundness": null,
+      "seed": 388902589,
+      "version": 3,
+      "versionNonce": 146105213,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573273536,
+      "created": 1792573273516,
+      "link": null,
+      "locked": false,
+      "status": "pending",
+      "fileId": null,
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    },
+    {
+      "id": "OSZArrN1jrurUKd5vlorS",
+      "type": "image",
+      "x": 467.5,
+      "y": 491,
+      "width": 20,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "transparent",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ax",
+      "roundness": null,
+      "seed": 335964221,
+      "version": 27,
+      "versionNonce": 2094530067,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573559005,
+      "created": 1792573310494,
+      "link": null,
+      "locked": false,
+      "status": "saved",
+      "fileId": "90071ff8b513da35823a50098bc4c077a5d38321",
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    },
+    {
+      "id": "PPWkbIsG5gt0rwWPG7-ub",
+      "type": "image",
+      "x": -182,
+      "y": 15.5,
+      "width": 20,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "transparent",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ay",
+      "roundness": null,
+      "seed": 415767507,
+      "version": 195,
+      "versionNonce": 1105628093,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792573565438,
+      "created": 1792573314230,
+      "link": null,
+      "locked": false,
+      "status": "saved",
+      "fileId": "90071ff8b513da35823a50098bc4c077a5d38321",
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    },
+    {
+      "id": "m6xK924Qd8XrvXVQrfrVF",
+      "type": "image",
+      "x": -176,
+      "y": 25.5,
+      "width": 20,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "transparent",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "az",
+      "roundness": null,
+      "seed": 751211315,
+      "version": 173,
+      "versionNonce": 66587677,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792573565438,
+      "created": 1792573374708,
+      "link": null,
+      "locked": false,
+      "status": "saved",
+      "fileId": "bbc1c88d9dbdf6dfb5f71a253ea2e92e24e24a95",
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    },
+    {
+      "id": "2vIfpQEruVgI-hFPh37aG",
+      "type": "image",
+      "x": 328.5,
+      "y": 108,
+      "width": 100,
+      "height": 100,
+      "angle": 0,
+      "strokeColor": "transparent",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "b00",
+      "roundness": null,
+      "seed": 1933742269,
+      "version": 3,
+      "versionNonce": 1352222077,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792573419711,
+      "created": 1792573419680,
+      "link": null,
+      "locked": false,
+      "status": "pending",
+      "fileId": null,
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    },
+    {
+      "id": "BK7rzCKOIeTnwPaw-VaUC",
+      "type": "image",
+      "x": -179.5,
+      "y": -92,
+      "width": 21.999999999999993,
+      "height": 21.999999999999993,
+      "angle": 0,
+      "strokeColor": "transparent",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "b01",
+      "roundness": null,
+      "seed": 1207925405,
+      "version": 317,
+      "versionNonce": 481984637,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792573565438,
+      "created": 1792573483832,
+      "link": null,
+      "locked": false,
+      "status": "saved",
+      "fileId": "258c0f534babd192705be3fd9c69fcde6dbaa265",
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    }
+  ],
+  "appState": {
+    "gridSize": 20,
+    "gridStep": 5,
+    "gridModeEnabled": false,
+    "viewBackgroundColor": "#ffffff",
+    "lockedMultiSelections": {}
+  },
+  "files": {
+    "90071ff8b513da35823a50098bc4c077a5d38321": {
+      "mimeType": "image/svg+xml",
+      "id": "90071ff8b513da35823a50098bc4c077a5d38321",
+      "dataURL": "data:image/svg+xml;base64,PHN2ZyBhcmlhLWhpZGRlbj0idHJ1ZSIgY2xhc3M9Ikljb24tWDRWa0tDIiBmb2N1c2FibGU9ImZhbHNlIiBoZWlnaHQ9IjIwIiB2aWV3Qm94PSIwIDAgMjAgMjAiIHdpZHRoPSIyMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dXNlIGhyZWY9Ii9jZG4vYXNzZXRzL2ljb25zLTlkZjlhYjY2YjQxMDUxMWEuc3ZnI2NvZGUtbGlnaHQtMjAiIGZpbGw9ImN1cnJlbnRDb2xvciIvPjwvc3ZnPg==",
+      "created": 1792573310540,
+      "lastRetrieved": 1792573310540
+    },
+    "bbc1c88d9dbdf6dfb5f71a253ea2e92e24e24a95": {
+      "mimeType": "image/svg+xml",
+      "id": "bbc1c88d9dbdf6dfb5f71a253ea2e92e24e24a95",
+      "dataURL": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxZW0iIGhlaWdodD0iMWVtIiB2aWV3Qm94PSIwIDAgMjQgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIgY2xhc3M9Imx1Y2lkZSBsdWNpZGUtc2VydmVyIiBkYXRhLWQtY29tcG9uZW50PSJpY29uIiBzdHlsZT0iZm9udC1zaXplOiAyMHB4OyI+PHJlY3Qgd2lkdGg9IjIwIiBoZWlnaHQ9IjgiIHg9IjIiIHk9IjIiIHJ4PSIyIiByeT0iMiIvPjxyZWN0IHdpZHRoPSIyMCIgaGVpZ2h0PSI4IiB4PSIyIiB5PSIxNCIgcng9IjIiIHJ5PSIyIi8+PGxpbmUgeDE9IjYiIHgyPSI2LjAxIiB5MT0iNiIgeTI9IjYiLz48bGluZSB4MT0iNiIgeDI9IjYuMDEiIHkxPSIxOCIgeTI9IjE4Ii8+PC9zdmc+",
+      "created": 1792573374719,
+      "lastRetrieved": 1792573374719
+    },
+    "258c0f534babd192705be3fd9c69fcde6dbaa265": {
+      "mimeType": "image/svg+xml",
+      "id": "258c0f534babd192705be3fd9c69fcde6dbaa265",
+      "dataURL": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+CiAgPHBhdGggZD0iTTYuMTYxMzMgMy41SDE3LjgzODRDMTguMzY1NiAzLjQ5OTk4IDE4LjgyMDMgMy40OTk5NyAxOS4xOTQ5IDMuNTMwNTdDMTkuNTkwMyAzLjU2Mjg3IDE5Ljk4MzUgMy42MzQxOSAyMC4zNjE5IDMuODI2OThDMjAuOTI2MyA0LjExNDYgMjEuMzg1MyA0LjU3MzU0IDIxLjY3MjkgNS4xMzgwM0MyMS44NjU3IDUuNTE2NDEgMjEuOTM3IDUuOTA5NjMgMjEuOTY5MyA2LjMwNDk3QzIxLjk5OTkgNi42Nzk1NCAyMS45OTk5IDcuMTM0MyAyMS45OTk5IDcuNjYxNDRWMTUuNUMyMi41NTIxIDE1LjUgMjIuOTk5OCAxNS45NDc3IDIyLjk5OTggMTYuNVYxNy41QzIyLjk5OTggMTkuMTU2OSAyMS42NTY3IDIwLjUgMTkuOTk5OCAyMC41SDMuOTk2MDlDMi4zMzkyNCAyMC41IDAuOTk2MDk0IDE5LjE1NjkgMC45OTYwOTQgMTcuNVYxNi41QzAuOTk2MDk0IDE1Ljk0NzcgMS40NDM4MSAxNS41IDEuOTk2MDkgMTUuNUgxLjk5OTg4TDEuOTk5ODggNy42NjE0NkMxLjk5OTg2IDcuMTM0MzEgMS45OTk4NCA2LjY3OTU1IDIuMDMwNDUgNi4zMDQ5N0MyLjA2Mjc1IDUuOTA5NjMgMi4xMzQwNiA1LjUxNjQxIDIuMzI2ODYgNS4xMzgwM0MyLjYxNDQ4IDQuNTczNTQgMy4wNzM0MiA0LjExNDYgMy42Mzc5MSAzLjgyNjk4QzQuMDE2MjkgMy42MzQxOSA0LjQwOTUgMy41NjI4NyA0LjgwNDg1IDMuNTMwNTdDNS4xNzk0MiAzLjQ5OTk3IDUuNjM0MTggMy40OTk5OCA2LjE2MTMzIDMuNVpNMy4wMDEyNyAxNy41TDIuOTk5ODggMTcuNUwyLjk5ODQ4IDE3LjVIMi45OTYwOUMyLjk5NjA5IDE4LjA1MjMgMy40NDM4MSAxOC41IDMuOTk2MDkgMTguNUgxOS45OTk4QzIwLjU1MjEgMTguNSAyMC45OTk4IDE4LjA1MjMgMjAuOTk5OCAxNy41SDIwLjk5ODVIMTUuMjM1OUwxNC40NDcgMTcuODk0NEMxNC4zMDgyIDE3Ljk2MzkgMTQuMTU1MSAxOCAxMy45OTk4IDE4SDkuOTk5ODJDOS44NDQ1OCAxOCA5LjY5MTQ3IDE3Ljk2MzkgOS41NTI2MSAxNy44OTQ0TDguNzYzNzYgMTcuNUgzLjAwMTI3Wk0xOS45OTk5IDE1LjVWNy43QzE5Ljk5OTkgNy4xMjM0NSAxOS45OTkxIDYuNzUxMTggMTkuOTc2IDYuNDY3ODRDMTkuOTUzOCA2LjE5NjE3IDE5LjkxNjEgNi4wOTU0NiAxOS44OTA5IDYuMDQ2MDFDMTkuNzk1IDUuODU3ODUgMTkuNjQyIDUuNzA0ODcgMTkuNDUzOSA1LjYwOUMxOS40MDQ0IDUuNTgzOCAxOS4zMDM3IDUuNTQ2MTIgMTkuMDMyIDUuNTIzOTNDMTguNzQ4NyA1LjUwMDc4IDE4LjM3NjQgNS41IDE3Ljc5OTkgNS41SDYuMTk5ODhDNS42MjMzMiA1LjUgNS4yNTEwNSA1LjUwMDc4IDQuOTY3NzEgNS41MjM5M0M0LjY5NjA1IDUuNTQ2MTIgNC41OTUzMyA1LjU4MzggNC41NDU4OSA1LjYwOUM0LjM1NzczIDUuNzA0ODcgNC4yMDQ3NCA1Ljg1Nzg1IDQuMTA4ODcgNi4wNDYwMUM0LjA4MzY4IDYuMDk1NDYgNC4wNDYgNi4xOTYxNyA0LjAyMzgxIDYuNDY3ODRDNC4wMDA2NiA2Ljc1MTE3IDMuOTk5ODggNy4xMjM0NSAzLjk5OTg4IDcuN1YxNS41SDguOTk5ODJDOS4xNTUwNyAxNS41IDkuMzA4MTggMTUuNTM2MSA5LjQ0NzA0IDE1LjYwNTZMMTAuMjM1OSAxNkgxMy43NjM4TDE0LjU1MjYgMTUuNjA1NkMxNC42OTE1IDE1LjUzNjEgMTQuODQ0NiAxNS41IDE0Ljk5OTggMTUuNUgxOS45OTk5WiIvPgo8L3N2Zz4=",
+      "created": 1792573483844,
+      "lastRetrieved": 1792573483844
+    }
+  }
+}
+```
+
+You might have to modify the code, rebuild the application, retest it, and redeploy it simply to change a URL.
+
+This couples configuration changes to application releases.
+
+### Problem B: Configuration duplicated across services
+
+Suppose five services use the same logging policy, timeout defaults, or tracing endpoint. If each service stores its own independent copy, a change requires multiple edits.
+
+That creates familiar operational problems:
+
+- Inconsistent configuration between services.
+- Manual mistakes during deployments.
+- Difficult auditing of configuration changes.
+- Different environments accidentally using incompatible settings.
+- Slow incident response when a configuration needs to be corrected.
+
+The architectural goal is to separate application code from environment-specific settings and establish a reliable way to manage configuration across services.
+
+## Solution
+
+Configuration is defined as everything likely to change between deployments (as per the 15-Factor methodology), like credentials, resource handles, and URLs to backing services. An application deployed in multiple locations will likely have different needs in each location and require different configurations. **A key aspect of cloud native applications is that the application artifact will stay immutable across environments**. No matter which environment you deploy it to, the application build will not be changed.
+
+Each release you deploy is a combination of build and configuration. The same
+build can be deployed to different environments with different configuration data.
+
+image::02-configuration/image-1.png[Each release you deploy is a combination of build and configuration, which is different for each environment]
+
+Anything that might need to change across deployments should be configurable. For
+example, you’ll probably want to change feature flags, credentials for accessing backing services, resource handles for databases, or URLs to external APIs, all depending
+on the environment to which you’re deploying the application. Cloud native applications favor externalized configuration so that you can replace it without having to
+rebuild your code.
+
+Unlike a monolithic app in which everything runs within a single instance, a cloud-native application consists of independent services distributed across virtual machines, containers, and geographic regions. Managing configuration settings for dozens of interdependent services can be challenging. Duplicate copies of configuration settings across different locations are error prone and difficult to manage. Centralized configuration is a critical requirement for distributed cloud-native applications.
+
+the Twelve-Factor App recommendations require strict separation between code and configuration. Configuration must be stored externally from the application and read-in as needed. Storing configuration values as constants or literal values in code is a violation. The same configuration values are often be used by many services in the same application. Additionally, we must support the same values across multiple environments, such as dev, testing, and production. The best practice is store them in a centralized configuration store.
+
+all your microservices could have a lot of common configuration values per environment.A better approach is to put this configuration in a common place in your system and make the applications sync its contents before they start. Then, you keep a centralized configuration per environment, so you need to adjust the values only once. this is a well-known pattern, known as externalized
+(or centralized) configuration, so there are out-of-the-box solutions to build a centralized configuration server.
+image::02-configuration/image.png[Centralized configuration: overview]
+
+The idea of centralized configuration is built around two main components:
+
+* A data store for configuration data, providing persistence, versioning, and possibly access control
+* A server sitting on top of the data store to manage configuration data and serve
+it to multiple applications
+
+Imagine having many applications deployed in different environments. A configuration server could manage configuration data for all of them from a centralized place,
+and that configuration data might be stored in different ways. For example, you could
+use a dedicated Git repository for storing non-sensitive data and use HashiCorp Vault
+to store your secrets. No matter how the data is stored, a configuration server will
+deliver it to different applications through a unified interface.
+
+No matter how the configuration data is stored(i.e Git repository for storing non-sensitive data, HashiCorp Vault to store your secrets), a configuration server will deliver it to different applications through a unified interface.
+
+![A centralized configuration server manages external properties for many applications across all environments.](/docs/assets/software-engineering/software-architecture/architecture-styles/microservice/02-configuration/image-2.png)
+
+the configuration server becomes a backing service
+for all the applications, which means it’s at risk of being a single point of failure. If it’s
+suddenly unavailable, all the applications will probably fail to start up. This risk can be
+easily mitigated by scaling the config server, as you would with other applications
+requiring high availability. When using a configuration server, it’s fundamental to
+deploy at least two replicas.
+== Configuration strategies
+The three main strategies for defining configuration data for cloud native applications are:
+
+***Property files packaged with the application***
+
+* These files can act as specifications of what configuration data the application supports. 
+* These are useful for defining sensible default values, mainly oriented to the development environment.
+
+***Environment variables***
+
+* Environment variables are supported by any operating system, so they are great for portability. 
+* Most programming languages allow you access to the environment vari- ables. In Java you can access them with the System.getenv() method. In Spring you can also rely on the Environment abstraction. 
+* These are useful for defining configuration data that depends on the infra- structure and platform where the application is deployed, such as active profiles, hostnames, service names, and port numbers.
+
+***Configuration service***
+
+* Provides configuration data persistence, auditing, and accountability. 
+* Allows secrets management by using encryption or dedicated secret vaults. * This is useful for defining configuration data specific to the application, such as connection pools, credentials, feature flags, thread pools, and URLs to third-party services.
+* A configuration server handles aspects like secret encryption, configuration
+traceability, versioning, and context refreshing at runtime with no restart.
+
+Those three strategies are generic enough that we can use them to configure applications for any cloud environment and service model (CaaS, PaaS, FaaS). When it
+comes to Kubernetes, there’s an additional configuration strategy that is provided
+natively by the platform: ConfigMaps and Secrets.
+
+
+## 1. `configuration-in-distributed-systems`
+
+### What is configuration?
+
+Configuration is the collection of values that determines how an application behaves in a particular environment or deployment, without requiring changes to its application code.
+
+For example, imagine an e-commerce system containing these services:
+
+- `product-service`
+- `order-service`
+- `payment-service`
+- `discovery-server`
+- `config-server`
+
+The `order-service` needs to know which database to connect to, where to find the product service, how long to wait for a response, and which logging level to use.
+
+These are configuration decisions rather than business logic.
+
+```
+server:
+  port: 8082
+
+spring:
+  application:
+    name: order-service
+  datasource:
+    url: jdbc:postgresql://orders-db:5432/orders
+
+clients:
+  product-service:
+    timeout: 2s
+
+logging:
+  level:
+    root: INFO
+```
+
+The values above control how the service runs. The same application code can use different values in development, testing, and production.
+
+
+### 1. What is externalized configuration?
+
+Externalized configuration means that application settings are supplied from outside the application binary instead of being permanently embedded in its code.
+
+The application reads its configuration from sources such as:
+
+- Environment variables.
+- Command-line arguments.
+- Configuration files mounted at deployment time.
+- Container or orchestration platform settings.
+- A remote configuration service.
+- A secret-management system.
+
+The application code remains the same while the settings can vary between environments.
+
+Application binary
+
+Business logic + application framework
+
+External configuration
+
+URLs, ports, timeouts, feature flags, logging levels
+
+Running application
+
+Same binary, environment-appropriate behavior
+
+For example, the payment URL could be an environment variable:
+
+```
+public class PaymentClient {
+
+    private final String paymentUrl;
+
+    public PaymentClient(String paymentUrl) {
+        this.paymentUrl = paymentUrl;
+    }
+
+    // Use paymentUrl to send payment requests.
+}
+```
+
+The deployment supplies the value:
+
+```
+PAYMENT_URL=https://payment.prod.internal
+```
+
+The application no longer needs to know the production URL at compile time.
+
+This example illustrates externalization, but it does not yet require a centralized configuration server.
+
+## 4. What is centralized configuration?
+
+In a centralized configuration architecture, a dedicated system manages configuration for multiple applications.
+
+A typical implementation has three major parts:
+
+1. Configuration repository — stores configuration definitions and their versions.
+2. Configuration server — retrieves configuration and exposes it through an API.
+3. Configuration clients — microservices that retrieve and apply the appropriate settings.
+
+Configuration repository
+
+Git: application.yml, order-service-prod.yml
+
+Configuration retrieval
+
+Configuration server
+
+Selects, resolves and serves configuration
+
+Gateway
+
+Product
+
+Order
+
+Each client receives configuration appropriate to its application and environment.
+
+Notice that the repository and the server are separate responsibilities:
+
+- The repository is the source of configuration data.
+- The server is the mechanism for retrieving and distributing configuration.
+
+In a Git-backed Spring Cloud Config deployment, the server reads the repository and exposes the resulting configuration over HTTP. A client doesn't generally need to clone the configuration repository itself.
+
+## 4.1 Example configuration repository
+
+Suppose the online shopping system has the following repository:
+
+```
+config-repo/
+├── application.yml
+├── api-gateway.yml
+├── product-service.yml
+├── order-service.yml
+├── payment-service.yml
+├── order-service-dev.yml
+└── order-service-prod.yml
+```
+
+Each filename has a purpose.
+
+| File                     | Purpose                                |
+| ------------------------ | -------------------------------------- |
+| `application.yml`        | Shared defaults across applications    |
+| `product-service.yml`    | Product service-specific settings      |
+| `order-service.yml`      | Order service-specific settings        |
+| `order-service-dev.yml`  | Order service settings for development |
+| `order-service-prod.yml` | Order service settings for production  |
+
+For example, the shared file might contain:
+
+```
+# application.yml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+app:
+  request-timeout: 3s
+```
+
+The order service might define its own behavior:
+
+```
+# order-service.yml
+app:
+  maximum-items-per-order: 50
+
+services:
+  payment:
+    timeout: 2s
+```
+
+Production could override a particular property:
+
+```
+# order-service-prod.yml
+app:
+  request-timeout: 5s
+
+services:
+  payment:
+    timeout: 4s
+```
+
+The configuration system resolves the applicable files and properties according to its precedence rules. In Spring Cloud Config, the effective result depends on the application name, active profile, repository layout, and configured property-source precedence.
+
+Important: centralization does not mean every service receives every configuration value. Services should receive only the settings they need, particularly when security-sensitive properties are involved.
+
+### 3. Externalized configuration vs. centralized configuration
+
+These concepts are related, but they are not identical.
+
+| Concept                                    | Meaning                                                                                               | Example                                           |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Externalized configuration                 | Configuration is outside the application binary.                                                      | Environment variables supplied to a container.    |
+| Centralized configuration                  | Configuration for multiple services is managed through a shared system.                               | A Config Server backed by Git.                    |
+| Externalized and centralized configuration | Configuration is stored outside the services and distributed through a central configuration service. | Spring Cloud Config Server with a Git repository. |
+
+You can externalize configuration without introducing a central server.
+
+For example, Kubernetes ConfigMaps and environment variables allow configuration to be supplied separately to each application instance. A centralized configuration service is a further architectural choice, not a mandatory requirement for every microservices system.
+
+### Why is configuration especially important in distributed systems?
+
+In a monolithic application, configuration may be relatively simple: one application, one deployment unit, and perhaps one configuration file.
+
+In a distributed system, configuration affects many independently running components.
+
+Configuration sources
+
+Files · Environment variables · Config Server · Secret Manager
+
+Configuration resolution
+
+Defaults · Profiles · Overrides · Validation
+
+Product
+
+Order
+
+Payment
+
+Each service receives configuration appropriate to its role and deployment.
+
+Configuration must account for several distributed-system properties:
+
+- Independently deployed services: each service can have its own settings and release schedule.
+- Multiple instances: several instances of the same service may need consistent settings.
+- Network communication: service URLs, timeouts, retry policies, and TLS settings affect communication.
+- Multiple environments: development, staging, and production need different values.
+- Partial failures: a configuration service may become temporarily unavailable.
+- Changing topology: service addresses, replica counts, and infrastructure endpoints can change over time.
+
+### Example: a timeout mismatch
+
+Suppose the order service calls the payment service.
+
+```
+Order Service
+    |
+    | timeout = 2 seconds
+    v
+Payment Service
+    |
+    | normal processing may take 3 seconds
+    v
+Payment Database
+```
+
+The order service may abandon a request even though payment processing is functioning normally.
+
+A configuration change to the timeout could solve the immediate problem, but setting an arbitrarily large timeout might instead cause requests to accumulate and consume resources. Configuration must therefore reflect the architecture and its failure-handling strategy.
+
+Key idea: configuration is part of the operational design of a distributed system, not merely a collection of property files.
+
+## 2. `externalized-configuration`
+
+### What does externalized configuration mean?
+
+Externalized configuration means separating environment-specific and deployment-specific settings from the application's compiled code and packaged artifact.
+
+Instead of building a different application for every environment, you build one artifact and supply the appropriate configuration when deploying it.
+
+One application artifact
+
+order-service.jar
+
+Development
+
+Local database
+
+Testing
+
+Test database
+
+Production
+
+Production database
+
+Same code and artifact; different deployment configuration.
+
+### Common configuration sources
+
+| Source                     | Example                       | Typical use                             |
+| -------------------------- | ----------------------------- | --------------------------------------- |
+| Application defaults       | `application.yml`             | Safe defaults shared by deployments     |
+| Profile-specific files     | `application-prod.yml`        | Environment-specific overrides          |
+| Environment variables      | `SPRING_DATASOURCE_URL`       | Container and platform configuration    |
+| Command-line arguments     | `--server.port=8085`          | Deployment-time overrides               |
+| External files             | `/etc/myapp/application.yml`  | Host-mounted configuration              |
+| Configuration service      | Spring Cloud Config Server    | Centralized distribution and versioning |
+| Orchestrator configuration | Kubernetes ConfigMaps         | Platform-managed non-secret settings    |
+| Secret manager             | Vault or cloud secret service | Credentials, keys, and certificates     |
+
+These sources can be combined. Their precedence depends on the framework and deployment mechanism; in Spring Boot, for example, command-line arguments and environment variables can override values from application configuration files.
+
+### Example: Spring Boot
+
+The application can define a default in `application.yml`:
+
+```
+clients:
+  product-service:
+    timeout: 2s
+```
+
+Then a deployment can override it with an environment variable:
+
+```
+CLIENTS_PRODUCT_SERVICE_TIMEOUT=3s
+```
+
+Spring Boot binds the environment value to the corresponding property, provided it is named and typed appropriately.
+
+The application code does not need to change:
+
+```
+@ConfigurationProperties(prefix = "clients.product-service")
+public record ProductServiceProperties(Duration timeout) {
+}
+```
+
+This example illustrates the principle: the code declares what it needs, while the deployment supplies the value.
+
+### Externalized configuration versus centralized configuration
+
+These terms are related, but they are not synonyms.
+
+- Externalized configuration describes where configuration is supplied from: outside the application code or artifact.
+- Centralized configuration describes how configuration is managed: through a shared, authoritative system or control point.
+
+For example, an environment variable is externalized configuration, but it is not necessarily centrally managed. A Spring Cloud Config Server backed by Git provides a centralized approach to distributing externalized configuration.
+
+Key idea: build once, configure per deployment.
+
+
+# 6. Configuration retrieval architectural styles
+
+Centralized configuration can be implemented in different ways depending on when and how a service retrieves its configuration.
+
+## Style A: Startup-time retrieval
+
+The service retrieves configuration during startup, then uses the loaded values while running.
+
+1\. Microservice starts
+
+2\. Requests configuration
+
+3\. Loads configuration and initializes
+
+4\. Handles business requests
+
+Advantages
+
+- Simple operational model.
+- Configuration is loaded before the application becomes ready, if the startup process is designed that way.
+- Runtime requests do not have to contact the Config Server to read each property.
+
+Trade-offs
+
+- The Config Server may become a startup dependency.
+- A new configuration version might require a restart or refresh before the service uses it.
+- If the server is unavailable, startup behavior depends on whether configuration is mandatory and whether a fallback is configured.
+
+This is a common model for Spring Cloud Config clients.
+
+## Style B: Runtime polling or refresh
+
+The service periodically checks for configuration changes or receives a refresh trigger.
+
+```
+Config repository
+       |
+       v
+Configuration server
+       |
+       v
+Configuration change detected
+       |
+       v
+Refresh mechanism
+       |
+       v
+Running service applies supported changes
+```
+
+This style is useful when operators need to change supported settings without restarting every service.
+
+However, refreshing configuration is not the same as automatically rebuilding every object that uses it. Application components must support the update mechanism, and the rollout should account for consistency across instances.
+
+## Style C: Event-driven configuration updates
+
+Instead of relying only on periodic polling, a configuration change can produce an event.
+
+```
+Git change
+    |
+    v
+Configuration management system
+    |
+    v
+Event broker
+    |
+    +----> Order service
+    |
+    +----> Product service
+    |
+    +----> Gateway
+```
+
+An event might tell clients that configuration has changed. Depending on the implementation, clients then fetch the new configuration or receive a change notification and refresh themselves.
+
+For Spring-based systems, Spring Cloud Bus can propagate refresh events across application instances when correctly configured.
+
+Important: event delivery does not automatically guarantee that all instances switch to the new configuration simultaneously. If consistency matters, you need versioning, rollout coordination, failure handling and observability.
+
+# 7. Configuration ownership: shared vs. service-specific
+
+One of the most important design decisions is determining which settings belong in shared configuration and which belong to individual microservices.
+
+## Shared configuration
+
+Shared configuration contains defaults or policies that multiple services should follow.
+
+Examples:
+
+- Default logging levels.
+- Observability and tracing settings.
+- Common HTTP timeout defaults.
+- Organization-wide security policies.
+- Shared feature-flag conventions.
+
+## Service-specific configuration
+
+Service-specific configuration belongs to a particular microservice.
+
+Examples:
+
+- The maximum number of items in an order.
+- Payment-provider timeout.
+- Product catalog page size.
+- Service-specific database connection settings.
+
+A useful rule is:
+
+Share infrastructure defaults and common policies; keep business-specific settings owned by the service that uses them.
+
+Avoid putting every application's settings into one enormous configuration file. That creates unnecessary coupling: changing one service's configuration can accidentally affect unrelated services.
+
+## 7.1 Configuration ownership diagram
+
+Shared configuration
+
+Logging defaults · Tracing · Common policies
+
+Product
+
+Catalog settings
+
+Order
+
+Order limits
+
+Payment
+
+Provider settings
+
+Each service combines applicable shared defaults with its own configuration and environment overrides.
+
+## Key Design Decisions
+When it comes to setting up a config server, there are a number of options to consider:
+• Selecting a storage type for the configuration repository
+• Deciding on the initial client connection, either to the config server or to the discovery
+server
+• Securing the configuration, both against unauthorized access to the API and by avoiding
+storing sensitive information in plain text in the configuration repository
+
+When designing externalized configuration for a microservices architecture, you need to decide where configuration lives, how services obtain it, and how it is protected.
+
+1\. Configuration repository and storage
+
+Where are configuration values stored and versioned?
+
+2\. Client bootstrap and service discovery
+
+How does a service locate and retrieve its configuration?
+
+3\. Configuration security and secrets management
+
+Who can retrieve configuration, and how are secrets protected?
+
+These decisions are related, but each solves a different architectural problem.
+
+How the three decisions fit together
+
+Consider what happens when a new `order-service` instance starts in production.
+
+### 1
+
+Repository and storage
+
+The configuration server retrieves the versioned production configuration from Git.
+
+### 2
+
+Bootstrap and discovery
+
+The new instance uses its initial configuration to locate the Config Server, either directly or through a discovery mechanism.
+
+### 3
+
+Security and secrets
+
+The service authenticates to retrieve permitted configuration and obtains any required secrets through an authorized mechanism.
+
+### 4
+
+Application startup
+
+The service initializes its database connections, HTTP clients and other components using the resolved settings.
+
+These decisions must work together. For example, selecting a secure secrets manager is not enough if the Config Server API is exposed publicly, and selecting Git as the repository is not enough if services cannot reliably reach the Config Server during startup.
+
+
+The three questions to remember are: Where is configuration stored? How does each service obtain it? How do we protect it? Together, they define the core architectural decisions for externalized configuration in microservices.
+## 1. Configuration repository and storage
+
+### 1.1 What problem does this decision solve?
+
+Every microservice needs configuration, but you need to decide where that configuration is maintained and how it is delivered.
+
+For example, `order-service` may require:
+
+```
+server:
+  port: 8082
+
+app:
+  maximum-items-per-order: 50
+
+services:
+  payment:
+    timeout: 2s
+```
+
+The question is not just where to save this YAML file. It is also how to manage changes, version configurations, separate environments, control access, and recover from mistakes.
+
+In a centralized configuration architecture, distinguish two responsibilities:
+
+- Configuration repository: stores the configuration data.
+- Configuration server: retrieves, resolves and exposes that data to clients.
+
+A Git repository can be the source of truth, while a Spring Cloud Config Server exposes its contents through HTTP.
+
+### 1.2 Common storage options
+
+| Storage option                   | Advantages                                                                        | Trade-offs                                                                                 |
+| -------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Git repository                   | Version history, review, branching, rollback                                      | Requires repository access and management; committed secrets are risky                     |
+| Local filesystem                 | Simple, easy for development and testing                                          | Deployment-specific files, weaker collaboration and version governance unless supplemented |
+| Database                         | Structured storage and potentially custom administration workflows                | Requires a retrieval implementation, schema and database operations                        |
+| Dedicated configuration platform | May provide centralized administration, policies, versioning and rollout controls | Additional platform dependencies, cost and operational complexity                          |
+
+For Spring Cloud Config, Git is a common choice. Filesystem and other repository implementations may also be suitable depending on the system's requirements.
+
+A database-backed repository is not the same as enabling a built-in Git backend: it may require a custom implementation or a different configuration-management platform.
+
+### 1.3 How should a Git repository be organized?
+
+A simple repository might look like this:
+
+```
+config-repo/
+├── application.yml
+├── api-gateway.yml
+├── product-service.yml
+├── order-service.yml
+├── payment-service.yml
+├── order-service-dev.yml
+└── order-service-prod.yml
+```
+
+The filenames represent different configuration scopes.
+
+| File                     | Purpose                          |
+| ------------------------ | -------------------------------- |
+| `application.yml`        | Shared defaults for applications |
+| `product-service.yml`    | Product-specific settings        |
+| `order-service.yml`      | Order-specific settings          |
+| `order-service-dev.yml`  | Development overrides            |
+| `order-service-prod.yml` | Production overrides             |
+
+For example, `application.yml` might contain:
+
+```
+logging:
+  level:
+    root: INFO
+
+app:
+  request-timeout: 3s
+```
+
+And `order-service-prod.yml` might override the timeout:
+
+```
+app:
+  request-timeout: 5s
+```
+
+When `order-service` runs with the `prod` profile, the configuration system resolves the applicable property sources and applies the relevant precedence rules.
+
+This avoids maintaining an entirely separate copy of every common setting for every environment.
+
+### 1.4 What should influence the storage decision?
+
+Consider these criteria when selecting a repository:
+
+- Versioning: Can you identify exactly which configuration revision was used?
+- Rollback: Can you safely restore a previous configuration?
+- Environment separation: Can development and production settings be managed independently?
+- Access control: Who can read or change the configuration?
+- Availability: Can services obtain configuration when infrastructure fails?
+- Auditability: Can you determine who changed a setting and why?
+- Secret handling: Does the repository contain credentials or other sensitive values?
+
+For most teams beginning with Spring Cloud Config, a private Git repository is a practical default for non-sensitive configuration, with secrets handled separately.
+
+Key principle: the repository is the source of configuration data; it does not have to be the same system that serves the data to applications.
+
+## 2. Client bootstrap and service discovery
+
+This decision concerns how a microservice obtains its configuration before it can operate normally.
+
+It is particularly important because the configuration server may itself be a remote service, and the client must know how to reach it.
+
+### 2.1 What is client bootstrap?
+
+Bootstrap is the initial process by which an application obtains the information it needs to initialize.
+
+Imagine `order-service` needs these settings before it can handle requests:
+
+- Its server port.
+- Its database connection information.
+- The payment service's timeout.
+- Logging and monitoring settings.
+
+But those values are stored on a Config Server.
+
+This creates a dependency:
+
+> The application needs configuration to start, but it needs some initial information to retrieve that configuration.
+
+The application therefore needs a small amount of initial configuration, sometimes called bootstrap configuration or bootstrap information.
+
+That initial information might include:
+
+- The Config Server's URL or discovery service address.
+- The application's name.
+- The active profile.
+- Authentication information for retrieving configuration.
+
+Not all of these values must be hardcoded. They can be supplied through environment variables, deployment settings or another trusted source.
+
+By default, a client connects first to the config server to retrieve its configuration. Based on the
+configuration, it connects to the discovery server (Netflix Eureka in our case) to register itself. It
+is also possible to do this the other way around, that is, the client first connects to the discovery
+server to find a config server instance and then connects to the config server to get its configura-
+tion. There are pros and cons to both approaches.
+
+### 2.2 Style A: Direct Config Server connection
+
+In the simplest approach, the client knows the Config Server's address.
+
+Config Server
+
+config-server:8888
+
+Client sends configuration request
+
+Order Service
+
+Product Service
+
+For a Spring Boot client, you can configure the initial connection using `spring.config.import`:
+
+```
+spring:
+  application:
+    name: order-service
+
+  config:
+    import: "configserver:http://config-server:8888"
+```
+
+The Config Client uses the application name and active profile to request the relevant configuration.
+
+For example, the request may resemble:
+
+```
+GET /order-service/prod
+```
+
+Here, `config-server` could be a Docker Compose service hostname or a DNS name resolvable by the client.
+
+#### Advantages
+
+- Simple architecture.
+- No discovery server is required.
+- Easy to configure in development and containerized deployments.
+- Fewer startup dependencies.
+
+#### Trade-offs
+
+- The client needs a stable URL or hostname.
+- Moving the Config Server may require DNS or deployment changes.
+- A single server endpoint needs suitable redundancy if high availability is required.
+
+One concern with connecting to the config server first is that the config server can
+become a single point of failure. If the clients connect first to a discovery server, such
+as Netflix Eureka, there can be multiple config server instances registered so that a
+single point of failure can be avoided. When we learn about the Service concept in
+Kubernetes, we will see how we can avoid a single point of failure by running multiple containers
+– for example, config servers, behind each Kubernetes Service.
+
+A direct connection does not necessarily mean a hardcoded IP address. A stable DNS name or load-balanced URL can provide location independence.
+
+### 2.3 Style B: Discovery-first connection
+
+In a discovery-first architecture, the client uses a service registry to find the Config Server.
+
+For example, Netflix Eureka maintains registrations of services and their network locations.
+
+Eureka Discovery Server
+
+Maintains service registrations
+
+Config Server
+
+Registers its location
+
+Order Service
+
+Looks up config-server
+
+The client uses the discovered location to retrieve its configuration.
+
+A Spring Cloud Config client might use settings such as:
+
+```
+spring:
+  application:
+    name: order-service
+
+  cloud:
+    config:
+      discovery:
+        enabled: true
+        service-id: config-server
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka-server:8761/eureka/
+```
+
+This requires the appropriate discovery client and Config Client dependencies. The Config Server must also register itself under the expected service ID.
+
+The crucial detail is that discovery does not remove the need for bootstrap information. The client must still know how to reach Eureka.
+
+#### Advantages
+
+- Config Server locations can change without updating every client URL.
+- Multiple registered instances can support redundancy and load balancing, depending on the discovery and client configuration.
+- Fits naturally into systems already using service discovery.
+
+#### Trade-offs
+
+- Adds infrastructure and operational complexity.
+- Introduces a dependency on the discovery service during startup.
+- Requires careful handling of startup ordering, authentication and discovery failures.
+
+### 2.4 Direct connection vs. discovery-first
+
+| Question                                | Direct connection                         | Discovery-first                                 |
+| --------------------------------------- | ----------------------------------------- | ----------------------------------------------- |
+| How does the client find Config Server? | URL or DNS name                           | Service registry lookup                         |
+| Is a registry required?                 | No                                        | Yes                                             |
+| Startup dependencies                    | Config Server                             | Discovery service and Config Server             |
+| Dynamic server locations                | Managed through URL, DNS or load balancer | Managed through registry                        |
+| Best fit                                | Simpler deployments                       | Existing discovery-based microservice platforms |
+
+There is also a third practical approach: use platform-native service discovery, such as Kubernetes DNS, with a stable Config Server service name. This often avoids adding a separate Eureka registry when the platform already provides service naming and routing.
+
+### 2.5 What happens if the Config Server is unavailable?
+
+You must decide how clients should behave when they cannot retrieve configuration.
+
+Fail-fast behavior: the application refuses to start if required remote configuration is unavailable.
+
+This is appropriate when starting with incorrect or missing configuration would be dangerous.
+
+Fallback behavior: the application starts using an explicitly defined local configuration source or previously available configuration.
+
+This can improve resilience, but fallback configuration must be deliberately maintained and must not silently bypass required security settings.
+
+A sensible design distinguishes between essential configuration and optional configuration. For example, a payment service should not silently substitute unsafe defaults if required payment verification settings cannot be loaded.
+
+Key principle: bootstrap and discovery determine how configuration is obtained; failure-handling policy determines whether the service can start when configuration infrastructure is unavailable.
+
+### Configuration and service discovery are different responsibilities
+
+These two concepts often appear together in microservices architecture, but they solve different problems.
+
+Configuration management answers:
+
+- What database connection settings should I use?
+- What timeout should apply to outgoing requests?
+- Which feature flags are enabled?
+- Which configuration profile should be active?
+
+Service discovery answers:
+
+- Where is the payment service currently running?
+- Which instances of the product service are available?
+- What network address should I use to reach a service?
+
+For example, a configuration repository could contain:
+
+```
+services:
+  payment:
+    service-id: payment-service
+    timeout: 2s
+```
+
+The `service-id` can identify the logical service, while a discovery client resolves that identifier into a reachable instance.
+
+However, storing a fixed URL is also possible:
+
+```
+services:
+  payment:
+    url: http://payment-service:8083
+```
+
+Whether this works depends on the deployment environment. In a container network, the hostname may resolve through container DNS. In a dynamic service registry architecture, the application might instead use a discovery client or load-balanced service identifier.
+
+The key distinction is that a Config Server distributes settings; a discovery server maintains information about reachable service instances.
+
+### How do they work together?
+
+Config Server
+
+Provides timeouts and service identifiers
+
+Discovery Server
+
+Provides service instance locations
+
+Order Service
+
+Uses configuration to determine how to call payment, then uses DNS or discovery to reach it.
+
+One caveat: a discovery server is not required simply because you use centralized configuration. You can use a fixed URL, DNS, a platform service name, or another routing mechanism.
+
+## Configuration security and secrets management.
+The third decision addresses two related but distinct questions:
+
+1. Who is allowed to access configuration?
+2. How are sensitive values protected throughout their lifecycle?
+
+Configuration information will, in general, be handled as sensitive information. This means
+that we need to secure the configuration information both in transit and at rest. From a runtime
+perspective, the config server does not need to be exposed to the outside through the edge server. During development, however, it is useful to be able to access the API of the config server to
+check the configuration. In production environments, it is recommended to lock down external
+access to the config server.
+
+Centralized configuration improves management, but it can also create a high-value target. An attacker who gains access to a configuration repository or server may discover internal service endpoints, database credentials, tokens or security-related settings.
+
+Before using configuration server in production, we must ensure that only authenticated and authorized parties can retrieve configuration data. 
+
+One option would be to use the OAuth2 Client credentials flow to secure the interactions between Config Service
+and applications based on an Access Token. It’s an OAuth2 flow specific for protecting service-to-service interactions.
+
+Assuming that applications will communicate over HTTPS, the HTTP Basic authentication strategy would be another viable option. When using this strategy, applications
+can be configured with the username and password via the properties exposed by Spring Cloud Config Client: spring.cloud.config.username and spring.cloud.config.password.
+
+Centralizing configuration can improve governance, but it also concentrates risk. If an attacker gains access to the configuration server or repository, they may obtain settings for multiple services.
+
+A sound design addresses several separate concerns.
+
+| Risk                                 | Recommended approach                                       |
+| ------------------------------------ | ---------------------------------------------------------- |
+| Unauthorized configuration retrieval | Authenticate clients and enforce authorization             |
+| Traffic interception                 | Use HTTPS/TLS                                              |
+| Secrets committed to Git             | Store credentials in a dedicated secrets manager           |
+| Excessive repository access          | Restrict repository permissions and review changes         |
+| Accidental disclosure in logs        | Redact credentials and sensitive properties                |
+| Uncontrolled configuration changes   | Use version control, reviews and audit trails              |
+| Compromised configuration server     | Restrict network access and use least-privilege identities |
+
+Configuration is not inherently safe simply because it is centralized. In fact, a centralized service can become a high-value target.
+
+Also, configuration values can be security-sensitive even when they are not passwords. For example, a feature flag that disables payment verification or a setting that changes authorization behavior can create serious vulnerabilities.
+
+There are three complementary security measures for a configuration server:
+
+1. Restrict network exposure — prevent unauthorized external access to the Config Server.
+2. Secure configuration in transit — use HTTPS and authenticate clients with HTTP Basic authentication.
+3. Secure configuration at rest — encrypt sensitive configuration values stored in the repository.
+
+### Understanding the security architecture
+
+Imagine your online shopping system contains an API Gateway, a Config Server, and several microservices.
+
+```
+External clients
+
+Browsers and external API consumers
+            ↓
+API Gateway / Edge Server
+
+Public HTTPS endpoint
+            ↓
+------------------------------------            
+Business microservices
+
+Product · Order · Payment
+------------------------------------  
+
+------------------------------------  
+Private configuration network
+
+Config Server + protected configuration repository
+-----------------------------------------------------
+
+The Config Server is accessible to authorized internal clients, but does not need a public route through the API Gateway.
+```
+The key architectural distinction is that the Config Server does not need to be a public API.
+
+The API Gateway handles incoming business requests. The Config Server serves configuration to authorized applications and, when appropriate, administrators.
+
+For example:
+
+- A customer accesses `https://api.example.com/orders`.
+- `order-service` retrieves its configuration from an internal Config Server.
+- An administrator accesses configuration through an approved internal development or management route.
+
+These are different access paths with different security requirements.
+
+### 3.1 Protecting the Config Server API
+
+TODO merge with Securing configuration in transit
+
+Suppose a Config Server exposes this endpoint:
+
+```
+GET /order-service/prod
+```
+
+The response may contain the order service's database URL, timeouts, feature flags and other settings.
+
+If the API is publicly accessible without appropriate protection, an unauthorized client may retrieve configuration that should remain private.
+
+You should consider the following security controls.
+
+| Control              | Purpose                                                                    |
+| -------------------- | -------------------------------------------------------------------------- |
+| Authentication       | Verifies the identity of the requesting client                             |
+| Authorization        | Determines which applications or users may access particular configuration |
+| HTTPS/TLS            | Protects configuration while it travels over the network                   |
+| Network restrictions | Limits which systems can reach the Config Server                           |
+| Auditing             | Records relevant access and configuration changes                          |
+| Least privilege      | Gives each client only the permissions it needs                            |
+
+For example, Spring Security can require authentication for requests to the Config Server. For production systems, consider service identities, OAuth 2.0 access tokens or mutual TLS where appropriate.
+
+Authentication alone is insufficient. A service authenticated as `product-service` should not automatically receive access to every secret belonging to `payment-service`.
+
+### 2. Securing configuration in transit
+
+When the configuration information is asked for by a microservice, or anyone using the API of
+the config server, it will be protected against eavesdropping by the edge server since it already
+uses HTTPS.
+
+Configuration is transmitted when a microservice requests its settings from the Config Server.
+
+For example:
+
+```
+GET /order-service/prod HTTP/1.1
+Host: config-server.internal:8888
+Authorization: Basic <credentials>
+```
+
+Two protections are important here: HTTPS and client authentication.
+
+#### 2.1 HTTPS protects confidentiality and integrity
+
+HTTPS uses TLS to protect data while it travels across the network.
+
+Without TLS, an attacker who can observe network traffic might read configuration responses containing sensitive information.
+
+With HTTPS, TLS protects against passive eavesdropping and detects unauthorized modification of protected traffic.
+
+Order Service
+
+Config client
+
+Config Server
+
+Config API
+
+HTTPS / TLS
+
+Encrypts the connection and authenticates the server through certificate validation.
+
+Your excerpt says that the edge server already uses HTTPS. That protects configuration traffic only if the relevant request actually passes through that HTTPS endpoint.
+
+There is an important distinction:
+
+- If the edge server terminates TLS and forwards traffic to the Config Server over plain HTTP, the internal connection is not encrypted.
+- If microservices connect directly to the Config Server over HTTP, the edge server's HTTPS configuration does not protect that traffic.
+- If the internal connection uses HTTPS, it is protected by TLS independently of the public gateway.
+
+Therefore, use HTTPS on the actual connection carrying the configuration data, or protect the internal network using an appropriately designed trusted transport architecture.
+
+#### 2.2 HTTP Basic authentication identifies the client
+
+HTTPS protects the connection, but it does not automatically determine whether a particular application is authorized to retrieve configuration.
+
+For that, your excerpt recommends HTTP Basic authentication.
+
+With HTTP Basic authentication, the client sends a username and password in the `Authorization` header.
+
+The credentials are encoded using Base64, not encrypted by Base64 itself. HTTPS is essential to protect them in transit.
+
+For example:
+
+```
+GET /order-service/prod HTTP/1.1
+Host: config-server.internal:8888
+Authorization: Basic <base64-encoded-credentials>
+```
+
+The Config Server's security layer verifies the credentials before allowing access.
+
+##### Configuring Spring Security
+
+For a simple Spring Boot Config Server, you can configure credentials through environment variables:
+
+```
+SPRING_SECURITY_USER_NAME=config-client
+SPRING_SECURITY_USER_PASSWORD=<strong-secret>
+```
+
+Spring Boot's default user configuration can use these properties when Spring Security is present and no custom authentication configuration overrides them.
+
+For a Docker Compose deployment, you could supply them through the deployment environment or a secrets mechanism rather than committing the real password to a YAML file.
+
+The client also needs to provide credentials using the supported Config Client authentication configuration.
+
+##### What does authentication actually guarantee?
+
+Authentication answers:
+
+> Is this requester presenting valid credentials?
+
+Authorization answers:
+
+> Is this requester allowed to access this particular configuration?
+
+For example, if all services share one username and password, a compromised `product-service` may be able to request `payment-service` configuration too.
+
+For production systems, consider distinct service identities and authorization policies, especially when configuration contains sensitive data. HTTP Basic authentication is a simple option, but it is not the only one.
+
+### 3. Restricting external access to the Config Server
+
+Your excerpt emphasizes that the Config Server does not need to be exposed through the edge server in production.
+
+This is a network architecture control, rather than an encryption mechanism.
+
+Suppose the API Gateway is publicly accessible, while the Config Server is deployed on a private network.
+
+```
+Internet
+   |
+   v
+API Gateway :443
+   |
+   +------> order-service
+   |
+   +------> product-service
+
+Private network
+   |
+   +------> config-server :8888
+                ^
+                |
+          Authorized services
+```
+
+This design reduces the number of externally accessible endpoints.
+
+Even if the Config Server has Spring Security configured, keeping it private provides an additional layer of defense.
+
+You can enforce this separation through:
+
+- Private network interfaces and firewall rules.
+- Container network isolation.
+- Kubernetes Services and NetworkPolicies.
+- Cloud security groups or equivalent network access controls.
+- Gateway routing rules that deliberately omit public Config Server routes.
+
+##### Development versus production
+
+| Environment | Reasonable approach                                                                             |
+| ----------- | ----------------------------------------------------------------------------------------------- |
+| Development | Allow controlled access from a developer workstation or internal development network            |
+| Testing     | Restrict access to test clients and authorized CI/CD systems                                    |
+| Production  | Keep the Config Server private and permit only authorized internal clients and management paths |
+
+Development access should still use authentication and HTTPS where appropriate. Production should not rely on obscurity, such as assuming that an endpoint is safe because nobody knows its URL.
+
+### 4. Securing configuration at rest
+
+So far, we have protected configuration while it travels over the network.
+
+But consider what happens if an attacker gains read access to the Git repository.
+
+Suppose it contains:
+
+```
+spring:
+  datasource:
+    username: payment_user
+    password: production-database-password
+```
+
+Even if the Config Server API is perfectly protected, the password is exposed to anyone who can read the repository.
+
+This is the problem of security at rest.
+
+Spring Cloud Config supports encryption and decryption of property values. The idea is to store encrypted values in the configuration repository and decrypt them when they are needed.
+
+To avoid a situation where someone with access to the configuration repository can steal sensitive information, such as passwords, the config server supports the encryption of configuration
+information when stored on disk. The config server supports the use of both symmetric and
+asymmetric keys. Asymmetric keys are more secure but harder to manage.
+
+For example:
+
+```
+spring:
+  datasource:
+    username: payment_user
+    password: "{cipher}ENCRYPTED_VALUE"
+```
+
+Here, `ENCRYPTED_VALUE` is illustrative, not a usable encrypted password.
+
+The repository contains ciphertext instead of the original plaintext password.
+
+#### 4.1 The encryption and decryption process
+
+1\. Encrypt the secret
+
+A plaintext password is encrypted using a protected key.
+
+2\. Store ciphertext in Git
+
+The repository contains the encrypted property.
+
+3\. Retrieve configuration
+
+The Config Server reads the encrypted property.
+
+4\. Decrypt when authorized
+
+The plaintext is made available through the configured decryption flow.
+
+The exact decryption location depends on the design. Spring Cloud Config can decrypt encrypted properties on the server side, or encrypted values can be returned for a client-side decryption arrangement.
+
+Server-side decryption means the server must protect the decryption key and ensure that plaintext responses are properly secured. Client-side decryption changes which components need access to the relevant keys.
+
+Neither approach makes plaintext exposure impossible: the application ultimately needs usable secret values to connect to its database or authenticate to another service.
+
+#### 4.2 Symmetric encryption
+
+With symmetric encryption, the same secret key is used for encryption and decryption.
+
+Conceptually:
+
+```
+                 Shared secret key
+                 /               \
+                v                 v
+Plaintext --> Encrypt          Decrypt <-- Ciphertext
+                |                 ^
+                +---- Ciphertext -+
+```
+
+For example, a secret is encrypted before being committed to Git. The Config Server can decrypt it only if it has access to the corresponding key.
+
+Advantages
+
+- Efficient.
+- Relatively straightforward to implement.
+- Appropriate for many application-level encryption requirements.
+
+Disadvantages
+
+- The key must be distributed securely to the components that need it.
+- Anyone who obtains both the ciphertext and the key may recover the secret.
+- Key rotation and access control require careful planning.
+
+#### 4.3 Asymmetric encryption
+
+Asymmetric encryption uses a key pair:
+
+- A public key can be used to encrypt data.
+- The corresponding private key can decrypt data.
+
+Conceptually:
+
+```
+Public key                          Private key
+    |                                   |
+    v                                   v
+Plaintext --> Encrypt --> Ciphertext --> Decrypt --> Plaintext
+```
+
+For example, a configuration-management process encrypts a password using the public key. The Config Server uses the private key to decrypt it.
+
+The public key does not need to remain secret, although its authenticity and correct use still matter. The private key must be protected carefully.
+
+Advantages
+
+- The encryption key can be distributed without distributing the decryption key.
+- The private key can be restricted to the components responsible for decryption.
+- It can simplify certain key-distribution arrangements.
+
+Disadvantages
+
+- More complicated key management.
+- Private-key protection and rotation remain critical.
+- It is not inherently more secure in every deployment; security depends on the algorithm, implementation, key handling and threat model.
+
+Your excerpt describes asymmetric encryption as more secure but harder to manage. The main practical advantage is that it separates encryption capability from decryption capability. That does not mean asymmetric encryption is universally safer than symmetric encryption.
+
+#### 4.4 What happens if the encryption key is compromised?
+
+Encryption at rest is only as strong as the protection of its keys.
+
+If an attacker obtains both the encrypted configuration and the corresponding decryption key, the attacker may recover the original secrets.
+
+Therefore:
+
+- Do not commit encryption keys alongside encrypted configuration.
+- Restrict access to private keys or symmetric keys.
+- Consider a dedicated key-management service.
+- Plan key rotation and recovery.
+- Avoid logging decrypted values.
+- Rotate exposed credentials, not just encryption keys, when a compromise occurs.
+
+Also, encrypting configuration values does not protect every property automatically. The sensitive values must actually be encrypted, and the decryption mechanism must be configured correctly.
+
+### 5. How the three security controls work together
+
+These controls address different attack paths.
+
+| Threat                                                   | Relevant control                                   |
+| -------------------------------------------------------- | -------------------------------------------------- |
+| Attacker intercepts configuration traffic                | HTTPS/TLS                                          |
+| Unknown client requests configuration                    | Authentication                                     |
+| Authenticated service requests another service's secrets | Authorization and least privilege                  |
+| External attacker probes the Config Server               | Network isolation and restricted exposure          |
+| Repository reader obtains stored configuration           | Encryption at rest or dedicated secrets management |
+| Encryption key is stolen                                 | Key protection, rotation and credential revocation |
+
+The important lesson is that HTTPS, HTTP Basic authentication, network isolation and encryption at rest are complementary controls. None replaces all the others.
+
+For production microservices, a robust design generally keeps the Config Server off the public edge, protects every connection that carries sensitive configuration, authenticates and authorizes clients, and keeps decryption keys separate from the configuration repository.
+
+For implementation details, consult the official [Spring Cloud Config security and encryption documentation](https://docs.spring.io/spring-cloud-config/reference/server/encryption-and-decryption.html?utm_source=chatgpt.com) and [Spring Security documentation](https://docs.spring.io/spring-security/reference/?utm_source=chatgpt.com).
+### 3.2 The problem with storing secrets in Git
+
+Consider this configuration:
+
+```
+spring:
+  datasource:
+    url: jdbc:postgresql://orders-db:5432/orders
+    username: orders_user
+    password: my-database-password
+```
+
+The configuration is easy to manage, but the password is stored in plain text.
+
+Even if the Git repository is private, risks remain:
+
+- An engineer with repository access can read the password.
+- A compromised developer account may expose it.
+- The password may remain in Git history after the current file is edited.
+- The value may be copied into logs, build artifacts or backups.
+
+Deleting the password from the latest version does not necessarily remove it from earlier commits.
+
+The preferred approach is to keep ordinary application configuration in the configuration repository and store sensitive credentials in a dedicated secrets-management system.
+
+### 3.3 Configuration vs. secrets
+
+Ordinary configuration
+
+Examples: request timeouts, logging levels, service identifiers, page sizes and non-sensitive feature flags.
+
+Usually suitable for Git, with appropriate access controls.
+
+Secrets
+
+Examples: database passwords, API keys, private keys, client secrets and access tokens.
+
+Should be protected using dedicated secret-management controls.
+
+Not all configuration is harmless, and not all sensitive settings are passwords. Authorization policies, encryption algorithms and security-related feature flags may also require strict access controls.
+
+### 3.4 How secrets management works
+
+A secrets manager stores sensitive values and releases them only to authorized clients.
+
+Common solutions include:
+
+- HashiCorp Vault — centralized secret storage, access policies, dynamic credentials and rotation.
+- Cloud secret managers, such as AWS Secrets Manager, Azure Key Vault and Google Secret Manager.
+- Kubernetes Secrets, combined with appropriate encryption at rest, RBAC and cluster security.
+
+A typical architecture looks like this:
+
+Git repository
+
+Ordinary configuration
+
+Secrets manager
+
+Credentials and keys
+
+Configuration and authorized secret retrieval
+
+Order Service
+
+Combines ordinary configuration with authorized secret values
+
+For example, the Git repository can contain:
+
+```
+spring:
+  datasource:
+    url: jdbc:postgresql://orders-db:5432/orders
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+```
+
+The deployment environment or a secrets-management integration must securely supply `DB_USERNAME` and `DB_PASSWORD`.
+
+The placeholders themselves do not secure anything. If the real password is placed in a committed environment file or exposed through logs, the system remains vulnerable.
+
+### 3.5 What about encrypted configuration?
+
+Another option is to store encrypted secret values in the configuration repository and decrypt them when needed.
+
+For example:
+
+```
+spring:
+  datasource:
+    password: "{cipher}ENCRYPTED_VALUE"
+```
+
+Spring Cloud Config supports encrypted property values when its encryption and decryption facilities are properly configured.
+
+This approach can be useful when configuration must travel through a version-controlled repository, but there are important requirements:
+
+- Encryption keys must be protected independently of the repository.
+- Only authorized components should be able to decrypt the values.
+- Access to decrypted responses must be protected.
+- Key rotation and secret rotation must be planned.
+
+Encryption is not equivalent to a secrets manager. A dedicated secrets manager can provide additional controls such as access policies, auditing, rotation and dynamically generated credentials.
+
+### 3.6 Security responsibilities across the lifecycle
+
+| Stage             | Security question                                                 |
+| ----------------- | ----------------------------------------------------------------- |
+| Storage           | Who can read or modify the repository?                            |
+| Retrieval         | Is the requesting service authenticated and authorized?           |
+| Transport         | Is configuration protected in transit?                            |
+| Application       | Are secret values exposed in logs, diagnostics or error messages? |
+| Runtime           | Can credentials be rotated and revoked?                           |
+| Change management | Are configuration changes reviewed and audited?                   |
+
+Key principle: protecting configuration requires securing both the configuration delivery mechanism and the sensitive values themselves.
+
+## Availability, resilience and failure handling
+
+Centralization creates an operational dependency that should be considered explicitly.
+
+Suppose the Config Server becomes unavailable.
+
+- Existing services: services that have already loaded their configuration may continue running, depending on their local state and runtime dependencies.
+- New instances: may fail to start if they require the Config Server and no suitable fallback exists.
+- Refresh operations: may fail until the server becomes available.
+- Secrets retrieval: may fail independently if the application also relies on an external secrets manager.
+
+Possible mitigations include:
+
+1. Running multiple Config Server instances behind a load balancer.
+2. Using a highly available configuration repository.
+3. Monitoring configuration retrieval failures and response times.
+4. Defining deliberate startup and fallback behavior.
+5. Avoiding unsafe defaults when configuration is mandatory for security or correctness.
+6. Using versioned configuration and controlled rollouts.
+
+A subtle but important distinction: a local cache can help an already-running service or server continue using previously retrieved configuration, but it does not automatically guarantee that a newly starting service can obtain valid configuration.
+
+## Is centralized configuration always the best choice?
+
+No. It adds a service, operational complexity and potentially another network dependency.
+
+| Situation                                                    | Reasonable approach                                                                    |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Small application or simple deployment                       | Environment variables and deployment-managed files                                     |
+| Multiple microservices with shared operational policies      | Centralized configuration management                                                   |
+| Large distributed system with frequent configuration changes | Central management with a deliberate refresh or rollout mechanism                      |
+| Sensitive credentials and tokens                             | Dedicated secrets management, potentially alongside Config Server                      |
+| Highly dynamic infrastructure                                | External configuration combined with DNS, service discovery or platform-native routing |
+
+The objective is not to centralize everything. It is to make configuration manageable, secure, consistent and appropriate for the system's operational requirements.
+
+
+## 3. `centralized-vs-decentralized-configuration`
+
+This topic explains where configuration is stored, who manages it, and how services obtain it.
+
+There are two broad approaches: centralized management and decentralized management.
+
+### A. Centralized configuration
+
+In a centralized approach, configuration is maintained in a shared system that acts as an authoritative source for one or more services.
+
+For example, a Spring Cloud Config Server can retrieve configuration from a Git repository and expose it to Spring Boot clients.
+
+Git configuration repository
+
+Versioned configuration files
+
+Spring Cloud Config Server
+
+Retrieves and serves configuration
+
+Product
+
+Order
+
+Payment
+
+For instance, a repository might contain:
+
+```
+config-repo/
+├── application.yml
+├── product-service.yml
+├── order-service.yml
+├── payment-service.yml
+├── order-service-dev.yml
+└── order-service-prod.yml
+```
+
+The shared `application.yml` can hold common settings, while service-specific and profile-specific files override or extend them.
+
+Advantages
+
+- A common place to review and manage configuration.
+- Version history and easier auditing when Git is used.
+- Less duplication of shared settings.
+- More consistent configuration practices across services.
+- Easier integration with deployment automation.
+
+Disadvantages
+
+- The configuration service and its dependencies need operational support.
+- A new instance may fail to start if it cannot retrieve required configuration.
+- Incorrect shared changes can affect multiple services.
+- Access control must prevent unauthorized users or services from reading or modifying configuration.
+
+One important distinction: a central configuration service is not necessarily a single point of failure. You can deploy multiple Config Server instances and make them highly available. You should also decide what happens if the configuration service becomes unavailable after a client has started.
+
+### B. Decentralized configuration
+
+In a decentralized approach, each service or deployment owns its configuration locally or receives it directly from its own deployment system.
+
+For example:
+
+```
+Deployment platform
+    |
+    +-- Product deployment
+    |      └── Product configuration
+    |
+    +-- Order deployment
+    |      └── Order configuration
+    |
+    +-- Payment deployment
+           └── Payment configuration
+```
+
+There may be no shared configuration server. Each deployment pipeline can inject the necessary values using environment variables, mounted files, or platform-specific configuration objects.
+
+Advantages
+
+- Services can be configured and deployed independently.
+- Fewer runtime dependencies on a shared configuration service.
+- Teams can control their own configuration lifecycle.
+- Local configuration may be easier to operate in small systems.
+
+Disadvantages
+
+- Shared values can become inconsistent.
+- Configuration may be duplicated across repositories and deployment definitions.
+- Auditing and comparing environments can be harder.
+- Organization-wide changes require coordination across multiple owners.
+
+### C. Comparison
+
+| Dimension          | Centralized                              | Decentralized                           |
+| ------------------ | ---------------------------------------- | --------------------------------------- |
+| Source of truth    | Shared configuration system              | Per-service or per-deployment sources   |
+| Governance         | Easier to standardize                    | More autonomy for teams                 |
+| Consistency        | Easier to coordinate                     | Requires additional controls            |
+| Independence       | More dependence on shared infrastructure | Greater local independence              |
+| Auditing           | Can be unified                           | Often spread across systems             |
+| Failure impact     | Shared service can affect many clients   | Failures are often more localized       |
+| Scaling operations | Shared platform to operate               | More individual configuration workflows |
+
+### D. Which approach should you choose?
+
+A practical production architecture often uses a hybrid approach.
+
+- Shared configuration is managed centrally when consistency and auditability matter.
+- Deployment-specific settings are injected by the deployment platform.
+- Secrets are managed by a dedicated secret-management mechanism.
+- Each service validates and owns the configuration it consumes.
+
+For example, Git might hold a payment timeout and feature settings, Kubernetes might inject a deployment-specific service endpoint, and a secret manager might supply database credentials.
+
+These approaches can coexist; centralized management does not mean every value must pass through one server at runtime.
+
+Key idea: centralization is a management choice, not a requirement that every configuration value be retrieved from a central server on every request.
+
+## 4. `configuration-vs-secrets`
+
+Configuration and secrets both influence application behavior, but they require different security controls.
+
+### A. Configuration
+
+Ordinary configuration describes how a system should operate.
+
+Examples:
+
+```
+server:
+  port: 8082
+
+clients:
+  payment-service:
+    timeout: 2s
+    max-retries: 2
+
+features:
+  recommendations-enabled: true
+
+logging:
+  level:
+    root: INFO
+```
+
+These values generally do not grant someone access to protected systems on their own.
+
+### B. Secrets
+
+Secrets are sensitive values that can grant access, enable impersonation, or compromise confidentiality or integrity if disclosed.
+
+Examples include:
+
+- Database passwords.
+- OAuth client secrets.
+- API keys and access tokens.
+- Private TLS keys.
+- Signing keys used to issue or validate security tokens.
+- Encryption keys.
+
+For example:
+
+```
+spring:
+  datasource:
+    url: jdbc:postgresql://orders-db:5432/orders
+    username: orders_app
+    password: ${ORDERS_DB_PASSWORD}
+```
+
+Here, the database URL is usually ordinary configuration, while the password is a secret. The `${ORDERS_DB_PASSWORD}` expression is a placeholder: it does not itself store or secure the password.
+
+### C. Why the distinction matters
+
+| Concern    | Ordinary configuration                            | Secrets                                                            |
+| ---------- | ------------------------------------------------- | ------------------------------------------------------------------ |
+| Example    | Request timeout                                   | Database password                                                  |
+| Storage    | Git, configuration files, platform config         | Secret manager, protected secret store                             |
+| Access     | Least privilege appropriate to operational impact | Strictly limited access                                            |
+| Versioning | Often suitable for ordinary Git history           | Avoid exposing secret values in history                            |
+| Logging    | Values may be logged when appropriate             | Never log secret values                                            |
+| Rotation   | Changes when operational requirements change      | Often requires explicit rotation and revocation processes          |
+| Encryption | Depends on sensitivity and storage environment    | Protect at rest and in transit; encryption alone is not sufficient |
+
+The distinction is about sensitivity and required controls, not simply the data type.
+
+A hostname can be sensitive in some environments. A feature flag may have serious business consequences even if it is not confidential. A TLS certificate is often public, but its associated private key is a secret.
+
+### D. Where should secrets live?
+
+A common pattern is to separate configuration distribution from secret management:
+
+Config repository
+
+Timeouts, feature flags, non-secret service settings
+
+Secret manager
+
+Credentials, tokens, private keys
+
+Application
+
+Receives settings and authorized access to required secrets
+
+Suitable secret-management options include a dedicated system such as HashiCorp Vault, a cloud provider's secret manager, or Kubernetes Secrets combined with appropriate access controls and encryption at rest.
+
+Spring Cloud Config can also support encrypted configuration values, but encryption does not eliminate the need for access control, key management, and secure handling of decrypted values.
+
+Important: never commit production credentials to a Git repository simply because it is private. A private repository still creates additional copies, access paths, and risks of accidental disclosure.
+
+### E. How should secrets be rotated?
+
+Suppose a database password must be changed.
+
+1. Create or rotate the credential in the database or identity system.
+2. Update the secret store.
+3. Ensure the application can obtain the new credential.
+4. Refresh or restart the application if necessary.
+5. Verify that new connections work.
+6. Revoke the old credential when it is safe to do so.
+
+The exact order depends on whether the database supports overlapping credentials, whether the application can reload credentials dynamically, and whether existing connections remain valid.
+
+Key idea: configuration management determines how settings are delivered; secret management adds controls for confidentiality, authorization, rotation, and exposure reduction.
+
+
+## Applying the architecture in Spring Boot
+
+The general concepts map to Spring Cloud as follows.
+
+| Architectural responsibility           | Spring technology                                                    |
+| -------------------------------------- | -------------------------------------------------------------------- |
+| Externalized application configuration | Spring Boot externalized configuration                               |
+| Central configuration API              | Spring Cloud Config Server                                           |
+| Configuration client                   | Spring Cloud Config Client                                           |
+| Configuration source and versioning    | Git-backed Config repository                                         |
+| Service discovery                      | Spring Cloud Netflix Eureka or another supported discovery mechanism |
+| Security                               | Spring Security, TLS and appropriate authentication                  |
+| Secrets management                     | Spring Cloud Vault or another secret-management integration          |
+| Distributed refresh notifications      | Spring Cloud Bus, when required                                      |
+
+A typical client can import configuration from a Config Server:
+
+```
+spring:
+  application:
+    name: order-service
+
+  config:
+    import: "configserver:http://config-server:8888"
+```
+
+The server can use a Git repository:
+
+```
+server:
+  port: 8888
+
+spring:
+  application:
+    name: config-server
+
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://git.example.com/platform/config-repo.git
+          default-label: main
+```
+
+These are illustrative examples; production deployments need appropriate repository credentials, network configuration, TLS and API security.
+
+The client imports configuration during startup, while the Config Server reads the configuration repository and provides the relevant property sources.
+
+For the official implementation details, see the [Spring Cloud Config documentation](https://docs.spring.io/spring-cloud-config/reference/?utm_source=chatgpt.com) and the [Spring Boot externalized configuration reference](https://docs.spring.io/spring-boot/reference/features/external-config.html?utm_source=chatgpt.com).
+
+## Summary: the architectural model to remember
+
+Externalize
+
+Keep environment-dependent settings outside the application binary.
+
+Centralize where useful
+
+Manage configuration through a common repository and service when the operational benefits justify the extra infrastructure.
+
+Secure
+
+Protect the repository, server API, transport and sensitive values.
+
+Control updates
+
+Decide how configuration changes reach running instances and how to recover from failures.
+
+The most important distinction is this: externalized configuration is the design principle; centralized configuration is one way to implement and manage that principle across a microservices system. Spring Cloud Config Server is a concrete implementation, not the architectural concept itself.
+
+## 5. `configuration-management-challenges`
+
+Managing configuration across multiple services is difficult because configuration changes can affect the behavior of an entire distributed system, often without changing application code.
+
+The important challenges are not limited to storing values. They include delivering the correct values, keeping services compatible, controlling changes, and recovering from mistakes.
+
+### A. Configuration consistency
+
+Different services or instances may use incompatible values.
+
+Suppose three order-service instances use different payment-service endpoints:
+
+```
+Order instance A ──> payment-v1
+Order instance B ──> payment-v2
+Order instance C ──> payment-v1
+```
+
+This may be intentional during a rollout, or it may be accidental configuration drift.
+
+The problem becomes more serious when instances disagree about security policies, protocol versions, retry limits, or feature flags.
+
+Approaches:
+
+- Define authoritative configuration sources.
+- Version configuration changes.
+- Validate deployment settings automatically.
+- Monitor the effective configuration version on each instance.
+- Use controlled rollout strategies rather than changing every instance blindly.
+
+Consistency does not always mean every instance must have identical configuration. Different regions or deployment roles may legitimately need different values.
+
+### B. Configuration discovery and startup ordering
+
+A service may need configuration before it can initialize its dependencies.
+
+Consider your Spring Cloud architecture:
+
+```
+Order Service
+    |
+    | 1. Fetch configuration
+    v
+Config Server
+    |
+    | 2. Resolve configuration repository
+    v
+Git Repository
+```
+
+The order service might receive its database URL, security settings, and discovery-server address from Config Server.
+
+But what happens if Config Server itself needs to discover a service or contact infrastructure whose configuration depends on Config Server?
+
+This can create a bootstrap dependency problem.
+
+A practical design gives foundational components enough initial configuration to start independently. For example, the Config Server can use a Git repository URL and authentication credentials supplied through its own environment or deployment configuration.
+
+For Spring Boot 2.4+, clients commonly use `spring.config.import` to import remote configuration. The initial location of Config Server must still be obtainable before that import can happen.
+
+Approaches:
+
+- Keep bootstrap dependencies explicit and minimal.
+- Provide essential initial settings through environment variables or local files.
+- Avoid circular dependencies between configuration and discovery infrastructure.
+- Define startup failure and retry behavior.
+
+### C. Configuration availability and caching
+
+What happens if Config Server becomes unavailable?
+
+There are two different situations:
+
+Situation 1: an existing service is running.
+
+It may continue using configuration already loaded into memory. Losing access to Config Server does not automatically mean the service loses its current configuration.
+
+Situation 2: a new service instance starts.
+
+If it requires remote configuration and cannot obtain it, startup may fail.
+
+```
+Existing instance
+    |
+    +── Cached configuration ──> May continue running
+
+New instance
+    |
+    +── Config Server unavailable
+              |
+              └── Startup may fail
+```
+
+The outcome depends on the client configuration, application requirements, and available fallback settings.
+
+Approaches:
+
+- Make Config Server highly available when required.
+- Use bounded retries and backoff.
+- Define whether startup may proceed with fallback configuration.
+- Cache configuration where the platform supports it.
+- Avoid fallback behavior that silently starts a service with unsafe settings.
+
+A fallback is not always desirable. Starting a payment service with an outdated security policy, for example, could be worse than refusing to start.
+
+### D. Configuration updates and runtime refresh
+
+Configuration changes do not necessarily take effect immediately.
+
+Suppose you update a payment timeout from two seconds to four seconds. The new value may be available in Git and served by Config Server, but running application instances may continue using the old value.
+
+```
+Git change
+    |
+    v
+Config Server serves new value
+    |
+    v
+Client must obtain and apply the update
+    |
+    v
+Application behavior changes
+```
+
+The last step is important. Retrieving a new value does not guarantee that every Spring bean or underlying library will dynamically apply it.
+
+For example, changing a database connection URL may require rebuilding a connection pool or restarting the application. Changing a property used by a refresh-aware component may be easier to apply dynamically.
+
+Approaches:
+
+- Distinguish startup-only properties from refreshable properties.
+- Define refresh or restart requirements for each configuration category.
+- Test whether the affected components really adopt new values.
+- Monitor which configuration version each instance is running.
+- Use rolling restarts when dynamic refresh is unsupported or unsafe.
+
+### E. Configuration rollout and atomicity
+
+A distributed system rarely updates all its instances at precisely the same moment.
+
+Imagine changing an API endpoint used by several services:
+
+```
+Time T1: Service A uses the new endpoint
+Time T2: Service B still uses the old endpoint
+Time T3: Service C uses the new endpoint
+```
+
+During this interval, the system has mixed configuration versions.
+
+This is not necessarily a problem. It becomes a problem when the old and new configurations are incompatible.
+
+For example, changing a service URL while immediately removing the old service may break instances that have not yet refreshed.
+
+Approaches:
+
+- Prefer backward-compatible changes.
+- Introduce new endpoints before removing old ones.
+- Use staged rollouts and health checks.
+- Coordinate changes when services must transition together.
+- Support rollback to a known-good configuration version.
+
+A configuration repository can make a change atomic at the repository level, but it does not make propagation and activation atomic across all running services.
+
+### F. Configuration drift
+
+Configuration drift occurs when the actual configuration of a running environment diverges from its intended or recorded configuration.
+
+Examples include:
+
+- Someone manually changes an environment variable in production.
+- One service instance receives an emergency override.
+- A Kubernetes manifest differs from the version in Git.
+- Development and production gradually accumulate undocumented differences.
+
+A useful distinction is between desired state and actual state:
+
+```
+Desired configuration
+       |
+       | compare / reconcile
+       v
+Actual deployed configuration
+       |
+       └── Drift detected?
+                |
+                ├── Yes: investigate and reconcile
+                └── No: continue monitoring
+```
+
+Approaches include configuration-as-code, Git-based reviews, automated reconciliation, drift detection, and recording the provenance of effective values.
+
+Not every difference is drift: some settings are intentionally generated dynamically or vary by instance.
+
+### G. Configuration validation and compatibility
+
+Configuration values can be syntactically valid but operationally incorrect.
+
+For example:
+
+```
+clients:
+  payment-service:
+    timeout: -2s
+    max-retries: -1
+```
+
+A parser may accept the YAML, but these values are not meaningful for the intended behavior.
+
+Other failures include:
+
+- Missing required properties.
+- Incorrect data types.
+- Invalid URLs.
+- Unsupported enum values.
+- Incompatible security settings.
+- A configuration intended for one application version being used with another.
+
+Approaches:
+
+- Validate configuration during startup.
+- Use typed configuration properties and constraints.
+- Reject invalid configurations before deployment.
+- Test configuration against the application version that consumes it.
+- Validate relationships between settings, not just individual values.
+
+For Spring Boot, `@ConfigurationProperties` with Jakarta Bean Validation can help enforce constraints on bound configuration values.
+
+### H. Configuration security and access control
+
+A centralized configuration system may expose information about internal infrastructure, service topology, and operational behavior. It may also accidentally expose secrets if they are stored alongside ordinary settings.
+
+Challenges include unauthorized reads, unauthorized modifications, leaked credentials, and insufficient auditing.
+
+Approaches:
+
+- Authenticate clients connecting to configuration services.
+- Authorize access by service identity and configuration scope.
+- Use TLS for communication.
+- Keep secrets in a dedicated secret-management system where possible.
+- Audit changes and restrict who can modify production configuration.
+- Never log tokens, passwords, or private keys.
+
+Protecting read access matters, but protecting write access is equally important: an attacker who can change a service's endpoint or security policy may be able to redirect traffic or weaken security controls.
+
+### I. Observability and troubleshooting
+
+When a distributed request fails, the cause may be incorrect configuration rather than defective application code.
+
+Imagine the payment service is healthy, but the order service uses an outdated hostname. Ordinary application logs might show only connection failures.
+
+To diagnose the problem, operators need to know which configuration was active when the failure occurred.
+
+Useful operational information includes:
+
+- Configuration version or revision.
+- Application and deployment version.
+- Active Spring profile.
+- Effective non-sensitive property values.
+- Configuration retrieval failures.
+- Refresh failures and timestamps.
+- The source of an overridden property.
+
+Avoid exposing sensitive values while collecting this information.
+
+### J. Configuration change management
+
+A configuration change can have the same operational impact as a code deployment.
+
+For example, changing `max-retries` from two to twenty could greatly increase downstream traffic during an outage. Changing an authorization setting could grant access that was previously denied.
+
+A robust change process may include:
+
+1. Review and approval.
+2. Automated validation.
+3. Testing in a non-production environment.
+4. Controlled deployment or rollout.
+5. Health checks and monitoring.
+6. Rollback procedures.
+
+Not every low-risk change requires manual approval. The process should be proportional to the risk.
+
+### Summary of challenges
+
+| Challenge            | Main risk                                           | Typical control                                  |
+| -------------------- | --------------------------------------------------- | ------------------------------------------------ |
+| Consistency          | Instances behave differently                        | Versioning and drift detection                   |
+| Startup dependencies | Service cannot initialize                           | Explicit bootstrap configuration                 |
+| Availability         | New instances cannot obtain settings                | HA, retries, deliberate fallback                 |
+| Runtime refresh      | New values are not applied                          | Refresh support or restart                       |
+| Rollout              | Mixed versions are incompatible                     | Staged, backward-compatible changes              |
+| Drift                | Actual state diverges from intended state           | Reconciliation and configuration-as-code         |
+| Validation           | Invalid or incompatible settings                    | Typed properties and automated tests             |
+| Security             | Unauthorized access or modification                 | Authentication, authorization, secret management |
+| Observability        | Configuration-related failures are hard to diagnose | Version tracking and safe diagnostics            |
+| Change management    | A bad change causes an outage                       | Reviews, rollout controls, rollback              |
+
+## Samples
+
+* [Multiplication Microservices Example](https://github.com/books-java/Learn-Microservices-with-Spring-Boot-3)
+
+## How these five topics fit together
+
+The topics form a useful conceptual sequence for your documentation:
+
+1. `configuration-in-distributed-systems`
+
+   Establishes what configuration is and why distributed architectures need it.
+2. `externalized-configuration`
+
+   Explains how settings are separated from application code and artifacts.
+3. `centralized-vs-decentralized-configuration`
+
+   Explains where configuration is managed and how services obtain it.
+4. `configuration-vs-secrets`
+
+   Establishes the security boundary between ordinary settings and sensitive credentials.
+5. `configuration-management-challenges`
+
+   Explores consistency, availability, rollout, refresh, validation, and operational risks.
+
+After these foundational topics, your next section can move into implementation and architecture decisions:
+
+- Configuration-as-code and versioning
+- Configuration repositories and environment profiles
+- Spring Cloud Config Server architecture
+- Client bootstrap and `spring.config.import`
+- Service discovery and configuration dependencies
+- Configuration security and secret management
+- Dynamic refresh and rollout strategies
+- Configuration validation, drift detection, and observability
+
+This keeps the first five pages focused on concepts and trade-offs, while the following pages explain how to implement them in a real microservices architecture.

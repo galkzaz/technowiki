@@ -1,0 +1,425 @@
+## Java Implementation
+
+Let's implement Bidirectional Search in Java and walk through how the two BFS processes work together.
+
+We'll use an undirected, unweighted graph, with:
+
+- Source node: `0`
+- Destination node: `9`
+- Two independent BFS searches.
+- Parent arrays to reconstruct the shortest path.
+- Visited arrays to detect when the searches meet.
+
+### 1. Example graph
+
+```
+             1 -------- 4
+           / |           \
+          /  5           (9) ---- 10
+         /                /        \
+       (0)               8          11
+         \              /           12
+          \            /
+           2 -------- 3
+            \        /
+             6      7
+```
+
+We want to find the shortest path from `0` to `9`.
+
+### 2. Java implementation
+
+We'll use arrays for queues and visited tracking to make the BFS mechanics explicit.
+
+```Java
+
+import java.util.Arrays;
+
+public class BidirectionalBFS {
+
+    static class SearchResult {
+        int[] path;
+        int visitedCount;
+
+        SearchResult(int[] path, int visitedCount) {
+            this.path = path;
+            this.visitedCount = visitedCount;
+        }
+    }
+
+    // Expand one complete BFS level.
+    // Returns the meeting node, or -1 if no meeting occurs.
+    static int expandLevel(
+            int[][] graph,
+            int[] queue,
+            int[] head,
+            int[] tail,
+            boolean[] ownVisited,
+            boolean[] otherVisited,
+            int[] ownParent) {
+
+        int levelSize = tail[0] - head[0];
+
+        for (int i = 0; i < levelSize; i++) {
+
+            int current = queue[head[0]++];
+
+            for (int neighbor : graph[current]) {
+
+                if (ownVisited[neighbor]) {
+                    continue;
+                }
+
+                ownVisited[neighbor] = true;
+                ownParent[neighbor] = current;
+
+                // Have the two searches met?
+                if (otherVisited[neighbor]) {
+                    return neighbor;
+                }
+
+                queue[tail[0]++] = neighbor;
+            }
+        }
+
+        return -1;
+    }
+
+    static SearchResult bidirectionalBFS(
+            int[][] graph, int source, int target) {
+
+        int n = graph.length;
+
+        if (source < 0 || source >= n ||
+            target < 0 || target >= n) {
+            throw new IllegalArgumentException("Invalid node");
+        }
+
+        if (source == target) {
+            return new SearchResult(
+                new int[]{source}, 1);
+        }
+
+        boolean[] visitedStart = new boolean[n];
+        boolean[] visitedTarget = new boolean[n];
+
+        int[] parentStart = new int[n];
+        int[] parentTarget = new int[n];
+
+        Arrays.fill(parentStart, -1);
+        Arrays.fill(parentTarget, -1);
+
+        // Two independent queues.
+        int[] queueStart = new int[n];
+        int[] queueTarget = new int[n];
+
+        int[] headStart = {0};
+        int[] tailStart = {0};
+
+        int[] headTarget = {0};
+        int[] tailTarget = {0};
+
+        // Initialize forward BFS.
+        queueStart[tailStart[0]++] = source;
+        visitedStart[source] = true;
+
+        // Initialize backward BFS.
+        queueTarget[tailTarget[0]++] = target;
+        visitedTarget[target] = true;
+
+        int meetingNode = -1;
+
+        // Alternate complete BFS levels.
+        while (headStart[0] < tailStart[0] &&
+               headTarget[0] < tailTarget[0]) {
+
+            meetingNode = expandLevel(
+                graph,
+                queueStart,
+                headStart,
+                tailStart,
+                visitedStart,
+                visitedTarget,
+                parentStart
+            );
+
+            if (meetingNode != -1) {
+                break;
+            }
+
+            meetingNode = expandLevel(
+                graph,
+                queueTarget,
+                headTarget,
+                tailTarget,
+                visitedTarget,
+                visitedStart,
+                parentTarget
+            );
+
+            if (meetingNode != -1) {
+                break;
+            }
+        }
+
+        if (meetingNode == -1) {
+            return new SearchResult(new int[0],
+                countVisited(visitedStart, visitedTarget));
+        }
+
+        int[] path = reconstructPath(
+            meetingNode, parentStart, parentTarget, n);
+
+        return new SearchResult(
+            path, countVisited(visitedStart, visitedTarget));
+    }
+
+    static int[] reconstructPath(
+            int meetingNode,
+            int[] parentStart,
+            int[] parentTarget,
+            int n) {
+
+        int[] path = new int[n];
+        int length = 0;
+
+        // Follow parents from meeting node to source.
+        int current = meetingNode;
+
+        while (current != -1) {
+            path[length++] = current;
+            current = parentStart[current];
+        }
+
+        // Reverse the source-to-meeting portion.
+        for (int i = 0; i < length / 2; i++) {
+            int temp = path[i];
+            path[i] = path[length - 1 - i];
+            path[length - 1 - i] = temp;
+        }
+
+        // Continue from meeting node toward target.
+        current = parentTarget[meetingNode];
+
+        while (current != -1) {
+            path[length++] = current;
+            current = parentTarget[current];
+        }
+
+        return Arrays.copyOf(path, length);
+    }
+
+    static int countVisited(boolean[] a, boolean[] b) {
+        int count = 0;
+
+        for (int i = 0; i < a.length; i++) {
+            if (a[i] || b[i]) {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    public static void main(String[] args) {
+
+        int[][] graph = {
+            {1, 2},       // 0
+            {0, 4, 5},    // 1
+            {0, 6, 7},    // 2
+            {8},          // 3
+            {1, 9},       // 4
+            {1},          // 5
+            {2},          // 6
+            {2},          // 7
+            {3, 9},       // 8
+            {4, 8, 10},   // 9
+            {9, 11, 12},  // 10
+            {10},         // 11
+            {10}          // 12
+        };
+
+        int source = 0;
+        int target = 9;
+
+        SearchResult result =
+            bidirectionalBFS(graph, source, target);
+
+        if (result.path.length == 0) {
+            System.out.println("No path found.");
+        } else {
+            System.out.println(
+                "Shortest path: " +
+                Arrays.toString(result.path));
+
+            System.out.println(
+                "Path length: " +
+                (result.path.length - 1));
+
+            System.out.println(
+                "Visited nodes: " +
+                result.visitedCount);
+        }
+    }
+}
+
+```
+
+### 3. Understanding the two parent arrays
+
+This is the most important part of the implementation.
+
+We maintain two parent arrays:
+
+| Array            | Purpose                                                                    |
+| ---------------- | -------------------------------------------------------------------------- |
+| `parentStart[]`  | Records how we reached each node from source `0`.                          |
+| `parentTarget[]` | Records how we reached each node from destination `9`, searching backward. |
+
+For example, suppose the searches meet at node `4`.
+
+Forward search:
+
+```
+parentStart:
+
+Node    Parent
+  0       -1
+  1        0
+  4        1
+```
+
+Backward search:
+
+```
+parentTarget:
+
+Node    Parent
+  9       -1
+  4        9
+```
+
+Notice that the parent relationship in the backward search points toward the destination.
+
+We can therefore reconstruct:
+
+```
+Forward:   0 → 1 → 4
+
+Backward:  4 → 9
+
+Combined:  0 → 1 → 4 → 9
+```
+
+This is how we obtain the complete shortest path without having to run another BFS.
+
+### 4. Step-by-step execution
+
+Let's trace the actual example.
+
+Initial state
+
+```
+Forward queue: [0]
+Backward queue: [9]
+
+Forward visited: {0}
+Backward visited: {9}
+```
+
+Iteration 1 – Forward BFS
+
+Expand node `0`:
+
+```
+     1
+    /
+   0
+    \
+     2
+```
+
+```
+Forward queue: [1, 2]
+Forward visited: {0, 1, 2}
+```
+
+Iteration 1 – Backward BFS
+
+Expand node `9`:
+
+```
+4 ── 9 ── 8
+      |
+     10
+```
+
+```
+Backward queue: [4, 8, 10]
+Backward visited: {9, 4, 8, 10}
+```
+
+Iteration 2 – Forward BFS
+
+Expand node `1`.
+
+Its neighbors are `0`, `4`, and `5`.
+
+- `0` is already visited by forward search.
+- `4` has been visited by backward search.
+- Therefore, the searches meet at `4`.
+
+Meeting node: 4
+
+```
+Forward search:  0 → 1 → 4
+
+Backward search: 9 → 4
+
+Final path:      0 → 1 → 4 → 9
+```
+
+Notice that we don't need to expand every node in either search area.
+
+### 5. Expected output
+
+```
+Shortest path: [0, 1, 4, 9]
+Path length: 3
+Visited nodes: 8
+```
+
+The visited count is the number of distinct nodes discovered by either search, not the sum of the two visited-array sizes.
+
+### 6. Complexity analysis
+
+Let:
+
+- \\(V\\) = number of vertices.
+- \\(E\\) = number of edges.
+- \\(b\\) = average branching factor.
+- \\(d\\) = shortest-path depth.
+
+| Complexity       | Bidirectional BFS                                       |
+| ---------------- | ------------------------------------------------------- |
+| Time             | \\(O(b^{d/2})\\) under the usual branching-factor model |
+| Space            | \\(O(b^{d/2})\\) under the same model                   |
+| Worst-case time  | \\(O(V+E)\\)                                            |
+| Worst-case space | \\(O(V)\\)                                              |
+
+The important distinction is that the exponential improvement is a search-space estimate, not a guarantee for every graph.
+
+### 7. Recommended next exercises
+
+To make sure you understand the algorithm, I'd suggest these exercises in order:
+
+1. Debug Bidirectional BFS: Print both queues, visited arrays, and parent arrays after every expansion.
+2. Compare BFS vs. Bidirectional BFS: Measure how many nodes each algorithm visits.
+3. Directed graphs: Implement backward traversal using a reversed adjacency list.
+4. Disconnected graphs: Handle cases where no path exists.
+
+The most valuable next step is exercise 1, because it makes the two simultaneous searches much easier to understand.
+
+I can also prepare a fresh Java graph-search exercise tomorrow.
+
+🧩Send a Java graph-search exercise tomorrowTap to set up

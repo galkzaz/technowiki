@@ -1,0 +1,2559 @@
+---
+title: Transformer Architecture
+description: "Study notes, explanations, examples, and practical exercises for transformer architecture."
+---
+
+The Transformer architecture is the foundation of most modern Large Language Models (LLMs), including GPT, LLaMA, and Mistral.
+
+To understand how an LLM works internally, we need to understand how the Transformer takes text, converts it into numerical representations, identifies relationships between words, processes those representations through neural network layers, and finally predicts the next token.
+
+The Transformer was introduced in the 2017 research paper: Attention Is All You Need, by researchers at Google.
+
+Before Transformers, many NLP systems relied on recurrent neural networks (RNNs) and Long Short-Term Memory networks (LSTMs). These processed sequences step by step, making parallel processing difficult and long-range dependencies harder to handle.
+
+Transformers introduced a different approach: Attention, which allows tokens to interact with other tokens directly, rather than relying on a sequential recurrent process.
+
+## Big picture: How does a Transformer work?
+Let's start with the overall process.
+
+Suppose we give an LLM the following prompt:
+```
+Explain how computers work
+```
+
+The Transformer needs to process this input and generate a meaningful answer.
+
+At a high level, the process looks like this:
+1. Input Text
+    ```
+    Explain how computers work
+    ```
+2. Tokenization
+
+    Convert text into token IDs
+
+3. Embedding + Positional Information
+
+    Convert tokens into numerical vectors and represent their positions
+
+4. Transformer Layers
+
+    Attention + Feed-Forward Networks, repeated many times
+
+5. Output Projection + Softmax
+
+    Calculate probabilities for possible next tokens
+
+6. Next-Token Selection
+
+    Select a token according to the generation strategy
+
+7. Repeat until generation finishes
+
+This is a simplified view of a Decoder-Only Transformer, the architecture commonly used by modern generative LLMs.
+
+Let's explore every component.
+
+## Transformer architecture components
+A modern Decoder-Only Transformer consists of several major components:
+1. Tokenization
+2. Token Embeddings
+3. Positional Information
+4. Transformer Blocks
+   - Multi-Head Self-Attention
+   - Feed-Forward Neural Network (FFN)
+   - Residual Connections
+   - Layer Normalization
+5. Output Projection (Language Modeling Head)
+6. Softmax and Next-Token Prediction
+
+Here is a simplified architectural view:
+
+![](/docs/assets/artificial-intelligence/08-generative-ai/large-language-models/transformer-architecture/Decoder-only-architecture-and-the-causal-mask.png)
+
+An important distinction: tokenization is generally performed outside the neural network itself. The Transformer receives token IDs, which are then converted into embeddings.
+
+## Tokenization: Converting text into tokens
+A computer does not directly understand words as humans do. Before the Transformer can process text, the input must be converted into numerical identifiers.
+
+This process is called Tokenization.
+
+Consider:
+```
+Explain how computers work
+```
+
+A tokenizer divides the sentence into tokens.
+
+For example, a simplified tokenizer might produce:
+```
+["Explain", " how", " computers", " work"]
+
+```
+Each token has a corresponding numerical ID in the model's vocabulary.
+```
+Token	        Token ID
+Explain	        15234
+how	            1268
+computers	    7321
+work	        1493
+```
+These IDs are illustrative, not actual GPT vocabulary IDs.
+
+The result is a sequence of integers:
+```
+[15234, 1268, 7321, 1493]
+```
+
+**Why do we need tokenization?**
+
+Because neural networks perform mathematical operations on numbers, not directly on text.
+
+Important concepts:
+- A token can be a complete word.
+- A token can be part of a word.
+- A token can be punctuation.
+- A token can represent whitespace together with text.
+- A vocabulary is the collection of tokens known to a tokenizer.
+
+For example, an unfamiliar word might be divided into multiple subword tokens rather than treated as one unknown word.
+
+This makes tokenization flexible and allows models to handle words they did not encounter as complete units during training.
+
+## Token Embeddings: Converting token IDs into vectors
+After tokenization, we have numerical IDs.
+
+However, these IDs are not meaningful numerical representations of language.
+
+For example:
+```
+computer = 100
+car      = 200
+apple    = 300
+```
+
+The fact that computer has ID 100 and car has ID 200 does not mean that a car is twice as similar to an apple or that the difference between these IDs has linguistic meaning.
+
+We need a better representation. This is where **Token Embeddings** come in.
+
+An embedding converts each token ID into a high-dimensional numerical vector.
+
+For example:
+```
+Token ID: 15234
+       |
+       v
+Embedding Layer
+       |
+       v
+[0.21, -0.43, 0.17, 0.82, ...]
+```
+
+Instead of representing a token with a single integer, we represent it with hundreds or thousands of numerical values.
+
+For illustration, imagine a model with an embedding dimension of 4:
+```
+Token	    Embedding vector
+Explain	    [0.21, 0.43, -0.12, 0.67]
+how	        [0.15, -0.32, 0.51, 0.22]
+computers	[0.82, 0.11, 0.34, -0.25]
+work	    [0.45, 0.62, -0.18, 0.31]
+```
+*Illustrative values only. Real embedding dimensions are much larger.*
+
+**Where do embeddings come from?**
+
+The Transformer has an embedding matrix, which is a collection of trainable numerical vectors.
+
+Suppose:
+- Vocabulary size = 50,000 tokens.
+- Embedding dimension = 768.
+
+The embedding matrix has dimensions:
+\[
+E \in \mathbb{R}^{50000 \times 768}
+\]
+
+Each row corresponds to one token's embedding.
+
+When a token ID arrives, the model retrieves the corresponding row.
+
+For example:
+```
+Embedding Matrix
+       |
+       +---- Token ID 15234
+       |            |
+       |            v
+       |       [0.21, 0.43, ...]
+       |
+       +---- Token ID 1268
+       |            |
+       |            v
+       |       [0.15, -0.32, ...]
+       |
+       +---- Token ID 7321
+                    |
+                    v
+               [0.82, 0.11, ...]
+
+```
+During training, these embeddings are adjusted through backpropagation and gradient descent.
+
+Over time, the model learns useful numerical representations that help it process language.
+
+An important distinction: embeddings are not predefined dictionary definitions. They are learned numerical representations that become useful through training.
+
+## Positional Information: Understanding token order
+Consider these two sentences:
+```
+The dog chased the cat.
+```
+```
+The cat chased the dog.
+```
+
+Both sentences contain almost exactly the same words, but their meanings are different because the word order changes.
+
+**How does a Transformer understand this?**
+
+Self-attention alone does not inherently know the original order of tokens. We need to provide positional information.
+
+Traditionally, the original Transformer used **Positional Encoding**.
+
+### Positional Encoding
+
+Each token receives information about its position in the sequence.
+
+For example:
+```
+Token	Position
+The	    1
+dog	    2
+chased	3
+the	    4
+cat	    5
+```
+The model combines the token embedding with a positional representation.
+
+Conceptually:
+\[
+X = E + P
+\]
+
+Where:
+- \(E\): Token embeddings.
+- \(P\): Positional encodings.
+- \(X\): Input representations passed to the Transformer.
+
+For example:
+```
+Token embedding        Position encoding
+       |                       |
+       v                       v
+ [0.2, 0.4, ...]        [0.1, 0.3, ...]
+       |                       |
+       +-----------+-----------+
+                   |
+                   v
+          Combined representation
+```
+
+The original Transformer used sine and cosine functions to generate positional encodings.
+
+The important idea is that the representation contains both token information and positional information.
+
+
+### Modern positional methods
+
+Modern LLMs do not all use the original positional encoding approach.
+
+One particularly important technique is RoPE (Rotary Positional Embeddings).
+
+RoPE incorporates positional information by rotating query and key vectors according to token positions.
+
+This allows attention to incorporate relative positional relationships between tokens.
+
+RoPE is used in many modern decoder-based LLM architectures, including LLaMA.
+
+So, when studying modern Transformers, remember:
+
+- Original Transformer: Sinusoidal positional encoding.
+- Some Transformer models: Learned positional embeddings.
+- Many modern LLMs: RoPE or other positional methods.
+
+## Transformer Blocks: The heart of the architecture
+
+Now we reach the most important component.
+
+A Transformer consists of multiple Transformer Blocks stacked on top of each other.
+
+Each block processes the representations produced by the previous block.
+
+A simplified Decoder-Only Transformer block looks like this:
+
+![](/docs/assets/artificial-intelligence/08-generative-ai/large-language-models/transformer-architecture/decoder-only-block.jpg)
+
+Each block contains two major computational components:
+1. Multi-Head Self-Attention.
+2. Feed-Forward Neural Network (FFN).
+
+It also uses supporting mechanisms:
+- Residual Connections.
+- Layer Normalization.
+
+Let's understand each one.
+### Self-Attention: Understanding relationships between tokens
+Self-Attention is one of the most important innovations of the Transformer architecture.
+
+It allows each token to examine other tokens and determine which ones are relevant to its current context.
+
+Consider:
+```
+The animal didn't cross the street
+because it was tired.
+```
+
+What does the word it refer to? It refers to The `animal`.
+
+To understand this sentence, the model needs to identify the relationship between it and animal.
+
+Self-Attention allows the model to learn such relationships.
+
+Another example:
+```
+The bank approved the loan.
+```
+
+The word bank is related to financial concepts.
+
+But:
+```
+We sat on the bank of the river.
+```
+
+Here, bank refers to the side of a river.
+
+The same token can have different contextual meanings depending on the surrounding tokens.
+
+Self-Attention helps the Transformer build contextual representations.
+
+**How does Self-Attention work?**
+
+Self-Attention uses three important vectors:
+- Query (Q)
+- Key (K)
+- Value (V)
+
+These are generated from the input representations using learned weight matrices.
+
+Let's understand their roles through an analogy.
+
+Imagine a search engine:
+```
+Component	Analogy	            Purpose
+Query	    Search request	    What information am I looking for?
+Key	        Document index	    What information does each token offer?
+Value	    Document content	What information should I retrieve?
+```
+In a Transformer:
+- Query represents what a token is looking for.
+- Key represents what a token offers for matching.
+- Value contains the information that can be passed to another token.
+
+#### Step 1: Generate Q, K, and V
+Suppose our input contains three tokens:
+```
+The animal slept
+```
+
+Each token has an embedding vector.
+
+The model applies three learned linear transformations:
+\[
+Q=XW_Q
+\]
+
+\[
+K=XW_K
+\]
+
+\[
+V=XW_V
+\]
+
+Where:
+- \(X\): Input representations.
+- \(W_Q\): Query weight matrix.
+- \(W_K\): Key weight matrix.
+- \(W_V\): Value weight matrix.
+
+The weight matrices are learned during training.
+
+The result is three new sets of vectors:
+```
+Input representations
+          |
+     +----+----+
+     |    |    |
+     v    v    v
+     Q    K    V
+
+```
+Each token now has its own Query, Key, and Value vectors.
+
+#### Step 2: Calculate attention scores
+The model compares each Query with the Keys of the available tokens.
+
+The comparison uses the dot product.
+\[
+Scores = QK^T
+\]
+
+A higher score means that the corresponding key is more relevant to the query, before normalization and masking.
+
+For example, imagine we are calculating attention for the token slept.
+
+It might produce these scores:
+```
+Token	Attention score
+The	    0.5
+animal	2.8
+slept	1.2
+```
+These numbers are illustrative.
+
+The token slept gives more attention to animal than to The in this example.
+Step 3: Scale the attention scores
+The Transformer divides the scores by the square root of the key dimension.
+\[
+ScaledScores =
+\frac{QK^T}{\sqrt{d_k}}
+\]
+
+Where \(d_k\) is the dimension of the Key vectors.
+
+Why do we divide by \(\sqrt{d_k}\)?
+
+As the vector dimension increases, dot products can become large.
+
+Large values can cause the Softmax function to produce extremely concentrated probabilities, making optimization more difficult.
+
+Scaling helps keep the values in a more suitable range.
+#### Step 4: Apply Softmax
+The scaled scores are passed through the Softmax function.
+
+Softmax converts the scores into probabilities that sum to 1.
+
+For example:
+```
+Token	Scaled score	Attention weight
+The	    0.5	            0.08
+animal	2.8	            0.78
+slept	1.2	            0.14
+Total		            1.00
+```
+The model has now calculated how much attention to give to each token.
+#### Step 5: Calculate the weighted sum of Values
+Finally, the model multiplies the attention weights by their corresponding Value vectors and adds the results.
+\[
+Attention(Q,K,V)=
+Softmax\left(
+\frac{QK^T}{\sqrt{d_k}}
+\right)V
+\]
+
+Conceptually:
+```
+Attention weights
+       |
+       +------ 0.08 × Value(The)
+       |
+       +------ 0.78 × Value(animal)
+       |
+       +------ 0.14 × Value(slept)
+                    |
+                    v
+              Sum the results
+                    |
+                    v
+            New contextual vector
+```
+
+The resulting vector contains information gathered from other tokens, weighted according to their relevance.
+
+This is how Self-Attention helps each token build a context-aware representation.
+
+Important: The attention weights are learned dynamically from the current input. They are not fixed rules such as "the word it always attends to the nearest noun."
+
+### Causal Self-Attention (Masked Self-Attention)
+There is an important difference between the Self-Attention used in an Encoder and the attention used in a Decoder-Only LLM.
+
+An Encoder can generally attend to tokens on both sides of a position.
+
+A Decoder-Only model uses Causal Self-Attention.
+
+Why?
+
+Because the model must predict the next token without seeing future tokens.
+
+Consider:
+```
+The computer processes information
+```
+
+When processing the token computer, the model can see:
+```
+The computer
+```
+
+But it cannot see:
+```
+processes information
+```
+
+The Transformer achieves this through a Causal Attention Mask.
+
+**Attention mask example**
+
+For these tokens:
+```
+The   computer   processes   information
+```
+
+The allowed attention relationships look like this:
+```
+Causal attention matrix
+
+Rows represent the current token; columns represent tokens it can attend to. ✓ = allowed, ✕ = blocked.
+
+Token	     The	computer	processes	information
+The	          ✓	       ✕	      ✕	          ✕
+computer	  ✓	       ✓	      ✕	          ✕
+processes	  ✓	       ✓	      ✓	          ✕
+information	  ✓	       ✓	      ✓	          ✓
+```
+
+The mask prevents a token from attending to future positions.
+
+Mathematically, the model adds a very large negative value to the scores of blocked positions before applying Softmax.
+
+This makes their resulting attention probabilities effectively zero.
+
+**Why is this important?**
+
+Imagine the model is being trained to predict the next token.
+
+If it could see future tokens, it could simply use the answer instead of learning to predict it.
+
+Causal masking prevents this information leakage.
+
+It is fundamental to autoregressive language modeling.
+
+### Multi-Head Attention: Looking at relationships from different perspectives
+So far, we have discussed one attention operation.
+
+However, Transformers generally use Multi-Head Attention.
+
+Instead of calculating attention once, the model calculates attention using multiple separate heads.
+
+Each attention head has its own learned Query, Key, and Value projections.
+
+Why multiple heads?
+
+Because language contains many different relationships.
+
+For example:
+```
+John gave Mary a book because she needed it.
+```
+
+Different attention heads may learn to focus on different relationships:
+- One head may focus on relationships between people and pronouns.
+- Another may focus on grammatical relationships.
+- Another may focus on relationships between verbs and objects.
+- Another may focus on nearby contextual information.
+
+These are illustrative possibilities, not guaranteed human-readable roles for individual heads.
+
+**How Multi-Head Attention works**
+
+Suppose we have a model with:
+- Hidden dimension = 512.
+- Number of attention heads = 8.
+- Dimension per head = 64.
+
+Each head performs its own attention calculation.
+\[
+head_i =
+Attention(Q_i,K_i,V_i)
+\]
+
+The outputs are concatenated:
+\[
+Concat(head_1,\ldots,head_8)
+\]
+
+Then a learned linear transformation combines them:
+\[
+MultiHead(Q,K,V)=
+Concat(head_1,\ldots,head_8)W_O
+\]
+
+Visual representation:
+
+
+
+
+
+
+
+wasilzafar.com
+
+
+The important idea:
+
+Multi-Head Attention allows the Transformer to capture multiple types of relationships between tokens simultaneously.
+Multi-Head Attention vs Multi-Query and Grouped-Query Attention
+Modern LLMs sometimes use optimized attention variants:
+Type	Key/Value arrangement	Main idea
+Multi-Head Attention (MHA)	Separate K/V per head	Traditional architecture
+Multi-Query Attention (MQA)	Shared K/V across heads	Reduces memory usage
+Grouped-Query Attention (GQA)	K/V shared by groups of heads	Balances efficiency and quality
+
+These variants are particularly important for inference efficiency because they can reduce the memory required to store attention keys and values.
+
+### Feed-Forward Neural Network (FFN)
+After the attention mechanism, the Transformer passes the resulting representations through another neural network called the Feed-Forward Network (FFN).
+
+You may also see it called:
+- Position-wise Feed-Forward Network.
+- MLP (Multi-Layer Perceptron).
+- Feed-Forward Layer.
+What does it do?
+
+Self-Attention allows tokens to exchange and combine information.
+
+The Feed-Forward Network then applies additional learned transformations to the resulting representation.
+
+Think of the difference this way:
+- Attention: Which information should I gather from other tokens?
+- FFN: How should I transform the information I have gathered?
+How does FFN work?
+A traditional Transformer FFN contains two linear layers with a nonlinear activation function between them.
+\[
+FFN(x)=
+W_2\cdot ReLU(W_1x+b_1)+b_2
+\]
+
+Where:
+- \(W_1\), \(W_2\): Learned weight matrices.
+- \(b_1\), \(b_2\): Bias vectors.
+- ReLU: Activation function.
+Consider a simplified example:
+Input vector
+     |
+     v
+Linear Layer 1
+     |
+     v
+Activation Function
+     |
+     v
+Linear Layer 2
+     |
+     v
+Output vector
+
+
+Suppose:
+- Hidden dimension = 512.
+- Intermediate FFN dimension = 2048.
+The first layer expands the representation from 512 to 2048 dimensions.
+
+The second layer projects it back to 512 dimensions.
+\[
+512 \rightarrow 2048 \rightarrow 512
+\]
+
+This expansion allows the network to perform richer nonlinear transformations.
+Why is the FFN important?
+Attention primarily mixes information across token positions.
+
+The FFN applies nonlinear transformations to each position independently (in the standard Transformer block).
+
+Both are necessary:
+- Attention provides contextual interaction.
+- FFN provides additional computational capacity for transforming representations.
+Modern LLMs often use alternatives to the original FFN, such as SwiGLU, which uses gated nonlinear transformations.
+
+### Residual Connections: Preserving information
+Another important component is the Residual Connection, also called a Skip Connection.
+
+Imagine a neural network with many layers.
+
+As information passes through these layers, training can become difficult. Deep networks may suffer from optimization problems, including vanishing gradients.
+
+Residual connections help by allowing information to bypass a transformation.
+
+Instead of passing only the transformed output forward, we add the original input.
+\[
+Output = x + F(x)
+\]
+
+Where:
+- \(x\): Original input.
+- \(F(x)\): Transformation performed by the layer.
+Visual representation:
+              +----------------------+
+              |                      |
+              |                      v
+Input --------+----> Transformation --+
+                                       |
+                                       v
+                                    Addition
+                                       |
+                                       v
+                                     Output
+
+
+Why is this useful?
+
+The network does not have to learn a completely new representation at every stage.
+
+It can learn a modification to the existing representation.
+
+Residual connections also provide a direct path for gradients during backpropagation, making deep networks easier to train.
+
+### Layer Normalization: Stabilizing the network
+Transformers also use Layer Normalization (LayerNorm).
+
+As representations pass through neural network layers, their numerical distributions can vary.
+
+Layer Normalization helps stabilize these representations.
+
+For a vector of activations, it calculates the mean and variance across its features and normalizes the values.
+
+A simplified formula:
+\[
+LayerNorm(x)=
+\gamma\frac{x-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta
+\]
+
+Where:
+- \(\mu\): Mean of the features.
+- \(\sigma^2\): Variance of the features.
+- \(\epsilon\): Small value for numerical stability.
+- \(\gamma\): Learnable scaling parameter.
+- \(\beta\): Learnable shifting parameter.
+Why is it important?
+- Helps stabilize training.
+- Improves optimization.
+- Makes deep Transformer networks easier to train.
+Pre-LayerNorm vs Post-LayerNorm
+There are different ways to arrange LayerNorm and residual connections.
+
+Post-LayerNorm (original Transformer arrangement):
+Input
+  |
+  v
+Attention / FFN
+  |
+  v
+Residual Addition
+  |
+  v
+LayerNorm
+  |
+  v
+Output
+
+
+Pre-LayerNorm (common in modern decoder LLMs):
+Input
+  |
+  +----------------------+
+  |                      |
+  v                      |
+LayerNorm                |
+  |                      |
+  v                      |
+Attention / FFN          |
+  |                      |
+  +----------------------+
+  |
+  v
+Addition
+  |
+  v
+Output
+
+
+In practice, modern implementations may also use RMSNorm instead of traditional LayerNorm.
+
+## Putting the Transformer Block together
+Now let's combine everything.
+
+A simplified Pre-LayerNorm Decoder Transformer block looks like this:
+Input representations
+
+Layer Normalization
+
+Masked Multi-Head Self-Attention
+
+Q, K, V → Attention → Output projection
+
+Residual Addition
+
+Layer Normalization
+
+Feed-Forward Network (MLP)
+
+Linear → Activation → Linear
+
+Residual Addition
+
+Output representations
+
+
+Notice that the block contains two main transformations:
+1. Attention.
+2. Feed-Forward Network.
+Each transformation has its own residual connection and normalization.
+
+The output of one Transformer Block becomes the input of the next.
+
+## Stacking Transformer Blocks
+A Transformer does not normally contain just one block.
+
+It stacks many blocks on top of each other.
+
+For example, imagine a model with 12 Transformer Blocks.
+Input Embeddings
+       |
+       v
++------------------+
+| Transformer  1   |
++------------------+
+       |
+       v
++------------------+
+| Transformer  2   |
++------------------+
+       |
+       v
++------------------+
+| Transformer  3   |
++------------------+
+       |
+       .
+       .
+       .
+       |
+       v
++------------------+
+| Transformer 12   |
++------------------+
+       |
+       v
+Output Representations
+
+
+Each block processes the representations produced by the previous block.
+
+Why do we need multiple blocks?
+
+Because the model needs sufficient computational depth to learn complex patterns and relationships.
+
+A simplified way to think about this:
+- Earlier layers can develop representations useful for local patterns and basic relationships.
+- Intermediate layers can combine more complex contextual information.
+- Later layers can develop representations useful for the model's prediction task.
+This is an intuition, not a strict rule. Individual layers can perform overlapping functions.
+Model depth and size
+Different LLMs use different numbers of Transformer Blocks.
+
+For example, the number of blocks, hidden dimensions, and attention heads are architectural hyperparameters.
+
+A model with more blocks is generally deeper, but more layers do not automatically guarantee better performance.
+
+Other factors matter too:
+- Number of parameters.
+- Training data quality and quantity.
+- Training method.
+- Attention configuration.
+- Model architecture.
+- Computational resources.
+
+## Output Projection: Converting representations into vocabulary scores
+After passing through all Transformer Blocks, the model has contextual representations for the input tokens.
+
+But these representations are not yet text.
+
+The model needs to convert them into scores representing possible next tokens.
+
+This is the job of the Output Projection, also known as the Language Modeling Head (LM Head).
+How does it work?
+Suppose the input is:
+Explain how computers work
+
+
+After processing the Transformer Blocks, the model obtains a final representation for each position.
+
+For next-token generation, it uses the representation at the final position.
+Transformer Blocks
+        |
+        v
+Final hidden representations
+        |
+        v
+Select final position
+        |
+        v
+Output Projection
+        |
+        v
+Vocabulary scores (Logits)
+
+
+The output projection is a learned linear transformation.
+\[
+Logits = hW_{vocab}+b
+\]
+
+Where:
+- \(h\): Final hidden representation.
+- \(W_{vocab}\): Output projection weights.
+- \(b\): Optional bias.
+- Logits: Scores for all possible vocabulary tokens.
+Example
+Suppose our vocabulary contains 50,000 tokens.
+
+The output projection generates 50,000 scores:
+Vocabulary
+    |
+    +---- computer   → 2.1
+    |
+    +---- processing → 5.8
+    |
+    +---- information → 4.3
+    |
+    +---- software   → 3.9
+    |
+    +---- banana     → 0.7
+    |
+    +---- ...        → ...
+
+
+These are called Logits.
+
+A logit is a raw numerical score, not a probability.
+
+The model now has scores for every possible next token in its vocabulary.
+
+## Softmax: Converting logits into probabilities
+The next step is applying the Softmax function.
+
+Softmax converts logits into probabilities that sum to 1.
+\[
+P(token_i)=
+\frac{e^{z_i}}{\sum_j e^{z_j}}
+\]
+
+Where:
+- \(z_i\): Logit for a particular token.
+- \(e\): Exponential function.
+- The denominator: Sum of exponentials for all vocabulary tokens.
+For example:
+Possible next token	Logit	Probability
+by	5.8	55%
+information	4.3	25%
+using	3.9	15%
+banana	0.7	5%
+Total		100%
+
+Illustrative probabilities, not an actual model prediction.
+
+The model now has a probability distribution over possible next tokens.
+How does the model select the next token?
+There are several generation strategies.
+
+Greedy decoding
+
+Always selects the token with the highest probability.
+
+In our example:
+by = 55%
+
+
+The model selects by.
+
+Sampling
+
+Randomly selects a token according to the probability distribution.
+
+This can produce different outputs for the same prompt.
+
+Top-k sampling
+
+Limits sampling to the k highest-probability tokens.
+
+Top-p (Nucleus) sampling
+
+Selects from the smallest group of tokens whose cumulative probability reaches a specified threshold.
+
+Temperature
+
+Adjusts the distribution before sampling.
+- Lower temperature: More concentrated distribution.
+- Higher temperature: More spread-out distribution.
+These techniques control generation behavior, not the underlying Transformer architecture.
+
+## Autoregressive Text Generation: How an LLM produces a complete answer
+Now we have reached the actual text generation process.
+
+Remember our original input:
+Explain how computers work
+
+
+The model predicts the next token, appends it to the sequence, and repeats the process.
+
+This is called Autoregressive Generation.
+
+Let's walk through an example.
+Interactive next-token generation
+A simplified demonstration of how a Decoder-Only LLM generates text one token at a time.
+CURRENT SEQUENCE
+Explain how computers work
+The original prompt is ready for processing.
+
+Generation step: 0 / 7
+
+0%
+
+
+
+PreviousGenerate next token
+
+The underlying process is:
+Original prompt
+       |
+       v
+Transformer
+       |
+       v
+Predict next token
+       |
+       v
+Append token to sequence
+       |
+       v
+Process updated sequence
+       |
+       v
+Predict another token
+       |
+       v
+Append another token
+       |
+       v
+       ...
+       |
+       v
+Stop generation
+
+
+This is why Decoder-Only models are called autoregressive models.
+
+The generated output becomes part of the input for subsequent predictions.
+Does the entire sequence get processed again every time?
+Conceptually, the model uses the entire available context to predict each next token.
+
+However, practical LLM implementations use an optimization called the KV Cache.
+
+During the first forward pass, the model computes and stores the Key and Value vectors for the existing tokens.
+
+When generating a new token, it reuses those cached vectors instead of recalculating them for every previous token.
+
+This significantly reduces redundant computation during generation.
+
+## Putting everything together: A complete LLM architecture
+Let's combine all the components into one complete picture.
+
+
+
+
+
+
+
+medium.com
+
+
+Here is the same architecture as a simplified text diagram:
+              INPUT TEXT
+                   |
+                   v
+              Tokenizer
+                   |
+                   v
+                Token IDs
+                   |
+                   v
+             Token Embedding
+                   |
+                   v
+          Positional Information
+                   |
+                   v
+        +-----------------------+
+        |   Transformer Block 1 |
+        |                       |
+        |  Causal Self-Attention|
+        |           |           |
+        |      Residual + Norm  |
+        |           |           |
+        |          FFN          |
+        |           |           |
+        |      Residual + Norm  |
+        +-----------------------+
+                   |
+                   v
+        +-----------------------+
+        |   Transformer Block 2 |
+        +-----------------------+
+                   |
+                   v
+                  ...
+                   |
+                   v
+        +-----------------------+
+        |   Transformer Block N |
+        +-----------------------+
+                   |
+                   v
+           Final Normalization
+                   |
+                   v
+             Output Projection
+                   |
+                   v
+                 Logits
+                   |
+                   v
+                Softmax
+                   |
+                   v
+           Next-Token Selection
+                   |
+                   v
+             Append New Token
+                   |
+                   +---------> Repeat
+
+
+This is the overall architecture we wanted to understand.
+## How is a Transformer trained?
+So far, we have focused on how a trained Transformer generates text.
+
+But how does it learn to predict the next token in the first place?
+
+This happens during the Pretraining stage of the LLM lifecycle.
+
+The basic training objective is Next-Token Prediction.
+
+Consider this training sentence:
+The computer processes information
+
+
+The model learns to predict the next token from the preceding tokens.
+Input	Expected next token
+The	computer
+The computer	processes
+The computer processes	information
+
+During training, the model performs the following steps:
+1. Receives a sequence of token IDs.
+2. Processes them through the Transformer Blocks.
+3. Predicts the next token at each position.
+4. Compares predictions with the actual next tokens.
+5. Calculates the prediction error using a loss function.
+6. Uses backpropagation to calculate gradients.
+7. Uses an optimizer such as AdamW to update model weights.
+Example: Prediction error
+Suppose the correct next token is:
+computer
+
+
+But the model predicts:
+Token	Predicted probability
+computer	10%
+processor	60%
+software	30%
+
+The model made an incorrect prediction.
+
+A loss function, commonly Cross-Entropy Loss, measures how far the prediction is from the correct answer.
+
+The optimizer then adjusts the model's parameters to improve future predictions.
+
+This process repeats over enormous numbers of training examples.
+
+Important: The model does not manually store a dictionary of answers. It learns patterns and relationships through adjustments to its numerical parameters.
+## Training vs Inference
+There are two different situations in which the Transformer operates.
+Aspect	Training	Inference
+Purpose	Learn language patterns	Generate predictions
+Input	Training sequences	User prompts and generated tokens
+Expected answers	Available in training data	Usually unknown
+Loss calculation	Yes	Not normally
+Backpropagation	Yes	No
+Weight updates	Yes	No
+Token generation	Used for prediction objectives	Used to produce responses
+
+For example:
+
+During training:
+Input:
+The capital of France is
+
+Expected:
+Paris
+
+Model prediction:
+London
+
+       |
+       v
+
+Calculate loss
+       |
+       v
+
+Backpropagation
+       |
+       v
+
+Update weights
+
+
+During inference:
+User:
+The capital of France is
+
+       |
+       v
+
+Transformer
+       |
+       v
+
+Predict next token
+       |
+       v
+
+Paris
+       |
+       v
+
+Return generated text
+
+
+During normal inference, the model's learned weights remain unchanged.
+
+## Important architectural concepts and terminology
+Here is a summary of the terminology you will encounter when studying LLM architecture.
+Component	Responsibility
+Tokenizer	Converts text into token IDs
+Embedding	Converts token IDs into vectors
+Positional Encoding / RoPE	Provides positional information
+Self-Attention	Allows tokens to exchange contextual information
+Causal Mask	Prevents access to future tokens
+Query (Q)	Represents what a token is looking for
+Key (K)	Represents information used for attention matching
+Value (V)	Carries information used in attention aggregation
+Multi-Head Attention	Processes multiple attention relationships
+FFN / MLP	Applies nonlinear transformations
+Residual Connection	Adds the original representation to a transformed one
+LayerNorm / RMSNorm	Normalizes representations
+Transformer Blocks	Repeated computational units
+Output Projection	Maps hidden representations to vocabulary scores
+Logits	Raw scores for possible next tokens
+Softmax	Converts scores into probabilities
+Sampling / Decoding	Determines which token to generate
+KV Cache	Reuses previously calculated Key and Value vectors
+
+## How does this relate to Encoder-Decoder and Decoder-Only?
+Now that you understand the internal components, the differences between the three Transformer architectures should be clearer.
+Encoder-Only (BERT)
+Encoder
+Bidirectional Self-Attention
+
+Can attend to preceding and following tokens
+
+Designed primarily for understanding and representing text.
+
+Encoder-Decoder (T5, BART)
+Encoder
+
+Bidirectional Self-Attention
+
+Decoder
+
+Causal Self-Attention + Cross-Attention
+
+
+Designed to transform an input sequence into an output sequence.
+
+Decoder-Only (GPT, LLaMA)
+Decoder
+Causal Self-Attention
+
+Can attend only to previous and current tokens
+
+Designed for autoregressive next-token prediction and text generation.
+
+One important distinction: all three architectures use Transformer building blocks, but they arrange and configure attention differently.
+
+## What should you learn next?
+For a deeper understanding of LLMs, I recommend organizing your Transformer study into the following topics.
+Order	Topic	Importance
+1	Transformer Architecture Overview	Current topic
+2	Attention Mechanism	Essential
+3	Self-Attention: Q, K, V	Essential
+4	Scaled Dot-Product Attention	Essential
+5	Causal / Masked Attention	Essential
+6	Multi-Head Attention	Essential
+7	Positional Encoding and RoPE	Important
+8	Feed-Forward Networks and SwiGLU	Important
+9	Residual Connections and LayerNorm / RMSNorm	Important
+10	KV Cache and Efficient Inference	Important
+11	Transformer Training and Loss Functions	Advanced
+12	Modern LLM Architectures: MHA, GQA, MoE	Advanced
+
+My recommendation: Study Attention Mechanism next, starting with Query, Key, and Value, then work through Scaled Dot-Product Attention with numerical examples.
+
+Once you understand that mechanism mathematically, the rest of the Transformer architecture becomes much easier to understand.
+
+## Recent Advancements in LLM Architectures
+
+The paragraph discusses several techniques used to make Large Language Models (LLMs) faster, cheaper, and more memory-efficient without significantly sacrificing their capabilities.
+
+The central problem is that modern LLMs are enormous neural networks.
+
+They may contain billions or even trillions of parameters, requiring substantial computational resources:
+
+- GPU memory (VRAM).
+- GPU processing power.
+- Memory bandwidth.
+- Storage capacity.
+- Electricity and cooling.
+- Inference time.
+
+For example, imagine a model with 100 billion parameters. Running every parameter for every generated token can be expensive.
+
+Researchers have developed several techniques to address this problem.
+
+The paragraph introduces four important areas:
+
+1. Mixture of Experts (MoE).
+2. Quantization.
+3. Model Distillation.
+4. Flash Attention and Sparse Computation.
+
+Let's explore each one, including the Java and JVM analogies.
+
+## 1. Mixture of Experts (MoE)
+
+Improve computational efficiency
+
+### 1.1 What is Mixture of Experts?
+
+Mixture of Experts (MoE) is a neural network architecture that divides certain parts of a model into multiple smaller neural networks called Experts.
+
+Instead of activating every Expert for every input, the model selects only a small number of Experts that are most relevant to the current input.
+
+This means that a model can have a very large number of total parameters while activating only a fraction of them for a particular token.
+
+Think of it as having a company with 100 specialists.
+
+You don't ask all 100 specialists to work on every problem.
+
+Instead, you have a manager who directs each problem to the most appropriate specialists.
+
+The MoE architecture works similarly.
+
+### 1.2 How does MoE work?
+
+A typical MoE layer contains three main components:
+
+1. Experts.
+2. Router (Gating Network).
+3. Combining mechanism.
+
+[Beyond the Attention Bottleneck: How CAD Boosts Long-Context LLM Training Efficiency by 1.35x - Abaka AI](https://images.openai.com/static-rsc-4/WKGBpM7vK-39kFmTeRw4rTfHQB4vhd7cnii_ZSn0z_kCJehyG3VzNufjfTJorS2H7J8xoeun-11iOYNGgk3a_st7HP9rUb59uV0xTAyxAB2S9iLlUVhsRFrX98VO46KG2cXH4cNvGq4y7-508S9Coi1HU3aa1XMl9etmpsCyCMs?purpose=inline)
+
+[abaka.ai](https://www.abaka.ai/blog/cad-boosts-long-context-llm-training-efficiency?utm_source=chatgpt.com)
+
+Let's understand each component.
+
+A. Experts
+
+Experts are separate neural networks, typically Feed-Forward Networks (FFNs).
+
+For example, imagine an MoE layer containing eight Experts:
+
+```
+Expert 1
+Expert 2
+Expert 3
+Expert 4
+Expert 5
+Expert 6
+Expert 7
+Expert 8
+```
+
+Each Expert has its own learned parameters.
+
+During training, different Experts can develop different specializations, although their roles are not necessarily explicit or human-interpretable.
+
+B. Router (Gating Network)
+
+The Router decides which Experts should process an input token.
+
+For example, suppose the input contains:
+
+```
+Explain how Java manages memory
+```
+
+The Router examines the token representations and calculates routing scores for the available Experts.
+
+An illustrative result might be:
+
+| Expert   | Routing score |
+| -------- | ------------- |
+| Expert 1 | 0.05          |
+| Expert 2 | 0.10          |
+| Expert 3 | 0.65          |
+| Expert 4 | 0.04          |
+| Expert 5 | 0.08          |
+| Expert 6 | 0.03          |
+| Expert 7 | 0.02          |
+| Expert 8 | 0.03          |
+
+The Router selects the Experts with the highest scores.
+
+C. Expert Selection
+
+Suppose the architecture uses Top-2 routing.
+
+Only the two highest-scoring Experts are selected:
+
+```
+                    Input Token
+                         |
+                         v
+                       Router
+                         |
+          +--------------+--------------+
+          |                             |
+          v                             v
+       Expert 3                      Expert 2
+       0.65                          0.10
+          |                             |
+          +--------------+--------------+
+                         |
+                         v
+                  Combine Outputs
+                         |
+                         v
+                  Output Representation
+```
+
+The outputs are combined, typically using normalized routing weights.
+
+The result is passed to the next Transformer component.
+
+### 1.3 Dense Transformer vs MoE Transformer
+
+Let's compare two hypothetical models.
+
+Dense Transformer
+
+All FFN parameters are activated for each token.
+
+E1
+
+E2
+
+E3
+
+E4
+
+E5
+
+E6
+
+E7
+
+E8
+
+Active Experts
+
+8 / 8
+
+MoE Transformer (Top-2)
+
+Only two selected Experts are activated for each token.
+
+E1
+
+E2
+
+E3
+
+E4
+
+E5
+
+E6
+
+E7
+
+E8
+
+Active Experts
+
+2 / 8
+
+Illustrative routing. The selected Experts can differ for each token.
+
+The MoE model has eight Experts available, but only two are used for a particular token.
+
+This reduces the amount of Expert computation required.
+
+### 1.4 Total parameters vs active parameters
+
+This is one of the most important concepts in MoE.
+
+Consider a hypothetical model:
+
+| Property                           | Value      |
+| ---------------------------------- | ---------- |
+| Number of Experts                  | 8          |
+| Parameters per Expert              | 10 billion |
+| Total Expert parameters            | 80 billion |
+| Active Experts per token           | 2          |
+| Active Expert parameters per token | 20 billion |
+
+The model has 80 billion Expert parameters available, but only 20 billion Expert parameters are activated for a token.
+
+There are also shared parameters, such as attention layers, embeddings, and other components, which remain part of the computation.
+
+Therefore:
+
+Total parameters are not the same as active parameters.
+
+This is why MoE models can have enormous total parameter counts without paying the full dense-model computation cost for every token.
+
+However, this does not mean the model only needs memory for 20 billion parameters. The full collection of Experts must generally be stored in GPU memory or distributed across devices and loaded when needed.
+
+### 1.5 MoE and Java Lazy Loading
+
+mixture of experts (MoE), used in models like GPT-4.5 and Gemini 2.5, selectively activate only a portion of the model
+parameters during inference, reducing computational overhead while maintaining
+high accuracy. This approach is conceptually similar to lazy-loading mechanisms in
+Java frameworks, where resources are loaded only when needed.
+
+Imagine a Java application with several services:
+
+```
+public class Application {
+
+    private final PaymentService paymentService;
+    private final EmailService emailService;
+    private final ReportService reportService;
+    private final NotificationService notificationService;
+
+}
+```
+
+With eager initialization, all services may be initialized at application startup.
+
+With lazy initialization, some services are initialized only when they are first needed.
+
+```
+@Service
+@Lazy
+public class ReportService {
+
+    public ReportService() {
+        System.out.println("ReportService initialized");
+    }
+
+}
+```
+
+The analogy:
+
+| MoE                                            | Java Lazy Loading                             |
+| ---------------------------------------------- | --------------------------------------------- |
+| Many Experts exist                             | Many services exist                           |
+| Router selects Experts                         | Application requests a service                |
+| Selected Experts execute                       | Requested service executes                    |
+| Other Experts are not activated for that token | Unrequested lazy services are not initialized |
+
+Important difference: MoE does not necessarily load Experts on demand from storage. Usually, Experts are already resident in memory or distributed across devices. The Router selects which Experts participate in computation.
+
+Lazy loading concerns object initialization and resource loading, whereas MoE concerns conditional neural-network computation.
+
+### 1.6 Advantages and disadvantages of MoE
+
+Advantages:
+
+- Supports very large models.
+- Reduces computation per token compared with a similarly sized dense model.
+- Allows different Experts to develop different capabilities.
+- Can improve the relationship between model capacity and computational cost.
+
+Challenges:
+
+- Routing can be difficult to balance.
+- Some Experts may receive too many tokens while others receive too few.
+- Distributing Experts across GPUs creates communication overhead.
+- The complete model can still require substantial memory.
+- Training and deployment are more complicated.
+
+## 2. Quantization
+
+Reduce memory usage
+
+### 2.1 What is Quantization?
+
+Quantization is a technique that reduces the precision used to represent neural network parameters and sometimes intermediate calculations.
+
+Remember that an LLM contains millions or billions of numerical parameters called weights.
+
+Traditionally, these weights might be stored using 32-bit floating-point numbers (FP32).
+
+However, storing every weight with 32 bits consumes a significant amount of memory.
+
+Quantization allows us to represent weights using fewer bits.
+
+For example:
+
+- FP32: 32 bits.
+- FP16: 16 bits.
+- BF16: 16 bits.
+- INT8: 8 bits.
+- INT4: 4 bits.
+
+The basic idea is:
+
+Use fewer bits to represent model parameters, reducing memory requirements and potentially improving inference speed.
+
+### 2.2 Understanding the difference
+
+Suppose we have a model containing 1 billion parameters.
+
+If each parameter uses 32 bits:
+
+\\[ 1,000,000,000 \times 4 \text{ bytes} \\]
+
+\\[ =4 \text{ GB} \\]
+
+Now let's compare different numerical formats.
+
+| Precision | Bits per parameter | Approximate memory for 1B parameters |
+| --------- | ------------------ | ------------------------------------ |
+| FP32      | 32                 | 4 GB                                 |
+| FP16      | 16                 | 2 GB                                 |
+| BF16      | 16                 | 2 GB                                 |
+| INT8      | 8                  | 1 GB                                 |
+| INT4      | 4                  | 0.5 GB                               |
+
+Approximate parameter storage only, excluding metadata, quantization scales, activations, KV cache, and runtime overhead.
+
+Notice that moving from FP32 to INT8 reduces the raw parameter storage by approximately 75%.
+
+Moving to INT4 reduces it by approximately 87.5%.
+
+### 2.3 How does Quantization work?
+
+Let's assume a model has these original floating-point weights:
+
+```
+Original FP32 weights:
+
+[0.123, -0.456, 0.789, -0.234]
+```
+
+Quantization maps these values into a smaller numerical representation.
+
+For example, an INT8 quantizer might produce:
+
+```
+Quantized INT8 weights:
+
+[ 20, -73, 127, -38]
+```
+
+These integer values are interpreted using a scaling factor and potentially a zero point.
+
+A simplified symmetric quantization relationship is:
+
+\\[ q = round\left(\frac{x}{s}\right) \\]
+
+Where:
+
+- \\(x\\): Original floating-point value.
+- \\(s\\): Quantization scale.
+- \\(q\\): Quantized integer value.
+
+To approximately reconstruct the original value:
+
+\\[ \hat{x}=q \times s \\]
+
+Because fewer bits are used, some precision is lost.
+
+For example:
+
+```
+Original:     0.789
+Reconstructed: 0.789 (approximately)
+```
+
+The reconstructed value might not be exactly equal to the original.
+
+This introduces quantization error.
+
+The goal is to reduce memory and computational costs while keeping the resulting model accurate enough for its intended task.
+
+### 2.4 Types of Quantization
+
+There are several approaches.
+
+| Technique                          | Description                                                          |
+| ---------------------------------- | -------------------------------------------------------------------- |
+| Post-Training Quantization (PTQ)   | Quantize an already trained model                                    |
+| Quantization-Aware Training (QAT)  | Simulate quantization effects during training                        |
+| Weight-only quantization           | Quantize model weights while keeping activations at higher precision |
+| Weight and activation quantization | Quantize both weights and activations                                |
+
+Post-Training Quantization is particularly useful because it can reduce model size without repeating the entire training process.
+
+Quantization-Aware Training can help preserve accuracy when aggressive quantization is required.
+
+### 2.5 Quantization and Java/JVM Optimization
+
+Quantization and
+model distillation allow developers to deploy smaller, resource-efficient versions of
+large models without significant loss of accuracy, much like JVM optimizations that
+improve runtime performance.
+
+The analogy is that both aim to improve runtime efficiency.
+
+For example, the JVM uses techniques such as:
+
+- Just-In-Time (JIT) compilation.
+- Method inlining.
+- Escape analysis.
+- Dead-code elimination.
+- Optimized machine-code generation.
+
+Quantization is different technically, but the overall objective is similar: reduce execution costs while preserving the required behavior.
+
+A useful comparison:
+
+| Quantization                          | JVM Optimization                             |
+| ------------------------------------- | -------------------------------------------- |
+| Uses fewer bits for weights           | Generates more efficient machine code        |
+| Reduces model memory                  | Can reduce execution overhead                |
+| May improve hardware throughput       | Can improve application throughput           |
+| Can introduce numerical approximation | Generally aims to preserve program semantics |
+
+One important distinction: Quantization changes numerical representations and can affect model accuracy. JVM optimizations generally preserve Java program semantics.
+
+### 2.6 Advantages and disadvantages
+
+Advantages:
+
+- Smaller model files.
+- Lower GPU memory requirements.
+- Possibility of running LLMs on consumer GPUs.
+- Potentially faster inference on hardware optimized for low-precision operations.
+- Lower deployment costs.
+
+Disadvantages:
+
+- Some accuracy may be lost.
+- Very aggressive quantization can degrade reasoning and generation quality.
+- Not every hardware platform accelerates every quantized format.
+- Quantization requires careful calibration and evaluation.
+
+## 3. Model Distillation (Knowledge Distillation)
+
+Create smaller, faster models
+
+### 3.1 What is Model Distillation?
+
+Model Distillation is a technique in which a smaller neural network learns to imitate the behavior of a larger, more capable neural network.
+
+The larger model is called the Teacher Model.
+
+The smaller model is called the Student Model.
+
+Instead of training the smaller model entirely from scratch using only the original training data, we can use the Teacher Model to provide additional training signals.
+
+Think of an experienced teacher training a student.
+
+The teacher has extensive knowledge and experience. The student learns by studying the teacher's answers and behavior.
+
+The objective is to create a smaller model that retains as much of the teacher's useful capabilities as possible.
+
+[Edge AI LLM | Efficient On-Device Language | Qualcomm](https://images.openai.com/static-rsc-4/6IKmWbvNzEu6rQ-ND8Lger5qty26Lax7P8pYyRweTYs8HbCE74bQJLGzlq2o-9v4GbTbhJULP7rQj7rVZC63BLt4uHgAaejaiCfyU5LwpIBKbPtewkR5CYadZWvugw9Z7kd5OuojJbML3t97UOyG_SN4LeYoyzj2XT1ianoam3o?purpose=inline)
+
+[qualcomm.com](https://www.qualcomm.com/news/onq/2023/11/accelerating-generative-ai-at-the-edge?utm_source=chatgpt.com)
+
+### 3.2 How does Knowledge Distillation work?
+
+Imagine we have:
+
+- Teacher Model: 70 billion parameters.
+- Student Model: 7 billion parameters.
+
+We want the smaller model to learn to perform similar tasks.
+
+The process looks like this:
+
+```
+            Training Data
+                 |
+                 v
+          +--------------+
+          | Teacher Model|
+          |   70B params |
+          +--------------+
+                 |
+                 v
+          Teacher Outputs
+                 |
+                 v
+          +--------------+
+          | Student Model|
+          |    7B params |
+          +--------------+
+                 |
+                 v
+          Compare Predictions
+                 |
+                 v
+          Calculate Distillation Loss
+                 |
+                 v
+          Update Student Weights
+                 |
+                 v
+          Smaller Trained Model
+```
+
+Let's use an example.
+
+Input:
+
+```
+What is the capital of France?
+```
+
+The Teacher Model produces a probability distribution:
+
+| Possible answer | Teacher probability |
+| --------------- | ------------------- |
+| Paris           | 90%                 |
+| London          | 5%                  |
+| Berlin          | 3%                  |
+| Rome            | 2%                  |
+
+The Student Model initially produces:
+
+| Possible answer | Student probability |
+| --------------- | ------------------- |
+| Paris           | 40%                 |
+| London          | 30%                 |
+| Berlin          | 20%                 |
+| Rome            | 10%                 |
+
+The Student Model is trained to produce a distribution closer to the Teacher Model's distribution.
+
+Notice something interesting.
+
+The Teacher does not simply tell the Student that the answer is `Paris`.
+
+It also provides information about the relative likelihood of other answers.
+
+This additional information is sometimes called Dark Knowledge.
+
+It can help the Student learn relationships that are not obvious from the correct answer alone.
+
+#### 3.3 Distillation Loss
+
+A common approach uses Kullback-Leibler (KL) divergence to compare the Teacher and Student probability distributions.
+
+\\[ L\_{KD}=D\_{KL}(P_T \parallel P_S) \\]
+
+Where:
+
+- \\(P_T\\): Teacher probability distribution.
+- \\(P_S\\): Student probability distribution.
+
+In practice, distillation often uses a temperature parameter to soften the probability distributions.
+
+A combined training objective can also include the original ground-truth labels:
+
+\\[ L = \alpha L\_{KD}+(1-\alpha)L\_{CE} \\]
+
+Where:
+
+- \\(L\_{KD}\\): Distillation loss.
+- \\(L\_{CE}\\): Cross-entropy loss against actual training labels.
+- \\(\alpha\\): Weight controlling the contribution of each loss.
+
+The exact training objective depends on the distillation method.
+
+### 3.4 Types of Knowledge Distillation
+
+There are several approaches:
+
+| Type                        | What the Student learns                           |
+| --------------------------- | ------------------------------------------------- |
+| Response-based distillation | Teacher's output predictions                      |
+| Feature-based distillation  | Intermediate representations from the Teacher     |
+| Relation-based distillation | Relationships between examples or representations |
+| Sequence-level distillation | Complete generated sequences from the Teacher     |
+
+For LLMs, response-based and sequence-level distillation are particularly useful.
+
+For example, a powerful Teacher can generate explanations, code examples, and question-answer pairs that are then used to train a smaller Student.
+
+### 3.5 Quantization vs Distillation
+
+These two techniques are related because both can reduce deployment costs, but they solve different problems.
+
+| Feature                      | Quantization                 | Distillation                                 |
+| ---------------------------- | ---------------------------- | -------------------------------------------- |
+| Main objective               | Reduce numerical precision   | Reduce model complexity                      |
+| What changes?                | Representation of parameters | Model architecture and learned weights       |
+| Requires Teacher Model?      | No                           | Usually yes                                  |
+| Can reduce parameter count?  | No, not necessarily          | Yes                                          |
+| Can reduce memory?           | Yes                          | Yes                                          |
+| Can improve inference speed? | Yes, depending on hardware   | Yes, if the Student is smaller and efficient |
+
+Consider this example:
+
+```
+Original Model
+     |
+     +---- Quantization
+     |         |
+     |         v
+     |    Same architecture
+     |    Lower precision
+     |
+     +---- Distillation
+               |
+               v
+          Smaller model
+          Fewer parameters
+```
+
+You can also combine both techniques:
+
+1. Distill a large Teacher into a smaller Student.
+2. Quantize the Student.
+3. Deploy the resulting compact model.
+
+This can be useful when deploying LLMs on machines with limited GPU memory.
+
+### 3.6 Advantages and disadvantages
+
+Advantages:
+
+- Smaller models can run on less powerful hardware.
+- Lower inference costs.
+- Reduced memory requirements.
+- Faster inference when the Student architecture is efficient.
+- Makes deployment on edge devices more practical.
+
+Disadvantages:
+
+- The Student may lose some capabilities.
+- Distillation requires additional training.
+- The quality of the Teacher affects the quality of the Student.
+- Some complex capabilities are difficult to transfer.
+- A smaller model is not automatically faster in every workload.
+
+## 4. Flash Attention
+
+Improve attention efficiency
+
+### 4.1 What is Flash Attention?
+
+FlashAttention is an algorithm that makes the Transformer Attention mechanism more memory-efficient and often faster.
+
+Remember that Self-Attention calculates relationships between tokens.
+
+The traditional attention equation is:
+
+\\[ Attention(Q,K,V)= Softmax\left(\frac{QK^T}{\sqrt{d_k}}\right)V \\]
+
+The problem is not just the mathematical calculation itself.
+
+The problem is how the intermediate results are stored and transferred between GPU memory levels.
+
+#### Understanding the GPU memory problem
+
+GPUs have different types of memory:
+
+- Registers: Very fast, but limited.
+- Shared memory: Fast, but limited.
+- High-bandwidth memory (HBM): Large GPU memory, but slower than on-chip storage.
+
+Traditional attention implementations may create and store a large attention-score matrix.
+
+If a sequence contains \\(N\\) tokens, the attention matrix has dimensions:
+
+\\[ N \times N \\]
+
+For example:
+
+| Sequence length | Attention matrix elements |
+| --------------- | ------------------------- |
+| 1,000           | 1 million                 |
+| 4,000           | 16 million                |
+| 8,000           | 64 million                |
+| 16,000          | 256 million               |
+| 32,000          | 1.024 billion             |
+
+Notice that doubling the sequence length makes the attention matrix four times larger.
+
+This becomes expensive for LLMs that process long contexts.
+
+### 4.2 How traditional attention works
+
+A simplified implementation looks like this:
+
+```
+Query (Q)     Key (K)
+    |            |
+    +------+-----+
+           |
+           v
+       Q × Kᵀ
+           |
+           v
+     Attention Scores
+           |
+           v
+      Softmax
+           |
+           v
+   Attention Probabilities
+           |
+           v
+       Multiply by V
+           |
+           v
+     Attention Output
+```
+
+The intermediate attention matrix can be very large.
+
+Moving these intermediate results between GPU memory and GPU computation units can consume substantial time and memory bandwidth.
+
+This is called a Memory-Bound Problem.
+
+### 4.3 How FlashAttention improves performance
+
+FlashAttention uses a technique called Tiling.
+
+Instead of computing and storing the entire attention matrix at once, it divides the computation into smaller blocks.
+
+These blocks are processed using fast on-chip GPU memory.
+
+[Inference Engineering — The Workshop Book](https://images.openai.com/static-rsc-4/idyNYVTVWxkA7UJC8_IajPa3WXxcWAKb4K4lTAVSMUUAh4JvNKBM6TosQ-nZM0JhYb-NyU7RbT--cSTREen8XhZ6UzG8uh1Zm3GRggs6Gdgy_8Wpiv_6CNQId76q5uLkbV-URbaG4vk404K8roYJuwU7V3bLEHq4ULulu6rfGQc?purpose=inline)
+
+[vizuaraai.github.io](https://vizuaraai.github.io/convolution-musical-journey/book.html?utm_source=chatgpt.com)
+
+Conceptually:
+
+```
+Traditional Attention:
+
+       Full N × N Matrix
+       +-------------+
+       |             |
+       |             |
+       |             |
+       +-------------+
+               |
+               v
+       Large memory traffic
+
+
+FlashAttention:
+
+       Divide into blocks
+
+       +----+----+
+       | B1 | B2 |
+       +----+----+
+       | B3 | B4 |
+       +----+----+
+               |
+               v
+       Process blocks using
+       fast on-chip memory
+               |
+               v
+       Combine partial results
+```
+
+But there is another important detail.
+
+FlashAttention does not need to store the complete attention matrix in GPU memory.
+
+It computes the attention output incrementally, using an online Softmax technique to combine the results from multiple blocks.
+
+This preserves the mathematical attention result, up to floating-point numerical differences.
+
+### 4.4 Why is FlashAttention important?
+
+Imagine processing a document containing 32,000 tokens.
+
+Traditional attention can require a very large intermediate matrix.
+
+FlashAttention reduces the need to store and repeatedly transfer that matrix.
+
+The benefits include:
+
+- Lower memory consumption.
+- Less GPU memory traffic.
+- Faster attention computation in many workloads.
+- Better support for long sequences.
+- More efficient use of GPU hardware.
+
+One important distinction:
+
+FlashAttention does not remove the quadratic computational complexity of standard full attention.
+
+The number of pairwise token interactions still grows approximately as:
+
+\\[ O(N^2) \\]
+
+Its major improvement is reducing memory overhead and data movement.
+
+### 4.5 FlashAttention and Java Memory-Mapped Files
+
+Emerging memory-efficient techniques, such as flash
+attention and sparse computation, further reduce hardware costs, akin to Java’s use of
+memory-mapped files for optimizing performance in high-throughput applications.
+
+A memory-mapped file allows a program to access file contents through a mapped memory region instead of manually reading and writing every piece of data.
+
+For example, Java provides:
+
+```
+FileChannel channel = FileChannel.open(
+    Path.of("data.bin"),
+    StandardOpenOption.READ
+);
+
+MappedByteBuffer buffer = channel.map(
+    FileChannel.MapMode.READ_ONLY,
+    0,
+    channel.size()
+);
+```
+
+This can be useful for accessing large files efficiently.
+
+The conceptual similarity is that both techniques aim to reduce unnecessary data movement.
+
+However, their implementations are very different:
+
+| FlashAttention                      | Memory-Mapped Files                  |
+| ----------------------------------- | ------------------------------------ |
+| Optimizes GPU attention computation | Optimizes file access                |
+| Uses GPU on-chip memory efficiently | Uses virtual memory mapping          |
+| Reduces GPU memory traffic          | Can reduce explicit file I/O copying |
+| Optimizes attention operations      | Optimizes access to persistent data  |
+
+## 5. Sparse Computation
+
+Avoid unnecessary computation
+
+### 5.1 What is Sparse Computation?
+
+In a traditional dense neural network, most or all of the relevant mathematical operations are performed, even when many values contribute very little to the result.
+
+Sparse Computation tries to avoid unnecessary calculations by exploiting sparsity.
+
+Sparsity means that many values in a matrix, vector, or computation are zero or intentionally excluded.
+
+For example:
+
+A dense matrix:
+
+\\[ A= \begin{bmatrix} 1&2&3\\\ 4&5&6\\\ 7&8&9 \end{bmatrix} \\]
+
+A sparse matrix:
+
+\\[ B= \begin{bmatrix} 1&0&0\\\ 0&5&0\\\ 0&0&9 \end{bmatrix} \\]
+
+The second matrix contains only three nonzero values.
+
+If the hardware and algorithm support sparse operations efficiently, calculations involving zero values can be skipped.
+
+### 5.2 How is Sparse Computation used in LLMs?
+
+There are several ways to introduce sparsity.
+
+#### A. Sparse Attention
+
+In standard full attention, each token can attend to all preceding tokens in a causal Decoder-Only model.
+
+For a long sequence, this can require substantial computation.
+
+Sparse Attention limits which tokens can interact.
+
+For example, a token might attend to:
+
+- Nearby tokens.
+- Selected important tokens.
+- Special global tokens.
+- Specific blocks of tokens.
+
+Conceptually:
+
+Dense causal attention
+
+Every token can attend to all preceding positions.
+
+Illustrative local sparse attention
+
+Each token attends only to a limited window of nearby positions.
+
+Green cells represent allowed attention; this is an illustrative pattern, not a specific model implementation.
+
+This can reduce the number of attention interactions.
+
+For example:
+
+- Full attention: approximately \\(O(N^2)\\).
+- Local attention with a fixed window size \\(w\\): approximately \\(O(Nw)\\).
+
+If \\(w\\) is much smaller than \\(N\\), this can significantly reduce computation.
+
+However, the model may lose some long-distance relationships unless additional mechanisms provide access to distant tokens.
+
+#### B. Sparse Neural Network Weights
+
+Another approach is to make some neural network weights zero or inactive.
+
+Instead of calculating every multiplication in a dense matrix operation, the model can skip zero-valued weights.
+
+This can reduce:
+
+- Computational operations.
+- Memory requirements.
+- Energy consumption.
+
+However, sparse computation is only beneficial when the hardware and software can efficiently exploit the sparsity.
+
+A sparse matrix is not automatically faster than a dense matrix. Irregular memory access and indexing overhead can sometimes make sparse operations slower.
+
+#### C. MoE as Conditional Sparsity
+
+MoE is also related to sparse computation.
+
+Remember that an MoE model contains multiple Experts, but only a few are activated for each token.
+
+This is a form of structured conditional computation.
+
+Instead of activating all Expert networks, the Router selects only a subset.
+
+Therefore, MoE can be considered a form of structured sparsity in the model's computation.
+
+### 5.3 Sparse Computation vs FlashAttention
+
+These two techniques are related to efficiency but solve different problems.
+
+| Feature                       | FlashAttention                | Sparse Computation                         |
+| ----------------------------- | ----------------------------- | ------------------------------------------ |
+| Main objective                | Reduce memory traffic         | Avoid unnecessary operations               |
+| Main technique                | Tiling and online Softmax     | Skip selected computations                 |
+| Full attention preserved?     | Yes, for exact full attention | Not necessarily                            |
+| Reduces attention complexity? | No, not by itself             | Can, depending on sparsity pattern         |
+| Main benefit                  | Memory efficiency and speed   | Reduced computation and potentially memory |
+
+## 6. Comparing the Four Techniques
+
+Now let's bring everything together.
+
+These techniques all improve LLM efficiency, but they target different bottlenecks.
+
+### Four approaches to LLM efficiency
+
+1\. Mixture of Experts
+
+Conditional computation
+
+Activates only selected Expert networks instead of all Experts.
+
+Main target: Computation per token.
+
+2\. Quantization
+
+Lower precision
+
+Represents weights using fewer bits.
+
+Main target: Memory usage and potentially computation.
+
+3\. Model Distillation
+
+Smaller model
+
+Trains a smaller Student to imitate a larger Teacher.
+
+Main target: Model size and inference cost.
+
+4\. FlashAttention
+
+Memory-efficient attention
+
+Reduces unnecessary GPU memory transfers while calculating attention.
+
+Main target: GPU memory traffic and attention performance.
+
+5\. Sparse Computation
+
+Skip operations
+
+Avoids selected computations using sparse patterns or conditional execution.
+
+Main target: Computational workload.
+
+### 6.1 Can these techniques be combined?
+
+Yes. In fact, modern LLM optimization often combines several of them.
+
+Imagine deploying a large language model in a production environment.
+
+You could apply:
+
+```
+              Large Teacher Model
+                       |
+                       v
+                Knowledge Distillation
+                       |
+                       v
+                Smaller Student Model
+                       |
+                       v
+                  Quantization
+                       |
+                       v
+                Lower-Precision Model
+                       |
+                       v
+                Optimized Attention
+                  (FlashAttention)
+                       |
+                       v
+                Production Deployment
+```
+
+Alternatively, the model itself could use MoE, while its attention computation uses FlashAttention and its weights use quantization.
+
+These techniques are not mutually exclusive.
+
+## 7. How do these techniques relate to production LLM deployment?
+
+Let's connect the concepts to something familiar from software engineering.
+
+Imagine you are deploying an LLM-powered Spring Boot application.
+
+Your application provides an API:
+
+```
+Client
+  |
+  v
+Spring Boot API
+  |
+  v
+LLM Inference Service
+  |
+  v
+GPU Infrastructure
+  |
+  v
+Generated Response
+```
+
+You have several deployment challenges:
+
+| Production challenge                              | Possible LLM optimization                            |
+| ------------------------------------------------- | ---------------------------------------------------- |
+| Model requires too much GPU memory                | Quantization                                         |
+| Model is too expensive to run                     | Distillation or MoE                                  |
+| Attention computation is expensive                | FlashAttention                                       |
+| Long context requires excessive computation       | Sparse Attention                                     |
+| Model has too many parameters activated per token | MoE                                                  |
+| Inference latency is too high                     | Quantization, optimized attention, efficient serving |
+
+There is also an important distinction between two types of performance:
+
+Model efficiency:
+
+How much computation and memory does the neural network require?
+
+Serving efficiency:
+
+How efficiently can the infrastructure serve requests?
+
+Serving optimizations include:
+
+- Continuous batching.
+- KV caching.
+- Tensor parallelism.
+- Pipeline parallelism.
+- Optimized GPU kernels.
+- Request scheduling.
+
+For example, KV caching avoids recalculating previous attention keys and values when generating additional tokens. Continuous batching allows multiple requests to share GPU execution more efficiently.
+
+These are complementary to the architectural techniques discussed above.
+
+## 8. Important clarification about GPT-4.5 and Gemini 2.5
+
+The paragraph mentions GPT-4.5 and Gemini 2.5 as examples of MoE models. There is an important distinction here.
+
+- Gemini 2.5: Google's technical report explicitly describes the Gemini 2.5 family as using sparse Mixture-of-Experts Transformer architecture.&#x20;
+
+  [image](https://www.google.com/s2/favicons?domain=https://www.bruguier.com\&sz=32)
+
+  bruguier.com
+
+- GPT-4.5: OpenAI's public release information discusses its scaling and capabilities but does not publicly establish that GPT-4.5 uses MoE. Therefore, we should not present its MoE architecture as confirmed.&#x20;
+
+  [image](https://www.google.com/s2/favicons?domain=https://help.openai.com\&sz=32)
+
+  OpenAI Help Center
+
+
+
+This is worth remembering when reading books and technical articles: a model's internal architecture is not always publicly disclosed.
+
+## 9. Recommended organization in your LLM learning roadmap
+
+I would organize this material under a section called Modern LLM Architecture and Optimization.
+
+```
+Large Language Models
+|
++-- Transformer Architecture
+|   |
+|   +-- Encoder-Only
+|   +-- Encoder-Decoder
+|   +-- Decoder-Only
+|   +-- Attention Mechanism
+|   +-- Transformer Blocks
+|
++-- Modern LLM Architectures
+|   |
+|   +-- Mixture of Experts (MoE)
+|   +-- Dense vs Sparse Models
+|   +-- Multi-Head Attention
+|   +-- Grouped-Query Attention
+|
++-- LLM Optimization Techniques
+|   |
+|   +-- Quantization
+|   +-- Knowledge Distillation
+|   +-- FlashAttention
+|   +-- Sparse Computation
+|   +-- KV Cache
+|
++-- LLM Inference Optimization
+    |
+    +-- Continuous Batching
+    +-- Tensor Parallelism
+    +-- Pipeline Parallelism
+    +-- GPU Memory Optimization
+```
+
+### 10. Test your understanding
+
+Try these questions to check whether the concepts are clear.
+
+LLM Optimization Quiz
+
+0/5 answered
+
+1\. A model contains 100 billion parameters but activates only 15 billion parameters per token. Which architecture makes this possible?
+
+Quantization
+
+Mixture of Experts
+
+Knowledge Distillation
+
+FlashAttention
+
+2\. You want to reduce a model's memory requirements without changing its architecture or significantly reducing its parameter count. What would you use?
+
+Quantization
+
+Distillation
+
+Sparse Attention
+
+MoE
+
+3\. A large Teacher model trains a smaller Student model to imitate its predictions. What is this technique?
+
+FlashAttention
+
+Quantization
+
+Knowledge Distillation
+
+Causal Attention
+
+4\. Which technique reduces GPU memory traffic when calculating attention without approximating away the full attention matrix?
+
+Sparse Attention
+
+FlashAttention
+
+MoE
+
+Quantization
+
+5\. Which technique can reduce the number of token-to-token attention interactions?
+
+Knowledge Distillation
+
+FP16 Quantization
+
+Sparse Attention
+
+Layer Normalization
+
+Check answers
+
+My recommendation: Since you're connecting LLM concepts with Java and JVM internals, pay particular attention to MoE, Quantization, and Distillation. They introduce three fundamentally different optimization ideas: selective execution, lower-precision representation, and knowledge transfer. Understanding that distinction will help you understand how modern LLMs are designed and deployed.

@@ -1,10 +1,31 @@
 # OpenID Connect
 
 ## Overview
+The OAuth 2.0 framework explicitly does not provide any information about the user that has authorized an application. OAuth 2.0 is a delegation framework, allowing third-party applications to act on behalf of a user, without the application needing to know the identity of the user.
+
+OpenID Connect takes the OAuth 2.0 framework and adds an identity layer on top. It provides information about the user, as well as enables clients to establish login sessions.
+
+OpenID Connect (OIDC) is an identity layer built on top of OAuth 2.0. It allows an application to verify who a user is, obtain information about that user, and establish an authenticated user session.
+
+Think of OAuth 2.0 as a way to obtain permission to access protected resources, while OpenID Connect adds a standardized way to authenticate users.
+
+For example, when you click “Sign in with Google” on an application, OpenID Connect can allow that application to verify your identity without requiring you to create a separate password for that application.
 
 ### What Is OpenID Connect
-OpenID Connect (abbreviated to OIDC) is, as has already been mentioned, an add-on to OAuth
-2.0 that enables client applications to verify the identity of users. OIDC adds an extra token, an
+OpenID Connect (abbreviated to OIDC) is an add-on to OAuth
+2.0 that enables client applications to verify the identity of users. 
+
+It defines how a client application can:
+
+- Authenticate a user through an OpenID Provider (OP).
+- Receive an ID Token containing information about the authentication event and the user's identity.
+- Retrieve additional user information from a standardized UserInfo endpoint.
+- Discover an identity provider's endpoints and supported capabilities.
+- Request specific user information through scopes and claims.
+
+OIDC is maintained by the OpenID Foundation.
+
+OIDC adds an extra token, an
 ID token, that the client application gets back from the authorization server after a completed
 grant flow.
 
@@ -54,6 +75,37 @@ party (called an Authorization Server) and retrieve the user profile information
 authorization server informs the Client application about the result of the authentication step via an ID Token.
 
 While OAuth 2.0 is a protocol for authorization, it does not cover authentication. OpenID Connect builds on top of OAuth 2.0 to add an authentication layer.
+
+**A simple example**
+
+Suppose you build an online shopping application and want users to sign in with an external identity provider.
+
+Without OIDC, you might have to implement your own registration, password storage, password recovery, and authentication mechanisms.
+
+With OIDC, your application can delegate authentication to an identity provider such as Google or Keycloak.
+
+The interaction looks like this:
+```
+                            User
+           Wants to sign in to the shopping application
+                             ↓
+|-----------------------------------------------------------|
+|                    Client Application                     |
+|          Redirects the user to the identity provider      |
+------------------------------------------------------------|
+                             ↓
+|-----------------------------------------------------------|
+|                    OpenID Provider (OP)                   |
+|          Authenticates the user and issues tokens         |
+------------------------------------------------------------|
+                             ↓
+                    Client receives an ID Token
+Validates the token and establishes the user's authenticated session
+```
+The application does not need to handle the user's identity-provider password directly. Instead, it relies on the identity provider's authentication process and verifies the resulting tokens.
+
+Important: Receiving an ID Token is not enough by itself. The client must validate it, including its signature, issuer, audience, expiration, and other applicable security requirements.
+
 
 When it comes to handling user authentication, we can identify three main actors in
 the OAuth2 framework that are used by the OIDC protocol:
@@ -112,25 +164,1070 @@ Authorization Code flow. The second step might seem redundant, but the
 Authorization Code is essential for ensuring that only the legitimate Client
 can exchange it with tokens.
 
-### The Problem OpenID Connect Solves
 
-### OpenID Connect vs OAuth 2.0
+## The Problem OpenID Connect Solves
 
-### OpenID Connect vs Authentication
+### Authenticating Users
+OAuth 2.0 was designed primarily for delegated authorization, not as a complete user authentication protocol.
 
-### OpenID Connect vs Session-Based Authentication
+This creates a common problem: an application obtains an OAuth access token, but how does it know which user authenticated?
 
-### OpenID Connect vs SAML
+**Before OIDC**
 
-### OpenID Connect Architecture
+Imagine a client application receives an OAuth 2.0 access token:
 
-### OpenID Connect Components
+```
+eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+```
 
-### OpenID Connect Terminology
+The client may know that it has a token, but the token alone does not establish a standardized authentication result for the client.
 
-### OpenID Connect Versions
+Depending on the access-token format and authorization server, the token might be opaque or might contain claims intended for a resource server rather than the client application.
 
-### OpenID Connect Specifications
+OAuth 2.0 does not standardize an ID Token or a universal way for clients to obtain an authenticated user's identity.
+
+**With OIDC**
+
+OIDC introduces an ID Token, usually a JSON Web Token (JWT), that communicates authentication-related information in a standardized format.
+
+A simplified payload might look like this:
+
+```
+{
+  "iss": "https://identity.example.com",
+  "sub": "user-84721",
+  "aud": "shopping-client",
+  "exp": 1791900000,
+  "iat": 1791896400,
+  "auth_time": 1791896300
+}
+```
+
+These claims mean:
+
+| Claim       | Meaning                                             |
+| ----------- | --------------------------------------------------- |
+| `iss`       | Issuer that issued the token                        |
+| `sub`       | Subject identifier for the user at that issuer      |
+| `aud`       | Intended audience, normally including the client ID |
+| `exp`       | Token expiration time                               |
+| `iat`       | Time the token was issued                           |
+| `auth_time` | Time the user authenticated, when present           |
+
+The values above are illustrative.
+
+The client validates the token and uses the issuer and subject together to identify the user. The `sub` value is not necessarily a global user ID shared across all identity providers.
+
+OIDC therefore provides a standardized answer to the question: “Which user authenticated, and how can my application verify the authentication result?”
+
+### Standarizing Authentication
+why OpenID Connect (OIDC) was created instead of letting every OAuth 2.0 provider invent its own authentication protocol?.
+
+OAuth 2.0 already provides mechanisms for obtaining access tokens and accessing protected APIs. But if you want to use it for authentication, you must define additional rules that OAuth 2.0 itself does not standardize.
+
+Let's examine each requirement and see how OIDC addresses it.
+
+#### The basic problem: OAuth 2.0 is not enough
+
+Imagine three companies independently extend OAuth 2.0 to support login:
+
+- Company A builds its own `/user` endpoint.
+- Company B builds a `/profile` endpoint.
+- Company C puts user information inside a proprietary access token.
+
+All three implementations might work, but they behave differently.
+
+<div class="card" style={{textAlign: "center"}}>
+  <div class="row">
+    <div class="col col--12 margin-bottom--lg">
+      <b>Third-party application</b><br />
+      Wants to support login with multiple providers
+    </div>
+  </div>
+  <div class="row">
+    <div class="col col--4 margin-bottom--lg">
+      <div class="card">
+        <b>Provider A</b><br />
+        `/user`<br />
+        Custom claims
+      </div>
+    </div>
+    <div class="col col--4 margin-bottom--lg">
+      <div class="card">
+        <b>Provider B</b><br />
+        `/profile`<br />
+        Different format
+      </div>
+    </div>
+    <div class="col col--4 margin-bottom--lg">
+      <div class="card">
+        <b>Provider C</b><br />
+        Custom token<br />
+        Different rules
+      </div>
+    </div>
+  </div>
+  <div class="row"  style={{textAlign: "left"}}>
+    <div class="col col--12 margin-bottom--lg">
+      ⚡️ <b>Result: custom integration for each provider</b><br />
+      The application needs provider-specific code, assumptions, and security
+      checks.
+    </div>
+    </div>
+</div>
+
+This is the problem: an implementation that is unique to one provider rather than interoperable with other providers.
+
+The solution is to standardize the authentication behavior, the messages, the claims, and the security requirements.
+
+That is what OIDC does.
+
+It is quite possible to use the OAuth 2.0 framework as the basis for building an authentication and identity protocol.
+
+To use OAuth 2.0 as the basis of an authentication protocol, you will need to do at least a few things.
+
+#### Requirement 1: Define an endpoint that returns user attributes
+
+OAuth 2.0 does not define a standard endpoint for retrieving a user's identity attributes.
+
+Suppose your application receives an access token and wants to obtain the user's name and email address.
+
+Without a standard, one provider might require:
+
+```
+GET /api/user
+Authorization: Bearer ACCESS_TOKEN
+```
+
+Another might require:
+
+```
+GET /api/profile
+Authorization: Bearer ACCESS_TOKEN
+```
+
+Even if both return similar information, the response formats might differ.
+
+**How OIDC solves this?**
+
+OIDC defines the UserInfo Endpoint.
+
+For example:
+
+```
+GET /userinfo HTTP/1.1
+Host: identity.example.com
+Authorization: Bearer ACCESS_TOKEN
+```
+
+A response might look like:
+
+```
+{
+  "sub": "user-123",
+  "name": "Alex Morgan",
+  "email": "alex@example.com",
+  "email_verified": true
+}
+```
+
+The endpoint returns claims about the authenticated end-user, subject to the client's authorization and the provider's policies.
+
+The important standardization is not merely the URL. OIDC also defines how the endpoint is called, how the access token is used, and how the response identifies the subject.
+
+Important: The UserInfo Endpoint is not the only way OIDC communicates identity. The ID Token already contains a subject identifier and authentication-related claims, while UserInfo can provide additional profile information.
+
+#### Requirement 2: Define scopes for requesting identity information
+
+OAuth 2.0 uses scopes to express the permissions a client requests.
+
+For example, a calendar application might request:
+
+```
+calendar.read
+```
+
+But OAuth 2.0 does not standardize scopes for user identity information.
+
+If each provider invents its own scopes, applications become difficult to integrate.
+
+**How OIDC solves this?**
+
+OIDC defines standard scopes for requesting identity-related claims.
+
+| Scope     | Information requested                                                 |
+| --------- | --------------------------------------------------------------------- |
+| `openid`  | Essential scope that makes the request an OIDC authentication request |
+| `profile` | Standard profile claims, such as name and preferred username          |
+| `email`   | Email address and email-verification status                           |
+| `address` | Address-related claims                                                |
+| `phone`   | Phone-number-related claims                                           |
+
+For example, an authorization request could contain:
+
+```
+GET /authorize?
+  response_type=code&
+  client_id=shopping-client&
+  scope=openid%20profile%20email&
+  redirect_uri=https%3A%2F%2Fshop.example.com%2Fcallback&
+  state=abc123
+```
+
+This requests an OIDC authentication flow and the profile and email claims.
+
+The provider may return different subsets of optional claims depending on what information is available, what the client is permitted to receive, and whether consent is required.
+
+Notice the significance of `openid`: without it, the request is an OAuth authorization request, not an OIDC authentication request.
+
+#### Requirement 3: Define authentication-specific parameters and errors
+
+Authentication introduces situations that are not fully covered by OAuth 2.0's generic authorization model.
+
+Consider these examples:
+
+- The user has been signed in for several hours, and the application requires recent authentication.
+- The user is already signed in, but needs to choose a different account.
+- The application requires multifactor authentication.
+- The user must authenticate again rather than silently reusing an existing identity-provider session.
+
+If every provider handles these cases differently, the client cannot reliably request the desired behavior.
+
+**How OIDC solves this?**
+
+OIDC defines additional authentication parameters and claims.
+
+| Parameter or claim | Purpose                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| `prompt`           | Controls aspects of the authentication and consent interaction                        |
+| `max_age`          | Requests that the authentication event be no older than a specified number of seconds |
+| `auth_time`        | ID Token claim indicating when the user authenticated                                 |
+| `acr_values`       | Requests particular authentication context or assurance levels                        |
+| `acr`              | ID Token claim describing the authentication context                                  |
+| `login_hint`       | Suggests an identifier to the provider, where supported                               |
+| `id_token_hint`    | Supplies a previously issued ID Token as a hint about the user's session              |
+
+For example, a client may request:
+
+```
+prompt=login
+```
+
+This asks the provider to prompt the user to authenticate again.
+
+Alternatively:
+
+```
+prompt=select_account
+```
+
+This asks the provider to let the user select an account.
+
+Or:
+
+```
+max_age=300
+```
+
+This requests authentication that is no more than 300 seconds old. The client can check the returned `auth_time` when required by the protocol and its security policy.
+
+These parameters let the client express its authentication requirements in a standardized way, although the provider's capabilities and policies still matter.
+
+OIDC also defines additional error values and behaviors for authentication-related scenarios.
+
+#### Why not let every provider build its own solution?
+
+Independently extending OAuth 2.0 can produce incompatible and inconsistently secured implementations.
+
+Imagine implementing login for three identity providers:
+
+| Concern          | Provider A        | Provider B        | Provider C               |
+| ---------------- | ----------------- | ----------------- | ------------------------ |
+| User attributes  | `/user`           | `/profile`        | Embedded in token        |
+| Requesting email | `user_email`      | `email`           | `profile:email`          |
+| Force login      | `reauth=true`     | `prompt=login`    | `force_authentication=1` |
+| Select account   | Custom parameter  | Supported         | Not supported            |
+| Token validation | Provider-specific | Provider-specific | Provider-specific        |
+
+Your application would need separate integrations and security assumptions for each provider.
+
+OIDC standardizes much of this behavior so that conforming clients and providers can interoperate.
+
+
+<div class="card" style={{textAlign: "center"}}>
+  <div class="row">
+    <div class="col col--12 margin-bottom--lg">
+      <b>OpenID Connect standard</b><br />
+      Common endpoints, scopes, claims, parameters, and validation requirements
+    </div>
+  </div>
+  <div class="row">
+    <div class="col col--4 margin-bottom--lg">
+      <div class="card">
+        <b>Provider A</b><br />
+        ✅
+      </div>
+    </div>
+    <div class="col col--4 margin-bottom--lg">
+      <div class="card">
+        <b>Provider B</b><br />
+        ✅
+      </div>
+    </div>
+    <div class="col col--4 margin-bottom--lg">
+      <div class="card">
+        <b>Provider C</b><br />
+        ✅
+      </div>
+    </div>
+  </div>
+  <div class="row"  style={{textAlign: "left"}}>
+    <div class="col col--12 margin-bottom--lg">
+      A conforming client can use the common protocol instead of implementing a completely different authentication integration for every provider. Provider-specific configuration and optional capabilities may still differ.
+    </div>
+    </div>
+</div>
+
+OIDC does not eliminate implementation choices or guarantee that every deployment is secure. It establishes a shared protocol and security requirements that implementations can follow and test against.
+
+---
+
+Here is the conceptual relationship:
+
+<div class="card">
+  <div class="row">
+    <div class="col col--12 margin-bottom--lg">
+      <b>OAuth 2.0</b><br />
+      Defines delegated authorization and access-token mechanisms.
+    </div>
+  </div>
+  <div class="row"  style={{textAlign: "center"}}>
+    <div class="col col--12 margin-bottom--lg">  &#65291;</div>
+  </div>
+  <div class="row">
+    <div class="col col--12 margin-bottom--lg">
+      <div class="card">
+        <b>OpenID Connect</b><br />
+        Adds standardized authentication, ID Tokens, identity claims, UserInfo,
+        and authentication-request behavior.
+      </div>
+    </div>
+  </div>
+  <div class="row"  style={{textAlign: "center"}}>
+    <div class="col col--12 margin-bottom--lg">  &darr;</div>
+  </div>
+  <div class="row">
+    <div class="col col--12 margin-bottom--lg">
+      <div class="card">
+        <b>Interoperable authentication framework</b><br />
+        Clients can authenticate users across compatible identity providers
+        using a common protocol.
+      </div>
+    </div>
+  </div>
+</div>
+
+#### Practical example: Spring Boot and Keycloak
+
+Suppose your online shop uses Keycloak as its identity provider.
+
+When the user clicks Sign in:
+
+1. Spring Security redirects the browser to Keycloak with an OIDC authorization request.
+2. Keycloak authenticates the user.
+3. Keycloak redirects the browser back with an authorization code.
+4. Spring Security exchanges the code for tokens.
+5. The client validates the ID Token according to the applicable OIDC rules.
+6. The application establishes the user's login state.
+7. When accessing protected APIs, the application or client uses an access token as appropriate, and the resource server validates it and enforces authorization.
+
+You configure the provider's issuer and client registration rather than implementing a proprietary authentication protocol from scratch.
+
+This is the practical benefit of OIDC: standardized authentication behavior built on OAuth 2.0, instead of a collection of provider-specific extensions.
+
+## OpenID Connect vs OAuth 2.0
+
+Although OIDC builds on OAuth 2.0, they solve different problems.
+
+| Aspect                  | OAuth 2.0                            | OpenID Connect                               |
+| ----------------------- | ------------------------------------ | -------------------------------------------- |
+| Primary purpose         | Authorization                        | Authentication plus identity information     |
+| Main question           | What can this client access?         | Who authenticated?                           |
+| Main token              | Access Token                         | ID Token, plus OAuth tokens as needed        |
+| Standard identity token | Not defined                          | ID Token                                     |
+| User information        | Depends on the API or provider       | Standardized through UserInfo and claims     |
+| Scope example           | `read:orders`                        | `openid profile email`                       |
+| Typical use             | Allow an app to access your calendar | Sign in to an app using an identity provider |
+
+OAuth 2.0 defines mechanisms for obtaining access tokens and using them to access protected resources. OIDC extends that framework with authentication-related behavior and the ID Token.&#x20;
+
+### Example: an online shopping application
+
+Suppose your application needs to authenticate a user and retrieve their orders.
+
+You might use both protocols:
+
+- OpenID Connect: Authenticate the user and establish which identity signed in.
+- OAuth 2.0: Obtain authorization to call an API that provides access to the user's orders.
+
+A typical token response might include:
+
+```
+{
+  "access_token": "ACCESS_TOKEN_VALUE",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "id_token": "ID_TOKEN_VALUE"
+}
+```
+
+This is a simplified example of a response from an OIDC token endpoint.
+
+The tokens serve different purposes:
+- ID Token
+
+    Answers: “What authentication and identity information has the provider asserted for this client?”
+
+    Intended for the OIDC client.
+
+- Access Token
+
+    Answers: “What credential can I present to a resource server to access a protected API?”
+
+    Intended for the relevant resource server.
+
+An ID Token should not be used as an API access token, and an access token should not automatically be treated as proof of user authentication. The intended audience and validation rules differ.
+
+This passage explains why OAuth 2.0 handles authorization but does not, by itself, define user authentication or identity. Let's break it down using the hotel key-card analogy and connect it to OpenID Connect (OIDC).
+
+### Why is OAuth 2.0 called an authorization framework?
+
+OAuth 2.0 is called an authorization “framework” rather than a “protocol” since the core spec actually leaves quite a lot of room for various implementations to do things differently depending on their use cases. Specifically, OAuth 2.0 does not provide a mechanism to say who a user is or how they authenticated, it just says that a user delegated an application to act on their behalf. The OAuth 2.0 framework provides this delegation in the form of an access token, which the application can use to act on behalf of the user. The access token is presented to the API (the “resource server”), which knows how to validate whether the access token is active. From the application’s perspective, it is an opaque string.
+
+OAuth 2.0 defines a set of rules and roles that allow an application to obtain limited access to protected resources.
+
+It specifies things such as:
+
+- How a client requests authorFization.
+- How an authorization server issues access tokens.
+- How a client presents an access token to a resource server.
+- How the resource server determines whether to accept the token.
+
+However, OAuth 2.0 deliberately leaves some details to the implementation, including the access-token format and how a resource server validates tokens.
+
+For example, an access token might be:
+
+```
+mF_9.B5f-4.1JqM
+```
+
+Or it might be a JWT containing claims.
+
+From the client's perspective, the access token should generally be treated as an opaque credential: the client uses it rather than assuming it knows its internal meaning or format.
+
+Why a framework rather than a complete authentication protocol?
+
+OAuth 2.0 standardizes the authorization framework, while allowing implementations to support different token formats, security mechanisms, and deployment architectures.
+
+Think of an access token as a hotel key card, When you check in to a hotel, you get a key card which you can use to enter your assigned room. You can think of the key card as an access token. The key card says nothing about who you are, or how you were authenticated at the front desk, but you can use the card to access your hotel room for the duration of your stay.
+
+<table>
+<tbody>
+<tr>
+    <td colSpan={2}>![](/docs/assets/software-engineering/design-architecture/security/api-security/openid-connect/vingcard-key-card.png)</td>
+</tr>
+<tr>
+    <td><b>Hotel key card</b><br />Opens an assigned room while access is valid.</td><td><b>OAuth access token</b><br />Grants access to permitted resources while the token is accepted.</td>
+</tr>
+<tr>
+    <td colSpan={2}>The key card is the credential used to enter the room; it is not a complete record of your identity or how the front desk verified you.</td>
+</tr>
+
+</tbody>
+</table>
+
+The key card is the credential used to enter the room; it is not a complete record of your identity or how the front desk verified you.
+
+Imagine you check into a hotel.
+
+1. You provide identification at the front desk.
+2. The hotel verifies your identity.
+3. The hotel issues a key card.
+4. You use the card to open your room door.
+5. The door's access-control system decides whether the card is valid for that room.
+
+Notice that step 4 does not require the door to repeat the original identity-verification process.
+
+The card is used to exercise a permission that has already been granted.
+
+OAuth works similarly:
+
+| Hotel                                 | OAuth 2.0                                                  |
+| ------------------------------------- | ---------------------------------------------------------- |
+| Front desk                            | Authorization server and associated authentication process |
+| Guest                                 | Resource owner                                             |
+| Guest's application or device         | OAuth client                                               |
+| Key card                              | Access token                                               |
+| Room door's access-control system     | Resource server                                            |
+| Permission to enter a particular room | Permission to access a protected resource                  |
+| Card validity and expiration          | Token validity and expiration                              |
+
+The analogy has a limitation: OAuth 2.0 does not prescribe how the authorization server authenticates the resource owner. The identity verification at the hotel front desk is analogous to an authentication process that may exist outside OAuth's standardized authorization mechanisms.
+
+### Why an access token does not establish user identity
+OAuth 2.0 was intentionally designed to provide authorization without providing user identity and authentication, as those problems have very different security considerations that don’t necessarily overlap with those of an authorization protocol. Treating authentication and identity separately allows the OAuth 2.0 framework to be used as part of building an authentication protocol.
+
+Suppose your application receives this access token:
+
+```
+abc123xyz
+```
+
+It can send the token to an API:
+
+```
+GET /api/orders HTTP/1.1
+Host: shop.example.com
+Authorization: Bearer abc123xyz
+```
+
+The resource server checks the token according to its implementation. It might verify a signature, look up an opaque token in a database, or consult an introspection endpoint.
+
+If the token is valid and authorizes the requested operation, the API can return the orders.
+
+But consider this question:
+
+Can the client conclude that the authenticated user is `gemy@example.com` just from receiving the access token?
+
+No.
+
+OAuth 2.0 does not define a standard access-token claim that identifies the user to the client, nor does it define a standard authentication event that the client can rely on.
+
+Even if an access token happens to contain a username or subject identifier, that does not automatically make it an OIDC ID Token. The token's intended audience and contract determine how it should be used.
+
+The distinction is:
+
+- Access token: A credential for accessing protected resources.
+- Identity assertion: Information that allows a client to establish an identity according to a defined authentication protocol.
+
+### How OpenID Connect solves this problem
+
+OpenID Connect builds on OAuth 2.0 and adds a standardized authentication layer.
+
+The key addition is the ID Token.
+
+Consider a login flow using Keycloak:
+
+<table>
+<tr align='center'>
+<td>
+<b>1\. Client</b>
+
+Requests authentication using the `openid` scope
+</td>
+</tr>
+<tr align='center'>
+<td>↓</td>
+</tr>
+<tr align='center'>
+<td align='center'>
+<b>2\. OpenID Provider</b>
+
+Authenticates the user and processes the request
+</td>
+</tr>
+<tr>
+<td align='center'>↓</td>
+</tr>
+<tr align='center'>
+<td align='center'>
+<b>3\. Token Endpoint</b>
+
+Returns an ID Token and, typically, an access token
+</td>
+</tr>
+<tr align='center'>
+<td>↓</td>
+</tr>
+<tr>
+<td align='center'>
+<b>4\. Client validates the ID Token</b>
+
+Checks issuer, audience, signature, expiration, and other applicable requirements
+</td>
+</tr>
+</table>
+A simplified ID Token payload could contain:
+
+```
+{
+  "iss": "https://identity.example.com",
+  "sub": "user-123",
+  "aud": "shopping-client",
+  "exp": 1791900000,
+  "iat": 1791896400
+}
+```
+
+Here:
+
+- `iss` identifies the issuer.
+- `sub` identifies the user within that issuer's namespace.
+- `aud` identifies the intended audience, including the client.
+- `exp` specifies when the token expires.
+- `iat` specifies when the token was issued.
+
+The client validates the ID Token and uses the resulting identity information to establish the user's authenticated state.
+
+The access token, meanwhile, is used to call the protected API.
+
+### OAuth 2.0 vs OpenID Connect: the complete picture
+
+| Question                                                              | OAuth 2.0                                                    | OpenID Connect                                                                                        |
+| --------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| What is the main purpose?                                             | Delegated authorization                                      | Authentication and identity                                                                           |
+| What does the client receive?                                         | Access token, and potentially other tokens                   | ID Token plus OAuth tokens as appropriate                                                             |
+| Can the client establish the user's identity from the standard alone? | No                                                           | Yes, after successful ID Token validation                                                             |
+| Does it standardize how users authenticate?                           | No                                                           | It standardizes authentication-related protocol behavior, but not one universal authentication method |
+| How does an API get protected?                                        | Resource server validates an access token                    | Usually the same OAuth access-token mechanism                                                         |
+| Can it be used for single sign-on?                                    | Not as a standardized user-authentication protocol by itself | Yes, through an identity provider's SSO capabilities                                                  |
+
+**The most important security lesson**
+
+Keep authentication and authorization conceptually separate.
+
+Imagine a user signs in to an online shop using OIDC:
+
+1. Authentication: The identity provider authenticates the user.
+2. Identity: The client validates the ID Token and establishes which user signed in.
+3. Authorization: The application determines whether that user may view a particular order.
+4. API access: The client presents an access token to the orders API.
+5. Enforcement: The API validates the access token and enforces the relevant permissions and resource-ownership rules.
+
+A valid access token does not necessarily mean the caller can access every order. The token must be valid for the API, and the requested operation must be authorized.
+
+Likewise, knowing who a user is does not automatically grant permission to perform every operation.
+
+In one sentence: OAuth 2.0 provides a framework for delegated access; OpenID Connect adds a standardized way to authenticate users and communicate their identity to client applications.
+
+## OpenID Connect vs Authentication
+
+Authentication is a security concept, while OpenID Connect is a protocol that standardizes one way to perform authentication through an identity provider.
+
+### Authentication vs authorization
+
+These concepts are related but distinct:
+
+- Authentication: Establishing or verifying an identity.
+- Authorization: Determining what an identity is allowed to do.
+
+Consider a user signing in to a banking application.
+
+1. Authentication establishes that the user has signed in as account holder `user-84721`.
+2. Authorization determines whether that user may view a particular account or transfer money.
+
+OIDC primarily standardizes the authentication and identity-information part. Your application still needs authorization policies, such as roles, permissions, resource ownership, and business rules.
+
+### Is OIDC the only way to authenticate?
+
+No. Applications can authenticate users through many mechanisms:
+
+- Username and password.
+- Passkeys and WebAuthn.
+- Client certificates.
+- Kerberos.
+- SAML-based single sign-on.
+- OpenID Connect.
+- Other application-specific authentication mechanisms.
+
+OIDC can also work with different authentication methods at the identity provider. The protocol does not require every provider to use the same way of verifying users.
+
+For example, a provider might authenticate a user with a password, a passkey, or multifactor authentication, then issue an ID Token describing the resulting authentication event.
+
+Key distinction: OIDC standardizes how a client obtains and validates an identity assertion; it does not prescribe one universal method of proving identity to the provider.
+
+## OpenID Connect vs Session-Based Authentication
+
+OIDC and session-based authentication are not mutually exclusive alternatives. They operate at different layers and are often used together.
+
+### Traditional session-based authentication
+
+In a traditional web application:
+
+1. The user submits credentials to the application.
+2. The application verifies those credentials.
+3. The server creates a session.
+4. The server sends a session identifier in a cookie.
+5. The browser sends the cookie on subsequent requests.
+6. The server looks up the session and determines which user is signed in.
+
+```
+Browser                     Web Application
+   |                               |
+   |---- Username + Password ----->|
+   |                               | Verify credentials
+   |                               | Create session
+   |<---- Session Cookie ----------|
+   |                               |
+   |---- Request + Cookie -------->|
+   |                               | Look up session
+   |<----------- Response ---------|
+```
+
+### OIDC-based authentication
+
+With OIDC, the application redirects the user to an external identity provider. After successful authentication, the client validates the result and can create its own application session.
+
+```
+Browser         Application          Identity Provider
+   |                  |                       |
+   |---- Open App --->|                       |
+   |<--- Redirect ----|                       |
+   |----------------------------------------->|
+   |                  |               Authenticate
+   |<-----------------------------------------|
+   |---- Authorization Response ------------>|
+   |                  |                       |
+   |                  | Validate OIDC result |
+   |                  | Create local session |
+   |<---- Session Cookie ---------------------|
+```
+
+The diagram is conceptual; the authorization response typically returns to the application's registered redirect URI, and the server-side client exchanges the authorization code at the token endpoint.
+
+### Comparison
+
+| Aspect                   | Traditional session                          | OIDC-based login                                             |
+| ------------------------ | -------------------------------------------- | ------------------------------------------------------------ |
+| Authentication authority | Often the application itself                 | External or centralized identity provider                    |
+| State after login        | Usually a server-side session                | May use a local session, tokens, or both                     |
+| Browser credential       | Often a session cookie                       | Often a session cookie for server-rendered web apps          |
+| Single sign-on           | Requires additional integration              | Can leverage an identity provider's SSO session              |
+| Identity federation      | Must be implemented or integrated separately | A core use case                                              |
+| Logout                   | Usually invalidates the local session        | May also involve identity-provider and other-client sessions |
+
+Practical recommendation: For a server-rendered web application, a common architecture is OIDC for login and a secure, `HttpOnly`, `Secure` session cookie for subsequent requests. The application does not necessarily need to expose tokens to browser JavaScript.
+
+For a SPA or mobile application, the architecture may instead use tokens directly, with the appropriate security controls.
+
+## OpenID Connect vs SAML
+
+Security Assertion Markup Language (SAML) is another standard used for federated authentication and enterprise single sign-on.
+
+Both SAML and OIDC allow an application to rely on an identity provider rather than authenticate every user independently.
+
+The main difference is how they fit into the wider protocol ecosystem and how they represent and exchange authentication information.
+
+**SAML 2.0**
+
+- Assertions commonly encoded as XML.
+- Uses browser-based bindings such as HTTP Redirect and HTTP POST.
+- Widely used in enterprise and legacy workforce SSO.
+- Defines its own federation and assertion model.
+
+**OpenID Connect**
+
+- ID Tokens encoded as JWTs in common deployments.
+- Built on OAuth 2.0 authorization flows.
+- Commonly uses JSON-based messages and HTTPS endpoints.
+- Well suited to web, mobile, and API-oriented application ecosystems.
+
+| Aspect                          | SAML 2.0                             | OpenID Connect                                              |
+| ------------------------------- | ------------------------------------ | ----------------------------------------------------------- |
+| Main identity assertion         | SAML assertion                       | ID Token                                                    |
+| Typical representation          | XML                                  | JWT, typically JSON claims                                  |
+| Protocol foundation             | SAML framework                       | OAuth 2.0                                                   |
+| Common deployment               | Enterprise workforce SSO             | Web, mobile, cloud, and enterprise applications             |
+| Authorization to APIs           | Usually requires separate mechanisms | OAuth 2.0 access tokens fit naturally into the architecture |
+| Provider discovery and metadata | SAML metadata                        | OIDC Discovery metadata                                     |
+
+Neither protocol is inherently secure simply because of its format. Both require correct configuration, validation, trust management, and secure handling of authentication responses.
+
+For a new Java/Spring Boot application that needs to sign users in and protect REST APIs, OIDC is often a natural choice. SAML remains useful when integrating with enterprise identity systems that already depend on it.
+
+## OpenID Connect Architecture
+
+OIDC introduces a few roles and endpoints that work together to authenticate a user.
+
+Consider a Java/Spring Boot online shopping system using Keycloak as its identity provider.
+```
+                          End-User
+                      Person signing in
+                            ↓
+|-----------------------------------------------------------|
+|                    Relying Party (Client)                 |
+|                 Spring Boot web application               |
+|-----------------------------------------------------------|
+          ↑↓ Browser redirects and token exchange
+|-----------------------------------------------------------|
+|                    OpenID Provider                        |
+|           Keycloak: authentication, consent, tokens       |
+|-----------------------------------------------------------|
+
+                  Resource Server
+Orders API: validates access tokens and enforces authorization
+```
+The client and resource server may be separate services or parts of a larger system. The resource server validates the access token, not the ID Token as a substitute.
+
+### Main architectural participants
+
+- End-User: The person whose identity is being verified.
+- Relying Party (RP): The application that relies on the provider's authentication result. In OIDC terminology, it is the client.
+- OpenID Provider (OP): The identity provider that authenticates users and issues ID Tokens.
+- User Agent: Usually the browser that carries out redirects between the client and provider.
+- Authorization Server: The OAuth 2.0 role responsible for authorization and token issuance. In a conventional OIDC deployment, the OP performs this role.
+- Resource Server: An API that accepts access tokens and protects its resources.
+
+### Important endpoints
+
+| Endpoint               | Purpose                                                  |
+| ---------------------- | -------------------------------------------------------- |
+| Authorization Endpoint | Starts the authorization and authentication interaction  |
+| Token Endpoint         | Exchanges an authorization code for tokens               |
+| UserInfo Endpoint      | Returns claims about the authenticated user              |
+| JWKS URI               | Publishes public keys used to verify signed tokens       |
+| Discovery Endpoint     | Publishes the provider's metadata and endpoint locations |
+| Logout Endpoint        | Supports provider logout behavior when implemented       |
+
+These endpoints are normally advertised through the provider's Discovery metadata.&#x20;
+
+## OpenID Connect Components
+
+The architecture consists of more than just the identity provider and client. Several protocol components work together.
+
+### Authorization Code Flow
+
+The Authorization Code Flow is the common OIDC flow for server-side web applications and is also used by SPAs and native apps with suitable security measures.
+
+```
+User/Browser       Client             OpenID Provider
+     |                |                       |
+     |-- Open app --->|                       |
+     |<-- Redirect ---|                       |
+     |--------------------------------------->|
+     |             Authenticate user          |
+     |<---------------------------------------|
+     |---- Authorization code --------------->|
+     |               |---- Code + PKCE ------>|
+     |               |<--- Tokens ------------|
+     |               |                        |
+     |               |  Validate ID Token     |
+     |<--- Logged-in application session -----|
+```
+
+The code exchange takes place directly between the client and token endpoint in a typical server-side implementation. Public clients, such as native apps, use PKCE; confidential clients also commonly use PKCE and authenticate at the token endpoint.
+
+### Scopes
+
+Scopes tell the provider what functionality or categories of information the client requests.
+
+| Scope            | Purpose                                                            |
+| ---------------- | ------------------------------------------------------------------ |
+| `openid`         | Requests OIDC authentication and an ID Token                       |
+| `profile`        | Requests access to supported standard profile claims               |
+| `email`          | Requests supported email-related claims                            |
+| `address`        | Requests supported address claims                                  |
+| `phone`          | Requests supported phone-number claims                             |
+| `offline_access` | Requests offline access, subject to provider and flow requirements |
+
+The `openid` scope is essential: without it, an OAuth authorization request is not an OIDC authentication request.
+
+Scopes request access to information; they do not guarantee every claim will be returned. Provider support, consent, policy, and claim availability matter.
+
+### ID Token
+
+The core of OpenID Connect is based on a concept called “ID Tokens.” This is a new token type that the authorization server will return which encodes the user’s authentication information. In contrast to access tokens, which are only intended to be understood by the resource server, ID tokens are intended to be understood by the OAuth client. When the client makes an OpenID Connect request, it can request an ID token along with an access token.
+
+The ID Token is the core OIDC authentication artifact.
+
+It commonly contains:
+
+- Identity information, such as `iss` and `sub`.
+- The intended client audience, `aud`.
+- Token timing claims, such as `iat` and `exp`.
+- Authentication-related claims, where applicable, such as `auth_time` and `acr`.
+
+The client validates the token according to OIDC requirements. For example, it checks the issuer, audience, signature, expiration, and any required nonce.
+
+OpenID Connect’s ID Tokens take the form of a JWT (JSON Web Token), which is a JSON payload that is signed with the private key of the issuer, and can be parsed and verified by the application.
+
+Inside the JWT are a handful of defined property names that provide information to the application. They are represented with shorthand names to keep the overall size of the JWT small. This includes a unique identifier for the user (sub, short for “subject”), the identifier for the server that issued the token (iss), the identifier for the client that requested this token (aud, short for “audience”), along with a handful of properties such as the lifetime of the token, and how long ago the user was presented with a primary authentication prompt.
+```json
+{
+  "iss": "https://server.example.com",
+  "sub": "24400320",
+  "aud": "s6BhdRkqt3",
+  "nonce": "n-0S6_WzA2Mj",
+  "exp": 1311281970,
+  "iat": 1311280970,
+  "auth_time": 1311280969
+}
+```
+Standardizing the endpoints, names, and metadata helps reduce implementation errors, and allows shared knowledge to be passed around about the security considerations of each.
+
+### UserInfo Endpoint
+
+The UserInfo endpoint returns claims about the authenticated user when the client presents an appropriate access token.
+
+A simplified response might look like this:
+
+```
+{
+  "sub": "user-84721",
+  "name": "Alex Morgan",
+  "email": "alex@example.com",
+  "email_verified": true
+}
+```
+
+The UserInfo response's `sub` must match the subject identifier in the ID Token for the client to safely associate the returned information with that identity.
+
+### Discovery
+
+Discovery allows a client to retrieve the provider's configuration rather than hardcode all endpoint URLs and supported features.
+
+For example, a conventional OIDC provider often exposes metadata at:
+
+```
+https://identity.example.com/.well-known/openid-configuration
+```
+
+The response can include the authorization endpoint, token endpoint, UserInfo endpoint, issuer, supported scopes, signing algorithms, and JWKS URI.
+
+The exact URL depends on the provider and issuer configuration.
+
+### JWKS and signature verification
+
+The JSON Web Key Set (JWKS) endpoint publishes public keys that clients can use to verify signed ID Tokens.
+
+The `kid` header parameter can help identify the signing key. Clients should follow the provider's metadata, validate signatures using an allowed algorithm, and handle key rotation correctly.
+
+The JWKS endpoint provides public verification keys; it must never expose private signing keys.
+
+## 9. OpenID Connect Terminology
+
+The following terms are useful when reading OIDC specifications and implementing it in Spring Security or Keycloak.
+
+| Term                              | Meaning                                                                                             |
+| --------------------------------- | --------------------------------------------------------------------------------------------------- |
+| End-User                          | The human whose identity is involved                                                                |
+| OpenID Provider (OP)              | The provider that authenticates the user and issues ID Tokens                                       |
+| Relying Party (RP)                | The client application relying on the provider                                                      |
+| Client ID                         | Identifier assigned to the client by the provider                                                   |
+| Redirect URI                      | Registered destination to which the authorization response is sent                                  |
+| Issuer (`iss`)                    | Identifier of the entity issuing the token                                                          |
+| Subject (`sub`)                   | Identifier for the user within the issuer's namespace                                               |
+| Claim                             | A statement about an entity, represented as a name-value pair                                       |
+| ID Token                          | Token conveying OIDC authentication and identity claims                                             |
+| Access Token                      | Credential for accessing a protected resource                                                       |
+| Refresh Token                     | Credential used to obtain new access tokens when permitted                                          |
+| Nonce                             | Value used to associate an ID Token with an authentication request and help mitigate replay attacks |
+| State                             | Value used to correlate an authorization response with the initiating request and mitigate CSRF     |
+| PKCE                              | Proof Key for Code Exchange, a protection for authorization-code flows                              |
+| Authentication Context (`acr`)    | Information about the authentication context or assurance level                                     |
+| Authentication Methods (`amr`)    | Information about authentication methods used, when supplied                                        |
+| Authentication Time (`auth_time`) | Time of user authentication, when supplied                                                          |
+| JWKS                              | JSON document containing public keys                                                                |
+| UserInfo                          | Standard endpoint for retrieving user claims                                                        |
+| Discovery                         | Mechanism for obtaining provider metadata                                                           |
+| Client Registration               | Process by which a client is registered with a provider                                             |
+
+A few distinctions deserve special attention:
+
+- `sub` is the primary stable subject identifier within an issuer's namespace. Do not assume that email is a unique, immutable identity key.
+- `state` and `nonce` serve different purposes. `state` correlates the authorization response; `nonce` binds an ID Token to an authentication request.
+- PKCE protects the authorization code from interception and misuse. It does not replace redirect URI validation, `state`, or ID Token validation.
+- A claim's presence is not guaranteed merely because a related scope was requested.
+
+## 10. OpenID Connect Versions
+
+OIDC's core protocol is commonly referred to as OpenID Connect 1.0. It is built on OAuth 2.0.
+
+The core standard has received errata corrections. The OpenID Foundation published Core 1.0 incorporating its second errata set in December 2023.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://www.openid.net\&sz=32)
+
+OpenID Foundation
+
++1
+
+
+
+It is important to distinguish three things:
+
+1. Protocol version: OIDC Core 1.0.
+2. Specification updates: Errata correct or clarify the existing standard.
+3. Extensions and related specifications: Add functionality such as logout, federation, and registration.
+
+OIDC is not generally described as a sequence of Core 1.0, Core 2.0, and Core 3.0 releases. New capabilities can be standardized separately without replacing the core protocol version.
+
+## 11. OpenID Connect Specifications
+
+The OpenID Foundation maintains several specifications covering the core protocol and its extensions.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://openid.net\&sz=32)
+
+OpenID Foundation
+
++1
+
+
+
+Here are the key documents to know.
+
+OpenID Connect Core 1.0
+
+Defines authentication, ID Tokens, claims, UserInfo, request parameters, and the main protocol flows.
+
+Start here.
+
+[Read the Core specification](https://openid.net/specs/openid-connect-core-1_0.html)
+
+OpenID Connect Discovery 1.0
+
+Defines how a client discovers provider metadata, endpoint URLs, and supported capabilities.
+
+[Read the Discovery specification](https://openid.net/specs/openid-connect-discovery-1_0.html)
+
+OpenID Connect Dynamic Client Registration 1.0
+
+Defines how a relying party registers with a provider and obtains client configuration.
+
+[Read the Registration specification](https://openid.net/specs/openid-connect-registration-1_0.html)
+
+OpenID Connect Back-Channel Logout 1.0
+
+Defines a mechanism for the provider to communicate logout events directly to relying parties.
+
+[Read the Back-Channel Logout specification](https://openid.net/specs/openid-connect-backchannel-1_0.html)
+
+Other relevant specifications include:
+
+- Front-Channel Logout: Browser-mediated logout communication.
+- Session Management: Mechanisms for tracking and managing OIDC sessions.
+- RP-Initiated Logout: Allows a relying party to initiate logout at the provider.
+- Financial-grade API (FAPI): Security profiles for high-value API ecosystems, including financial services.
+- OpenID Federation: Defines mechanisms for establishing trust across federated identity ecosystems.
+
+The OpenID Foundation's [specifications directory](https://openid.net/developers/specs/) lists the wider collection and indicates the status of each document.
+
+## Putting it all together
+
+The most useful mental model is:
+
+OpenID Connect = authentication and identity
+
+The client obtains and validates an ID Token to establish who authenticated.
+
+OAuth 2.0 = delegated authorization
+
+The client obtains access tokens to call protected APIs within the granted permissions.
+
+Application session = maintaining login state
+
+The application may create a session cookie after OIDC login, so it does not need to repeat the full authentication flow for every request.
+
+For your Spring Boot and Keycloak studies, a productive learning order is OIDC architecture → Authorization Code Flow → ID Token validation → scopes and claims → Discovery and JWKS → logout → Spring Security implementation. This order connects the protocol concepts to the code and configuration you will encounter in real applications.
 
 ---
 
@@ -2139,3 +3236,13 @@ for controlling the authentication flow and using the tokens issued by the Autho
 ### Multi-Factor Authentication
 
 ### Centralized Identity Management
+
+## Summary
+
+OpenID Connect provides user identity and authentication on top of the OAuth 2.0 framework. You can use OpenID Connect to establish a login session, and use OAuth to access protected resources.
+
+You can request both an ID token and access token in the same flow in order to both authenticate the user as well as obtain authorization to access a protected resource.
+
+OpenID Connect is maintained by the OpenID Foundation. The core OpenID Connect spec, as well as many extensions, can be read in full on https://openid.net/connect/.
+
+The OpenID Connect Debugger is a fantastic resource to help you build OpenID Connect requests and walk through the flows. Additionally, the OAuth 2.0 Playground provides a walkthrough of the OpenID Connect flow against a live server.

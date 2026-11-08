@@ -1,0 +1,679 @@
+{/* # Lab: Build a Maze Game Solver Using DFS in C */}
+
+In this lab, we'll build a small maze game where the player enters a path from the start vertex `S` to the target vertex `T`, and the application checks whether the path is valid. We'll then use **Depth-First Search (DFS)** to find a solution automatically so the player can compare their answer with the algorithm's solution.
+
+We'll keep the implementation in C, use ASCII diagrams, and avoid external libraries.
+
+## 1. Lab objectives
+
+By the end of this lab, you'll be able to:
+
+- Represent a maze as a graph using an adjacency list.
+- Identify junctions, dead ends, the start, and the target as vertices.
+- Let the user enter a path such as `S A C F T`.
+- Validate that each consecutive pair of vertices is connected by a corridor.
+- Use DFS to find a path from `S` to `T`.
+- Understand how `visited[]`, recursion, and backtracking work in a practical application.
+
+## 2. Game design
+
+The game will have two views: a maze diagram for the player and a graph representation used by the algorithm.
+
+### Example maze
+
+Here is a predefined maze that we'll use for the first version:
+
+```
+             +------- B ------- D
+             |                 |
+START S ----- A                 T TARGET
+             |                 |
+             +------- C ------- E
+```
+
+To make the connections unambiguous, the graph for this lab is:
+
+```
+       B -------- D
+      /            \
+S --- A              T
+      \            /
+       C -------- E
+```
+
+The corridors connect these vertices:
+
+```
+S -- A
+A -- B
+A -- C
+B -- D
+D -- T
+C -- E
+E -- T
+```
+
+The graph is undirected: if the player can travel from `A` to `B`, they can also travel from `B` to `A`.
+
+There are two possible simple paths from `S` to `T`:
+
+```
+Upper path: S -> A -> B -> D -> T
+
+Lower path: S -> A -> C -> E -> T
+```
+
+Both paths are valid. Our game should accept either one.
+
+## 3. Implementation plan
+
+We'll build the application in stages so each part has a clear purpose.
+
+Step 1 — Build the graph
+
+Store vertices and corridors in an adjacency matrix.
+
+Step 2 — Read the player's path
+
+Accept a sequence such as `S A B D T`.
+
+Step 3 — Validate the path
+
+Check the start, target, connected corridors, and repeated vertices.
+
+Step 4 — Solve with DFS
+
+Search the graph and reconstruct a path from `S` to `T`.
+
+For this first version, the maze is predefined. After the program works, you can extend it to generate random mazes.
+
+## 4. Complete C implementation
+
+Save the following code as `maze_game.c`.
+
+The implementation uses an adjacency matrix. Each cell `graph[u][v]` is `1` if a corridor connects the two vertices and `0` otherwise. Because our maze is undirected, every corridor is recorded in both directions.
+
+```c
+
+#include <stdio.h>
+#include <string.h>
+
+#define V 7
+#define MAX_PATH 32
+
+// Vertex IDs. The array index is the vertex's internal ID.
+enum {
+    START, A, B, C, D, E, TARGET
+};
+
+// Human-readable labels for the vertices.
+const char labels[V] = {'S', 'A', 'B', 'C', 'D', 'E', 'T'};
+
+// graph[u][v] == 1 means there is a corridor between u and v.
+int graph[V][V] = {0};
+
+// DFS state.
+int visited[V];
+int parent[V];
+
+// Convert a label such as 'A' into its internal vertex ID.
+// Return -1 if the label does not exist.
+int labelToIndex(char label)
+{
+    for (int i = 0; i < V; i++) {
+        if (labels[i] == label) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+// Add an undirected corridor between two vertices.
+void addCorridor(char from, char to)
+{
+    int u = labelToIndex(from);
+    int v = labelToIndex(to);
+
+    if (u == -1 || v == -1) {
+        return;
+    }
+
+    // An undirected edge must be stored in both directions.
+    graph[u][v] = 1;
+    graph[v][u] = 1;
+}
+
+// Create the predefined maze.
+void buildMaze(void)
+{
+    addCorridor('S', 'A');
+
+    addCorridor('A', 'B');
+    addCorridor('A', 'C');
+
+    addCorridor('B', 'D');
+    addCorridor('D', 'T');
+
+    addCorridor('C', 'E');
+    addCorridor('E', 'T');
+}
+
+// Display the maze as a graph diagram.
+void displayMaze(void)
+{
+    printf("\n========== MAZE ==========\n\n");
+
+    printf("       B -------- D\n");
+    printf("      /            \\\n");
+    printf("S --- A              T\n");
+    printf("      \\            /\n");
+    printf("       C -------- E\n");
+
+    printf("\nStart: S    Target: T\n");
+    printf("Enter vertices separated by spaces.\n");
+    printf("Example: S A B D T\n\n");
+}
+
+// Check whether the player's path is valid.
+// A valid answer must start at S, end at T,
+// follow existing corridors, and not revisit a vertex.
+int validatePath(const int path[], int length)
+{
+    int seen[V] = {0};
+
+    if (length < 2) {
+        printf("Wrong: the path is too short.\n");
+        return 0;
+    }
+
+    if (path[0] != START) {
+        printf("Wrong: the path must start at S.\n");
+        return 0;
+    }
+
+    if (path[length - 1] != TARGET) {
+        printf("Wrong: the path must end at T.\n");
+        return 0;
+    }
+
+    for (int i = 0; i < length; i++) {
+        int current = path[i];
+
+        // A simple maze solution should not revisit a vertex.
+        if (seen[current]) {
+            printf("Wrong: vertex %c is repeated.\n",
+                   labels[current]);
+            return 0;
+        }
+
+        seen[current] = 1;
+
+        // Every pair of consecutive vertices must have
+        // a direct corridor between them.
+        if (i > 0) {
+            int previous = path[i - 1];
+
+            if (graph[previous][current] == 0) {
+                printf("Wrong: there is no corridor from %c to %c.\n",
+                       labels[previous], labels[current]);
+                return 0;
+            }
+        }
+    }
+
+    printf("Correct! You found a valid path:\n");
+
+    for (int i = 0; i < length; i++) {
+        printf("%c", labels[path[i]]);
+
+        if (i < length - 1) {
+            printf(" -> ");
+        }
+    }
+
+    printf("\n");
+    return 1;
+}
+
+// Depth-First Search.
+// Find any path from current to TARGET.
+// parent[] records how we reached each vertex.
+int dfs(int current)
+{
+    visited[current] = 1;
+
+    // Base case: the target has been reached.
+    if (current == TARGET) {
+        return 1;
+    }
+
+    // Examine every possible neighbor.
+    for (int neighbor = 0; neighbor < V; neighbor++) {
+        if (graph[current][neighbor] == 1 &&
+            !visited[neighbor]) {
+
+            // Record the route into this vertex.
+            parent[neighbor] = current;
+
+            // Explore this branch before trying another.
+            if (dfs(neighbor)) {
+                return 1;
+            }
+        }
+    }
+
+    // No path to the target was found through this branch.
+    return 0;
+}
+
+// Find and print a solution using DFS.
+void solveMaze(void)
+{
+    // Reset DFS state before searching.
+    for (int i = 0; i < V; i++) {
+        visited[i] = 0;
+        parent[i] = -1;
+    }
+
+    printf("\n========== DFS SOLUTION ==========\n");
+
+    if (!dfs(START)) {
+        printf("No path exists from S to T.\n");
+        return;
+    }
+
+    // Follow parent pointers backward from T to S.
+    int reversePath[V];
+    int length = 0;
+
+    for (int current = TARGET;
+         current != -1;
+         current = parent[current]) {
+
+        reversePath[length++] = current;
+    }
+
+    // Print the path in forward order: S to T.
+    printf("DFS found: ");
+
+    for (int i = length - 1; i >= 0; i--) {
+        printf("%c", labels[reversePath[i]]);
+
+        if (i > 0) {
+            printf(" -> ");
+        }
+    }
+
+    printf("\n");
+}
+
+// Read and validate the path entered by the player.
+void playGame(void)
+{
+    char line[256];
+    int path[MAX_PATH];
+    int length = 0;
+
+    printf("Your path: ");
+
+    // Read the whole line, including spaces.
+    if (fgets(line, sizeof(line), stdin) == NULL) {
+        printf("Could not read your input.\n");
+        return;
+    }
+
+    // Split the line into whitespace-separated tokens.
+    char *token = strtok(line, " \t\r\n");
+
+    while (token != NULL) {
+        // Each vertex label must be exactly one character.
+        if (strlen(token) != 1) {
+            printf("Wrong input: use single-letter labels.\n");
+            return;
+        }
+
+        int vertex = labelToIndex(token[0]);
+
+        if (vertex == -1) {
+            printf("Wrong input: unknown vertex '%s'.\n", token);
+            return;
+        }
+
+        if (length >= MAX_PATH) {
+            printf("Wrong input: path is too long.\n");
+            return;
+        }
+
+        path[length++] = vertex;
+        token = strtok(NULL, " \t\r\n");
+    }
+
+    // Check the player's proposed route.
+    validatePath(path, length);
+}
+
+int main(void)
+{
+    buildMaze();
+
+    displayMaze();
+
+    playGame();
+
+    // Independently solve the same maze using DFS.
+    solveMaze();
+
+    return 0;
+}
+
+```
+
+## 5. Compile and run the game
+
+On Linux, install GCC if needed, then compile and run:
+
+```
+gcc -std=c11 -Wall -Wextra -pedantic maze_game.c -o maze_game
+./maze_game
+```
+
+The program first displays the maze, asks for your path, checks it, and then prints a solution found by DFS.
+
+### Example run: correct upper path
+
+```
+========== MAZE ==========
+
+       B -------- D
+      /            \
+S --- A              T
+      \            /
+       C -------- E
+
+Start: S    Target: T
+Enter vertices separated by spaces.
+Example: S A B D T
+
+Your path: S A B D T
+Correct! You found a valid path:
+S -> A -> B -> D -> T
+
+========== DFS SOLUTION ==========
+DFS found: S -> A -> B -> D -> T
+```
+
+### Example run: correct lower path
+
+```
+Your path: S A C E T
+Correct! You found a valid path:
+S -> A -> C -> E -> T
+
+========== DFS SOLUTION ==========
+DFS found: S -> A -> B -> D -> T
+```
+
+Notice that the player's path and the DFS path are different, but both are valid. DFS is allowed to return any valid path; it does not necessarily find the shortest one.
+
+### Example run: invalid path
+
+```
+Your path: S B D T
+Wrong: there is no corridor from S to B.
+
+========== DFS SOLUTION ==========
+DFS found: S -> A -> B -> D -> T
+```
+
+The program rejects this path because there is no direct corridor between `S` and `B`.
+
+## 6. Understand the graph representation
+
+The application uses seven vertices:
+
+```
+ID    Label
+--    -----
+0     S
+1     A
+2     B
+3     C
+4     D
+5     E
+6     T
+```
+
+The numeric IDs let the program use arrays efficiently, while the labels make the game understandable to the player.
+
+For example:
+
+```
+addCorridor('S', 'A');
+```
+
+calls `labelToIndex()` to convert `S` and `A` to their internal IDs. It then updates the adjacency matrix:
+
+```
+graph[u][v] = 1;
+graph[v][u] = 1;
+```
+
+Both assignments matter because the maze is undirected.
+
+The graph's edges can be summarized as follows:
+
+| Vertex | Neighbors |
+| ------ | --------- |
+| S      | A         |
+| A      | S, B, C   |
+| B      | A, D      |
+| C      | A, E      |
+| D      | B, T      |
+| E      | C, T      |
+| T      | D, E      |
+
+This representation makes it easy to test whether a corridor exists:
+
+```
+if (graph[previous][current] == 0) {
+    /* No direct corridor exists. */
+}
+```
+
+## 7. How the application validates the player's path
+
+The `validatePath()` function performs several checks.
+
+1. Check the start. The first vertex must be `S`.
+2. Check the target. The final vertex must be `T`.
+3. Check repeated vertices. The player cannot revisit a vertex in this version of the game.
+4. Check every corridor. Each consecutive pair must have an edge in the adjacency matrix.
+5. Accept or reject the path. The program prints the result and displays the route when it is valid.
+
+For example, consider this input:
+
+```
+S A B D T
+```
+
+The validation function checks:
+
+```
+S -- A    exists
+A -- B    exists
+B -- D    exists
+D -- T    exists
+```
+
+All checks pass, so the path is accepted.
+
+Now consider:
+
+```
+S A D T
+```
+
+The first edge `S -- A` exists, but `A -- D` does not. The program rejects the path at that point.
+
+The no-repeated-vertices rule is a game rule, not a requirement for every possible graph path. A more advanced version could allow revisiting vertices while still requiring every move to follow a corridor.
+
+## 8. How DFS solves the maze
+
+The recursive `dfs()` function is the heart of the solver.
+
+Its main operations are:
+
+```
+visited[current] = 1;
+
+if (current == TARGET) {
+    return 1;
+}
+```
+
+First, it marks the current vertex as visited. If it reaches the target, it reports success.
+
+Otherwise, it examines all possible neighbors:
+
+```
+for (int neighbor = 0; neighbor < V; neighbor++) {
+    if (graph[current][neighbor] == 1 &&
+        !visited[neighbor]) {
+
+        parent[neighbor] = current;
+
+        if (dfs(neighbor)) {
+            return 1;
+        }
+    }
+}
+```
+
+There are three important details here:
+
+- `graph[current][neighbor] == 1` ensures there is a corridor.
+- `!visited[neighbor]` prevents the algorithm from endlessly revisiting vertices.
+- `parent[neighbor] = current` remembers the route used to reach the neighbor.
+
+The recursive call explores that branch deeply before trying the next available neighbor.
+
+### DFS walkthrough
+
+Because the implementation checks neighbors in ascending vertex-ID order, the first path found is:
+
+### 1
+
+Visit S
+
+The only neighbor is A.
+
+### 2
+
+Visit A
+
+B is examined before C, so DFS explores B first.
+
+### 3
+
+Visit B, then D
+
+Each recursive call continues deeper into the graph.
+
+### 4
+
+Reach T
+
+DFS returns success through the recursive calls.
+
+The resulting search sequence is:
+
+```
+S -> A -> B -> D -> T
+```
+
+Since the target is reached, the algorithm stops searching. It doesn't need to visit `C` or `E` to find a solution.
+
+### Why do we need `parent[]`?
+
+DFS discovers vertices in the forward direction, but we want to print the complete route after finding the target.
+
+The assignments record how we arrived at each vertex:
+
+```
+parent[A] = S
+parent[B] = A
+parent[D] = B
+parent[T] = D
+```
+
+Starting from `T`, we follow the parent pointers backward:
+
+```
+T <- D <- B <- A <- S
+```
+
+Then we reverse that sequence to obtain:
+
+```
+S -> A -> B -> D -> T
+```
+
+This is a common graph technique for reconstructing paths after BFS or DFS.
+
+## 9. Test cases
+
+Try the following inputs to check the application.
+
+| Input           | Expected result | Reason                   |
+| --------------- | --------------- | ------------------------ |
+| `S A B D T`     | Correct         | Valid upper path         |
+| `S A C E T`     | Correct         | Valid lower path         |
+| `S B D T`       | Wrong           | No `S -- B` corridor     |
+| `A B D T`       | Wrong           | Does not start at `S`    |
+| `S A B D`       | Wrong           | Does not end at `T`      |
+| `S A B A C E T` | Wrong           | Repeats `A`              |
+| `S X T`         | Wrong input     | `X` is an unknown vertex |
+
+## 10. Complexity analysis
+
+Let $V$ be the number of vertices and $E$ the number of corridors.
+
+| Operation                  | Time complexity                                                                           |
+| -------------------------- | ----------------------------------------------------------------------------------------- |
+| Build the predefined maze  | $O(E)$                                                                                |
+| Validate the player's path | $O(V+L)$ for this matrix-based implementation, where $L$ is the input path length |
+| DFS with adjacency matrix  | $O(V^2)$                                                                              |
+| Reconstruct the solution   | $O(V)$                                                                                |
+| Graph storage              | $O(V^2)$                                                                              |
+
+The DFS implementation scans an entire matrix row for every visited vertex, which is why its time complexity is $O(V^2)$.
+
+For a large, sparse maze, an adjacency list would usually be more space-efficient and would let DFS run in $O(V+E)$ time.
+
+## 11. Extend the lab: random mazes
+
+After the predefined version works, you can add random maze generation.
+
+One important design choice is that randomly choosing edges is not enough to guarantee a solvable maze. You need a generation algorithm that preserves connectivity or a process that verifies a path exists.
+
+A good next step is randomized DFS maze generation:
+
+1. Start at a grid cell and mark it visited.
+2. Randomly choose an unvisited neighboring cell.
+3. Remove the wall between the current cell and that neighbor.
+4. Continue recursively or with an explicit stack.
+5. Backtrack when no unvisited neighbor remains.
+6. Choose the entrance and exit, then label junctions and dead ends.
+
+For the full maze game, a natural progression is:
+
+- Version 1: Predefined graph, manual path input, validation, DFS solution.
+- Version 2: Several predefined mazes selected by the player.
+- Version 3: Random maze generation with guaranteed connectivity.
+- Version 4: A grid-based display where the player navigates with keyboard commands.
+- Version 5: Highlight the player's route and DFS's explored vertices.
+
+One final distinction: the current program displays a graph diagram, rather than a full grid maze with walls and corridors. That is intentional for the first lab because it lets you focus on graph traversal, path validation, and DFS before adding grid rendering.
+
+Would you like ChatGPT to remind you to continue with Version 2: multiple predefined mazes, or later follow up on implementing random maze generation?

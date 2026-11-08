@@ -1,1 +1,1212 @@
-# Memory Model
+{/* # Java Memory Model (JMM) */}
+
+The Java Memory Model (JMM) defines how threads interact through shared memory, and which values a thread is allowed to observe when another thread modifies that memory.
+
+It is one of the most important concepts for understanding Java concurrency, multithreading, `synchronized`, `volatile`, and the `java.util.concurrent` package.
+
+Since you've been studying JVM architecture, it helps to distinguish three related concepts:
+
+| Concept                 | What it explains                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------------------- |
+| JVM memory areas        | Where runtime data is stored: heap, stacks, method-related metadata, and so on.          |
+| Java Memory Model (JMM) | The rules governing visibility and ordering of shared-memory operations between threads. |
+| Garbage Collection (GC) | How the JVM reclaims memory occupied by unreachable objects.                             |
+
+The key idea: The JMM is not a physical memory region. It is a set of rules that determines how multithreaded Java programs behave.
+
+## Why do we need the JMM?
+
+Imagine two Java threads sharing an ordinary variable.
+
+```Java
+public class SharedData {
+    static boolean ready = false;
+
+    public static void main(String[] args)
+            throws InterruptedException {
+
+        Thread writer = new Thread(() -> {
+            ready = true;
+        });
+
+        Thread reader = new Thread(() -> {
+            while (!ready) {
+                // Wait until ready becomes true
+            }
+
+            System.out.println("Ready!");
+        });
+
+        reader.start();
+        writer.start();
+
+        writer.join();
+        reader.join();
+    }
+}
+```
+
+You might expect the reader thread to observe `ready = true` as soon as the writer changes it.
+
+However, this program has a data race: neither thread uses synchronization to coordinate access to `ready`.
+
+Consequently, the JMM does not guarantee that the reader will observe the update. The reader might continue looping indefinitely, even though the writer has assigned `true`.
+
+Why can this happen?
+
+- The compiler or JIT compiler may optimize memory accesses.
+- The processor may reorder operations when permitted by the memory model.
+- Threads may observe shared-memory updates at different times because no synchronization establishes the required visibility.
+
+These behaviors depend on the implementation and hardware; the JMM defines which behaviors Java programs must allow.
+
+This is why concurrency requires more than simply assigning values to variables.
+
+## JMM's fundamental concerns
+
+1\. Visibility
+
+When one thread updates a shared variable, under what conditions must another thread see the new value?
+
+2\. Ordering
+
+Which operations must appear to happen before other operations, and which may be reordered?
+
+3\. Atomicity
+
+Which operations happen as indivisible units, without another thread observing a partial operation?
+
+Let's explore each one.
+
+### 1. Visibility
+
+Visibility means that a thread can observe another thread's changes.
+
+Consider this example:
+
+```Java
+class Counter {
+    static int value = 0;
+
+    public static void main(String[] args) {
+        Thread writer = new Thread(() -> {
+            value = 42;
+        });
+
+        Thread reader = new Thread(() -> {
+            System.out.println(value);
+        });
+
+        writer.start();
+        reader.start();
+    }
+}
+```
+
+The reader might print `0` or `42`. Starting both threads does not establish an ordering between their two operations.
+
+If the writer completes before the reader starts, the result is different:
+
+```Java
+writer.start();
+writer.join();  // Wait until writer terminates
+
+reader.start();
+```
+
+Here, the writer's actions happen-before the reader thread's actions after `join()` returns. The reader must therefore observe `42`, assuming no intervening write.
+
+The distinction is important: visibility is governed by synchronization guarantees, not simply by the fact that a variable is shared.
+
+### 2 Ordering
+
+The JMM allows the compiler, JIT compiler, and processor to reorder operations when the transformation preserves the behavior required by the Java Memory Model.
+
+Consider:
+
+```Java
+int data = 0;
+boolean ready = false;
+
+// Thread A
+data = 42;
+ready = true;
+
+// Thread B
+if (ready) {
+    System.out.println(data);
+}
+```
+
+The programmer intends this sequence:
+
+1. Store `42` in `data`.
+2. Set `ready` to `true`.
+3. When another thread sees `ready == true`, let it read `data`.
+
+But these are ordinary, unsynchronized shared variables. The JMM does not guarantee that Thread B will see `data == 42` just because it sees `ready == true`.
+
+A compiler or processor does not have to preserve the apparent source-code ordering in every way that matters to unsynchronized concurrent threads.
+
+To establish the intended ordering, use a synchronization mechanism such as `volatile`, a monitor lock, or a suitable concurrency utility.
+
+### 3. Atomicity
+
+An operation is atomic when it takes effect as one indivisible operation from the perspective of other threads.
+
+Consider:
+
+```Java
+static int count = 0;
+
+// Executed by multiple threads
+count++;
+```
+
+It looks like one operation, but conceptually it consists of three steps:
+
+```
+1. Read count
+2. Add 1
+3. Write the result
+```
+
+Suppose `count` is initially `0`.
+
+```
+ ┌──────────────────────────────────────────────────────┐            
+ │Two threads incrementing the same counter             │          
+ │                                                      │            
+ │                                                      │            
+ │                                                      │            
+ │       Thread A                 Thread B              │            
+ │    Reads count = 0          Reads count = 0          │            
+ │    Calculates 1             Calculates 1             │            
+ │    Writes count = 1         Writes count = 1         │            
+ │                                                      │            
+ │───────────────────────────────────────────────────── │            
+ │Final count: 1 instead of 2                           │           
+ │                                                      │                    
+ │                                                      │            
+ │                                                      │            
+ └──────────────────────────────────────────────────────┘                                                                                                                       
+```
+
+This is a lost update. The read-modify-write sequence is not atomic, even though an individual read or write of an `int` is atomic under Java's rules.
+
+Use `AtomicInteger` when you need an atomic increment:
+
+```Java
+import java.util.concurrent.atomic.AtomicInteger;
+
+public class CounterExample {
+    private static final AtomicInteger count = new AtomicInteger();
+
+    public static void main(String[] args) throws InterruptedException {
+        Runnable task = () -> {
+            for (int i = 0; i < 100_000; i++) {
+                count.incrementAndGet();
+            }
+        };
+
+        Thread first = new Thread(task);
+        Thread second = new Thread(task);
+
+        first.start();
+        second.start();
+
+        first.join();
+        second.join();
+
+        System.out.println(count.get()); // 200000
+    }
+}
+```
+
+`AtomicInteger.incrementAndGet()` performs an atomic increment, so the two threads cannot lose updates in this way.
+
+## Happens-before relationship
+
+The happens-before relationship is the central concept for reasoning about Java Memory Model guarantees.
+
+It tells you when the effects of one action must be visible to another action.
+
+The term does not necessarily mean that the actions occurred at different physical times. It describes a guaranteed ordering relationship under the JMM.
+
+The main rules to learn are:
+
+| Rule                                      | Guarantee                                                                                                       |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Program order                             | Within a single thread, earlier actions happen-before later actions in that thread.                             |
+| Monitor unlock → subsequent lock          | Unlocking a monitor happens-before a subsequent lock of the same monitor.                                       |
+| Volatile write → subsequent volatile read | A write to a volatile field happens-before a subsequent read of that field that observes it.                    |
+| `Thread.start()`                          | Calling `start()` happens-before actions in the started thread.                                                 |
+| Thread termination → `join()` return      | A thread's actions happen-before another thread successfully detects its termination, such as through `join()`. |
+| Transitivity                              | If A happens-before B, and B happens-before C, then A happens-before C.                                         |
+
+These rules let you prove that one thread will see another thread's work.
+
+**Example: volatile establishes visibility and ordering**
+
+```Java
+public class VisibilityExample {
+    private static int data = 0;
+    private static volatile boolean ready = false;
+
+    public static void main(String[] args) throws InterruptedException {
+        Thread reader = new Thread(() -> {
+            while (!ready) {
+                // Wait for the volatile flag
+            }
+
+            System.out.println(data); // Guaranteed to print 42
+        });
+
+        reader.start();
+
+        data = 42;
+        ready = true;
+
+        reader.join();
+    }
+}
+```
+
+Why is this different from the first example?
+```                                                                   
+   ┌───────────────────────────────────────────────────────────────┐            
+   │┌─────────────────────────────────────────────────────────────┐│            
+   ││                      Writer thread                          ││            
+   ││                      Write data = 42                        ││            
+   ││                            ↓                                ││            
+   ││                 Write volatile ready = true                 ││                             
+   ││                                                             ││            
+   │└─────────────────────────────────────────────────────────────┘│            
+   │                              ↓                                │            
+   │                       happens-before                          │            
+   │┌─────────────────────────────────────────────────────────────┐│            
+   ││                                                             ││                      
+   ││                      Reader thread                          ││            
+   ││                 Read volatile ready == true                 ││ 
+   ││                             ↓                               ││            
+   ││                     Read data == 42                         ││            
+   ││                                                             ││            
+   │└─────────────────────────────────────────────────────────────┘│            
+   └───────────────────────────────────────────────────────────────┘            
+```                                                                                                                                                                                                                       
+
+The writer's assignment to `data` happens-before its volatile write to `ready`, by program order. The volatile write synchronizes with a subsequent volatile read of `ready` that observes that write. By transitivity, the assignment to `data` happens-before the reader's subsequent read of `data`.
+
+This guarantees visibility and ordering. Notice that `data` itself does not need to be volatile here.
+
+One caveat: if another thread can also modify `data`, you need to analyze those additional accesses. This example assumes no other writes to `data`.
+
+## How `volatile`, `synchronized`, and atomics relate to the JMM
+
+These are mechanisms you use in Java code to obtain the guarantees defined by the JMM.
+
+1. `volatile` — **visibility and ordering**
+
+    Best for a shared flag or a state variable when individual reads and writes are sufficient.
+
+    ```Java
+    private volatile boolean running = true;
+    ```
+
+    A write to `running` becomes visible to threads that subsequently read the volatile field under the JMM's synchronization rules. It does not make compound operations such as `running = !running` atomic.
+
+2. `synchronized` — **mutual exclusion, visibility, and ordering**
+
+    Best when multiple operations must be performed as one protected critical section.
+
+    ```Java
+    synchronized (lock) {
+        count++;
+    }
+    ```
+
+    Threads using the same monitor cannot execute the same synchronized critical section simultaneously. Unlocking the monitor also establishes a happens-before relationship with a subsequent lock of that monitor.
+
+3. Atomic classes — **atomic operations**
+
+    Best for independent counters, compare-and-set state changes, and similar operations.
+
+    ```
+    AtomicInteger count = new AtomicInteger();
+    count.incrementAndGet();
+    ```
+
+    Atomic classes provide defined atomic operations and appropriate memory-ordering guarantees. They are often a simpler alternative to locking for a single variable.
+
+### Quick comparison
+
+| Property                         | `volatile` | `synchronized`                | `AtomicInteger`                               |
+| -------------------------------- | ---------- | ----------------------------- | --------------------------------------------- |
+| Visibility guarantees            | Yes        | Yes, through the same monitor | Yes, through its memory-ordering guarantees   |
+| Atomic increment                 | No         | Yes, inside a shared lock     | Yes                                           |
+| Mutual exclusion                 | No         | Yes                           | No general critical-section lock              |
+| Suitable for compound operations | Usually no | Yes                           | Only operations the class explicitly provides |
+
+Important: `volatile` is not a lightweight replacement for `synchronized` in every situation. Choose the mechanism based on the guarantee your algorithm needs.
+
+## The JMM and JVM memory architecture
+
+You previously explored the JVM's heap, Java stacks, method-related runtime information, and thread execution. Here is how that connects to the JMM.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐      
+|                                                                                 |
+|┌──────────────────────────────────────────────────────────────────────────────┐ |  
+│|                                Java Memory Model                             | |                    
+│|Defines legal inter-thread visibility, ordering, and synchronization behavior | |
+|└──────────────────────────────────────────────────────────────────────────────┘ |
+│┌──────────────────────────────────────┐ ┌─────────────────────────────────────┐ │      
+││    Shared heap                       │ │   Per-thread stacks                 │ │      
+││Objects and arrays may be             | │Each thread has its own stack        | |    
+││accessed by multiple threads          | │frames and local variables.          │ |  
+││                                      │ │                                     │ │      
+││                                      │ │                                     │ │      
+││                                      │ │                                     │ │      
+│└──────────────────────────────────────┘ └─────────────────────────────────────┘ │      
+│┌──────────────────────────────────────┐ ┌─────────────────────────────────────┐ │      
+││     Synchronization                  │ │     JIT and hardware                │ │      
+││Locks, volatile fields, thread        │ |Optimizations and memory             │ |  
+││lifecycle operations, and             │ |operations must respect the JMM's    | |
+││concurrency utilities.                │ │                                     │ │      
+││                                      │ │                                     │ │      
+│└──────────────────────────────────────┘ └─────────────────────────────────────┘ │      
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+A few details matter here:
+
+- The heap is shared in the logical JVM memory model. Objects can be reachable by multiple threads, so their mutable state may require coordination.
+- Stacks are per-thread. A local variable belongs to a thread's stack frame, but if that variable contains a reference to a shared object, the referenced object can still be accessed by other threads.
+- The JMM does not require every thread to read directly from RAM. Modern JVMs and processors use registers, caches, and other optimizations. The JMM specifies observable behavior rather than a particular physical memory layout.
+- The JMM is not a garbage collector or a memory allocator. It governs concurrency semantics, not the process of allocating and reclaiming objects.
+
+This last point is especially useful: the JVM architecture explains the runtime's components, while the JMM explains what those components must guarantee when threads communicate.
+
+## Safe publication and `final` fields
+
+Safe publication means making an object available to other threads in a way that ensures they can observe its properly initialized state.
+
+Imagine that one thread creates a `User`, `Configuration`, or `Order` object, and another thread needs to use it. The challenge is not just sharing the object's reference; it is ensuring that the second thread sees the object's initialization writes.
+
+The Java Memory Model (JMM) solves this through happens-before relationships.
+
+Consider:
+
+```Java
+class Configuration {
+    int port;
+
+    Configuration(int port) {
+        this.port = port;
+    }
+}
+```
+
+A thread creates the object:
+
+```
+Configuration config =
+        new Configuration(8080, "localhost");
+```
+
+The constructor assigns `port` and `host`. But if another thread reads a reference published through an ordinary, unsynchronized shared field, the JMM does not guarantee that the reader will observe those initialization writes.
+
+The key distinction is:
+
+- Object construction: The creating thread initializes the object.
+- Reference publication: The creating thread makes the reference available to another thread.
+- Safe publication: The program establishes the required guarantees so the reader can observe the initialized state.
+
+Common safe-publication mechanisms include:
+
+- Publishing the reference through a `volatile` field.
+- Publishing it while holding a lock, with the reader acquiring the same lock.
+- Initializing the object before starting the thread that receives it.
+- Using appropriately designed concurrent collections or other concurrency utilities.
+- Using a `static` initializer for class-initialized shared state.
+
+Let's see how each mechanism achieves this
+
+### Common safe-publication mechanisms
+##### 1. Publishing through a `volatile` field
+
+A `volatile` field provides visibility and ordering guarantees between threads.
+
+When a thread writes an object reference to a volatile field, the initialization actions that occurred before that write happen-before a subsequent read of that field that observes the write.
+
+**Example**
+
+```Java
+public class VolatilePublication {
+
+    static class Configuration {
+        int port;
+        String host;
+
+        Configuration(int port, String host) {
+            this.port = port;
+            this.host = host;
+        }
+    }
+
+    // Shared volatile reference
+    private static volatile Configuration config;
+
+    public static void main(String[] args)
+            throws InterruptedException {
+
+        Thread reader = new Thread(() -> {
+            while (config == null) {
+                Thread.onSpinWait();
+            }
+
+            // The initialized values are visible here.
+            System.out.println(config.port);
+            System.out.println(config.host);
+        });
+
+        reader.start();
+
+        Configuration newConfig =
+                new Configuration(8080, "localhost");
+
+        config = newConfig; // Volatile write
+
+        reader.join();
+    }
+}
+```
+
+Expected output:
+
+```
+8080
+localhost
+```
+
+**What happens between the threads?**
+
+**Thread A — Publisher**
+
+1\. Allocate the object.
+
+2\. Initialize `port = 8080`.
+
+3\. Initialize `host = "localhost"`.
+
+4\. Write the reference to volatile `config`.
+
+**Happens-before**
+
+Volatile write → subsequent volatile read
+
+**Thread B — Reader**
+
+5\. Read volatile `config` and observe the reference.
+
+6\. Read `port` and `host` with initialization guaranteed visible.
+
+The important relationship is:
+
+$$ 
+\begin{aligned} 
+&\text{Initialize object} \\ 
+&\quad\downarrow\ \text{program order} \\ 
+&\text{Volatile write} \\ 
+&\quad\downarrow\ \text{happens-before} \\ 
+&\text{Volatile read} \\ 
+&\quad\downarrow\ \text{program order} \\ 
+&\text{Read object fields} 
+\end{aligned}
+$$
+
+###### When should you use this?
+
+A volatile reference is useful when you want to publish or replace a complete object without using a lock for readers.
+
+For example:
+
+```Java
+private static volatile Configuration config;
+
+static void reloadConfiguration() {
+    config = new Configuration(9090, "server.example");
+}
+```
+
+Readers can observe the newly published configuration without acquiring a lock.
+
+Important limitation: `volatile` protects the publication and visibility of the reference and preceding initialization writes. It does not automatically make subsequent mutations of the object's fields thread-safe.
+
+For configuration objects, an especially good design is to make the object immutable.
+
+##### 2. Publishing while holding a lock
+
+Java's `synchronized` keyword provides mutual exclusion and memory-visibility guarantees through a monitor lock.
+
+The rule is:
+
+> An unlock of a monitor happens-before every subsequent lock of that same monitor.
+
+The publisher initializes the object and publishes its reference while holding a lock. The reader acquires the same lock before accessing the reference.
+
+**Example**
+
+```
+public class LockPublication {
+
+    static class Configuration {
+        int port;
+        String host;
+
+        Configuration(int port, String host) {
+            this.port = port;
+            this.host = host;
+        }
+    }
+
+    private static final Object lock = new Object();
+    private static Configuration config;
+
+    static void publish() {
+        synchronized (lock) {
+            config = new Configuration(8080, "localhost");
+        }
+    }
+
+    static Configuration getConfiguration() {
+        synchronized (lock) {
+            return config;
+        }
+    }
+
+    public static void main(String[] args)
+            throws InterruptedException {
+
+        Thread reader = new Thread(() -> {
+            Configuration c;
+
+            while ((c = getConfiguration()) == null) {
+                Thread.onSpinWait();
+            }
+
+            System.out.println(c.port);
+            System.out.println(c.host);
+        });
+
+        reader.start();
+
+        publish();
+
+        reader.join();
+    }
+}
+```
+
+Expected output:
+
+```
+8080
+localhost
+```
+
+###### Execution flow
+
+Publisher
+
+Acquire `lock`
+
+Initialize and assign `config`
+
+Release `lock`
+
+Unlock → subsequent lock
+
+Reader
+
+Acquire the same `lock`
+
+Read `config`
+
+Access the initialized fields
+
+When `getConfiguration()` acquires the lock after `publish()` releases it, the reader is guaranteed to see the published reference and the preceding initialization writes.
+
+The `while` loop is useful here because the reader might acquire the lock before the publisher has run. Each call checks the reference under synchronization.
+
+####### Why must both threads use the same lock?
+
+This is not sufficient:
+
+```
+static final Object publisherLock = new Object();
+static final Object readerLock = new Object();
+```
+
+If the publisher synchronizes on `publisherLock` and the reader synchronizes on `readerLock`, their lock operations do not establish the required monitor-based happens-before relationship.
+
+The lock must be the same monitor.
+
+####### When should you use this?
+
+Use locking when publication is part of a larger operation that must remain consistent, such as updating a collection, maintaining an invariant across several fields, or coordinating changes to shared application state.
+
+For a single replaceable reference, `volatile` is often simpler. When multiple operations must be coordinated together, locking is usually more appropriate.
+
+##### 3. Initializing the object before starting the receiving thread
+
+###### How it works
+
+Java guarantees that all actions performed by a thread before calling `Thread.start()` happen-before the actions performed by the newly started thread.
+
+This makes thread startup a natural safe-publication mechanism.
+
+You can initialize an ordinary object in the main thread and pass its reference to a worker thread, provided the worker does not start using the object until after initialization is complete.
+
+####### Example
+
+```
+public class ThreadStartPublication {
+
+    static class Configuration {
+        int port;
+        String host;
+
+        Configuration(int port, String host) {
+            this.port = port;
+            this.host = host;
+        }
+    }
+
+    public static void main(String[] args)
+            throws InterruptedException {
+
+        // Initialize the object before starting the worker.
+        Configuration config =
+                new Configuration(8080, "localhost");
+
+        Thread worker = new Thread(() -> {
+            System.out.println(config.port);
+            System.out.println(config.host);
+        });
+
+        // Publication boundary
+        worker.start();
+
+        worker.join();
+    }
+}
+```
+
+Expected output:
+
+```
+8080
+localhost
+```
+
+Notice that `config` does not need to be `volatile` here.
+
+###### Execution flow
+
+Main thread
+
+1\. Create `Configuration`.
+
+2\. Initialize `port` and `host`.
+
+3\. Capture the reference in the worker's task.
+
+4\. Call `worker.start()`.
+
+Actions before `start()`
+
+happen-before actions in the started thread
+
+Worker thread
+
+5\. Execute the task.
+
+6\. Read the initialized configuration.
+
+####### Why does this work?
+
+The JMM defines a synchronization relationship between thread startup and execution.
+
+The object is completely initialized before `start()` is called. Therefore, its initialization writes happen-before the worker's subsequent reads.
+
+####### An important limitation
+
+The guarantee applies to actions before `start()`. It does not automatically cover changes made afterward.
+
+For example:
+
+```
+Configuration config = new Configuration(8080, "localhost");
+
+Thread worker = new Thread(() -> {
+    System.out.println(config.port);
+});
+
+worker.start();
+
+config.port = 9090; // Concurrent modification after startup
+```
+
+The startup guarantee alone does not make this later write visible to the worker or prevent a race between the read and write.
+
+If the object must change after startup, use an appropriate synchronization mechanism.
+
+####### When should you use this?
+
+This pattern is excellent for:
+
+- Initializing a worker's configuration before starting it.
+- Passing immutable task data to a thread.
+- Building objects and their dependencies before starting background work.
+- Avoiding unnecessary synchronization for data that will not change after startup.
+
+The same principle applies to executor tasks when their submission and execution are coordinated through the documented memory-consistency guarantees of the executor.
+
+##### 4. Publishing through concurrent collections or concurrency utilities
+
+###### How it works
+
+Classes such as `ConcurrentHashMap`, `BlockingQueue`, and `ExecutorService` provide documented thread-safety and memory-consistency guarantees.
+
+Instead of implementing your own publication protocol, you can use one of these classes to transfer references safely between threads.
+
+The exact guarantee depends on the utility and operation. For example, a `BlockingQueue` specifies that actions performed by a thread before placing an object into the queue happen-before actions after another thread accesses or removes that object.
+
+####### Example using `BlockingQueue`
+
+Imagine that one thread creates a configuration and sends it to a worker through a queue.
+
+```
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+
+public class QueuePublication {
+
+    static class Configuration {
+        int port;
+        String host;
+
+        Configuration(int port, String host) {
+            this.port = port;
+            this.host = host;
+        }
+    }
+
+    public static void main(String[] args)
+            throws InterruptedException {
+
+        BlockingQueue<Configuration> queue =
+                new LinkedBlockingQueue<>();
+
+        Thread producer = new Thread(() -> {
+            Configuration config =
+                    new Configuration(8080, "localhost");
+
+            try {
+                queue.put(config);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        Thread consumer = new Thread(() -> {
+            try {
+                Configuration config = queue.take();
+
+                System.out.println(config.port);
+                System.out.println(config.host);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        consumer.start();
+        producer.start();
+
+        producer.join();
+        consumer.join();
+    }
+}
+```
+
+Expected output:
+
+```
+8080
+localhost
+```
+
+###### Execution flow
+
+Producer thread
+
+Construct and initialize the configuration.
+
+Call `queue.put(config)`.
+
+Queue memory-consistency guarantee
+
+Consumer thread
+
+Call `queue.take()`.
+
+Receive the reference.
+
+Read the initialized configuration fields.
+
+The queue does not need the configuration's fields to be declared `volatile`. Its documented concurrency guarantees establish the required publication relationship.
+
+###### Example with `ConcurrentHashMap`
+
+A concurrent map is useful when a thread publishes an object under a key and other threads retrieve it.
+
+```
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+public class MapPublication {
+
+    static class Configuration {
+        int port;
+
+        Configuration(int port) {
+            this.port = port;
+        }
+    }
+
+    private static final ConcurrentMap<String, Configuration> configs =
+            new ConcurrentHashMap<>();
+
+    public static void main(String[] args) {
+        Configuration config = new Configuration(8080);
+
+        configs.put("web", config);
+
+        Configuration result = configs.get("web");
+
+        System.out.println(result.port); // 8080
+    }
+}
+```
+
+The `ConcurrentHashMap` safely coordinates concurrent map operations and publishes the inserted mapping according to its documented memory-consistency guarantees.
+
+In a real application, the producer and consumer would normally be different threads. The same principle applies.
+
+Important limitation: A concurrent collection protects its own concurrent operations. It does not automatically make arbitrary mutations of the objects stored inside it thread-safe.
+
+For example:
+
+```
+configs.get("web").port = 9090;
+```
+
+This field mutation is not automatically protected merely because the object came from a `ConcurrentHashMap`.
+
+####### When should you use this?
+
+Prefer concurrency utilities when the problem naturally involves:
+
+- Passing work between producer and consumer threads.
+- Sharing objects through a concurrent registry or cache.
+- Submitting tasks to a thread pool.
+- Coordinating tasks with latches, semaphores, futures, or other concurrency primitives.
+
+These abstractions are generally safer and easier to maintain than manually implementing low-level synchronization.
+
+##### 5. Publishing through a `static` initializer
+
+###### How it works
+
+Java guarantees that class initialization is synchronized by the JVM.
+
+When a class is initialized, its static field initializers and static initialization blocks execute as part of that initialization process. The JVM coordinates initialization so that other threads using the class cannot proceed past the class-initialization boundary before initialization completes.
+
+This makes static initialization a convenient mechanism for safely publishing shared objects.
+
+####### Example
+
+```
+public class StaticInitializationPublication {
+
+    static class Configuration {
+        final int port;
+        final String host;
+
+        Configuration(int port, String host) {
+            this.port = port;
+            this.host = host;
+        }
+    }
+
+    // Initialized as part of class initialization.
+    private static final Configuration CONFIG;
+
+    static {
+        CONFIG = new Configuration(8080, "localhost");
+    }
+
+    public static Configuration getConfiguration() {
+        return CONFIG;
+    }
+
+    public static void main(String[] args)
+            throws InterruptedException {
+
+        Thread first = new Thread(() -> {
+            Configuration c = getConfiguration();
+            System.out.println(c.port);
+        });
+
+        Thread second = new Thread(() -> {
+            Configuration c = getConfiguration();
+            System.out.println(c.host);
+        });
+
+        first.start();
+        second.start();
+
+        first.join();
+        second.join();
+    }
+}
+```
+
+Possible output:
+
+```
+8080
+localhost
+```
+
+The output order is not guaranteed because the two threads execute independently.
+
+###### Execution flow
+
+JVM initializes the class
+
+1\. Execute static field initializers and static initialization blocks.
+
+2\. Construct the configuration.
+
+3\. Assign the reference to `CONFIG`.
+
+4\. Complete class initialization.
+
+Class-initialization guarantee
+
+Application threads
+
+5\. Access the initialized class.
+
+6\. Retrieve `CONFIG` and read its fields.
+
+The JMM specifies that the completion of a class's initialization happens-before the first subsequent active use of that class by another thread.
+
+As a result, threads that access `CONFIG` after initialization can safely observe the initialized object.
+
+####### Why use `static final`?
+
+These two modifiers serve different purposes:
+
+- `static` makes the field belong to the class rather than to individual instances.
+- `final` prevents reassignment of the reference after initialization.
+
+The `final` modifier does not, by itself, provide the entire publication mechanism. The class-initialization guarantee is what makes this pattern safe.
+
+####### A practical variation: the initialization-on-demand holder idiom
+
+You can use the same mechanism for lazy initialization:
+
+```
+public class ConfigurationProvider {
+
+    private ConfigurationProvider() {
+    }
+
+    private static class Holder {
+        static final Configuration INSTANCE =
+                new Configuration(8080, "localhost");
+    }
+
+    public static Configuration getInstance() {
+        return Holder.INSTANCE;
+    }
+
+    static class Configuration {
+        final int port;
+        final String host;
+
+        Configuration(int port, String host) {
+            this.port = port;
+            this.host = host;
+        }
+    }
+}
+```
+
+The `Holder` class is initialized only when it is first actively used. JVM class initialization provides thread-safe initialization without requiring an explicit synchronized accessor.
+
+This pattern is useful for lazily initialized singletons and shared, immutable configuration objects.
+
+####### When should you use this?
+
+Use static initialization when:
+
+- A shared object can be created as part of class initialization.
+- You need a simple, thread-safe singleton.
+- You want lazy initialization without explicit locks.
+- The object can be initialized once and then reused.
+
+It is less suitable when initialization requires dynamic application configuration, request-specific data, or complex lifecycle management.
+
+##### 6. Comparing all five mechanisms
+
+| Mechanism                            | How it establishes safety                                                               | Best use case                                                    |
+| ------------------------------------ | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `volatile` reference                 | Volatile write happens-before a subsequent volatile read that observes it.              | Publishing or replacing a shared reference.                      |
+| Same monitor lock                    | Unlock happens-before a subsequent lock of that monitor.                                | Publishing state that participates in a larger critical section. |
+| `Thread.start()`                     | Actions before `start()` happen-before actions in the started thread.                   | Passing initialized data to a new thread.                        |
+| Concurrent collections and utilities | Their documented memory-consistency guarantees establish visibility between operations. | Passing work or sharing objects between concurrent tasks.        |
+| Static initialization                | Class initialization completes before subsequent active use proceeds.                   | Shared constants, immutable configuration, and singletons.       |
+
+###### 7. How to choose the right mechanism
+
+Choose a scenario to see the recommended approach.
+
+A configuration object can be replaced at runtime.
+
+Several fields must change together as one operation.
+
+An object is prepared before a worker thread starts.
+
+One thread produces objects and another consumes them.
+
+One shared instance should be initialized lazily.
+
+Recommended: `volatile` reference
+
+```
+private static volatile Configuration config;
+```
+
+Construct a new configuration and publish it by assigning the reference. Prefer immutable configuration objects.
+
+###### 8. The most important lesson
+
+Safe publication and thread safety are related, but they are not the same thing.
+
+- Safe publication ensures a thread can see the object's properly initialized state.
+- Thread safety ensures that concurrent operations on the object behave correctly.
+- Immutability reduces the need for synchronization after an object has been safely constructed and published.
+
+For most Java applications, a strong default design is to construct objects fully, make configuration and value objects immutable where practical, and publish them through well-defined mechanisms such as `volatile`, locks, thread startup, or concurrency utilities.
+
+For the formal rules, see the [Java Language Specification, §17.4: Memory Model](https://docs.oracle.com/javase/specs/jls/se24/html/jls-17.html#jls-17.4) and [§12.4.2: Detailed Initialization Procedure](https://docs.oracle.com/javase/specs/jls/se24/html/jls-12.html#jls-12.4.2).
+
+### Why `final` fields matter
+
+```Java
+final class Configuration {
+    private final int port;
+
+    Configuration(int port) {
+        this.port = port;
+    }
+
+    int getPort() {
+        return port;
+    }
+}
+```
+
+The JMM provides special initialization guarantees for properly constructed objects with `final` fields, provided `this` does not escape during construction.
+
+However, `final` does not mean that the object reference is automatically safely published in every possible concurrent design. Safe publication remains an important design concern, especially when an object has mutable fields or contains references to mutable objects.
+
+Also, `final` applies to the reference or value itself, not necessarily to the state of a referenced object:
+
+```Java
+final List<String> names = new ArrayList<>();
+
+names.add("Java"); // Legal: the list is mutable
+// names = new ArrayList<>(); // Illegal: cannot reassign the reference
+```
+
+## Data races and race conditions
+
+These terms are related but not identical.
+
+- Data race: Two conflicting accesses to the same variable from different threads, at least one of which is a write, without the required happens-before ordering.
+- Race condition: The correctness of a program depends on the timing or interleaving of operations.
+
+A program can have a race condition even when its accesses are individually atomic. Conversely, a properly synchronized program can avoid a data race but still contain a logical concurrency bug, such as acquiring locks in an inconsistent order.
+
+For example, this code has a race condition:
+
+```
+if (account.getBalance() >= amount) {
+    account.withdraw(amount);
+}
+```
+
+Even if `getBalance()` and `withdraw()` are individually thread-safe, the overall check-then-act operation may not be atomic. Another thread might withdraw money between the check and the withdrawal.
+
+The fix is to coordinate the entire operation, for example by protecting both steps with the same lock inside the account's implementation.
+
+## 8. Common JMM misconceptions
+
+| Misconception                                                           | Correct understanding                                                                                |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `volatile` makes a variable thread-safe in every situation.             | It provides visibility and ordering guarantees, but does not make compound operations atomic.        |
+| `count++` is atomic because `int` reads and writes are atomic.          | The increment is a read-modify-write sequence and can lose updates.                                  |
+| If one thread writes a field, another thread will eventually see it.    | Without suitable synchronization, that visibility is not guaranteed.                                 |
+| Source-code order always determines execution order.                    | Optimizations may reorder operations when allowed by the JMM.                                        |
+| A local variable means the entire object is thread-local.               | The local reference is thread-local, but its referenced object may be shared.                        |
+| `final` makes an object immutable.                                      | It prevents reassignment of a final field; referenced objects can still be mutable.                  |
+| The JMM describes the physical layout of RAM.                           | It defines observable behavior and synchronization guarantees, not a specific hardware architecture. |
+| Using `synchronized` on different locks protects the same shared state. | Mutual exclusion works only when the relevant threads coordinate through the same lock.              |
+
+## 9. Practical design guidelines
+
+When writing concurrent Java code, use this checklist.
+
+1. Identify shared mutable state. If only one thread can access the state, you may not need synchronization.
+2. Prefer immutability. Immutable objects reduce the amount of shared state that needs coordination.
+3. Choose the right synchronization mechanism. Use `volatile` for appropriate independent state variables, locks for compound critical sections, and atomic classes for supported atomic operations.
+4. Establish a happens-before relationship. Do not rely on timing, sleep delays, or the assumption that one thread will eventually notice another thread's writes.
+5. Protect invariants, not just individual fields. If several operations must remain consistent together, coordinate them as one logical operation.
+6. Prefer high-level concurrency utilities. Consider `ExecutorService`, `BlockingQueue`, `CountDownLatch`, `ConcurrentHashMap`, and `CompletableFuture` rather than building synchronization from scratch.
+7. Test concurrent behavior. Ordinary unit tests can miss race conditions. For advanced JMM experiments, use [OpenJDK's jcstress](https://openjdk.org/projects/code-tools/jcstress/).
+
+## 10. Recommended JMM study roadmap
+
+For your Java Core APIs and JVM study, I would learn the topics in this order.
+
+1. JMM overview — shared state, thread visibility, ordering, and atomicity.
+2. Happens-before — program order, monitor locks, volatile accesses, thread lifecycle, and transitivity.
+3. `volatile` — visibility, ordering, limitations, and common use cases.
+4. Intrinsic locks and `synchronized` — monitor acquisition/release, mutual exclusion, and visibility.
+5. Atomic variables and CAS — `AtomicInteger`, compare-and-set, and compound operations.
+6. Safe publication and initialization — `final` fields, object construction, class initialization, and escape of `this`.
+7. Concurrency bugs — data races, race conditions, lost updates, stale observations, and deadlocks.
+8. Advanced JMM topics — instruction reordering, out-of-thin-air concerns, memory barriers, and the Java Memory Model specification.
+
+For authoritative references, start with:
+
+- [Java Language Specification, Chapter 17: Threads and Locks](https://docs.oracle.com/javase/specs/jls/se24/html/jls-17.html) — especially §17.4, Memory Model.
+- [Java Concurrency in Practice](https://jcip.net/) — practical reasoning about thread safety and publication.
+- [OpenJDK jcstress](https://openjdk.org/projects/code-tools/jcstress/) — experiments for testing concurrency behavior.
+
+The takeaway: The JMM defines the guarantees that make concurrent Java programs understandable and correct. Whenever multiple threads share mutable state, reason about visibility, ordering, atomicity, and happens-before rather than assuming that source-code order alone is sufficient.

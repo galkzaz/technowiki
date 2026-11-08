@@ -1,0 +1,708 @@
+---
+id: software-engineering-design-architecture-architectural-styles-microservices-labs-product-review-recommendation-microservices-lab13
+title: "lab13: Using Distributed Tracing"
+sidebar_position: 13
+---
+
+In this Lab, we will learn how to use distributed tracing to better understand how our microservices cooperate – for example, in fulfilling a request sent to the external API. 
+
+**Micrometer Tracing** will be used to collect trace information, and **Zipkin** will be used for the storage and visualization
+of said trace information.
+
+## Introducing distributed tracing with Micrometer Tracing and Zipkin
+
+Micrometer Tracing is used to collect trace information, propagate trace contexts (for example,
+trace and span IDs) in calls to other microservices, and export the trace information into trace
+analysis tools such as Zipkin. The handling of the trace information is done under the hood, by a
+tracer. Micrometer supports auto-configuration of tracers based on OpenTelemetry (https://opentelemetry.io/) or OpenZipkin Brave (https://github.com/openzipkin/brave).
+
+By default, trace headers are propagated between microservices using W3C trace context headers
+(https://www.w3.org/TR/trace-context/) – most importantly, the traceparent header – but
+can be configured to use OpenZipkin’s B3 headers. In this Lab,** we will use the W3C trace
+context headers**. In Lab 18, we will use the B3 headers.
+
+A sample W3C trace context traceparent header looks like this:
+```
+traceparent:"00-2425f26083814f66c985c717a761e810-fbec8704028cfb20-01"
+```
+The value of the traceparent header contains four parts, separated by a “-”:
+- “00” indicates the version used. It will always be “00” using the current specification.
+- “124…810” is the trace ID.
+- “fbe…b20” is the span ID.
+- “01”, the last part, contains various flags. The only flag supported by the current specification is a flag named sampled, with the value “01”. It means that the caller is recording
+the trace data for this request. **We will configure our microservices to record trace data
+for all requests, so this flag will always have the value of “01”**.
+
+Zipkin comes with native support for storing trace information either in memory, or in a database
+such as Apache Cassandra, Elasticsearch, or MySQL. In this
+Lab, **we will store the trace information in memory**.
+
+## Adding distributed tracing to the source code
+In this section, we will learn how to update the source code to enable distributed tracing. This
+can be done with the following steps:
+1. Add dependencies to the build files to bring in Micrometer Tracing with a tracer imple-
+mentation and a reporter.
+2. Add a Zipkin server to the Docker Compose files.
+3. Configure the microservices to send trace information to Zipkin.
+4. Add workarounds for the lack of support of reactive clients.
+5. Add code for creating custom spans and custom tags in existing spans.
+
+### Adding dependencies to build files
+To be able to utilize Micrometer Tracing and the ability to export trace information to Zipkin,
+we need to add a dependency to the selected tracer and reporter to the Gradle project build files,
+build.gradle.
+This is accomplished by adding the following two lines:
+```groovy
+implementation 'io.micrometer:micrometer-tracing-bridge-otel'
+implementation 'io.opentelemetry:opentelemetry-exporter-zipkin'
+```
+
+For the review service, a dependency has also been added to enable trace information regarding
+SQL database operations. It looks like this:
+```groovy
+implementation 'net.ttddyy.observation:datasource-micrometer-spring-
+boot:1.0.0'
+```
+This library can create spans for the SQL operations executed by the review service. These spans
+will contain information about the SQL query that was executed and its execution time.
+
+### Adding configuration for Micrometer Tracing and Zipkin
+Configuration for using Micrometer Tracing and Zipkin is added to the common configuration
+file, config-repo/application.yml. In the default profile, it is specified that trace information
+will be sent to Zipkin using the following URL:
+```yml
+management.zipkin.tracing.endpoint: http://zipkin:9411/api/v2/spans
+```
+By default, Micrometer Tracing only sends 10% of the traces to Zipkin. To ensure that all traces
+are sent to Zipkin, the following property is added to the default profile:
+```yml
+management.tracing.sampling.probability: 1.0
+```
+We also want trace and span IDs to be written to logs; this will enable us to correlate log output
+from cooperating microservices that, for example, fulfill a request sent to the external API.
+Trace and span IDs are written to the logs by default when Micrometer Tracing is used. To simplify
+the parsing of the log output in Lab 19, Centralized Logging with the EFK Stack, the log format
+has been customized using the following configuration:
+```yml
+logging.pattern.correlation: "[${spring.application.name:},
+%X{traceId:-},%X{spanId:-}] "
+logging.include-application-name: false
+```
+For more information on how to customize the log format for trace information, see https://docs.spring.io/spring-boot/reference/actuator/tracing.html#actuator.micrometer-tracing.logging.
+
+:::note
+
+When using Spring Cloud Configuration Server, the `logging.include-application-name` property must be placed in the bootstrap.yml file under each
+microservice’s `src/main/resources` folder. To keep the two new logging properties together, the `logging.pattern.correlation` property has also been placed
+there. In Lab 17, where Spring Cloud Configuration Server is replaced by the
+corresponding Kubernetes features, these properties will be moved to the common
+property file `config-repo/application.yml`.
+
+:::
+
+With the preceding log format, the log output will look like this:
+```
+2025-04-22T14:02:07.417Z INFO ... [product-composite,01234,56789] ...
+```
+Where product-composite is the name of the microservice, `01234` is the trace ID, and `56789` is
+the span ID.
+
+To reduce the log output, we also change the log level from `DEBUG` to `INFO` for each microservice’s
+configuration file in the `config-repo`. This makes it easier to verify that trace and span IDs are
+added as expected. This change is applied by this line:
+```yml
+se.magnus: INFO
+```
+For the product-composite microservice, the log level for the `HttpWebHandlerAdapter` class
+has been changed from `TRACE` to `INFO` for the same reason:
+```yml
+org.springframework.web.server.adapter.HttpWebHandlerAdapter: INFO
+```
+
+### Adding Zipkin to the Docker Compose files
+To run the Zipkin server as a Docker container, we will use a Docker image, openzipkin/zipkin,
+published by the Zipkin project. Refer to https://hub.docker.com/r/openzipkin/zipkin for
+details. The definition of the Zipkin server appears as follows:
+```yml
+  zipkin-server:
+    image: openzipkin/zipkin:3.5.0
+    restart: always
+    mem_limit: 1024m
+    environment:
+      - STORAGE_TYPE=mem
+    ports:
+      - 9411:9411
+```
+Let’s explain the preceding source code:
+- The version of the Docker image, `openzipkin/zipkin`, is specified to be version `3.5.0`.
+- The `STORAGE_TYPE=mem` environment variable is used to specify that Zipkin will keep all
+trace information in memory.
+- The memory limit for Zipkin is increased to `1,024 MB`, compared to `512 MB` for all other
+containers. The reason for this is that since Zipkin is configured to keep all trace information in memory, it will consume more memory than the other containers after a while.
+- In the case where Zipkin happens to run out of memory and stops, we have applied a
+restart policy that requests the Docker engine to always restart the container. This will
+apply both if the container itself crashes or if the Docker engine is restarted.
+- Zipkin exposes HTTP port `9411` for web browsers to access its web user interface.
+
+:::info
+
+While it is OK to store the trace information in Zipkin in memory for development and test activities, Zipkin should be configured to store trace
+information in a database in a production environment.
+
+:::
+
+### Adding workarounds for the lack of support of reactive clients
+As mentioned previously, the current versions of Spring Boot, Project Reactor, and Micrometer
+Tracing do not yet work together perfectly. Therefore, a couple of workarounds have been applied
+to the source code for reactive clients. That is, the four microservices and the gateway. The prob-
+lems are mainly related to the complexity of propagating trace contexts (for example, trace and
+span IDs) between different threads involved in reactive asynchronous processing, specifically
+if parts of the processing involve imperative synchronous processing.
+
+:::note
+
+If all processing of a request is done with a synchronous implementation, using one
+and the same thread for all processing, propagating trace context is not an issue. A
+ThreadLocal variable can be used to store the trace context. The trace context can
+be retrieved from the ThreadLocal variable in any place of the implementation
+since all code runs in one and the same thread.
+
+:::
+
+An example of this mix of reactive and imperative processing is the implementation of the review
+microservice, where calls to the underlying SQL database are done synchronously.
+
+To address many of the challenges with context propagation, we can turn on automatic context
+propagation by calling the Hooks.enableAutomaticContextPropagation() method in a reactive
+client’s main() method. For details, see the blog series “Unified Bridging between Reactive and
+Imperative” previously referred to. For the product-composite service, it looks like this:
+```Java
+  public static void main(String[] args) {
+    Hooks.enableAutomaticContextPropagation();
+    SpringApplication.run(ProductCompositeServiceApplication.class, args);
+  }
+```
+
+:::note
+
+Since Spring Boot 3.2, you can configure automatic context propagation using a property instead of calling Hooks.enableAutomaticContextPropagation() yourself.
+
+**Recommended approach**
+
+In your product-composite service, configure application.yml:
+```
+spring:
+  reactor:
+    context-propagation: auto
+```
+This is the Spring Boot-supported way to enable automatic context propagation through Reactor operators. 
+
+You generally do not need both the property and the explicit hook.
+
+:::
+
+However, for the product-composite service, one problem remains. To ensure that a WebClient
+instance is correctly instrumented for observation – for example, to be able to propagate the
+current trace and span IDs as headers in an outgoing request – the `WebClient.Builder` instance
+is expected to be injected using auto-wiring. Unfortunately, when using Eureka for service dis-
+covery, the `WebClient.Builder` instance is recommended to be created as a bean annotated with
+`@LoadBalanced` as follows:
+```Java
+@Bean
+@LoadBalanced
+public WebClient.Builder loadBalancedWebClientBuilder() {
+return WebClient.builder();
+}
+```
+
+So, there is a conflict in how to create a WebClient instance when used with both Eureka and
+Micrometer Tracing. To resolve this conflict, the `@LoadBalanced` bean can be replaced by a
+load-balancer-aware exchange-filter function, `ReactorLoadBalancerExchangeFilterFunction`. An exchange-filter function can be set on an auto-wired `WebClient.Builder` instance like this:
+```Java
+    @Autowired
+    private ReactorLoadBalancerExchangeFilterFunction lbFunction;
+
+    @Bean
+    public WebClient webClient(WebClient.Builder builder) {
+        return builder.filter(lbFunction).build();
+    }
+```
+This means that the application class, `ProductCompositeServiceApplication`, registers a `WebClient`
+bean instead of a `WebClient`.Builder bean. This affects the `ProductCompositeIntegration` class;
+it now needs to auto-wire a `WebClient` bean instead of a `WebClient.Builder` bean.
+To get access to the `ReactorLoadBalancerExchangeFilterFunction` function, a dependency
+to `org.springframework.cloud:spring-cloud-starter-loadbalancer` has been added to the
+build file, build.gradle.
+
+### Adding custom spans
+Besides relying on the built-in support for creating traces and spans for the ongoing processing,
+we can also use the Observation API provided by Micrometer Observability to, for example, add
+our own spans or add custom tags to existing spans created by a microservice. The Observation
+API is implemented behind a Java interface with the same name.
+
+To add a custom span, the Observation interface provides a static method, `createNotStarted()`,
+that can be used to create a span. To execute the span, an `observe()` method can be used to provide the code that the span shall cover. . If the code doesn’t return any value, it can be specified as
+a `Runnable` function; otherwise, it needs to be specified as a `Supplier` function.
+
+If we want to add metadata regarding the span, we can specify it by adding a contextual name and
+a set of tags as key-value pairs. The contextual name will be the name of the span and it can be used
+to identify the span when a trace tree is visualized in Zipkin. If the possible values for the informa-
+tion are bounded, limited to a finite number of alternatives, the tag should be specified using the
+`lowCardinalityKeyValue()` method. For unbounded values, the `highCardinalityKeyValue()`
+method should be used. Calling these methods will result in tags being added to the current span,
+while low-cardinality values will also be tagged to metrics created by the observation.
+
+Let’s apply this to the **product-composite** service to create a custom span that provides
+productId as a tag. Since the number of product IDs is unlimited, we will specify it using the
+`highCardinalityKeyValue()` method. We will create a span that specifies the current product ID for each of the three API methods for creating, retrieving, and deleting composite products. The creation of a custom span that contains one high-cardinality tag is handled by a utility
+class, `ObservationUtil`. The utility class is placed in the `se.magnus.microservices.composite.product.services.tracing` package.
+
+```Java
+package se.magnus.microservices.composite.product.services.tracing;
+
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+import java.util.function.Supplier;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ObservationUtil {
+
+  private final ObservationRegistry registry;
+
+  public ObservationUtil(ObservationRegistry registry) {
+    this.registry = registry;
+  }
+
+  public <T> T observe(String observationName, String contextualName, String highCardinalityKey, String highCardinalityValue, Supplier<T> supplier) {
+    return Observation.createNotStarted(observationName, registry)
+      .contextualName(contextualName)
+      .highCardinalityKeyValue(highCardinalityKey, highCardinalityValue)
+      .observe(supplier);
+  }
+
+}
+```
+The `observe()` method wraps the call to the `Observation.createNotStarted()` method.
+
+For any observation to take place using the Observation API, observation objects need to be
+registered in an `ObservationRegistry` bean. An `ObservationRegistry` bean can be injected
+using auto-wiring.
+
+This utility method is used in the `ProductCompositeServiceImpl` class by a helper method, `observationWithProductInfo()`, that applies common values to the
+`ProductCompositeServiceImpl` class:
+```Java
+public class ProductCompositeServiceImpl implements ProductCompositeService {
+
+  private final ObservationUtil observationUtil;
+
+  @Override
+  public Mono<ProductAggregate> getProduct(int productId, int delay, int faultPercent) {
+    return observationWithProductInfo(productId, () -> getProductInternal(productId, delay, faultPercent));
+  }
+
+  @Override
+  public Mono<Void> createProduct(ProductAggregate body) {
+    return observationWithProductInfo(body.getProductId(), () -> createProductInternal(body));
+  }
+
+  private <T> T observationWithProductInfo(int productInfo, Supplier<T> supplier) {
+    return observationUtil.observe(
+        "composite observation",
+        "product info",
+        "productId",
+        String.valueOf(productInfo),
+        supplier);
+  }
+```
+Finally, the helper method is used by the three API methods, `createProduct()`, `getProduct()`,
+and `deleteProduct()`. The custom span is created by wrapping the existing code in each method.
+The existing code has been moved to corresponding “internal” methods to simplify the structure
+of the solution. The “internal” methods are called by the `observationWithProductInfo()` method.
+```Java
+  @SuppressWarnings("unchecked")
+  private Mono<ProductAggregate> getProductInternal(int productId, int delay, int faultPercent) {
+    LOG.info("Will get composite product info for product.id={}", productId);
+    return Mono.zip(
+        values -> createProductAggregate(
+            (SecurityContext) values[0], (Product) values[1], (List<Recommendation>) values[2],
+            (List<Review>) values[3], serviceUtil.getServiceAddress()),
+        getSecurityContextMono(),
+        integration.getProduct(productId, delay, faultPercent),
+        integration.getRecommendations(productId).collectList(),
+        integration.getReviews(productId).collectList())
+        .doOnError(ex -> LOG.warn("getCompositeProduct failed: {}", ex.toString()))
+        .log(LOG.getName(), FINE);
+  }
+```
+If compared with the corresponding implementation in Lab 12, we can see that the changes
+required to create a custom span are limited to adding a new “inner” method and calling it from
+the `observationWithProductInfo() `method. So, adding a custom span to existing code can be done with a very small change, given a proper
+utility method that handles the details of setting up a custom span. When we try out distributed
+tracing later in this Lab, we will see this custom span in action. With a custom span in place,
+let’s see how we can add custom tags to any span created in a microservice!
+
+### Adding custom tags to existing spans
+If we want to add some custom information to all spans that are created by a microservice, we
+can use an `ObservationFilter`. It needs to be registered in the `ObservationRegistry` bean using
+an `ObservationRegistryCustomizer` bean.
+
+Let’s apply a filter that registers the current version of the product-composite microservice as a
+tag on every span it creates. We need to do the following:
+- Update the build file to make Gradle create build info, including the current version specified by the version property in the build.gradle file
+- Create a filter that adds the current version as a low-cardinality tag to all spans
+- Create a registry configuration bean that registers the filter
+To make Gradle create build info, the following is added to the build file, build.gradle:
+```groovy
+springBoot {
+    buildInfo()
+}
+```
+This addition will result in the build/resources/main/META-INF/build-info.properties file
+being created when the ./gradlew build command is executed. This file will specify the current
+version as the following:
+```
+build.version=1.0.0-SNAPSHOT
+```
+The build info file will be bundled into the microservice’s JAR file, and its information can be
+accessed using a `BuildProperties` bean.
+The filter looks like this:
+```Java
+package se.magnus.microservices.composite.product.services.tracing;
+
+import io.micrometer.common.KeyValue;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationFilter;
+import org.springframework.boot.info.BuildProperties;
+
+public class BuildInfoObservationFilter implements ObservationFilter {
+
+    private final BuildProperties buildProperties;
+
+    public BuildInfoObservationFilter(BuildProperties buildProperties) {
+        this.buildProperties = buildProperties;
+    }
+
+    @Override
+    public Observation.Context map(final Observation.Context context) {
+        KeyValue buildVersion = KeyValue.of("build.version", buildProperties.getVersion());
+        return context.addLowCardinalityKeyValue(buildVersion);
+    }
+}
+```
+rom the preceding source code, we can see the following:
+- A `BuildProperties` bean is injected into the filter’s constructor
+- The filter’s `map()` method retrieves the microservice version from using the `BuildProperties`
+bean and sets it as a low-cardinality tag on the provided observation context
+
+The registry configuration bean looks like this:
+```Java
+package se.magnus.microservices.composite.product.services.tracing;
+
+import io.micrometer.observation.ObservationRegistry;
+import org.springframework.boot.actuate.autoconfigure.observation.ObservationRegistryCustomizer;
+import org.springframework.boot.info.BuildProperties;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration(proxyBeanMethods = false)
+public class ObservationRegistryConfig implements ObservationRegistryCustomizer<ObservationRegistry> {
+
+    private final BuildProperties buildProperties;
+
+    public ObservationRegistryConfig(BuildProperties buildProperties) {
+        this.buildProperties = buildProperties;
+    }
+
+    @Override
+    public void customize(final ObservationRegistry registry) {
+        registry.observationConfig().observationFilter(new BuildInfoObservationFilter(buildProperties));
+    }
+}
+```
+
+From the preceding source code, we can learn the following:
+- A `BuildProperties` bean is also injected into the configuration class’s constructor.
+- In the customize() method, the filter is created and registered. The filter also gets the
+`BuildProperties` bean injected here.
+The filter and the registry configuration bean can be found in the `se.magnus.microservices.composite.product.services.tracing` package. When we try out distributed tracing later in
+this Lab, we will see this observation filter in action.
+
+That’s what it takes to add distributed tracing using Micrometer Tracing and Zipkin, so let’s try it out in the next section!
+
+## Trying out distributed tracing
+With the necessary changes to the source code in place, we can try out distributed tracing. We
+will do this by performing the following steps:
+1. Build, start, and verify the system landscape.
+2. Send a successful API request and see what trace information we can find in Zipkin related
+to this API request.
+3. Send an unsuccessful API request and see what error information we can find.
+4. Send a successful API request that triggers asynchronous processing and see how its trace
+information is represented.
+We will discuss these steps in detail in the upcoming sections.
+
+### Starting up the system landscape
+1. First, build the Docker images with the following commands:
+```sh
+./gradlew build && docker compose build
+```
+
+2. Next, start the system landscape in Docker and run the usual tests with the following command:
+```sh
+./test-em-all-docker.bash start
+```
+
+Before we can call the API, we need an access token. Run the following commands to acquire an access token:
+```sh
+unset ACCESS_TOKEN
+ACCESS_TOKEN=$(curl -k https://writer:secret-writer@localhost:8443/oauth2/token -d grant_type=client_credentials -d scope="product:read product:write" -s | jq .access_token -r)
+
+echo $ACCESS_TOKEN
+```
+
+:::note
+
+As noticed in previous Lab, an access token issued by the authorization server
+is valid for one hour. So, if you start to get 401 Unauthorized errors after a while,
+it is probably time to acquire a new access token.
+
+:::
+
+### Sending a successful API request
+Now, we are ready to send a normal request to the API. Run the following command:
+```sh
+curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1 -w "%{http_code}\n" -o /dev/null -s
+```
+Expect the command to return the HTTP status code for success, `200`.
+
+We can now launch the Zipkin UI to look into what trace information has been sent to Zipkin:
+1. Open the following URL in your web browser: http://localhost:9411/zipkin/.
+2. To find the trace information for our request, we can search for traces that have passed
+through the gateway service. Perform the following steps:
+  a. Click on the large plus sign (a white + sign on a red background) and select serviceName and then gateway.
+  b. Click on the RUN QUERY button.
+  c. Click on the Start Time header to see the results ordered by the latest first (a down arrow should be visible to the left of the Start Time header).
+
+The response from finding traces should look like the following screenshot:
+
+3. The trace information from our preceding API request is the first one in the list. Click on
+its SHOW button to see details pertaining to the trace:
+
+In the detailed information view, we can observe the following:
+a. The request was received by the gateway service.
+b. The gateway service delegated the processing of the request to the product-
+composite service.
+c. The product-composite service, in turn, sent three parallel requests to the core
+services: product, recommendation, and review. See spans named product-com-
+posite: http get.
+d. Once the product-composite service received the response from all three core
+services, it created a composite response and sent it back to the caller through
+the gateway service.
+e. The custom span created in the previous section is named product-composite:
+product info. Click on it to see its tags. In the details view to the right, we can see
+both the tag created by the custom span, productId = 1, and the tag created by
+the observation filter build.version = 1.0.0-SNAPSHOT.
+f. To verify that the tag created by the observation filter works as expected, click on
+other spans created by the product-composite service, and verify that the build.
+version is present.
+4. Select the span named review: query to see a span reported by the review microservice’s
+database layer:
+5. In the span’s list of tags, we can see the actual SQL query it has performed. We can also
+see its execution time of 0.8 ms.
+
+To better understand how trace and span IDs are propagated between microservices, we can
+change the logging configuration of the product-composite service so that HTTP headers in
+outgoing requests are written to its log. This can be achieved by taking the following steps:
+1. Add the following two lines to the `config-repo/product-composite.yml` configuration
+file:
+```yml
+spring.codec.log-request-details: true
+logging.level.org.springframework.web.reactive.function.client.ExchangeFunctions: TRACE
+```
+2. The two lines already exist in the configuration file but are commented out. They are
+preceded by the following comment:
+```
+# To see tracing headers, uncomment the following two lines and
+restart the product-composite service
+```
+3. Find the preceding comment in the configuration file and uncomment the two lines be-
+low it.
+4. After that, restart the product-composite service:
+```
+docker compose restart product-composite
+```
+5. Display the log output from the product-composite service:
+```
+docker compose logs -f --tail 0 product-composite
+```
+6. Rerun the preceding curl request and you will see the log output containing the
+traceparent HTTP header mentioned previously – for example, a request sent to the
+recommendation service:
+```
+product-composite-1 | YYYY-MM-DDT09:24:50.849Z TRACE 1 --- [
+parallel-2] [product-composite,e1420dcc38901378e888b8ce7022510e,0686
+7b65cf84b552] o.s.w.r.f.client.ExchangeFunctions : [14606b71]
+HTTP GET http://d40874197b77:8080/recommendation?productId=1,
+headers=[traceparent:"00-e1420dcc38901378e888b8ce7022510e-
+06867b65cf84b552-01"]
+```
+7. In the sample log output, we can see the value of the traceparent HTTP header, where
+the trace ID is set to `e1420dcc38901378e888b8ce7022510e`, and the span ID is set to
+`06867b65cf84b552`.
+8. If you don’t want to keep the logging of the traceparent HTTP header, comment out the two
+lines in `config-repo/product-composite.yml` and restart the product-composite service.
+
+### Sending an unsuccessful API request
+Let’s see what the trace information looks like if we make an unsuccessful API request; for example,
+searching for a product that causes a timeout:
+1. Send an API request for product ID 1, enforce a delay of three seconds, which will trigger
+the time limiter, and verify that it returns the HTTP status code 500:
+```sh
+curl -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/1?delay=3 -w "%{http_code}\n" -o /dev/null -s
+```
+2. In the Zipkin UI, go back to the search page (use the back button in the web browser) and
+click on the RUN QUERY button again. To see the results ordered by the latest first, click
+on the Start Time header. Expect a result similar to the following screenshot:
+3. You should see the failed request at the top of the returned list. Note that its duration bar is
+red, indicating that an error has occurred. Click on its SHOW button to see details:
+
+Here, we can see a span, product-composite: secured request, with an error symbol in
+front of it (a red circle with an exclamation mark).
+4. Click on the span to see its tags. You will find a tag named error that clearly indicates that
+the error is caused by a timeout that occurred after two seconds.
+
+### Sending an API request that triggers asynchronous
+processing
+The third type of request sending that is interesting to see represented in the Zipkin UI is a request
+where parts of its processing are done asynchronously. Let’s try a delete request, where the delete process in the core services is done asynchronously. The product-composite service sends
+a delete event to each of the three core services over the message broker and each core service
+picks up the delete event and processes it asynchronously. Thanks to Micrometer Tracing, trace
+information is added to the events that are sent to the message broker, resulting in a coherent
+view of the total processing of the delete request.
+
+Perform the following steps:
+1. Run the following command to delete the product with a product ID of 12345 and verify
+that it returns the HTTP status code for the request being accepted, 202:
+```sh 
+curl -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" -k https://localhost:8443/product-composite/12345 -w "%{http_code}\n" -o /dev/null -s
+```
+
+:::info
+
+Remember that the delete operation is idempotent, that is, it will succeed
+even if the product doesn’t exist!
+
+:::
+
+2. In the Zipkin UI, go back to the search page (use the back button in the web browser) and
+click on the RUN QUERY button again. To see the results ordered by the latest first, click
+on the Start Time header. Expect a result like the following screenshot:
+
+3. You should see the delete request at the top of the returned list. Note that the root service
+name, gateway, is suffixed by the HTTP method used, delete. Click on its SHOW button
+to see details:
+
+4. Here, we can see the trace information for processing the delete request:
+  - The request was received by the gateway service.
+  - The gateway service delegated the processing of the request to the product-
+  composite service.
+  - The product-composite service has created a custom span named product-com-
+  posite: product info, as expected.
+  - The product-composite service, in turn, published three events on the message
+  broker (RabbitMQ, in this case). See spans with names suffixed with “send.”
+  - The product-composite service is now done and returns an HTTP success status
+  code, 200, through the gateway service back to the caller. Note that this is done
+  before all processing is completed by the core services!
+  - The core services (product, recommendation, and review) receive the delete
+  events and start to process them asynchronously, that is, independently of one
+  another. See spans with names suffixed with “receive.”
+5. To confirm the involvement of the message broker, click on the first product span:
+
+6. The selected span contains a tag named peer.service that reveals that RabbitMQ is used,
+and the tag spring.rabbit.listener.id points out that the messages are received by the
+consumer group productsGroup.
+7. Finally, to see the traceparent header in a message sent through RabbitMQ, we can inspect
+the message stored in the audit queue for the products. Open http://localhost:15672/#/queues/%2F/products.auditGroup in your web browser.
+
+8. Click on the button named Get Messages(s) to see the oldest message in the queue. The
+web page should look like the following:
+
+9. In the Properties section, you will find the traceparent header for this message. In
+this case, the trace ID is `99a9f2501e4d454643184c6b1cb0a232` and the span ID is
+`7458430fe56d6df1`.
+
+
+### Sending a timeout request
+TODO
+How can we find requests that have been interrupted by the timeout?
+
+{/* add steps from previous lab for sending timeout request */}
+If you set the Sort parameter to Longest First, you will find them
+at the top of the list.
+However, you can also be a bit more precise in your search and specify the
+following:
+
+• Service Name: All
+• Annotation Query: error=CANCELLED
+• Duration: 2s
+
+Note that it is the second product-composite span that has the error field set
+to CANCELLED, so it is important that you don't search for the gateway service
+only!
+
+### open a circuit breaker
+TODO
+What does the trace look like for an API request when the circuit breaker is open?
+{/* add steps from previous lab for Forcing the circuit breaker to open when things go wrong */}
+We expect a short response time when the circuit breaker is open;
+in other words, when fast fallback to the fallback method has been applied.
+Therefore, perform a search with the following parameter settings:
+• Service Name: All
+• Annotation Query: error=CANCELLED
+• Sort: Shortest First
+The first two traces in the response should come from a request with the
+circuit breaker open. Click on one of them. They should appear as follows:
+
+Note that the call to the product service failed, due to the open circuit
+breaker, but the request succeeded thanks to the fallback method applied by
+the product-composite service!
+
+### locate APIs that failed due to the caller not being authorized to perform the request
+TODO
+
+Search for error=403 in the Annotation Query parameter. You will
+find an HTTP DELETE request that failed due to the user not having enough
+privileges – in other words, the expected OAuth Scope.
+
+
+This completes the tests of distributed tracing for this Lab!
+
+
+The Zipkin UI contains much more functionality for finding traces of interest!
+To get more accustomed to the Zipkin UI, try out the query functionality by clicking
+on the plus sign and selecting tagQuery. For example, to find requests that failed
+on a 403 - Forbidden error, set its value to tagQuery=http.status_code=403,
+searching for traces that failed on a Forbidden (403) error. Also, try setting limits
+for the lookback range (start and end time) and the maximum number of hits by
+clicking on the cogwheel icon to the right of the RUN QUERY button.
+
+
+Wrap up the tests by bringing down the system landscape. Run the following command:
+```sh
+docker compose down
+```
+
+## Summary
+In this Lab, we learned how to use distributed tracing to understand how our microservices
+cooperate. We learned how to use Micrometer Tracing to collect trace information, and Zipkin
+to store and visualize the trace information.
+
+We saw how adding Micrometer Tracing to microservices is affected by adding a couple of dependencies to the build files and setting up a few configuration parameters.
+
+If required, we can use the Observation API to create custom spans or add tags to all spans
+created by a microservice. We also saw how the Zipkin UI makes it very easy to identify which
+part of a complex workflow caused either an unexpectedly long response time or an error. Both
+synchronous and asynchronous workflows can be visualized with the Zipkin UI.
+
+In the next Lab, we will learn about container orchestrators, specifically Kubernetes. We will
+learn how to use Kubernetes to deploy and manage microservices, while also improving important
+runtime characteristics such as scalability, high availability, and resilience.

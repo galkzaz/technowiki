@@ -1,0 +1,860 @@
+## Iterative DFS (using a stack)
+### C
+We'll implement iterative DFS using an explicit stack in C. Unlike recursive DFS, this version does not rely on the function call stack to explore the graph. Instead, we manage the stack ourselves using an array.
+
+We'll use an adjacency-list representation implemented with arrays. This keeps the example focused on DFS without requiring linked lists or external libraries.
+
+The program contains both `dfs()` and `dfs_debug()`. They use the same traversal strategy, but the debug version prints the stack, visited array, and every push/pop operation.
+
+```c
+#include <stdio.h>
+#include <stdbool.h>
+
+#define MAX_VERTICES 100
+
+/* Graph represented as an array of adjacency lists.
+   Each vertex can have up to MAX_VERTICES neighbors. */
+typedef struct {
+    int neighbors[MAX_VERTICES][MAX_VERTICES];
+    int degree[MAX_VERTICES];
+    int num_vertices;
+} Graph;
+
+/* A stack containing vertex numbers. */
+typedef struct {
+    int items[MAX_VERTICES];
+    int top;
+} Stack;
+
+/* Initialize an empty graph with n vertices. */
+void initGraph(Graph *g, int n) {
+    g->num_vertices = n;
+
+    for (int i = 0; i < n; i++) {
+        g->degree[i] = 0;
+    }
+}
+
+/* Add an undirected edge between u and v. */
+void addEdge(Graph *g, int u, int v) {
+    if (u < 0 || v < 0 ||
+        u >= g->num_vertices || v >= g->num_vertices) {
+        return;
+    }
+
+    g->neighbors[u][g->degree[u]++] = v;
+    g->neighbors[v][g->degree[v]++] = u;
+}
+
+/* Initialize an empty stack. */
+void initStack(Stack *s) {
+    s->top = -1;
+}
+
+/* Return true if the stack contains no elements. */
+bool isEmpty(const Stack *s) {
+    return s->top == -1;
+}
+
+/* Push a vertex onto the stack.
+   Returns false if the stack is full. */
+bool push(Stack *s, int vertex) {
+    if (s->top >= MAX_VERTICES - 1) {
+        return false;
+    }
+
+    s->items[++s->top] = vertex;
+    return true;
+}
+
+/* Remove and return the top vertex.
+   The caller must ensure the stack is not empty. */
+int pop(Stack *s) {
+    return s->items[s->top--];
+}
+
+/* Display stack contents from bottom to top. */
+void printStack(const Stack *s) {
+    printf("[");
+
+    for (int i = 0; i <= s->top; i++) {
+        printf("%d", s->items[i]);
+
+        if (i < s->top) {
+            printf(", ");
+        }
+    }
+
+    printf("] (top is on the right)\n");
+}
+
+/* Display the visited array. */
+void printVisited(const bool visited[], int n) {
+    printf("Visited: ");
+
+    for (int i = 0; i < n; i++) {
+        printf("%d:%s ", i, visited[i] ? "T" : "F");
+    }
+
+    printf("\n");
+}
+
+/*
+ * NORMAL ITERATIVE DFS
+ *
+ * Uses an explicit stack instead of recursion.
+ * Marks vertices as visited when pushing them, so
+ * each vertex is pushed at most once.
+ */
+void dfs(const Graph *g, int source) {
+    if (source < 0 || source >= g->num_vertices) {
+        printf("Invalid DFS source.\n");
+        return;
+    }
+
+    bool visited[MAX_VERTICES] = {false};
+    Stack stack;
+
+    initStack(&stack);
+
+    /* Discover the source before pushing it. */
+    visited[source] = true;
+    push(&stack, source);
+
+    printf("DFS traversal: ");
+
+    while (!isEmpty(&stack)) {
+        /* Explore the most recently pushed vertex. */
+        int u = pop(&stack);
+
+        printf("%d ", u);
+
+        /*
+         * Push neighbors in reverse insertion order.
+         * Because the stack is LIFO, the first neighbor
+         * in the adjacency list is processed first.
+         */
+        for (int i = g->degree[u] - 1; i >= 0; i--) {
+            int v = g->neighbors[u][i];
+
+            if (!visited[v]) {
+                visited[v] = true;
+                push(&stack, v);
+            }
+        }
+    }
+
+    printf("\n");
+}
+
+/*
+ * DEBUG ITERATIVE DFS
+ *
+ * Performs the same traversal as dfs(), but displays:
+ * - the current vertex being popped
+ * - the stack after each operation
+ * - each neighbor examined
+ * - changes to the visited array
+ */
+void dfs_debug(const Graph *g, int source) {
+    if (source < 0 || source >= g->num_vertices) {
+        printf("Invalid DFS source.\n");
+        return;
+    }
+
+    bool visited[MAX_VERTICES] = {false};
+    Stack stack;
+
+    initStack(&stack);
+
+    printf("=== DFS DEBUG START ===\n");
+
+    /* Initialize the search with the source vertex. */
+    visited[source] = true;
+    push(&stack, source);
+
+    printf("Push source %d\n", source);
+    printf("Stack: ");
+    printStack(&stack);
+    printVisited(visited, g->num_vertices);
+
+    while (!isEmpty(&stack)) {
+        /* Remove the next vertex to explore. */
+        int u = pop(&stack);
+
+        printf("\nPOP %d\n", u);
+        printf("Stack: ");
+        printStack(&stack);
+
+        printf("VISIT %d\n", u);
+
+        /* Examine neighbors in reverse order. */
+        for (int i = g->degree[u] - 1; i >= 0; i--) {
+            int v = g->neighbors[u][i];
+
+            printf("  Examine edge %d -> %d: ", u, v);
+
+            if (!visited[v]) {
+                printf("unvisited\n");
+
+                /*
+                 * Mark before pushing to prevent duplicate
+                 * pushes when another edge reaches v.
+                 */
+                visited[v] = true;
+                push(&stack, v);
+
+                printf("  Push %d\n", v);
+                printf("  Stack: ");
+                printStack(&stack);
+            } else {
+                printf("already visited/discovered; skip\n");
+            }
+        }
+
+        printVisited(visited, g->num_vertices);
+    }
+
+    printf("\nStack is empty. DFS complete.\n");
+    printf("=== DFS DEBUG END ===\n");
+}
+
+/* Build a sample graph and test both DFS versions. */
+int main(void) {
+    Graph graph;
+
+    initGraph(&graph, 6);
+
+    addEdge(&graph, 0, 1);
+    addEdge(&graph, 0, 2);
+    addEdge(&graph, 1, 3);
+    addEdge(&graph, 1, 4);
+    addEdge(&graph, 2, 5);
+
+    printf("--- Normal DFS ---\n");
+    dfs(&graph, 0);
+
+    printf("\n--- Debug DFS ---\n");
+    dfs_debug(&graph, 0);
+
+    return 0;
+}
+```
+
+Compile and run:
+
+```
+gcc -std=c11 -Wall -Wextra -pedantic dfs.c -o dfs
+./dfs
+```
+
+**Normal DFS output**
+
+```
+--- Normal DFS ---
+DFS traversal: 0 1 3 4 2 5
+```
+
+The order follows the adjacency-list insertion order, because neighbors are pushed in reverse order and the stack is LIFO.
+
+**Debug version: code walkthrough**
+
+Let's trace the main stack operations. The stack is shown with its top on the right.
+
+Initially:
+
+```
+Stack:   [0]
+Visited: 0:T 1:F 2:F 3:F 4:F 5:F
+```
+
+1. Step 1: Pop vertex 0
+
+Vertex `0` is processed. Its neighbors are `[1, 2]`.
+
+We examine them in reverse order:
+
+```
+Examine 0 -> 2
+    2 is unvisited
+    Push 2
+
+Stack: [2]
+
+Examine 0 -> 1
+    1 is unvisited
+    Push 1
+
+Stack: [2, 1]
+```
+
+Vertex `1` will be processed next because it is at the top.
+
+2. Step 2: Pop vertex 1
+
+```
+POP 1
+
+Stack: [2]
+```
+
+Its neighbors are `[0, 3, 4]`. We examine them in reverse order:
+
+```
+Examine 1 -> 4
+    4 is unvisited
+    Push 4
+
+Stack: [2, 4]
+
+Examine 1 -> 3
+    3 is unvisited
+    Push 3
+
+Stack: [2, 4, 3]
+
+Examine 1 -> 0
+    0 is already visited
+    Skip
+```
+
+The stack now contains:
+
+```
+Bottom           Top
+  2      4       3
+```
+
+3. Step 3: Pop vertex 3
+
+```
+POP 3
+
+Stack: [2, 4]
+```
+
+Vertex `3` has only one neighbor: `1`. Because `1` is already visited, nothing is pushed.
+
+4. Step 4: Pop vertex 4
+
+```
+POP 4
+
+Stack: [2]
+```
+
+Vertex `4` also connects only to vertex `1`, which has already been visited.
+
+5. Step 5: Pop vertex 2
+
+```
+POP 2
+
+Stack: []
+```
+
+Vertex `2` has neighbors `[0, 5]`.
+
+```
+Examine 2 -> 5
+    5 is unvisited
+    Push 5
+
+Stack: [5]
+
+Examine 2 -> 0
+    0 is already visited
+    Skip
+```
+
+6. Step 6: Pop vertex 5
+
+```
+POP 5
+
+Stack: []
+
+Examine 5 -> 2
+    2 is already visited
+    Skip
+```
+
+The stack is empty, so DFS finishes.
+
+The resulting traversal is:
+
+```
+0 -> 1 -> 3 -> 4 -> 2 -> 5
+```
+
+#### Important implementation details
+
+##### Why mark a vertex visited when pushing it?
+
+Notice this code:
+
+```
+if (!visited[v]) {
+    visited[v] = true;
+    push(&stack, v);
+}
+```
+
+We mark the vertex before pushing it. Otherwise, two different vertices might both push the same neighbor before it gets popped, causing duplicate stack entries.
+
+This implementation therefore requires a stack capacity of at least `V`, which our `MAX_VERTICES` array provides.
+
+##### Does iterative DFS always match recursive DFS?
+
+No. The order depends on how neighbors are pushed and when vertices are marked visited. Reversing the adjacency-list order helps produce a familiar DFS order, but in graphs with cross-connections, a simple stack of vertices can differ from recursive DFS.
+
+If you need iterative DFS to reproduce recursive DFS's exact exploration and parent relationships, use stack frames that also store each vertex's next-neighbor index.
+
+##### What about disconnected graphs?
+
+The `dfs()` function explores only vertices reachable from `source`. To visit every component, wrap DFS in an outer loop that starts a new search at each still-unvisited vertex.
+
+### Iterative DFS for a Disconnected Graph
+To traverse a disconnected graph, we need an outer loop that checks every vertex. Whenever it finds an unvisited vertex, it starts a new DFS traversal from that vertex.
+
+The important idea is that one DFS explores one connected component; the outer loop ensures that every component is explored.
+
+#### 1. Example graph
+
+Consider this undirected graph with six vertices and two disconnected components:
+
+```
+Component 1:          Component 2:
+
+    0                     3
+   / \                   /
+  1   2                 4
+
+                         (5 isolated)
+```
+
+The edges are:
+
+```
+0 -- 1
+0 -- 2
+3 -- 4
+```
+
+Vertex `5` is isolated: it has no edges.
+
+If we call `dfs(graph, 0)`, we visit only `0`, `1`, and `2`. The other component and isolated vertex remain unvisited.
+
+To traverse the entire graph, we use `dfsAll()`.
+
+#### 2. Implementation
+
+We'll reuse the same `Graph` and `Stack` structures from the previous implementation. The key change is to keep a single `visited[]` array shared across all DFS traversals.
+
+```c
+/*
+ * Explore one connected component using iterative DFS.
+ *
+ * visited[] is shared with the caller, so vertices
+ * visited in previous components are not processed again.
+ */
+void dfsComponent(
+    const Graph *g,
+    int source,
+    bool visited[])
+{
+    Stack stack;
+    initStack(&stack);
+
+    visited[source] = true;
+    push(&stack, source);
+
+    while (!isEmpty(&stack)) {
+        int u = pop(&stack);
+
+        printf("%d ", u);
+
+        /* Reverse order preserves the expected traversal order. */
+        for (int i = g->degree[u] - 1; i >= 0; i--) {
+            int v = g->neighbors[u][i];
+
+            if (!visited[v]) {
+                visited[v] = true;
+                push(&stack, v);
+            }
+        }
+    }
+}
+
+/*
+ * Traverse every connected component in the graph.
+ */
+void dfsAll(const Graph *g)
+{
+    bool visited[MAX_VERTICES] = {false};
+
+    printf("DFS forest traversal:\n");
+
+    for (int u = 0; u < g->num_vertices; u++) {
+
+        /* An unvisited vertex starts a new component search. */
+        if (!visited[u]) {
+            printf("Component starting at %d: ", u);
+
+            dfsComponent(g, u, visited);
+
+            printf("\n");
+        }
+    }
+}
+```
+
+#### 3. Complete example using `main()`
+
+Add this `main()` to the previous program, keeping the existing graph and stack definitions and helper functions.
+
+```c
+int main(void)
+{
+    Graph graph;
+    initGraph(&graph, 6);
+
+    /* First connected component: 0, 1, 2 */
+    addEdge(&graph, 0, 1);
+    addEdge(&graph, 0, 2);
+
+    /* Second connected component: 3, 4 */
+    addEdge(&graph, 3, 4);
+
+    /* Vertex 5 is isolated. */
+
+    dfsAll(&graph);
+
+    return 0;
+}
+```
+
+Expected output:
+
+```
+DFS forest traversal:
+Component starting at 0: 0 1 2
+Component starting at 3: 3 4
+Component starting at 5: 5
+```
+
+#### 4. Code walkthrough
+
+The important part is the outer loop:
+
+```c
+for (int u = 0; u < g->num_vertices; u++) {
+    if (!visited[u]) {
+        dfsComponent(g, u, visited);
+    }
+}
+```
+
+Here's what happens:
+
+#### 1
+
+Start at vertex 0
+
+DFS visits `0`, `1`, and `2`. All three are marked visited.
+
+#### 2
+
+Continue scanning vertices
+
+Vertices `1` and `2` are already visited, so DFS skips them. Vertex `3` is unvisited, so it starts another component traversal.
+
+#### 3
+
+Explore the second component
+
+DFS visits `3` and `4`. Both become visited.
+
+#### 4
+
+Handle the isolated vertex
+
+Vertex `5` is still unvisited. DFS starts there, visits `5`, and immediately finishes because it has no neighbors.
+
+#### 5. Why is this called a DFS forest?
+
+A single DFS traversal produces a DFS tree. When a graph has multiple disconnected components, running DFS from each unvisited vertex produces a DFS forest: a collection of DFS trees.
+
+```
+DFS forest:
+
+Tree 1          Tree 2          Tree 3
+
+    0               3               5
+   / \             /
+  1   2           4
+```
+
+#### 6. Complexity
+
+For an adjacency-list graph:
+
+- Time: $O(V+E)$ — every vertex and edge is examined a bounded number of times.
+- Auxiliary space: $O(V)$ — the shared visited array and stack.
+
+Remember: initialize `visited[]` only once in `dfsAll()`, not once per component. Otherwise, each new DFS could revisit vertices belonging to components already explored.
+## recursive
+### Three DFS Colors
+#### C
+
+We'll implement the three colors — `WHITE`, `GRAY`, and `BLACK` — in a complete C program that performs recursive Depth-First Search on a graph.
+
+The important idea is that each vertex has a color, and DFS changes that color as the vertex moves through the exploration process.
+
+- `WHITE`: The vertex has not been visited.
+- `GRAY`: The vertex is being explored; it may still have unvisited neighbors.
+- `BLACK`: The vertex and all its neighbors have been fully processed.
+
+### 1. The color states in C
+
+C allows us to represent these states with an `enum`:
+
+```
+typedef enum {
+    WHITE,  // Vertex has not been visited.
+    GRAY,   // Vertex is currently being explored.
+    BLACK   // Vertex has finished processing.
+} Color;
+```
+
+We can then create a color array:
+
+```
+Color color[MAX_VERTICES];
+```
+
+For example, `color[2]` stores the current state of vertex `2`.
+
+### 2. Complete C implementation
+
+This example uses an adjacency-list-style representation stored in arrays. It explores the graph recursively, prints each color transition, and records each vertex's predecessor.
+
+```
+
+#include <stdio.h>
+
+#define MAX_VERTICES 6
+
+/*
+ * Each vertex can be in one of three DFS states.
+ */
+typedef enum {
+    WHITE,  // Not visited yet.
+    GRAY,   // Visited; neighbors are still being explored.
+    BLACK   // Finished; all neighbors have been examined.
+} Color;
+
+/*
+ * A simple graph represented by adjacency lists.
+ *
+ * adj[u][i] is the i-th neighbor of vertex u.
+ * degree[u] is the number of neighbors of vertex u.
+ */
+typedef struct {
+    int adj[MAX_VERTICES][MAX_VERTICES];
+    int degree[MAX_VERTICES];
+} Graph;
+
+/* Names used when displaying vertices. */
+static const char *vertexName[MAX_VERTICES] = {
+    "A", "B", "C", "D", "E", "F"
+};
+
+/* Convert a color value to readable text. */
+const char *colorName(Color color)
+{
+    switch (color) {
+        case WHITE: return "WHITE";
+        case GRAY:  return "GRAY";
+        case BLACK: return "BLACK";
+        default:    return "UNKNOWN";
+    }
+}
+
+/* Add an undirected edge between u and v. */
+void addEdge(Graph *graph, int u, int v)
+{
+    if (u < 0 || u >= MAX_VERTICES ||
+        v < 0 || v >= MAX_VERTICES) {
+        return;
+    }
+
+    /* Add v to u's adjacency list. */
+    graph->adj[u][graph->degree[u]++] = v;
+
+    /* Add u to v's adjacency list. */
+    graph->adj[v][graph->degree[v]++] = u;
+}
+
+/*
+ * Recursively explore vertex u.
+ *
+ * color[] tracks the DFS state of each vertex.
+ * pred[] records the predecessor in the DFS tree.
+ */
+void dfsVisit(
+    const Graph *graph,
+    int u,
+    Color color[],
+    int pred[]
+) {
+    /* Step 1: Enter u. It is now being explored. */
+    color[u] = GRAY;
+    printf("Enter %s -> %s\n",
+           vertexName[u], colorName(color[u]));
+
+    /* Step 2: Examine every neighbor of u. */
+    for (int i = 0; i < graph->degree[u]; i++) {
+        int v = graph->adj[u][i];
+
+        printf("  Examine edge %s -> %s\n",
+               vertexName[u], vertexName[v]);
+
+        /*
+         * Only WHITE vertices have not been visited.
+         * GRAY and BLACK vertices must not be visited again.
+         */
+        if (color[v] == WHITE) {
+            /* Record how DFS discovered v. */
+            pred[v] = u;
+
+            /* Explore v completely before continuing. */
+            dfsVisit(graph, v, color, pred);
+        } else {
+            printf("  Skip %s: already %s\n",
+                   vertexName[v], colorName(color[v]));
+        }
+    }
+
+    /*
+     * Step 3: Every neighbor has been examined.
+     * The recursive exploration of u is complete.
+     */
+    color[u] = BLACK;
+    printf("Leave %s -> %s\n",
+           vertexName[u], colorName(color[u]));
+}
+
+/* Initialize the colors and predecessor array. */
+void depthFirstSearch(const Graph *graph, int source)
+{
+    Color color[MAX_VERTICES];
+    int pred[MAX_VERTICES];
+
+    for (int v = 0; v < MAX_VERTICES; v++) {
+        color[v] = WHITE;
+        pred[v] = -1;
+    }
+
+    printf("Starting DFS from %s\n\n", vertexName[source]);
+
+    /* Start the recursive traversal. */
+    dfsVisit(graph, source, color, pred);
+
+    printf("\nFinal vertex states:\n");
+
+    for (int v = 0; v < MAX_VERTICES; v++) {
+        printf("%s: %-5s predecessor: %s\n",
+               vertexName[v],
+               colorName(color[v]),
+               pred[v] == -1 ? "NONE" : vertexName[pred[v]]);
+    }
+}
+
+int main(void)
+{
+    /*
+     * Start with an empty graph.
+     * All adjacency-list lengths are zero.
+     */
+    Graph graph = {0};
+
+    /*
+     * Build this undirected graph:
+     *
+     *         A
+     *        / \
+     *       B   C
+     *      / \   \
+     *     D   E---F
+     *
+     * Vertices: A=0, B=1, C=2, D=3, E=4, F=5
+     */
+    addEdge(&graph, 0, 1);  // A-B
+    addEdge(&graph, 0, 2);  // A-C
+    addEdge(&graph, 1, 3);  // B-D
+    addEdge(&graph, 1, 4);  // B-E
+    addEdge(&graph, 2, 5);  // C-F
+    addEdge(&graph, 4, 5);  // E-F
+
+    /* Run DFS starting from A (vertex 0). */
+    depthFirstSearch(&graph, 0);
+
+    return 0;
+}
+
+```
+
+Compile and run:
+
+```
+gcc -std=c11 -Wall -Wextra -pedantic dfs_colors.c -o dfs_colors
+./dfs_colors
+```
+
+### 3. How the colors change during execution
+
+Starting from vertex `A`, the traversal follows this order:
+
+```
+A -> B -> D -> E -> F -> C
+```
+
+The color changes occur in this sequence:
+
+#### DFS color trace
+
+Each row shows the vertices' states immediately after the event.
+![DFS color trace](/docs/assets/software-systems/data-structures-and-algorithms/algorithms/concepts/searching/graph-searching/dfs-color-change-example.png)
+The most important transition happens when DFS returns from a recursive call:
+
+```
+color[u] = BLACK;
+```
+
+That line executes after the loop has examined every neighbor of `u`. For example, `D` becomes black before execution resumes at `B`.
+
+### 4. Why do we check `color[v] == WHITE`?
+
+This condition is essential:
+
+```
+if (color[v] == WHITE) {
+    pred[v] = u;
+    dfsVisit(graph, v, color, pred);
+}
+```
+
+Consider the undirected edge `A-B`.
+
+When DFS visits `A`, it explores `B`. Later, when DFS examines `B`'s neighbors, it encounters `A` again.
+
+But `A` is gray, so DFS skips it instead of recursively calling `dfsVisit(A)` again.
+
+Without the color check, the traversal could repeatedly visit vertices and never terminate on a cyclic graph.
+
+The colors therefore serve two purposes:
+
+- They prevent revisiting vertices.
+- They tell us whether a vertex is still being explored or has finished.
+

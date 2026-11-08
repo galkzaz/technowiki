@@ -1,0 +1,196 @@
+
+## 4. Java implementation: adjacency matrix + linear search
+
+This implementation uses:
+
+- An adjacency matrix to represent the graph.
+- A distance array to store tentative shortest distances.
+- A predecessor array to reconstruct paths.
+- A visited array to track finalized vertices.
+- A linear scan to select the minimum-distance vertex.
+
+```Java
+import java.util.Arrays;
+
+public class DijkstraDenseGraph {
+
+    private static final long INF = Long.MAX_VALUE;
+
+    public static void dijkstra(int[][] graph, int source) {
+
+        int V = graph.length;
+
+        long[] dist = new long[V];
+        int[] pred = new int[V];
+        boolean[] visited = new boolean[V];
+
+        Arrays.fill(dist, INF);
+        Arrays.fill(pred, -1);
+
+        dist[source] = 0;
+
+        for (int count = 0; count < V; count++) {
+
+            // Find the unvisited vertex with minimum distance.
+            int u = findMinDistance(dist, visited);
+
+            // No more reachable vertices.
+            if (u == -1) {
+                break;
+            }
+
+            // Finalize the selected vertex.
+            visited[u] = true;
+
+            // Examine every possible neighbor of u.
+            for (int v = 0; v < V; v++) {
+
+                // Check whether an edge u -> v exists.
+                if (graph[u][v] > 0 && !visited[v]) {
+
+                    long candidate = dist[u] + graph[u][v];
+
+                    if (candidate < dist[v]) {
+                        dist[v] = candidate;
+                        pred[v] = u;
+                    }
+                }
+            }
+        }
+
+        printResults(dist, pred);
+    }
+
+    private static int findMinDistance(
+            long[] dist,
+            boolean[] visited) {
+
+        long min = INF;
+        int minVertex = -1;
+
+        for (int v = 0; v < dist.length; v++) {
+
+            if (!visited[v] && dist[v] < min) {
+                min = dist[v];
+                minVertex = v;
+            }
+        }
+
+        return minVertex;
+    }
+
+    private static void printResults(long[] dist, int[] pred) {
+
+        System.out.println("Vertex\tDistance\tPath");
+
+        for (int v = 0; v < dist.length; v++) {
+
+            System.out.print(v + "\t");
+
+            if (dist[v] == INF) {
+                System.out.println("INF\t\tUnreachable");
+            } else {
+                System.out.print(dist[v] + "\t\t");
+                printPath(v, pred);
+                System.out.println();
+            }
+        }
+    }
+
+    private static void printPath(int v, int[] pred) {
+
+        if (pred[v] == -1) {
+            System.out.print(v);
+            return;
+        }
+
+        printPath(pred[v], pred);
+        System.out.print(" -> " + v);
+    }
+
+    public static void main(String[] args) {
+
+        int[][] graph = {
+            {0, 4, 1, 0},
+            {0, 0, 0, 2},
+            {0, 0, 0, 5},
+            {0, 0, 0, 0}
+        };
+
+        dijkstra(graph, 0);
+    }
+}
+```
+
+Note: This example uses 0 to represent no edge, so it assumes strictly positive edge weights. For graphs that may contain zero-weight edges, use a separate representation for absent edges, such as -1.
+
+Expected output:
+
+```
+Vertex  Distance    Path
+0       0           0
+1       4           0 -> 1
+2       1           0 -> 2
+3       3           0 -> 2 -> 3
+```
+
+The shortest path to vertex 3 is:
+
+\\[ A \rightarrow C \rightarrow D \\]
+
+with cost:
+
+\\[ 1+5=6 \\]
+
+Correction to the example output: the path through B has cost \\(4+2=6\\), so both paths to D have cost 6. The implementation may choose either predecessor depending on relaxation order.
+
+## 5. Comparing Dijkstra implementations
+
+| Feature              | Linear scan + matrix  | Binary heap + adjacency list     |
+| -------------------- | --------------------- | -------------------------------- |
+| Graph representation | Adjacency matrix      | Adjacency list                   |
+| Find minimum         | Linear scan           | Extract-min                      |
+| Update priority      | Update distance array | Decrease-key or insert new entry |
+| Minimum selection    | \\(O(V)\\)            | \\(O(\log V)\\)                  |
+| Edge examination     | \\(O(V^2)\\)          | \\(O(E)\\)                       |
+| Total time           | \\(O(V^2)\\)          | \\(O((V+E)\log V)\\)             |
+| Graph storage        | \\(O(V^2)\\)          | \\(O(V+E)\\)                     |
+
+## 6. When should you use each implementation?
+
+| Graph type              | Recommended implementation                | Reason                                      |
+| ----------------------- | ----------------------------------------- | ------------------------------------------- |
+| Sparse graph            | Adjacency list + binary heap              | Avoids scanning nonexistent edges           |
+| Dense graph             | Adjacency matrix + linear scan            | Avoids heap overhead                        |
+| Small graph             | Either                                    | Simplicity may matter more than performance |
+| Very large sparse graph | Adjacency list + efficient priority queue | Better memory and time efficiency           |
+
+A useful rule of thumb:
+
+- If \\(E\\) is close to \\(V\\), prefer the heap-based implementation.
+- If \\(E\\) is close to \\(V^2\\), consider the linear-scan implementation.
+- If the graph is dense, an adjacency matrix may also be a natural representation because most possible edges exist.
+
+## 7. Important distinction: dense graph does not change Dijkstra's algorithm
+
+The underlying greedy algorithm remains exactly the same.
+
+What changes is the mechanism used to select the next vertex and examine its neighbors.
+
+```
+                 Dijkstra's Algorithm
+                         |
+             Select minimum tentative distance
+                         |
+                 +-------+-------+
+                 |               |
+            Linear Scan      Min-Heap
+                 |               |
+          Adjacency Matrix  Adjacency List
+                 |               |
+              O(V²)       O((V+E) log V)
+                 |               |
+            Dense Graph     Sparse Graph
+```
+
+The main takeaway: Dijkstra's algorithm does not require a priority queue. A priority queue is an optimization for selecting the minimum-distance vertex efficiently. For dense graphs, a simple linear scan can be faster asymptotically and easier to implement.

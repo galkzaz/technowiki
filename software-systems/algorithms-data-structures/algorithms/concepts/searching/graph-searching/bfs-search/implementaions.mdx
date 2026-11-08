@@ -1,0 +1,1292 @@
+
+The BFS algorithm is the same in both languages, but the implementation details differ. In C, you must manage the queue's storage and memory yourself. In Java, you can use the `Queue` interface with `ArrayDeque`, but you still need to choose a graph representation, handle edge cases, and test correctness.
+
+We'll focus on a practical BFS implementation that supports:
+
+- Traversal from a source vertex.
+- Shortest distances in an unweighted graph.
+- Parent tracking and path reconstruction.
+- Disconnected graphs and unreachable destinations.
+- Debug output and edge-case testing.
+
+
+## C
+{/* queue implementation, arrays, memory management, and debug output */}
+
+### 1.1 Choosing a queue implementation
+
+BFS requires a FIFO queue: the first vertex inserted must be the first one removed.
+
+For a graph with $V$ vertices, a simple array-based queue can hold up to $V$ vertices if each vertex is enqueued at most once.
+
+A straightforward implementation uses a circular queue:
+
+```c
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+typedef struct {
+    int *data;
+    int capacity;
+    int front;
+    int size;
+} Queue;
+```
+
+Here:
+
+- `data` stores queued vertices.
+- `capacity` is the maximum number of entries.
+- `front` identifies the first entry.
+- `size` tracks how many entries are currently in the queue.
+
+Why use a circular queue instead of shifting the array after every dequeue? Because shifting can take $O(V)$ time per removal, while a circular queue provides $O(1)$ enqueue and dequeue operations.
+
+### Circular queue implementation
+
+```c
+bool queueInit(Queue *q, int capacity) {
+    if (q == NULL || capacity <= 0) {
+        return false;
+    }
+
+    q->data = malloc((size_t)capacity * sizeof(*q->data));
+
+    if (q->data == NULL) {
+        return false;
+    }
+
+    q->capacity = capacity;
+    q->front = 0;
+    q->size = 0;
+
+    return true;
+}
+
+bool queueIsEmpty(const Queue *q) {
+    return q->size == 0;
+}
+
+bool enqueue(Queue *q, int value) {
+    if (q == NULL || q->size == q->capacity) {
+        return false;
+    }
+
+    int rear = (q->front + q->size) % q->capacity;
+    q->data[rear] = value;
+    q->size++;
+
+    return true;
+}
+
+bool dequeue(Queue *q, int *value) {
+    if (q == NULL || value == NULL || queueIsEmpty(q)) {
+        return false;
+    }
+
+    *value = q->data[q->front];
+    q->front = (q->front + 1) % q->capacity;
+    q->size--;
+
+    return true;
+}
+
+void queueDestroy(Queue *q) {
+    if (q != NULL) {
+        free(q->data);
+        q->data = NULL;
+        q->capacity = 0;
+        q->front = 0;
+        q->size = 0;
+    }
+}
+```
+
+For BFS, a capacity of $V$ is sufficient when each vertex is enqueued at most once. The implementation still checks capacity so that queue misuse does not silently corrupt memory.
+
+Memory-management rule: every successful `malloc` needs a corresponding `free` when the allocated memory is no longer needed.
+
+### 1.2 Graph representation in C
+
+For BFS, an adjacency list is usually a good choice because the algorithm only needs to examine actual neighbors.
+
+One simple representation uses a linked list per vertex, but that requires dynamic allocation for each edge. Another option is a dynamically allocated array of neighbors for each vertex.
+
+For learning, a fixed-size adjacency list is simpler:
+
+```c
+#define MAX_VERTICES 100
+
+typedef struct {
+    int neighbors[MAX_VERTICES][MAX_VERTICES];
+    int degree[MAX_VERTICES];
+    int num_vertices;
+} Graph;
+```
+
+Here, `neighbors[u]` stores the neighbors of vertex `u`, and `degree[u]` tells us how many entries are valid.
+
+This is easy to understand, but it reserves space for up to $V^2$ neighbor entries. For larger or sparse graphs, a dynamically allocated adjacency list is more memory-efficient.
+
+A helper for adding an undirected edge:
+
+```c
+bool addUndirectedEdge(Graph *g, int u, int v) {
+    if (g == NULL ||
+        u < 0 || u >= g->num_vertices ||
+        v < 0 || v >= g->num_vertices) {
+        return false;
+    }
+
+    if (g->degree[u] >= MAX_VERTICES ||
+        g->degree[v] >= MAX_VERTICES) {
+        return false;
+    }
+
+    g->neighbors[u][g->degree[u]++] = v;
+    g->neighbors[v][g->degree[v]++] = u;
+
+    return true;
+}
+```
+
+This example assumes a simple undirected graph. A production implementation should also decide how to handle duplicate edges and self-loops. Notice that this representation has a maximum degree of `MAX_VERTICES` per vertex, which is enough for the simple graph shown, but the fixed-size storage is still a limitation.
+
+### 1.3 BFS with distance and parent arrays
+
+The following is the essential C traversal logic, assuming the graph and queue have already been initialized and the arrays are large enough.
+
+```c
+bool bfs(const Graph *g, int source,
+         int distance[], int parent[]) {
+    if (g == NULL || distance == NULL || parent == NULL ||
+        source < 0 || source >= g->num_vertices) {
+        return false;
+    }
+
+    for (int v = 0; v < g->num_vertices; v++) {
+        distance[v] = -1;  // Unreachable/not discovered
+        parent[v] = -1;
+    }
+
+    Queue q;
+
+    if (!queueInit(&q, g->num_vertices)) {
+        return false;
+    }
+
+    distance[source] = 0;
+    if (!enqueue(&q, source)) {
+        queueDestroy(&q);
+        return false;
+    }
+
+    while (!queueIsEmpty(&q)) {
+        int u;
+
+        if (!dequeue(&q, &u)) {
+            queueDestroy(&q);
+            return false;
+        }
+
+        for (int i = 0; i < g->degree[u]; i++) {
+            int v = g->neighbors[u][i];
+
+            if (distance[v] == -1) {
+                distance[v] = distance[u] + 1;
+                parent[v] = u;
+
+                if (!enqueue(&q, v)) {
+                    queueDestroy(&q);
+                    return false;
+                }
+            }
+        }
+    }
+
+    queueDestroy(&q);
+    return true;
+}
+```
+
+Because a vertex's distance is set before it is enqueued, `distance[v] == -1` also serves as the discovery check. A separate `visited[]` array isn't necessary here.
+
+Notice the error handling around queue allocation and operations. In C, you cannot assume dynamic memory allocation succeeded. Also, if the queue is allocated successfully, every exit path should release its storage.
+
+For simplicity, this function assumes `g->degree[u]` and the neighbor indices have already been validated by graph-building code. If the graph can be supplied by untrusted input, validate those invariants too.
+
+### 1.4 Debug output in C
+
+Debug output helps you understand the queue's state and why a vertex is discovered.
+
+```
+printf("Dequeued: %d\n", u);
+
+for (int i = 0; i < g->degree[u]; i++) {
+    int v = g->neighbors[u][i];
+
+    printf("  Checking neighbor %d\n", v);
+
+    if (distance[v] == -1) {
+        distance[v] = distance[u] + 1;
+        parent[v] = u;
+
+        printf("  Discovered %d, distance = %d\n",
+               v, distance[v]);
+
+        enqueue(&q, v);
+    } else {
+        printf("  Already discovered: %d\n", v);
+    }
+}
+```
+
+In real code, check the return value of `enqueue`, as the complete implementation above does.
+
+A useful debug trace records:
+
+- Which vertex was dequeued.
+- Which neighbors were examined.
+- Which vertices were newly discovered.
+- The distance and parent assigned to each new vertex.
+- The queue contents before and after an iteration, if needed.
+
+Keep debug output optional. Printing on every edge can make a large traversal appear slow because terminal output is much more expensive than simple array operations.
+
+
+##  Java
+
+### 2.1 Why use `Queue` and `ArrayDeque`?
+
+Java provides the `Queue` interface, which describes queue operations, and `ArrayDeque`, an efficient resizable-array implementation.
+
+```
+import java.util.ArrayDeque;
+import java.util.Queue;
+
+Queue<Integer> queue = new ArrayDeque<>();
+```
+
+Use:
+
+```
+queue.offer(vertex);  // Enqueue
+int vertex = queue.poll();  // Dequeue
+```
+
+`offer()` adds an element and `poll()` removes the head, returning `null` if the queue is empty. In BFS, the loop condition guarantees the queue is not empty before `poll()` is called.
+
+For an ordinary BFS, `ArrayDeque` is a good default. It doesn't allow `null` elements, which is fine for vertex IDs represented as integers.
+
+Avoid using `ArrayList.remove(0)` as a queue operation: it shifts remaining elements and can make a traversal much slower.
+
+### 2.2 Graph representation in Java
+
+A common adjacency-list representation is:
+
+```
+List<List<Integer>> graph;
+```
+
+For example:
+
+```
+import java.util.ArrayList;
+import java.util.List;
+
+int vertexCount = 6;
+List<List<Integer>> graph = new ArrayList<>();
+
+for (int i = 0; i < vertexCount; i++) {
+    graph.add(new ArrayList<>());
+}
+```
+
+Add an undirected edge:
+
+```
+graph.get(0).add(1);
+graph.get(1).add(0);
+```
+
+For a directed edge `u -> v`, add only `v` to `graph.get(u)`.
+
+The representation choice affects complexity. An adjacency list gives $O(V+E)$ BFS time, whereas scanning an adjacency matrix for neighbors generally takes $O(V^2)$.
+
+### 2.3 Java BFS with distances and parents
+
+This example uses `-1` to indicate an undiscovered vertex, and returns both arrays in a small result object.
+
+```
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Queue;
+
+public class Bfs {
+    public static class Result {
+        public final int[] distance;
+        public final int[] parent;
+
+        public Result(int[] distance, int[] parent) {
+            this.distance = distance;
+            this.parent = parent;
+        }
+    }
+
+    public static Result bfs(
+            List<List<Integer>> graph, int source) {
+
+        int n = graph.size();
+
+        if (source < 0 || source >= n) {
+            throw new IllegalArgumentException(
+                    "Invalid source vertex");
+        }
+
+        int[] distance = new int[n];
+        int[] parent = new int[n];
+
+        Arrays.fill(distance, -1);
+        Arrays.fill(parent, -1);
+
+        Queue<Integer> queue = new ArrayDeque<>();
+
+        distance[source] = 0;
+        queue.offer(source);
+
+        while (!queue.isEmpty()) {
+            int u = queue.poll();
+
+            for (int v : graph.get(u)) {
+                if (distance[v] == -1) {
+                    distance[v] = distance[u] + 1;
+                    parent[v] = u;
+                    queue.offer(v);
+                }
+            }
+        }
+
+        return new Result(distance, parent);
+    }
+}
+```
+
+This snippet assumes `List`, `ArrayList`, and `Arrays` are imported, and that the graph's adjacency lists contain valid vertex indices. In a complete file, include `import java.util.List;` and `import java.util.ArrayList;` as well.
+
+A few design points:
+
+- The source is validated before indexing the arrays.
+- The distance array doubles as the visited array.
+- The parent array is initialized to `-1`, which means "no parent."
+- `ArrayDeque` supplies the FIFO behavior required by BFS.
+
+If the graph is mutable or can be modified concurrently, you should also define whether it may change during traversal. BFS generally assumes the graph structure remains stable while it runs.
+
+### 2.4 Path reconstruction in Java
+
+After BFS, reconstruct the path by following `parent[]` from the destination back to the source.
+
+```
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public static List<Integer> reconstructPath(
+        int source, int destination, int[] distance, int[] parent) {
+
+    if (source < 0 || source >= distance.length ||
+        destination < 0 || destination >= distance.length) {
+        throw new IllegalArgumentException("Invalid vertex");
+    }
+
+    if (distance[destination] == -1) {
+        return Collections.emptyList();
+    }
+
+    List<Integer> path = new ArrayList<>();
+    int current = destination;
+
+    while (current != -1) {
+        path.add(current);
+
+        if (current == source) {
+            break;
+        }
+
+        current = parent[current];
+    }
+
+    // Defensive check: the parent chain must reach the source.
+    if (path.get(path.size() - 1) != source) {
+        return Collections.emptyList();
+    }
+
+    Collections.reverse(path);
+    return path;
+}
+```
+
+The returned list contains the source and destination, inclusive.
+
+For example, if the parent relationships are:
+
+```
+parent[4] = 1
+parent[1] = 0
+parent[0] = -1
+```
+
+then reconstructing the path from `0` to `4` produces:
+
+```
+[0, 1, 4]
+```
+
+An empty list means no path was found. This works even when the source equals the destination: the result is a list containing just that vertex.
+
+Complexity: path reconstruction takes $O(L)$ time and space for a path of $L$ edges, because it collects $L+1$ vertices and reverses them.
+
+
+Here is a compact implementation using an adjacency list. It records visited vertices, parents, and shortest distances.
+
+```Java
+import java.util.*;
+
+public class BFSExample {
+
+    static void bfs(
+            List<List<Integer>> graph,
+            int source,
+            int target) {
+
+        int n = graph.size();
+
+        boolean[] visited = new boolean[n];
+        int[] parent = new int[n];
+        int[] distance = new int[n];
+
+        Arrays.fill(parent, -1);
+        Arrays.fill(distance, -1);
+
+        Queue<Integer> queue = new ArrayDeque<>();
+
+        // Discover the source.
+        visited[source] = true;
+        distance[source] = 0;
+        queue.offer(source);
+
+        while (!queue.isEmpty()) {
+            int u = queue.poll();
+
+            // Process the current vertex.
+            System.out.println(
+                    "Vertex: " + u
+                    + ", distance: " + distance[u]);
+
+            // Optional: stop when the target is processed.
+            if (u == target) {
+                break;
+            }
+
+            for (int v : graph.get(u)) {
+                if (!visited[v]) {
+                    // Mark when discovered, before enqueueing.
+                    visited[v] = true;
+                    parent[v] = u;
+                    distance[v] = distance[u] + 1;
+
+                    queue.offer(v);
+                }
+            }
+        }
+
+        if (!visited[target]) {
+            System.out.println("No path exists.");
+            return;
+        }
+
+        // Reconstruct the path from target to source.
+        List<Integer> path = new ArrayList<>();
+
+        for (int v = target; v != -1; v = parent[v]) {
+            path.add(v);
+        }
+
+        Collections.reverse(path);
+
+        System.out.println("Shortest path: " + path);
+        System.out.println(
+                "Distance: " + distance[target]);
+    }
+
+    public static void main(String[] args) {
+        int n = 6;
+
+        List<List<Integer>> graph = new ArrayList<>();
+
+        for (int i = 0; i < n; i++) {
+            graph.add(new ArrayList<>());
+        }
+
+        // Undirected edges.
+        graph.get(0).add(1);
+        graph.get(0).add(2);
+        graph.get(1).add(3);
+        graph.get(1).add(4);
+        graph.get(2).add(5);
+
+        graph.get(1).add(0);
+        graph.get(2).add(0);
+        graph.get(3).add(1);
+        graph.get(4).add(1);
+        graph.get(5).add(2);
+
+        bfs(graph, 0, 5);
+    }
+}
+```
+
+The graph uses vertex IDs `0` through `5`. Its structure is:
+
+```
+        0
+       / \
+      1   2
+     / \   \
+    3   4   5
+```
+
+The output includes the minimum distances from vertex `0` and the shortest path to vertex `5`:
+
+```
+Vertex: 0, distance: 0
+Vertex: 1, distance: 1
+Vertex: 2, distance: 1
+Vertex: 3, distance: 2
+Vertex: 4, distance: 2
+Vertex: 5, distance: 2
+Shortest path: [0, 2, 5]
+Distance: 2
+```
+
+The early termination condition stops when the target is removed from the queue. At that point, its shortest distance is already known.
+
+For a reusable implementation, validate `source` and `target` before indexing the graph, and consider separating graph construction, BFS results, and path reconstruction into distinct methods.
+
+## Three-Color Breadth-First Search (BFS)
+### C
+#### 5. Complete C implementation
+
+We'll use the same graph representation as the DFS implementation so you can compare the algorithms directly.
+
+The implementation includes:
+
+- Three-color vertex states.
+- A FIFO queue implemented using an array.
+- A predecessor array.
+- A distance array.
+- Debug output showing color transitions and queue contents.
+
+```c
+
+#include <stdio.h>
+
+#define MAX_VERTICES 6
+#define INFINITY_VALUE -1
+
+/*
+ * Three states used by BFS.
+ */
+typedef enum {
+    WHITE,  // Not discovered.
+    GRAY,   // Discovered, waiting to be processed or processing.
+    BLACK   // Completely processed.
+} Color;
+
+/*
+ * Graph represented using adjacency lists.
+ */
+typedef struct {
+    int adj[MAX_VERTICES][MAX_VERTICES];
+    int degree[MAX_VERTICES];
+} Graph;
+
+/*
+ * Simple FIFO queue.
+ *
+ * Each vertex is enqueued at most once in BFS,
+ * so an array of MAX_VERTICES is sufficient.
+ */
+typedef struct {
+    int items[MAX_VERTICES];
+    int front;
+    int rear;
+} Queue;
+
+static const char *vertexName[MAX_VERTICES] = {
+    "A", "B", "C", "D", "E", "F"
+};
+
+/* Convert a color into readable text. */
+const char *colorName(Color color)
+{
+    switch (color) {
+        case WHITE: return "WHITE";
+        case GRAY:  return "GRAY";
+        case BLACK: return "BLACK";
+        default:    return "UNKNOWN";
+    }
+}
+
+/* Add an undirected edge between two vertices. */
+void addEdge(Graph *graph, int u, int v)
+{
+    if (u < 0 || u >= MAX_VERTICES ||
+        v < 0 || v >= MAX_VERTICES) {
+        return;
+    }
+
+    graph->adj[u][graph->degree[u]++] = v;
+    graph->adj[v][graph->degree[v]++] = u;
+}
+
+/* Initialize an empty queue. */
+void initializeQueue(Queue *queue)
+{
+    queue->front = 0;
+    queue->rear = 0;
+}
+
+/* Check whether the queue is empty. */
+int isEmpty(const Queue *queue)
+{
+    return queue->front == queue->rear;
+}
+
+/* Insert a vertex at the rear of the queue. */
+void enqueue(Queue *queue, int vertex)
+{
+    if (queue->rear < MAX_VERTICES) {
+        queue->items[queue->rear++] = vertex;
+    }
+}
+
+/* Remove and return the vertex at the front. */
+int dequeue(Queue *queue)
+{
+    if (isEmpty(queue)) {
+        return -1;
+    }
+
+    return queue->items[queue->front++];
+}
+
+/* Display the current contents of the queue. */
+void printQueue(const Queue *queue)
+{
+    printf("Queue: [");
+
+    for (int i = queue->front; i < queue->rear; i++) {
+        printf("%s", vertexName[queue->items[i]]);
+
+        if (i < queue->rear - 1) {
+            printf(", ");
+        }
+    }
+
+    printf("]\n");
+}
+
+/* Display the current color of every vertex. */
+void printColors(const Color color[])
+{
+    printf("Colors: ");
+
+    for (int v = 0; v < MAX_VERTICES; v++) {
+        printf("%s=%s ",
+               vertexName[v],
+               colorName(color[v]));
+    }
+
+    printf("\n");
+}
+
+/*
+ * Breadth-First Search using three colors.
+ *
+ * source: starting vertex.
+ * color:  state of each vertex.
+ * pred:   predecessor of each vertex.
+ * dist:   shortest distance from source.
+ */
+void breadthFirstSearch(
+    const Graph *graph,
+    int source,
+    Color color[],
+    int pred[],
+    int dist[]
+) {
+    Queue queue;
+
+    /* Initialize all vertices. */
+    for (int v = 0; v < MAX_VERTICES; v++) {
+        color[v] = WHITE;
+        pred[v] = -1;
+        dist[v] = INFINITY_VALUE;
+    }
+
+    initializeQueue(&queue);
+
+    /*
+     * Discover the source.
+     *
+     * The source becomes GRAY before it is enqueued.
+     */
+    color[source] = GRAY;
+    dist[source] = 0;
+
+    enqueue(&queue, source);
+
+    printf("Starting BFS from %s\n\n", vertexName[source]);
+
+    printColors(color);
+    printQueue(&queue);
+
+    /*
+     * Continue while there are vertices waiting
+     * in the queue.
+     */
+    while (!isEmpty(&queue)) {
+
+        /* Take the next vertex from the front. */
+        int u = dequeue(&queue);
+
+        printf("\nProcessing vertex: %s\n", vertexName[u]);
+
+        /*
+         * Examine every neighbor of u.
+         */
+        for (int i = 0; i < graph->degree[u]; i++) {
+
+            int v = graph->adj[u][i];
+
+            printf("  Examine neighbor %s: ",
+                   vertexName[v]);
+
+            /*
+             * Only WHITE vertices are undiscovered.
+             */
+            if (color[v] == WHITE) {
+
+                /* Discover v. */
+                color[v] = GRAY;
+
+                /* Record the BFS tree predecessor. */
+                pred[v] = u;
+
+                /* Record shortest distance from source. */
+                dist[v] = dist[u] + 1;
+
+                /* Add the newly discovered vertex. */
+                enqueue(&queue, v);
+
+                printf("WHITE -> GRAY, enqueue %s\n",
+                       vertexName[v]);
+
+            } else {
+                /*
+                 * GRAY means already discovered.
+                 * BLACK means already completely processed.
+                 *
+                 * Neither should be enqueued again.
+                 */
+                printf("skip (%s)\n",
+                       colorName(color[v]));
+            }
+        }
+
+        /*
+         * All neighbors of u have been examined.
+         * u is now completely processed.
+         */
+        color[u] = BLACK;
+
+        printf("  %s: GRAY -> BLACK\n", vertexName[u]);
+
+        printColors(color);
+        printQueue(&queue);
+    }
+
+    printf("\nBFS traversal completed.\n");
+}
+
+/* Print the BFS results. */
+void printResults(
+    const Color color[],
+    const int pred[],
+    const int dist[]
+) {
+    printf("\nFinal BFS results:\n");
+    printf("---------------------------------------------\n");
+    printf("Vertex   Color    Predecessor   Distance\n");
+    printf("---------------------------------------------\n");
+
+    for (int v = 0; v < MAX_VERTICES; v++) {
+
+        printf("%-8s %-8s %-13s ",
+               vertexName[v],
+               colorName(color[v]),
+               pred[v] == -1
+                   ? "NONE"
+                   : vertexName[pred[v]]);
+
+        if (dist[v] == INFINITY_VALUE) {
+            printf("UNREACHABLE\n");
+        } else {
+            printf("%d\n", dist[v]);
+        }
+    }
+}
+
+int main(void)
+{
+    Graph graph = {0};
+
+    /*
+     * Build the undirected graph:
+     *
+     *         A
+     *        / \
+     *       B   C
+     *      / \   \
+     *     D   E---F
+     *
+     * A=0, B=1, C=2, D=3, E=4, F=5
+     */
+    addEdge(&graph, 0, 1);  // A-B
+    addEdge(&graph, 0, 2);  // A-C
+    addEdge(&graph, 1, 3);  // B-D
+    addEdge(&graph, 1, 4);  // B-E
+    addEdge(&graph, 2, 5);  // C-F
+    addEdge(&graph, 4, 5);  // E-F
+
+    Color color[MAX_VERTICES];
+    int pred[MAX_VERTICES];
+    int dist[MAX_VERTICES];
+
+    /* Run BFS starting from A. */
+    breadthFirstSearch(
+        &graph,
+        0,
+        color,
+        pred,
+        dist
+    );
+
+    /* Display final traversal information. */
+    printResults(color, pred, dist);
+
+    return 0;
+}
+
+```
+
+Compile and execute:
+
+```
+gcc -std=c11 -Wall -Wextra -pedantic bfs_three_colors.c -o bfs_three_colors
+
+./bfs_three_colors
+```
+
+#### 6. Understanding the implementation
+
+Let's focus on the most important parts of the code.
+
+##### A. Why is a queue necessary?
+
+BFS uses a FIFO queue.
+
+```
+int u = dequeue(&queue);
+```
+
+This ensures that the vertex discovered first is processed first.
+
+For example:
+
+```
+Discover A
+    |
+    v
+Queue: [A]
+
+Process A
+    |
+    +-- Discover B
+    |
+    +-- Discover C
+    |
+    v
+Queue: [B, C]
+
+Process B
+    |
+    +-- Discover D
+    |
+    +-- Discover E
+    |
+    v
+Queue: [C, D, E]
+```
+
+Notice that `C` is processed before `D` and `E`, even though `D` and `E` were discovered while processing `B`.
+
+That is the level-by-level behavior of BFS.
+
+##### B. Why do we change WHITE to GRAY before enqueueing?
+
+This is one of the most important details:
+
+```
+if (color[v] == WHITE) {
+    color[v] = GRAY;
+    enqueue(&queue, v);
+}
+```
+
+Imagine that we have:
+
+```
+    A
+   / \
+  B---C
+```
+
+When processing `A`, BFS discovers both `B` and `C`:
+
+```
+Queue: [B, C]
+```
+
+Later, when processing `B`, BFS encounters `C` again.
+
+If we had not changed `C` to gray when first discovering it, the algorithm might enqueue `C` again.
+
+By changing its color immediately, we guarantee that each vertex is enqueued only once.
+
+##### C. Why does a vertex become BLACK after processing its neighbors?
+
+```
+color[u] = BLACK;
+```
+
+This line comes after the neighbor loop.
+
+It means that BFS has examined all neighbors of `u`. Any white neighbors have been discovered and enqueued, and any gray or black neighbors have already been discovered.
+
+Unlike DFS, BFS does not recursively enter a neighbor. It schedules that neighbor for later processing.
+
+#### 7. DFS vs. BFS: Three-color comparison
+
+Both algorithms use exactly the same three states, but their traversal mechanisms are different.
+
+| Characteristic                    | DFS                         | BFS                             |
+| --------------------------------- | --------------------------- | ------------------------------- |
+| Data structure                    | Recursion / stack           | Queue                           |
+| WHITE                             | Not visited                 | Not discovered                  |
+| GRAY                              | Currently exploring         | Discovered, not finished        |
+| BLACK                             | All neighbors examined      | All neighbors examined          |
+| When becomes GRAY                 | On entering recursive call  | On discovery, before enqueue    |
+| When becomes BLACK                | After recursive exploration | After processing adjacency list |
+| Exploration strategy              | Go deep first               | Explore level by level          |
+| Shortest path in unweighted graph | Not guaranteed              | Guaranteed                      |
+
+#### 8. Complexity analysis
+
+For an adjacency-list representation:
+
+| Operation                                  | Complexity       |
+| ------------------------------------------ | ---------------- |
+| Initialize colors, predecessors, distances | $O(V)$       |
+| Enqueue each vertex                        | $O(V)$ total |
+| Dequeue each vertex                        | $O(V)$ total |
+| Examine all adjacency lists                | $O(E)$       |
+| Total time                                 | $O(V+E)$     |
+| Auxiliary space                            | $O(V)$       |
+
+Each vertex is enqueued at most once because it changes from white to gray at discovery time.
+
+Each undirected edge is examined twice: once from each endpoint.
+
+#### 9. Important: What happens with disconnected graphs?
+
+The implementation above starts BFS from one source:
+
+```
+breadthFirstSearch(&graph, 0, color, pred, dist);
+```
+
+If the graph has disconnected components, vertices that cannot be reached from `A` remain white:
+
+```
+Component 1          Component 2
+
+    A                    X
+   / \                  /
+  B   C                Y
+```
+
+After BFS from `A`:
+
+```
+A, B, C  -> BLACK
+X, Y     -> WHITE
+```
+
+If you want to visit every component, you can add an outer loop:
+
+```c
+for (int v = 0; v < MAX_VERTICES; v++) {
+    if (color[v] == WHITE) {
+        /* Start another BFS component here. */
+    }
+}
+```
+
+You would need to adapt the BFS initialization so that colors and predecessors are initialized only once, and each new component gets its own source.
+
+The most important concept to remember:
+
+- DFS changes a vertex to gray when it enters the recursive call.
+- BFS changes a vertex to gray when it is discovered and added to the queue.
+- Both change a vertex to black only after examining all its neighbors.
+
+This is the fundamental difference in how the same three-color system is used by the two algorithms.
+
+## 3. Tests: verify the behavior, not just the output
+
+A BFS implementation can appear to work on one graph while failing on disconnected graphs, invalid input, or graphs containing cycles. Test several different cases.
+
+Here's a small test graph:
+
+```
+0 --- 1 --- 3
+|     |
+2 --- 4
+
+5
+```
+
+Assume these edges:
+
+```
+0-1, 0-2, 1-3, 1-4, 2-4
+```
+
+Vertex `5` is isolated.
+
+Starting from `0`, the expected shortest distances are:
+
+| Vertex | Distance | One valid parent |
+| ------ | -------- | ---------------- |
+| 0      | 0        | -1               |
+| 1      | 1        | 0                |
+| 2      | 1        | 0                |
+| 3      | 2        | 1                |
+| 4      | 2        | 1 or 2           |
+| 5      | -1       | -1               |
+
+The parent of vertex `4` depends on which neighbor BFS processes first. Both `0 → 1 → 4` and `0 → 2 → 4` are shortest paths.
+
+### Suggested test cases
+
+| Test                      | What it verifies                                 |
+| ------------------------- | ------------------------------------------------ |
+| One vertex, no edges      | Source distance is 0                             |
+| A simple chain            | Distances increase by one along the chain        |
+| A cycle                   | Vertices are not enqueued repeatedly             |
+| A disconnected graph      | Unreachable vertices remain at `-1`              |
+| Source equals destination | Reconstructed path contains one vertex           |
+| Invalid source            | Input validation works                           |
+| Multiple shortest paths   | Parent may vary, but distance stays correct      |
+| Directed graph            | BFS follows outgoing edges only                  |
+| Empty graph               | No invalid array access; source must be rejected |
+
+### What should you assert?
+
+For each reachable vertex `v` other than the source, check that:
+
+```
+distance[v] == distance[parent[v]] + 1
+```
+
+Also verify that `parent[v]` is a valid vertex and that the graph contains the appropriate edge from `parent[v]` to `v` in the direction allowed by the graph.
+
+For every edge from a reachable vertex `u` to a neighbor `v`, shortest-path distances should satisfy:
+
+$$
+distance[v]\le distance[u]+1
+$$
+
+when `v` is reachable. If `v` was previously unreachable, processing `u` should discover it.
+
+These properties often catch bugs that a traversal-order test misses.
+
+## 4. Edge cases and implementation-specific pitfalls
+
+These are the problems most likely to cause incorrect results or unnecessary complexity.
+
+### 4.1 Mark vertices when discovered, not when dequeued
+
+Correct:
+
+```
+if not visited[v]:
+    visited[v] = true
+    enqueue(v)
+```
+
+Risky:
+
+```
+if not visited[v]:
+    enqueue(v)
+
+// Mark visited only when dequeued
+```
+
+The second version can enqueue the same vertex multiple times when multiple vertices discover it before its first dequeue. Marking on discovery ensures every vertex enters the queue at most once.
+
+### 4.2 Distinguish vertex `0` from "not found"
+
+In C, if vertices are numbered from `0`, zero is a valid vertex ID. Don't use `0` as the sentinel for an absent parent or unreachable vertex.
+
+A common convention is:
+
+```
+parent[v] = -1;
+distance[v] = -1;
+```
+
+This works when vertex IDs are nonnegative integers.
+
+In Java, `int` arrays also default to zero, so explicitly initialize them with `Arrays.fill()`. Otherwise, uninitialized distances may incorrectly look like valid zero-length paths.
+
+### 4.3 Validate vertex indices
+
+Before accessing an array or adjacency list, ensure the vertex ID is within the graph's bounds.
+
+C:
+
+```
+if (source < 0 || source >= num_vertices) {
+    return false;
+}
+```
+
+Java:
+
+```
+if (source < 0 || source >= graph.size()) {
+    throw new IllegalArgumentException("Invalid source");
+}
+```
+
+The appropriate response depends on your API: C may return an error code, while Java commonly throws an exception for invalid arguments.
+
+### 4.4 Handle empty graphs
+
+An empty graph has no valid source vertex. Check for that before starting BFS.
+
+In C, also make sure a queue with zero capacity cannot be initialized and then used. In Java, `ArrayDeque` can be created for an empty graph, but BFS must reject any source because no vertex exists.
+
+### 4.5 Avoid fixed-size array overflow in C
+
+A declaration such as:
+
+```
+int queue[MAX_VERTICES];
+```
+
+is safe only if the algorithm never enqueues more than `MAX_VERTICES` vertices.
+
+For ordinary BFS with marking on discovery, a queue capacity of $V$ is sufficient. But the graph's vertex count must not exceed the allocated capacity, and queue operations should still check for overflow.
+
+For large graphs, dynamic allocation avoids arbitrary fixed limits. Always check allocation results and free allocated memory when finished.
+
+### 4.6 Don't accidentally turn a directed graph into an undirected graph
+
+For a directed edge $u\rightarrow v$, add only that outgoing edge:
+
+```
+graph[u].add(v)
+```
+
+If you also add:
+
+```
+graph[v].add(u)
+```
+
+you have changed the graph into an undirected one. That can make unreachable vertices appear reachable and produce incorrect paths.
+
+### 4.7 Duplicate edges and self-loops
+
+Consider:
+
+```
+A --- B
+A --- B
+```
+
+Duplicate edges usually do not affect BFS distances if discovery is handled correctly, but they cause extra neighbor checks.
+
+A self-loop such as `A → A` also does not change the shortest distance to `A`, which remains zero. The visited check prevents it from being re-enqueued.
+
+You can choose to reject or remove duplicate edges when constructing the graph, depending on whether your application allows multigraphs.
+
+### 4.8 Neighbor order affects parents and traversal order
+
+If the adjacency list for vertex `A` contains:
+
+```
+A: B, C
+```
+
+BFS may discover `B` before `C`. If the order is:
+
+```
+A: C, B
+```
+
+it may discover `C` first.
+
+Both orders are valid. The shortest distances remain the same, but the traversal order and the selected parent can differ when multiple shortest paths exist.
+
+Avoid tests that require one exact traversal order unless the implementation explicitly guarantees neighbor ordering.
+
+### 4.9 Don't confuse traversal with path reconstruction
+
+BFS may visit a vertex without needing to return a path. If you need a path, preserve the parent array during traversal.
+
+Also, do not reconstruct a path to an unreachable destination. Check its distance first; an unreachable vertex has no valid parent chain back to the source.
+
+### 4.10 Don't use ordinary BFS for arbitrary weights
+
+If edges represent different prices, durations, or distances, ordinary BFS minimizes edge count rather than total cost. Use 0–1 BFS for weights restricted to zero and one, or Dijkstra's algorithm for general nonnegative weights.
+
+## C versus Java: quick reference
+
+| Concern              | C                                                        | Java                                                            |
+| -------------------- | -------------------------------------------------------- | --------------------------------------------------------------- |
+| Queue                | Implement with an array or linked structure              | `Queue<Integer>` with `ArrayDeque`                              |
+| Memory management    | Allocate and release dynamic memory explicitly           | Garbage collection manages object memory                        |
+| Queue capacity       | Must be managed and checked for fixed arrays             | `ArrayDeque` grows as needed, subject to available memory       |
+| Graph representation | Arrays, dynamically allocated adjacency lists, or matrix | `List<List<Integer>>`, arrays, or matrix                        |
+| Unreachable marker   | Often `-1` in `int` arrays                               | Often `-1` in `int` arrays                                      |
+| Input validation     | Check pointers, bounds, and allocation failures          | Check arguments and collection contents                         |
+| Debugging            | `printf`, debugger, sanitizers                           | Logging, debugger, assertions, unit tests                       |
+| Path reconstruction  | Follow `parent[]`, reverse an array or list              | Follow `parent[]`, reverse a list                               |
+| Typical failure      | Buffer overflow, invalid indices, memory leaks           | Invalid indices, incorrect initialization, excessive memory use |

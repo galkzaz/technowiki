@@ -1,0 +1,1312 @@
+# Model Tuning: Beyond Tweaking the Output
+
+This section explains how we can adapt an existing AI model when ordinary prompting or adjusting its input and output is not enough.
+
+sometimes just using an existing model and slightly tweaking its inputs and
+outputs isn’t enough, and you can’t find a specific model for your use case. This is
+when you have to look into other ways to create a specific adaptation or even create a
+new model.
+
+The central idea is:
+
+We can change a model's behavior at different levels of complexity, from changing instructions to training additional parameters or modifying the model itself.
+
+Let's break down the concepts and understand how they relate.
+
+## 1. Why Do We Need Model Tuning?
+
+Imagine you are building a customer-support application for a banking system.
+
+You use an existing LLM, but you notice that:
+
+- It doesn't understand your company's banking terminology.
+- It doesn't consistently follow your desired response format.
+- It doesn't classify customer requests accurately enough.
+- It doesn't follow your organization's specific response style.
+- It sometimes produces incorrect answers even when the prompt is well-written.
+
+You could try improving the prompts, but eventually prompting alone might not solve the problem.
+
+At this point, you may need to adapt the model.
+
+There are several ways to do that, depending on how much you want to change.
+
+## 2. Different Levels of Model Adaptation
+
+Think of model adaptation as a progression from less invasive to more invasive approaches.
+
+## Increasing adaptation complexity
+
+1\. Prompt Engineering
+
+Change instructions and input structure. No model training.
+
+2\. Retrieval-Augmented Generation (RAG)
+
+Supply external knowledge at inference time. Base model weights remain unchanged.
+
+3\. Prompt Tuning / Prefix Tuning
+
+Learn additional prompt-related parameters. Base model weights generally remain frozen.
+
+4\. Adapter-Based Fine-Tuning (LoRA)
+
+Train a small number of additional parameters while keeping most base-model weights frozen.
+
+5\. Full Fine-Tuning
+
+Update the pretrained model's weights using task-specific training data.
+
+6\. Training from Scratch
+
+Initialize and train a new model using a large training dataset.
+
+This is a conceptual progression, not a strict ranking. RAG, for example, solves a different problem from parameter training.
+
+The paragraph you provided focuses primarily on the middle approaches: adapters and parameter-efficient fine-tuning.
+
+## 3. Traditional Fine-Tuning
+
+First, let's understand what traditional fine-tuning means.
+
+A pretrained model already contains learned knowledge represented by its weights.
+
+Fine-tuning takes this existing model and trains it further using a dataset specific to your task.
+
+For example:
+
+- Base model: a general-purpose language model.
+- Training data: thousands of banking customer-support conversations.
+- Fine-tuned model: a model better adapted to banking customer-support tasks.
+
+Conceptually:
+
+```
+             Pretrained Model
+                    |
+                    v
+             Existing Weights
+                    |
+                    v
+          Task-Specific Training Data
+                    |
+                    v
+              Fine-Tuning
+                    |
+                    v
+           Updated Model Weights
+                    |
+                    v
+           Specialized Model
+```
+
+### What actually changes?
+
+Suppose a model contains 7 billion parameters.
+
+During full fine-tuning, the training process can update all 7 billion parameters.
+
+The model doesn't start learning from zero. It starts with the knowledge acquired during pretraining and adjusts its weights to improve performance on the new task.
+
+Advantages:
+
+- Can achieve strong task-specific performance.
+- Can adapt model behavior and response patterns.
+- Can teach the model specialized terminology and task conventions.
+
+Disadvantages:
+
+- Requires substantial computing resources.
+- Requires suitable training data.
+- Can cause catastrophic forgetting if poorly managed.
+- Requires ML training expertise.
+
+This is what the paragraph means by:
+
+> Tuning in the traditional sense changes the model weights and adapts a pretrained model to a specific need.
+
+## 4. Model Adapters
+
+uning in the traditional
+sense changes the model weights and adapts a pretrained model to a specific need.
+But you can change model behavior in many ways without changing the pretrained
+model, changing only its inner workings. This approach, known as using model
+adapters, allows the base model to retain its general knowledge while the adapter
+layers add task-specific knowledge on top.
+
+An adapter is a small set of additional trainable parameters that can be attached to a pretrained model.
+
+Instead of changing all the original model weights, we keep most of the base model unchanged and train the adapter to introduce task-specific behavior.
+
+Think of it this way:
+
+- The base model contains general knowledge and capabilities.
+- The adapter introduces additional task-specific behavior.
+- Both work together during inference.
+
+### How does it work?
+
+Suppose we have a pretrained LLM:
+
+```
+          Pretrained LLM
+          (7B parameters)
+                 |
+                 v
+          General Knowledge
+```
+
+We attach an adapter:
+
+```
+          Pretrained LLM
+          (7B parameters)
+          Frozen Weights
+                 |
+                 v
+          Adapter Layers
+          (Trainable Parameters)
+                 |
+                 v
+          Specialized Model
+```
+
+During training:
+
+- The original model weights remain frozen.
+- The adapter parameters are updated.
+- The training process teaches the adapter how to influence the model's behavior.
+
+During inference, the model uses both the original weights and the adapter.
+
+Why is this useful?
+
+Imagine you need three specialized versions of the same base model:
+
+- One for banking customer support.
+- One for medical document summarization.
+- One for software development assistance.
+
+Instead of maintaining three independently fine-tuned copies of the entire model, you could use one base model and three different adapters.
+
+One base model, multiple adapters
+
+Shared Base LLM
+
+Original pretrained weights remain frozen
+
+Adapter A
+
+Banking
+
+Adapter B
+
+Medical
+
+Adapter C
+
+Coding
+
+This can reduce training costs and storage requirements, particularly when adapting large models for several tasks.
+
+## 5. Popular Adapter and Parameter-Efficient Fine-Tuning Techniques
+
+Your paragraph mentions three main groups:
+
+1. LoRA.
+2. PEFT.
+3. Prefix tuning and prompt tuning.
+
+Let's understand each one.
+
+### 5.1 Low-Rank Adaptation (LoRA)
+
+Popular technique
+
+LoRA stands for Low-Rank Adaptation.
+
+It is a technique that adapts a pretrained model by introducing small trainable matrices into selected model layers.
+
+The important idea is that we don't need to update the entire original weight matrix to adapt the model.
+
+We can learn a smaller update and apply it to the original weights.
+
+#### Understanding the idea
+
+Imagine a model has a weight matrix \\(W\\).
+
+Traditional fine-tuning updates the original matrix:
+
+\\[ W\_{\text{new}} = W + \Delta W \\]
+
+LoRA represents the weight update using two smaller matrices:
+
+\\[ \Delta W = BA \\]
+
+Therefore:
+
+\\[ W\_{\text{new}} = W + BA \\]
+
+Here:
+
+- \\(W\\): Original pretrained weights.
+- \\(A\\) and \\(B\\): Smaller trainable matrices.
+- \\(BA\\): The learned weight update.
+
+The matrices are designed with a low rank, meaning they require fewer parameters than the original matrix.
+
+#### Example
+
+Suppose the original weight matrix has dimensions:
+
+\\[ W \in \mathbb{R}^{4096 \times 4096} \\]
+
+It contains:
+
+\\[ 4096 \times 4096 = 16,777,216 \\]
+
+parameters.
+
+Instead of training all those parameters, suppose LoRA uses rank \\(r=8\\).
+
+The two smaller matrices have dimensions:
+
+\\[ A \in \mathbb{R}^{8 \times 4096} \\]
+
+\\[ B \in \mathbb{R}^{4096 \times 8} \\]
+
+Their combined parameter count is:
+
+\\[ (8 \times 4096) + (4096 \times 8) = 65,536 \\]
+
+Parameter comparison
+
+Original matrix\
+16,777,216
+
+LoRA matrices
+
+65,536
+
+Approximately 256 times fewer trainable parameters for this example matrix.
+
+This is why LoRA is called parameter-efficient.
+
+Advantages:
+
+- Much fewer trainable parameters.
+- Lower memory requirements during training.
+- Smaller adapter files.
+- Multiple adapters can share one base model.
+
+Use cases:
+
+- Adapting an LLM to a specific business domain.
+- Teaching a model a particular response style.
+- Adapting code-generation models to a programming language or coding convention.
+- Specialized document processing.
+
+One important detail: LoRA does not necessarily add a conventional neural-network layer after every existing layer. It introduces low-rank weight updates into selected model projections, commonly attention projections.
+
+### 5.2 Parameter-Efficient Fine-Tuning (PEFT)
+
+PEFT stands for Parameter-Efficient Fine-Tuning.
+
+Unlike LoRA, PEFT is not one specific technique. It is a family of techniques that adapt pretrained models while training only a small portion of their parameters.
+
+The objective is to avoid updating the entire model.
+
+Common PEFT techniques include:
+
+| Technique      | Main idea                                                    |
+| -------------- | ------------------------------------------------------------ |
+| LoRA           | Train low-rank weight updates                                |
+| Prefix Tuning  | Learn virtual prefix vectors used by transformer layers      |
+| Prompt Tuning  | Learn trainable virtual tokens added to the input            |
+| Adapter Layers | Insert small trainable neural-network modules into the model |
+
+So the relationship is:
+
+```
+          PEFT
+            |
+    +-------+-------+----------------+
+    |       |       |                |
+   LoRA   Prefix   Prompt         Adapter
+          Tuning   Tuning          Layers
+```
+
+Why is PEFT useful?
+
+Consider a 70-billion-parameter LLM.
+
+Full fine-tuning requires updating a huge number of parameters and maintaining optimizer states and gradients during training.
+
+With PEFT, you can freeze most of the model and train only a small set of additional parameters.
+
+This can make adapting large models much more accessible.
+
+A commonly used implementation is the Hugging Face PEFT library.
+
+Important: LoRA is one technique within PEFT. Saying "LoRA versus PEFT" is like comparing one particular implementation with the larger family it belongs to.
+
+### 5.3 Prefix Tuning
+
+Prefix tuning adds trainable vectors, called prefixes, to the model's internal processing.
+
+These vectors influence how the model processes the input.
+
+Unlike ordinary text prompts, these prefixes are learned during training.
+
+Conceptually:
+
+```
+       User Input
+           |
+           v
+    Learned Prefix Vectors
+           |
+           v
+      Transformer
+           |
+           v
+      Model Output
+```
+
+In common prefix-tuning implementations, the learned prefix is associated with the attention mechanism at multiple transformer layers.
+
+Example:
+
+You want an LLM to consistently generate technical documentation.
+
+Instead of manually writing detailed instructions every time, you train a prefix that helps the model follow your preferred documentation conventions.
+
+The original model weights remain frozen, while the prefix parameters are trained.
+
+### 5.4 Prompt Tuning
+
+Prompt tuning also learns additional parameters, but its approach is different from prefix tuning.
+
+It introduces trainable virtual tokens into the model's input embedding sequence.
+
+These tokens are not ordinary words that a user types. They are learned vectors.
+
+Conceptually:
+
+```
+        Learned Virtual Tokens
+                  +
+             User Input
+                  |
+                  v
+             Embeddings
+                  |
+                  v
+             Transformer
+                  |
+                  v
+              Output
+```
+
+For example, suppose you want a model to classify customer messages into:
+
+- Complaint.
+- Question.
+- Request.
+- Feedback.
+
+Prompt tuning can learn virtual tokens that help the model perform this classification task.
+
+The base model remains frozen.
+
+### Prefix Tuning vs. Prompt Tuning
+
+These techniques are related, but they are not identical.
+
+| Aspect               | Prefix Tuning                                                   | Prompt Tuning                  |
+| -------------------- | --------------------------------------------------------------- | ------------------------------ |
+| What is learned?     | Prefix representations, commonly at multiple transformer layers | Trainable virtual input tokens |
+| Where is it applied? | Internal transformer layers, particularly attention             | Input embedding sequence       |
+| Base model weights   | Frozen                                                          | Frozen                         |
+| Trainable parameters | Prefix parameters                                               | Virtual token embeddings       |
+
+One correction to the original paragraph: The comparison with system prompts is useful for intuition, but trainable prompt tuning is not the same as writing a system prompt.
+
+A system prompt is ordinary text supplied at inference time. Prompt tuning learns numerical vectors during training.
+
+## 6. Full Fine-Tuning vs. PEFT vs. Prompt Engineering
+
+Let's compare the approaches.
+
+| Approach              | Changes base weights?          | Trains parameters?                 | Main purpose                              |
+| --------------------- | ------------------------------ | ---------------------------------- | ----------------------------------------- |
+| Prompt engineering    | No                             | No                                 | Improve instructions                      |
+| RAG                   | No                             | No                                 | Provide external knowledge                |
+| Prompt tuning         | No                             | Yes, virtual tokens                | Learn task-specific input representations |
+| Prefix tuning         | No                             | Yes, prefix parameters             | Adapt internal processing                 |
+| LoRA                  | No, base weights remain frozen | Yes, low-rank matrices             | Adapt model behavior efficiently          |
+| Full fine-tuning      | Yes                            | Yes, typically most or all weights | Deep task-specific adaptation             |
+| Training from scratch | Creates new weights            | Yes                                | Build a new model                         |
+
+Notice that PEFT is a category containing LoRA, prompt tuning, prefix tuning, and other techniques, rather than a separate method competing with them.
+
+## 7. How Are Adapters Used During Inference?
+
+Adapter models can be integrated via various techniques in inference engines and effectively layered on top of existing models. Think of it as additional layers of a container. Adapters are commonly referenced in the model name, and their documentation indicates the application they are adapted for.
+
+After training an adapter, you need to use it with its compatible base model.
+
+For example:
+
+```
+             Base Model
+                |
+                |
+        +-------+-------+
+        |               |
+        v               v
+    Banking LoRA    Coding LoRA
+        |               |
+        v               v
+   Banking Model   Coding Model
+        |               |
+        v               v
+   Inference       Inference
+```
+
+An inference engine that supports the model architecture and adapter format can load the base model and the adapter together.
+
+Examples of engines and tools that support LoRA workflows include:
+
+- vLLM.
+- llama.cpp (with supported LoRA configurations).
+- Hugging Face Transformers.
+- Ollama, through supported adapter/model packaging workflows.
+
+A few important considerations:
+
+- An adapter is generally associated with a particular base model and configuration.
+- Not every inference engine supports every adapter technique or model architecture.
+- An adapter file is usually much smaller than the complete base model.
+- Some systems can load or switch between multiple adapters without loading a separate full model for each one.
+
+### Base model vs. adapter vs. final model
+
+| Component        | Responsibility                                     |
+| ---------------- | -------------------------------------------------- |
+| Base model       | Provides pretrained general capabilities           |
+| Adapter          | Provides learned task-specific modifications       |
+| Inference engine | Loads and executes the model and supported adapter |
+| Application      | Sends inputs and consumes predictions              |
+
+## 8. When Should You Use Each Approach?
+
+Let's return to the banking customer-support example.
+
+| Requirement                                                                                                    | Recommended approach           |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Change response format or tone                                                                                 | Prompt engineering             |
+| Give the model access to company policies                                                                      | RAG                            |
+| Learn a task-specific behavior with few trainable parameters                                                   | LoRA / PEFT                    |
+| Learn task-specific virtual prompts                                                                            | Prompt or prefix tuning        |
+| Need substantial changes to model behavior and have sufficient training resources                              | Full fine-tuning               |
+| Need to build a model for a new domain or capability that existing pretrained models cannot adequately support | Consider training from scratch |
+
+Training from scratch is expensive and requires substantial data and expertise. It should not be the default solution just because a pretrained model doesn't perform well.
+
+## Approaches to Model Adaptation
+
+Figure gives you an
+overview about the various approaches, ranked by effort and their usefulness for
+certain scenarios.
+![](/docs/assets/artificial-intelligence/08-generative-ai/large-language-models/common-tuning-techniques.png)
+
+Let's use one example throughout the explanation:
+
+Scenario: You are developing an AI-powered banking customer-support application. You want an LLM to answer questions about bank accounts, transactions, loans, fees, and company policies.
+
+Your existing pretrained LLM can understand general language, but it doesn't know your bank's internal policies and doesn't always follow your desired response style.
+
+Each approach solves this problem differently.
+
+### 1. Prompt Engineering
+
+No training required
+
+Prompt engineering means improving the instructions and input provided to an existing model to guide its behavior.
+
+You don't change the model's architecture, weights, or internal parameters. You simply communicate with it more effectively.
+
+#### How does it work?
+
+An LLM generates responses based on the input context it receives.
+
+You can influence its behavior by specifying:
+
+- Its role.
+- The task it must perform.
+- The context it should consider.
+- Rules and restrictions.
+- The expected output format.
+- Examples of desired responses.
+
+Example:
+
+A simple prompt:
+
+```
+What is a savings account?
+```
+
+A more structured prompt:
+
+```
+You are a banking customer-support assistant.
+
+Explain banking concepts in simple language.
+
+Rules:
+- Use clear, concise explanations.
+- Avoid unnecessary technical terminology.
+- Do not invent bank policies.
+- If you don't know the answer, say so.
+
+Question:
+What is a savings account?
+
+Format:
+1. Definition
+2. Main benefits
+3. Simple example
+```
+
+The second prompt gives the model more guidance, so it is more likely to produce the desired response.
+
+#### Common prompt engineering techniques
+
+| Technique                   | Description                                                    |
+| --------------------------- | -------------------------------------------------------------- |
+| Zero-shot prompting         | Ask the model to perform a task without examples.              |
+| Few-shot prompting          | Provide examples of the expected behavior.                     |
+| Role prompting              | Define the role or perspective the model should adopt.         |
+| Chain-of-thought prompting  | Encourage structured reasoning for tasks that benefit from it. |
+| Structured output prompting | Request a specific format, such as JSON.                       |
+| Contextual prompting        | Include relevant information in the input.                     |
+
+#### When should you use it?
+
+- Changing the response style.
+- Enforcing a particular output format.
+- Improving task instructions.
+- Guiding classification or extraction.
+- Making a model behave consistently.
+
+Limitation: Prompt engineering cannot reliably teach a model new knowledge or capabilities that it doesn't already possess. A better prompt can help the model use existing capabilities, but it doesn't retrain the model.
+
+### 2. Retrieval-Augmented Generation (RAG)
+
+No model training required
+
+RAG stands for Retrieval-Augmented Generation.
+
+It improves the information available to a model by retrieving relevant information from an external knowledge source and including it in the model's input.
+
+Instead of expecting the model to already know your bank's internal policies, you retrieve those policies when the user asks a question.
+
+#### How does it work?
+
+Suppose a customer asks:
+
+"What is the maximum daily ATM withdrawal limit?"
+
+The model doesn't necessarily know your bank's current withdrawal policy.
+
+RAG solves this by searching your bank's knowledge base before asking the LLM to answer.
+
+```
+             Customer Question
+                     |
+                     v
+              Retrieval System
+                     |
+                     v
+              Search Knowledge Base
+                     |
+                     v
+            Retrieve Relevant Documents
+                     |
+                     v
+             Build Augmented Prompt
+                     |
+                     v
+                 Pretrained LLM
+                     |
+                     v
+                Generated Answer
+```
+
+#### Example
+
+Suppose your knowledge base contains:
+
+```
+ATM Withdrawal Policy
+
+The maximum daily ATM withdrawal limit
+for standard accounts is 10,000 EGP.
+```
+
+The customer asks:
+
+```
+What is my daily ATM withdrawal limit?
+```
+
+The retrieval system finds the relevant policy and adds it to the LLM's context:
+
+```
+System:
+You are a banking assistant.
+Answer using the supplied context.
+
+Context:
+The maximum daily ATM withdrawal limit
+for standard accounts is 10,000 EGP.
+
+Question:
+What is my daily ATM withdrawal limit?
+```
+
+The LLM can now produce an answer grounded in the retrieved information.
+
+#### Common RAG components
+
+| Component       | Responsibility                                          |
+| --------------- | ------------------------------------------------------- |
+| Document loader | Loads documents from files, databases, APIs, etc.       |
+| Chunking        | Splits documents into smaller pieces.                   |
+| Embedding model | Converts text into numerical vectors.                   |
+| Vector database | Stores and searches document vectors.                   |
+| Retriever       | Finds relevant documents for a question.                |
+| LLM             | Generates the final answer using the retrieved context. |
+
+Common technologies include:
+
+- LangChain.
+- LlamaIndex.
+- FAISS.
+- Milvus.
+- Qdrant.
+- Elasticsearch.
+- PostgreSQL with pgvector.
+
+#### When should you use it?
+
+- Company-specific knowledge.
+- Frequently changing information.
+- Internal documentation.
+- Product catalogs.
+- Technical documentation.
+- Policies and regulations.
+
+Limitation: RAG doesn't modify the model's internal knowledge or weights. It supplies additional information at inference time. Retrieval quality, document quality, and context limits all affect the final answer.
+
+### 3. Prompt Tuning / Prefix Tuning
+
+Parameter-efficient adaptation
+
+Prompt tuning and prefix tuning are training-based techniques that teach a pretrained model to perform a particular task by learning additional parameters.
+
+Prompt tuning is like optimizing Structured Query Language (SQL)
+queries or tweaking configuration files, where adjustments to inputs improve overall
+performance without modifying the underlying system. 
+
+prompt engineering, which focuses more on crafting better prompts without sys‐
+tematic experimentation. Prompt tuning systematically refines input patterns and
+embeddings so the model produces more-desirable outputs. Applications or automa‐
+ted systems typically implement prompt tuning by using structured templates that
+modify prompts based on user interactions. This allows developers to guide model
+behavior with minimal overhead, making it an accessible and cost-effective approach
+to improving AI responses. However, unlike fine-tuning, prompt tuning does not
+alter the model’s internal parameters, which means its effectiveness is constrained by
+the base model’s existing capabilities.
+
+Remember:
+
+- Prompt engineering: A developer writes instructions using ordinary text.
+- Prompt tuning: The training process learns virtual tokens represented by numerical vectors.
+- Prefix tuning: The training process learns prefix representations that influence the model's internal transformer layers.
+
+In both cases, the original pretrained model weights are generally frozen.
+
+#### 3.1 Prompt Tuning
+
+Prompt tuning adds a set of trainable virtual tokens to the model's input embeddings.
+
+These virtual tokens are not ordinary words. They are numerical vectors learned during training.
+
+Example: Banking question classification
+
+You want the model to classify customer messages into:
+
+- Complaint.
+- Inquiry.
+- Transaction request.
+- Loan request.
+
+You prepare a training dataset:
+
+| Customer message                         | Expected classification |
+| ---------------------------------------- | ----------------------- |
+| I want to report an unauthorized payment | Complaint               |
+| What is the interest rate?               | Inquiry                 |
+| Transfer 500 EGP to my account           | Transaction request     |
+| How can I apply for a loan?              | Loan request            |
+
+During prompt tuning, the model learns virtual tokens that help it perform this classification task.
+
+Conceptually:
+
+```
+       Trainable Virtual Tokens
+                  +
+          Customer Message
+                  |
+                  v
+           Input Embeddings
+                  |
+                  v
+          Pretrained Transformer
+          (Frozen Weights)
+                  |
+                  v
+             Classification
+```
+
+The training process updates the virtual tokens, not the original model weights.
+
+When should you use it?
+
+- Task-specific classification.
+- Text categorization.
+- Information extraction.
+- Adapting a model to a particular task with relatively few trainable parameters.
+
+#### 3.2 Prefix Tuning
+
+Prefix tuning is related to prompt tuning, but it applies learned prefix representations more deeply within the transformer.
+
+Rather than learning only virtual tokens at the input, prefix tuning commonly learns additional representations used by the attention mechanisms across transformer layers.
+
+Example: Banking response generation
+
+You want the model to consistently produce customer-support responses in a particular format:
+
+```
+1. Direct answer
+2. Explanation
+3. Required customer action
+4. Additional notes
+```
+
+You prepare examples of questions and correctly formatted answers.
+
+Prefix tuning learns parameters that influence how the model processes inputs and generates responses.
+
+Conceptually:
+
+```
+             Customer Input
+                    |
+                    v
+           Transformer Layer 1
+                    ^
+                    |
+              Learned Prefix
+                    |
+                    v
+           Transformer Layer 2
+                    ^
+                    |
+              Learned Prefix
+                    |
+                    v
+           Transformer Layer N
+                    |
+                    v
+              Model Output
+```
+
+The exact implementation varies, but the key idea is that learned prefix representations influence the transformer's internal processing.
+
+#### Prompt Tuning vs. Prefix Tuning
+
+| Aspect                  | Prompt Tuning                                      | Prefix Tuning                                      |
+| ----------------------- | -------------------------------------------------- | -------------------------------------------------- |
+| What is learned?        | Virtual input token embeddings                     | Prefix representations                             |
+| Where are they applied? | Input embedding sequence                           | Commonly across transformer layers                 |
+| Base model weights      | Frozen                                             | Frozen                                             |
+| Training                | Updates virtual tokens                             | Updates prefix parameters                          |
+| Main idea               | Learn how to condition the model through its input | Learn additional conditioning throughout the model |
+
+Important: These techniques are generally more specialized than ordinary prompt engineering. They require a training process, suitable datasets, and a compatible training framework.
+
+### Prompt learning
+Prompt learning extends prompt tuning by training a model with
+structured input-output prompt pairs. This enables the model to refine its responses
+based on structured examples rather than simple trial and error. This is typically done
+through fine-tuning methods where labeled examples guide the model’s learning,
+helping it adjust to specific patterns or desired behaviors. One effective approach
+is using LoRA, which allows adjustments to be made without retraining the entire
+model, making it more efficient and resource-friendly. This method is mainly used in
+applications that require predefined response structures. Good examples are enforc‐
+ing compliance in AI-generated text, maintaining consistency in customer support
+interactions, or applying business logic guardrails. It can roughly be compared to
+writing test-driven development (TDD) tests where expected inputs and outputs help
+refine software behavior iteratively, ensuring predictable and improved model perfor‐
+mance over time. Unlike using pretrained adapters, this will have to be executed by
+data scientists.
+
+### 4. Adapter-Based Fine-Tuning (LoRA)
+
+Popular in modern LLM adaptation
+
+Adapter-based fine-tuning introduces additional trainable parameters into an existing pretrained model while keeping most of its original weights frozen.
+
+One of the most popular techniques is LoRA (Low-Rank Adaptation).
+
+#### How does it work?
+
+Suppose you have a pretrained LLM with 7 billion parameters.
+
+Full fine-tuning would update the model's original weights.
+
+LoRA instead introduces small trainable matrices into selected model layers.
+
+During training:
+
+- Original model weights remain frozen.
+- LoRA matrices are trainable.
+- The model learns task-specific weight updates through these matrices.
+
+Conceptually:
+
+```
+             Pretrained LLM
+              (7B Parameters)
+                     |
+              Frozen Weights
+                     |
+                     v
+              +-------------+
+              |  Transformer|
+              |    Layers   |
+              +-------------+
+                     |
+              +-------------+
+              | LoRA Updates|
+              |  Trainable  |
+              +-------------+
+                     |
+                     v
+              Adapted LLM
+```
+
+More precisely, LoRA introduces low-rank matrices into selected weight projections, such as attention projections.
+
+#### Example: Banking specialization
+
+You want your general-purpose LLM to understand your bank's terminology and follow its customer-support conventions.
+
+You collect thousands of examples:
+
+```
+Input:
+How can I dispute a card transaction?
+
+Expected output:
+To dispute a card transaction, please:
+1. Open the banking application.
+2. Select the transaction.
+3. Choose Report a Problem.
+4. Follow the instructions.
+```
+
+You train a LoRA adapter using these examples.
+
+The result is:
+
+```
+       Original Base Model
+              |
+              +
+       Banking LoRA Adapter
+              |
+              v
+       Banking-Adapted Model
+```
+
+The adapter contains the learned modifications, while the original model remains unchanged.
+
+#### One base model, multiple adapters
+
+A particularly useful feature is that different adapters can be trained for different tasks.
+
+```
+                  Base LLM
+                     |
+          +----------+----------+
+          |          |          |
+          v          v          v
+      Banking     Medical    Programming
+      Adapter     Adapter     Adapter
+          |          |          |
+          v          v          v
+      Banking     Medical    Coding
+      Assistant   Assistant  Assistant
+```
+
+You can reuse the same base model instead of maintaining a separate full copy for every task.
+
+#### Advantages
+
+- Requires fewer trainable parameters than full fine-tuning.
+- Reduces training memory requirements.
+- Adapter files are relatively small.
+- Makes it easier to maintain multiple specialized versions.
+- Can be supported by modern inference engines such as vLLM.
+
+#### When should you use it?
+
+- Domain-specific language adaptation.
+- Specialized response generation.
+- Code-generation customization.
+- Classification and extraction tasks.
+- Adapting a large model with limited training resources.
+
+Important distinction: LoRA is a specific PEFT technique. PEFT (Parameter-Efficient Fine-Tuning) is the broader family that also includes prompt tuning, prefix tuning, and other methods.
+
+### 5. Full Fine-Tuning
+
+More resource-intensive.
+
+Full fine-tuning means adjusting all model weights by retraining it on domain-specific data, requiring specialized knowledge and significant computational resources. This process is akin to recompiling an entire application with a new framework version instead of just upgrading a single dependency. Unlike lighter tuning methods, full fine-tuning demands expertise in ML, access to high-performance hardware, and a well-prepared dataset to ensure optimal results. Because of these complexities, it is not typically accessible to traditional developers and instead is done by a dedicated data science team.
+
+Full fine-tuning takes a pretrained model and continues training it using task-specific data, updating its original model weights.
+
+Unlike LoRA, which trains a small set of additional parameters, full fine-tuning typically updates all or most of the model's parameters.
+
+#### How does it work?
+
+Suppose you start with a pretrained model:
+
+```
+             Pretrained LLM
+              (7B Parameters)
+                     |
+                     v
+              Original Weights
+                     |
+                     v
+          Task-Specific Training Data
+                     |
+                     v
+              Full Fine-Tuning
+                     |
+                     v
+             Updated Weights
+                     |
+                     v
+             Fine-Tuned LLM
+```
+
+During training, the model compares its predictions with the expected outputs.
+
+An optimization process calculates how its weights should change to reduce the training loss.
+
+This involves:
+
+1. Forward propagation: The model generates predictions.
+2. Loss calculation: The predictions are compared with expected results.
+3. Backpropagation: Gradients are calculated.
+4. Weight updates: The optimizer updates the model parameters.
+5. Repetition: The process continues over the training dataset.
+
+#### Example: Specialized banking model
+
+Suppose your bank has a large, high-quality dataset containing:
+
+- Banking conversations.
+- Financial terminology.
+- Customer-support interactions.
+- Transaction explanations.
+- Loan-related questions.
+- Correct answers and response formats.
+
+You use this dataset to fine-tune a pretrained LLM.
+
+The resulting model may become substantially better at banking-related tasks.
+
+#### LoRA vs. Full Fine-Tuning
+
+| Aspect                   | LoRA                        | Full Fine-Tuning                     |
+| ------------------------ | --------------------------- | ------------------------------------ |
+| Original weights         | Frozen                      | Updated                              |
+| Trainable parameters     | Small subset                | Most or all parameters               |
+| Training memory          | Generally lower             | Generally higher                     |
+| Output artifact          | Adapter weights             | Updated model weights                |
+| Multiple specializations | Convenient through adapters | Often requires separate model copies |
+| Training complexity      | Lower                       | Higher                               |
+
+#### Advantages
+
+- Can produce strong task-specific adaptation.
+- Allows broad changes to the pretrained model's behavior.
+- Useful when adapter-based approaches don't achieve the required performance.
+
+#### Disadvantages
+
+- Requires more computational resources.
+- Requires more training memory.
+- Produces larger model artifacts.
+- Can cause catastrophic forgetting.
+- Requires careful evaluation and training configuration.
+
+When should you use it?
+
+When you have sufficient high-quality training data and resources, and parameter-efficient methods aren't delivering the required performance.
+
+### Alignment tuning
+Alignment tuning adjusts a model’s outputs to ensure compliance
+with ethical guidelines, safety regulations, and industry standards, making it essential
+for responsible AI deployment. This process modifies the model’s decision-making
+process to align with predefined rules, much like defining security policies and implementing role-based access control (RBAC) to enforce access restrictions across a system. Similar to enforcing API rate limits, deploying security patches, or establish‐
+ing governance policies at an enterprise level, alignment tuning ensures that the AI
+operates within acceptable boundaries, mitigating risks associated with unintended
+behavior or biased decision making.
+
+The InstructLab project takes a novel approach to alignment tuning by using synthetic data generation and reinforcement learning from human feedback (RLHF) to
+refine AI behavior. InstructLab generates curated datasets that help models learn ethical reasoning, industry-specific regulations, and business logic while ensuring knowledge consistency across applications. This approach allows developers to integrate
+AI systems that are adaptable to compliance needs without requiring full retraining,
+reducing costs and effort while maintaining safety and reliability
+### 6. Training from Scratch
+
+Highest complexity
+
+Training from scratch means creating and training a new model without starting from an existing pretrained model.
+
+This is fundamentally different from fine-tuning.
+
+With fine-tuning, you start with existing learned weights.
+
+With training from scratch, you initialize new model weights and teach the model through a training process.
+
+#### How does it work?
+
+Let's compare the two workflows.
+
+Fine-tuning
+
+Pretrained Model
+
+Task-Specific Training
+
+Fine-Tuned Model
+
+Training from scratch
+
+New Model Architecture + Randomly Initialized Weights
+
+Large-Scale Training Dataset
+
+Pretraining Process
+
+New Pretrained Model
+
+#### Example: Building a banking language model
+
+Imagine a company wants to build its own language model specialized in banking and financial terminology.
+
+It decides not to use an existing LLM.
+
+Instead, it:
+
+1. Designs or selects a model architecture.
+2. Collects and cleans a large training corpus.
+3. Initializes model weights.
+4. Trains the model on the collected data.
+5. Evaluates its language understanding and generation capabilities.
+6. Performs additional adaptation if necessary.
+
+The resulting model starts with learned capabilities acquired from its own training process.
+
+#### What is required?
+
+| Requirement             | Explanation                                        |
+| ----------------------- | -------------------------------------------------- |
+| Training data           | A large, high-quality dataset                      |
+| Model architecture      | Transformer or another suitable architecture       |
+| Computing resources     | Potentially large GPU clusters                     |
+| Training infrastructure | Distributed training and checkpoint management     |
+| ML expertise            | Model architecture, optimization, and training     |
+| Evaluation              | Extensive quality, safety, and performance testing |
+
+#### Advantages
+
+- Complete control over model architecture.
+- Control over training data and pretraining objectives.
+- Can target a domain or language poorly represented by existing models.
+- No dependency on an existing pretrained model's architecture or licensing.
+
+#### Disadvantages
+
+- Very expensive.
+- Requires substantial data.
+- Requires specialized ML expertise.
+- Training can take a long time.
+- No guarantee that the resulting model will outperform existing models.
+
+#### When should you use it?
+
+Training from scratch is generally appropriate when:
+
+- Existing pretrained models cannot meet the requirements.
+- You need a fundamentally different architecture.
+- You have access to substantial training data and computing resources.
+- You need control over the complete pretraining process.
+
+For most application development projects, starting from scratch is unnecessary.
+
+### 7. Comparing All Six Approaches
+
+Let's put everything together.
+
+| Approach                   | What changes?                     | Training required? | Typical use                            |
+| -------------------------- | --------------------------------- | ------------------ | -------------------------------------- |
+| Prompt Engineering         | Input instructions                | No                 | Change response style and behavior     |
+| RAG                        | Information supplied to the model | No                 | Provide external or updated knowledge  |
+| Prompt / Prefix Tuning     | Learned prompt-related parameters | Yes                | Task-specific conditioning             |
+| LoRA / Adapter Fine-Tuning | Additional trainable parameters   | Yes                | Domain and task adaptation             |
+| Full Fine-Tuning           | Original model weights            | Yes                | More substantial behavioral adaptation |
+| Training from Scratch      | Entire model's learned weights    | Yes                | Build a new foundation model           |
+
+Table 2-1 provides a complete overview of the tuning methods with their respec‐
+tive resource and cost implications and an indication of their advantages and
+disadvantages.
+
+
+| Method | Effort | Resources | Cost | Skills required | Pros | Cons |
+| --- | --- | --- | --- | --- | --- | --- |
+| Prompt tuning or engineering | Low | Minimal | Low | Developers | No extra infrastructure<br />Immediate, easy changes<br />Ideal for minor tweaks | Limited deeper control<br />Trial and error needed |
+| Prompt learning | Medium | Moderate | Medium | Data scientists | Better reliability without parameter changes<br />More effective than prompt tuning | Needs labeled data<br />Limited by model constraints |
+| Parameter-efficient fine-tuning (PEFT, LoRA) | Medium | Moderate | Medium | Developers, data scientists | Lower training costs than full fine-tuning<br />Runs on standard GPUs<br />Adapts model without losing original knowledge | Requires data prep and updates<br />Gains vary by task complexity |
+| Full fine-tuning | Very high | Extensive | Very high | Data scientists | Maximum behavior control<br />Ideal for proprietary or highly specific tasks | High compute/storage costs<br />Requires advanced ML expertise |
+| Alignment tuning | High | High | High | Developers | Ensures ethical AI<br />Essential for regulated industries | Complex implementation<br />Dedicated AI infrastructure needed<br />High ongoing costs |
+### 8. How to Choose the Right Approach
+
+Here is a practical decision process for an AI engineer.
+
+Start: What problem are you trying to solve?
+
+Do you only need to change instructions, response style, or output format?
+
+Yes → Prompt Engineering
+
+Does the model need access to external or frequently updated information?
+
+Yes → RAG
+
+Does the model need to learn a specific task or behavior?
+
+Yes → Consider PEFT
+
+- Prompt tuning / Prefix tuning
+- LoRA / Adapters
+
+Are parameter-efficient approaches insufficient, and do you have enough training data and resources?
+
+Yes → Full Fine-Tuning
+
+Can existing pretrained models not meet your fundamental requirements?
+
+Consider Training from Scratch
+
+One important qualification: this is a practical selection guide, not a mandatory sequence. You can combine approaches. For example, an application might use RAG and LoRA together: LoRA adapts the model's behavior, while RAG supplies current company information.
+
+
+It is important to note that while prompt tuning and engineering are accessible to developers, more-complex methods like full fine-tuning and alignment tuning require specialized knowledge and resources typically found in data science teams. Developers, however, are responsible for choosing the right model for their applications.
+
+### 9. What Should You Learn as an AI Engineer?
+
+I recommend prioritizing these topics:
+
+| Priority  | Topic                  | What you should understand                              |
+| --------- | ---------------------- | ------------------------------------------------------- |
+| High      | Prompt Engineering     | Design effective prompts and structured outputs         |
+| High      | RAG                    | Retrieval, embeddings, vector databases, and generation |
+| High      | LoRA                   | How adapter-based adaptation works                      |
+| High      | PEFT                   | The family of parameter-efficient techniques            |
+| Medium    | Full Fine-Tuning       | Training workflow, datasets, and resource requirements  |
+| Medium    | Prompt / Prefix Tuning | How learned virtual tokens and prefixes work            |
+| Awareness | Training from Scratch  | Architecture, pretraining, infrastructure, and costs    |
+
+My recommendation: For your AI engineering and MLOps roadmap, organize this subject under `LLM → Model Adaptation and Fine-Tuning`. Keep model deployment separate because adaptation is about changing model behavior, while deployment is about making the resulting model available to applications.
+
+The most important distinction to remember is:
+
+- Prompt Engineering: Tell the model how to behave.
+- RAG: Give the model relevant information.
+- PEFT: Train a small number of parameters to adapt the model.
+- Full Fine-Tuning: Update the pretrained model's weights.
+- Training from Scratch: Build and train a new model.
+
+## 9. When Do You Need a Data Scientist?
+
+As a software engineer integrating AI into applications, you don't necessarily need to implement every adaptation technique yourself.
+
+A useful division of responsibilities is:
+
+| Activity                      | Typical responsibility                        |
+| ----------------------------- | --------------------------------------------- |
+| Prompt engineering            | AI application engineer / developer           |
+| RAG implementation            | AI engineer / software engineer               |
+| Model evaluation              | AI engineer / data scientist                  |
+| LoRA training                 | ML engineer / data scientist                  |
+| PEFT configuration            | ML engineer / data scientist                  |
+| Full fine-tuning              | ML engineer / data scientist                  |
+| Training from scratch         | ML research / specialized ML engineering team |
+| Model serving and integration | ML platform engineer / backend engineer       |
+
+These responsibilities overlap in real teams.
+
+## 10. Recommended TOC Placement
+
+I would put this topic under LLM Adaptation and Fine-Tuning, separate from model deployment.
+
+```
+artificial-intelligence/
+└── llm/
+    ├── fundamentals/
+    ├── architecture/
+    ├── prompting/
+    ├── retrieval-augmented-generation/
+    │
+    ├── model-adaptation/
+    │   ├── index.mdx
+    │   ├── prompt-engineering.mdx
+    │   ├── model-tuning-overview.mdx
+    │   ├── fine-tuning.mdx
+    │   ├── parameter-efficient-fine-tuning.mdx
+    │   ├── lora.mdx
+    │   ├── prefix-tuning.mdx
+    │   ├── prompt-tuning.mdx
+    │   └── training-from-scratch.mdx
+    │
+    └── deployment/
+        ├── model-formats.mdx
+        ├── inference-engines.mdx
+        ├── model-serving.mdx
+        └── ...
+```
+
+The key takeaway: Prompt engineering changes the instructions, RAG changes the information supplied to the model, PEFT changes a small set of learned parameters, and full fine-tuning changes the pretrained model's weights. These are different levels of adapting a model, and choosing the simplest approach that solves the problem is usually the best starting point.

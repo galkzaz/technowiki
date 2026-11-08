@@ -1,0 +1,6574 @@
+# Spring Cloud Config: Architecture, Design Decisions, and Implementation
+
+Spring Cloud Config is a centralized configuration system for distributed applications. It lets you manage the configuration of multiple Spring Boot services in one place instead of maintaining independent configuration files inside every service.
+
+To understand it properly, think of it as an architectural component in your microservices system, not just another Spring Boot dependency.
+
+When designing a Spring Cloud Config Server architecture, you need to make three major decisions:
+
+1. Where configuration is stored — Git, a local filesystem, a database, or another repository.
+2. How services discover the Config Server — connect directly to it or discover it through a service registry such as Eureka.
+3. How configuration is secured — protect access to configuration endpoints and prevent sensitive values, such as passwords and API keys, from being exposed.
+
+We'll connect it to the architecture decisions that matter in a real system:
+
+- Selecting a configuration repository: Git, filesystem, or another backend.
+- Deciding where the Config Server runs and how clients discover it.
+- Choosing when configuration is loaded and refreshed.
+- Separating configuration by service, environment, and deployment.
+- Securing configuration in transit and at rest.
+- Handling configuration failures, availability, and consistency.
+- Integrating it with Spring Cloud Gateway, Eureka, Docker Compose, and OAuth2.
+- Testing the design through practical Spring Boot examples.
+
+## 1. The architectural problem
+
+Imagine your microservices application contains these services:
+
+- `product-service`
+- `review-service`
+- `recommendation-service`
+- `product-composite-service`
+- `gateway`
+
+Each service needs configuration. For example:
+
+```
+server:
+  port: 8081
+
+spring:
+  data:
+    mongodb:
+      uri: mongodb://mongo:27017/products
+
+  rabbitmq:
+    host: rabbitmq
+    port: 5672
+
+app:
+  review-service:
+    url: http://review-service:8082
+```
+
+Now suppose you need to change a RabbitMQ address, configure a timeout, or update a feature flag.
+
+Without centralized configuration, you might need to modify configuration files in several repositories, rebuild images, redeploy services, and ensure that all environments use compatible values.
+
+This creates several problems:
+
+| Problem                   | Architectural consequence                                                       |
+| ------------------------- | ------------------------------------------------------------------------------- |
+| Configuration duplication | Different services may use inconsistent values.                                 |
+| Environment differences   | Development, testing, and production can drift apart.                           |
+| Configuration changes     | Changes require repeated edits across repositories.                             |
+| Secrets in source code    | Credentials may be committed to Git or included in images.                      |
+| Operational visibility    | It becomes difficult to identify the effective configuration of a service.      |
+| Deployment coupling       | Configuration changes can become unnecessarily coupled to application releases. |
+
+Spring Cloud Config addresses the configuration-management part of these problems.
+
+It does not automatically solve secret management, configuration consistency across a distributed system, or zero-downtime deployment. Those require additional architectural decisions.
+
+## 2. The core architecture
+
+Configuration Repository
+
+Git repository containing application and environment configuration
+
+Spring Cloud Config Server
+
+Reads configuration and exposes it through an HTTP API
+
+Product Service
+
+Loads its configuration
+
+Review Service
+
+Loads its configuration
+
+Gateway
+
+Loads its configuration
+
+Other Services
+
+Load their configuration
+
+The important distinction is that the Config Server is a configuration provider, not a service that normally proxies every application request.
+
+For example, the product service fetches its configuration from the Config Server and then connects directly to MongoDB and other services. Ordinary product requests do not need to pass through the Config Server.
+
+### The main components
+
+| Component                     | Responsibility                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------- |
+| Configuration repository      | Stores versioned configuration files.                                                 |
+| Config Server                 | Retrieves, combines, and serves configuration.                                        |
+| Config Client                 | Connects to the Config Server and imports configuration into the Spring Environment.  |
+| Spring Environment            | Provides resolved property values to the application.                                 |
+| Actuator / refresh mechanisms | Support selected operational tasks, such as refreshing configuration when configured. |
+| Secret-management system      | Stores and controls access to sensitive values when required.                         |
+
+Spring Cloud Config commonly uses Git as its backend, but its server-side repository abstraction supports other approaches as well.
+
+## 3. Design decision: selecting a configuration repository
+
+This is one of the most important architecture decisions because the repository determines how configuration is versioned, reviewed, deployed, secured, and recovered.
+
+Spring Cloud Config separates the configuration API from the storage backend. The application clients talk to the Config Server; the server talks to the chosen repository.
+
+The Config Server retrieves configuration from a repository and makes it available to client applications.
+
+For example, suppose you have three microservices:
+
+- `product-service`
+- `order-service`
+- `gateway`
+
+Each service needs its own configuration, but you want to manage that configuration centrally.
+
+```excalidraw
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "id": "UCnGBC7fOM1vFGNMVI17w",
+      "type": "text",
+      "x": -44.443748474121094,
+      "y": -117,
+      "width": 320,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a1",
+      "roundness": null,
+      "seed": 994620716,
+      "version": 299,
+      "versionNonce": 994254173,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792571898824,
+      "created": 1792434200272,
+      "link": null,
+      "locked": false,
+      "text": "Configuration Repository",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Configuration Repository",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "EG-CPGYs2LQkCEE_Hw2CI",
+      "type": "text",
+      "x": -85.21041107177734,
+      "y": -73,
+      "width": 401.5333251953125,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a2",
+      "roundness": null,
+      "seed": 155007916,
+      "version": 213,
+      "versionNonce": 1930521021,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792571898824,
+      "created": 1792442717724,
+      "link": null,
+      "locked": false,
+      "text": "application.yml · product-service.yml · order-service.yml",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "application.yml · product-service.yml · order-service.yml",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "hlUWXjTA3t59QbFB-tj6R",
+      "type": "text",
+      "x": 41.266666412353516,
+      "y": 113,
+      "width": 101.46666717529297,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a3",
+      "roundness": null,
+      "seed": 2076935956,
+      "version": 98,
+      "versionNonce": 1434391603,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442765358,
+      "link": null,
+      "locked": false,
+      "text": "Initial array",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Initial array",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "e9miYzobg_Q_irPLTetw8",
+      "type": "rectangle",
+      "x": 37.30000305175781,
+      "y": 171.809375,
+      "width": 189.5,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a4",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 907436564,
+      "version": 201,
+      "versionNonce": 349289597,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "D6I0PwLVPXT4eZ5BvbLv3"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442784709,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "D6I0PwLVPXT4eZ5BvbLv3",
+      "type": "text",
+      "x": 124.71666955947876,
+      "y": 183.44062499999998,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a4V",
+      "roundness": null,
+      "seed": 1757900948,
+      "version": 159,
+      "versionNonce": 664016339,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442801934,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "e9miYzobg_Q_irPLTetw8",
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "SsDeokVES5FGRPe_cJpll",
+      "type": "rectangle",
+      "x": 242.95781326293948,
+      "y": 172.7375,
+      "width": 192.99999999999994,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a5",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 278899116,
+      "version": 277,
+      "versionNonce": 1539253469,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "CLMMphBKNBXJwomUelNiT"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442790111,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "CLMMphBKNBXJwomUelNiT",
+      "type": "text",
+      "x": 332.67447996139526,
+      "y": 184.36875,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a5V",
+      "roundness": null,
+      "seed": 1323757972,
+      "version": 174,
+      "versionNonce": 517464947,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442804237,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "SsDeokVES5FGRPe_cJpll",
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "6lY3AZHm2E2bXQtkIkraJ",
+      "type": "rectangle",
+      "x": 450.3125,
+      "y": 171.5,
+      "width": 184.49999999999997,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 401073324,
+      "version": 243,
+      "versionNonce": 1168146749,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "6epJMRN8JUOkTb0sYIDJ-"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442794856,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "6epJMRN8JUOkTb0sYIDJ-",
+      "type": "text",
+      "x": 535.8125,
+      "y": 183.13125,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6V",
+      "roundness": null,
+      "seed": 1758219948,
+      "version": 161,
+      "versionNonce": 1133575443,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443204321,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "6lY3AZHm2E2bXQtkIkraJ",
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "UIGe73Iq5OLWOv4-X9o7x",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 270.5,
+      "width": 354.73333740234375,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a8",
+      "roundness": null,
+      "seed": 121108884,
+      "version": 118,
+      "versionNonce": 936858013,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442972985,
+      "link": null,
+      "locked": false,
+      "text": "Step 1: Compare the first two elements",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 1: Compare the first two elements",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "A1gX1fFjWKDRQ8pwfvSoq",
+      "type": "text",
+      "x": 180.66666650772095,
+      "y": 317.5,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a9",
+      "roundness": null,
+      "seed": 1740808724,
+      "version": 102,
+      "versionNonce": 1362485939,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442985056,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "ohDyGbzyv_lWlKr7TakbN",
+      "type": "text",
+      "x": 465.7166666984558,
+      "y": 317.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aA",
+      "roundness": null,
+      "seed": 1070164628,
+      "version": 156,
+      "versionNonce": 1872041469,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442989501,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "-FQ63PgydbBW6xRdTnSap",
+      "type": "arrow",
+      "x": 321.84072494477346,
+      "y": 337,
+      "width": 20.736456238139024,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aC",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1257068436,
+      "version": 164,
+      "versionNonce": 1349325907,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443017496,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20.736456238139024,
+          -1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "moveMidPointsWithElement": true
+    },
+    {
+      "id": "ioGFWcAp2pFNrYxepqKq7",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 402,
+      "width": 269.73333740234375,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aD",
+      "roundness": null,
+      "seed": 1724302356,
+      "version": 147,
+      "versionNonce": 131812957,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443035700,
+      "link": null,
+      "locked": false,
+      "text": "Step 2: Compare the next pair",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 2: Compare the next pair",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "sguHkWnZ2Xaiif9IWC6AB",
+      "type": "text",
+      "x": 183.19166660308838,
+      "y": 450.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aE",
+      "roundness": null,
+      "seed": 1357943444,
+      "version": 175,
+      "versionNonce": 1896681971,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "0vZdNcYDVUTAiIFdJEpmv",
+      "type": "text",
+      "x": 468.24166679382324,
+      "y": 450.5,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aF",
+      "roundness": null,
+      "seed": 334045204,
+      "version": 229,
+      "versionNonce": 1065056957,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "ruKnUpyd8gXi4cLtk98jN",
+      "type": "arrow",
+      "x": 340.5715246191928,
+      "y": 452,
+      "width": 16.589164990511218,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aG",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 807525012,
+      "version": 266,
+      "versionNonce": 605838227,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -16.589164990511218,
+          1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "LDjhc0M5hmo7t-ogyed7Q",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 355,
+      "width": 524.9000244140625,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aH",
+      "roundness": null,
+      "seed": 577825172,
+      "version": 141,
+      "versionNonce": 2132220701,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "id": "7g7_G6X4vuSrCjYT8OXqc",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1792571507394,
+      "created": 1792443062023,
+      "link": null,
+      "locked": false,
+      "text": "A.compareTo(B) is negative, so the run is ascending so far.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "A.compareTo(B) is negative, so the run is ascending so far.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "Ill1X3fA_tLk27_3ZywaR",
+      "type": "arrow",
+      "x": 321.74894243386814,
+      "y": 475.68085239399215,
+      "width": 20.736456238139024,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aI",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 229730324,
+      "version": 245,
+      "versionNonce": 1976660275,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443089151,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20.736456238139024,
+          -1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "LzNgkZwSuilRs6lCKwDnH",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 492,
+      "width": 539.7666625976562,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aJ",
+      "roundness": null,
+      "seed": 907889044,
+      "version": 137,
+      "versionNonce": 522170237,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443148006,
+      "link": null,
+      "locked": false,
+      "text": "B.compareTo(C) is negative, so the ascending run continues.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B.compareTo(C) is negative, so the ascending run continues.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "cIPbgyJfFZxsQBSQ9rf-4",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 537,
+      "width": 201.06666564941406,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aK",
+      "roundness": null,
+      "seed": 220271252,
+      "version": 108,
+      "versionNonce": 34540413,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571707072,
+      "created": 1792443154966,
+      "link": null,
+      "locked": false,
+      "text": "Step 3: Accept the run",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 3: Accept the run",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "IirBEJIdXoGSSfRdmmDfC",
+      "type": "rectangle",
+      "x": -181.6999969482422,
+      "y": 232.75,
+      "width": 188.5,
+      "height": 77.99999999999999,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [
+        "80a69ksi9GnEwINO6pKtg"
+      ],
+      "frameId": null,
+      "index": "aKG",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 1873986324,
+      "version": 347,
+      "versionNonce": 1209477661,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "sw_uSR4UAr1bstWjIAp2g"
+        }
+      ],
+      "updated": 1792571898824,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "sw_uSR4UAr1bstWjIAp2g",
+      "type": "text",
+      "x": -122.66666412353516,
+      "y": 259.25,
+      "width": 70.43333435058594,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [
+        "80a69ksi9GnEwINO6pKtg"
+      ],
+      "frameId": null,
+      "index": "aKV",
+      "roundness": null,
+      "seed": 1374351788,
+      "version": 302,
+      "versionNonce": 189128317,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792571898824,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Product",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "IirBEJIdXoGSSfRdmmDfC",
+      "originalText": "Product",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "4ntyCTMsqj_K6KGBPI4ck",
+      "type": "rectangle",
+      "x": 22.306251525878906,
+      "y": 233.75,
+      "width": 196.50000000000003,
+      "height": 74.00000000000001,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [
+        "80a69ksi9GnEwINO6pKtg"
+      ],
+      "frameId": null,
+      "index": "aKl",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 140163092,
+      "version": 430,
+      "versionNonce": 1935607517,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "wcPFKxxquAgD9sd88_Fh5"
+        }
+      ],
+      "updated": 1792571898824,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "wcPFKxxquAgD9sd88_Fh5",
+      "type": "text",
+      "x": 94.40625190734863,
+      "y": 258.25,
+      "width": 52.29999923706055,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [
+        "80a69ksi9GnEwINO6pKtg"
+      ],
+      "frameId": null,
+      "index": "aL",
+      "roundness": null,
+      "seed": 84113068,
+      "version": 323,
+      "versionNonce": 1660166973,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792571898824,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Order",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "4ntyCTMsqj_K6KGBPI4ck",
+      "originalText": "Order",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "paRuBDzSCq-5csYRSAjRp",
+      "type": "rectangle",
+      "x": 234.3125,
+      "y": 236.5,
+      "width": 178.49999999999994,
+      "height": 70.49999999999997,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [
+        "80a69ksi9GnEwINO6pKtg"
+      ],
+      "frameId": null,
+      "index": "aLV",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 772533524,
+      "version": 393,
+      "versionNonce": 1852224413,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "qSJj_B1xVqESBJelxbuah"
+        }
+      ],
+      "updated": 1792571898824,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "qSJj_B1xVqESBJelxbuah",
+      "type": "text",
+      "x": 283.36249923706055,
+      "y": 259.25,
+      "width": 80.4000015258789,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [
+        "80a69ksi9GnEwINO6pKtg"
+      ],
+      "frameId": null,
+      "index": "aM",
+      "roundness": null,
+      "seed": 1434368940,
+      "version": 308,
+      "versionNonce": 568866813,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792571898824,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Gateway",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "paRuBDzSCq-5csYRSAjRp",
+      "originalText": "Gateway",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "tOe5o53lr8-1wBnt9evlF",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 671.5,
+      "width": 617.7000122070314,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aW",
+      "roundness": null,
+      "seed": 1797304468,
+      "version": 210,
+      "versionNonce": 852965075,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571707072,
+      "created": 1792443234326,
+      "link": null,
+      "locked": false,
+      "text": "TimSort can recognize the whole array as an ascending run and\nleave it unchanged. It has no reason to compare C against A during\nthis scan.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "TimSort can recognize the whole array as an ascending run and leave it unchanged. It has no reason to compare C against A during this scan.",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "7g7_G6X4vuSrCjYT8OXqc",
+      "type": "arrow",
+      "x": 341.9916018838546,
+      "y": 320.90432213838733,
+      "width": 21.65819465352797,
+      "height": 0.13772144489394123,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aX",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 555248788,
+      "version": 403,
+      "versionNonce": 663933651,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443705595,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -21.65819465352797,
+          0.13772144489394123
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "XPr_DMZ875l8WgNMvKfxz",
+      "type": "arrow",
+      "x": 115.3062515258789,
+      "y": -29.5,
+      "width": 0.5,
+      "height": 34,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aY",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 167182451,
+      "version": 112,
+      "versionNonce": 125448285,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792571898824,
+      "created": 1792571516813,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0.5,
+          34
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "_rUmBpUsO-gArgBG4RLNs",
+      "type": "text",
+      "x": 18.822921752929688,
+      "y": 28,
+      "width": 193.46665954589844,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aZ",
+      "roundness": null,
+      "seed": 1134664285,
+      "version": 103,
+      "versionNonce": 1827544253,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792571898824,
+      "created": 1792571521935,
+      "link": null,
+      "locked": false,
+      "text": "Fetches configuration",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Fetches configuration",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "-QeAte5IrEW6fai5QjWQ3",
+      "type": "rectangle",
+      "x": -156.4437484741211,
+      "y": 89,
+      "width": 544,
+      "height": 108.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aa",
+      "roundness": null,
+      "seed": 709795635,
+      "version": 121,
+      "versionNonce": 1776647453,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792571898824,
+      "created": 1792571532277,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "KznHgyoKadSt_maH3yYoK",
+      "type": "text",
+      "x": -56.977088928222656,
+      "y": 100.5,
+      "width": 345.0666809082031,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ab",
+      "roundness": null,
+      "seed": 1875452157,
+      "version": 139,
+      "versionNonce": 634507645,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792571898824,
+      "created": 1792571537415,
+      "link": null,
+      "locked": false,
+      "text": "Spring Cloud Config Server",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Spring Cloud Config Server",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "f_64nb1ayoaEozoWbEfon",
+      "type": "embeddable",
+      "x": 134.5,
+      "y": 455,
+      "width": 50,
+      "height": 37.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ac",
+      "roundness": null,
+      "seed": 266444061,
+      "version": 13,
+      "versionNonce": 1812560285,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571779852,
+      "created": 1792571771038,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "E2vAb45SVBGK_MO88a9w3",
+      "type": "arrow",
+      "x": 678,
+      "y": -2.5,
+      "width": 308.883371169126,
+      "height": 371.25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ad",
+      "roundness": null,
+      "seed": 1087599987,
+      "version": 5,
+      "versionNonce": 721217821,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571792587,
+      "created": 1792571790671,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -308.883371169126,
+          371.25
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": {
+        "elementId": "4ntyCTMsqj_K6KGBPI4ck",
+        "mode": "orbit",
+        "fixedPoint": [
+          0.43024013606646583,
+          1.277777777777778
+        ]
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "GtBy56UKp0znivQDFD6AV",
+      "type": "text",
+      "x": -37.743751525878906,
+      "y": 149.5,
+      "width": 306.6000061035156,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ae",
+      "roundness": null,
+      "seed": 645623485,
+      "version": 105,
+      "versionNonce": 1576311261,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792571898824,
+      "created": 1792571852473,
+      "link": null,
+      "locked": false,
+      "text": "Reads, resolves and exposes configuration",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Reads, resolves and exposes configuration",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    }
+  ],
+  "appState": {
+    "gridSize": 20,
+    "gridStep": 5,
+    "gridModeEnabled": false,
+    "viewBackgroundColor": "#ffffff",
+    "lockedMultiSelections": {}
+  },
+  "files": {}
+}
+```
+
+### 3.1 Repository options
+
+the config server supports the
+storing of configuration files in a number of different backends. Here are some examples:
+• Git repository
+• Local filesystem
+• HashiCorp Vault
+• JDBC database
+
+Option A — Git repository
+
+Recommended default
+
+Best for ordinary application configuration, version history, pull-request reviews, rollback, and environment-specific files.
+
+Trade-off: configuration updates depend on Git access and the server's local repository cache. Secrets need additional protection.
+
+Option B — Local filesystem
+
+Useful for a learning lab, local development, or a small controlled deployment.
+
+Trade-off: files are harder to audit and distribute consistently. A local path on one Config Server is not automatically shared with other instances.
+
+Option C — Database-backed repository
+
+Useful when configuration must be managed through database workflows, application-specific access controls, or existing operational tooling.
+
+Trade-off: you need to design database schema, change history, access control, and configuration publishing yourself or through supporting tools.
+
+
+Option D — Dedicated secrets/configuration platform
+
+Systems such as HashiCorp Vault are particularly useful for credentials, tokens, certificates, dynamic secrets, and strict access policies.
+
+Trade-off: additional infrastructure, integration, operational complexity, and availability dependencies.
+
+Spring Cloud Config supports Git as its default repository implementation and provides integrations for alternative backends, including filesystem and Vault-related approaches.&#x20;
+
+| Repository type         | How it works                                                                                                | Best suited for                                               |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Git                     | Configuration is stored in a Git repository with commits and branches.                                      | Most production microservice systems                          |
+| Local filesystem        | Configuration files are read from a directory on the Config Server host.                                    | Development, testing and simple deployments                   |
+| Database                | Configuration is retrieved from database records through a custom or alternative repository implementation. | Systems that require database-backed configuration management |
+| Vault or secret manager | Sensitive values are stored and retrieved through a dedicated secrets-management system.                    | Credentials, tokens and encryption keys                       |
+
+Git is a common default choice because it provides version history, change review, branching and rollback.
+
+For example, your repository could look like this:
+
+```
+config-repo/
+├── application.yml
+├── gateway.yml
+├── product-service.yml
+├── order-service.yml
+└── product-service-prod.yml
+```
+
+The shared `application.yml` contains defaults for all applications. A service-specific file overrides or extends those defaults, while a profile-specific file supplies environment-specific settings.
+
+For example:
+
+```
+### application.yml
+logging:
+  level:
+    root: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+```
+
+```
+### product-service-prod.yml
+server:
+  port: 8081
+
+logging:
+  level:
+    root: WARN
+```
+
+The Config Server combines the applicable configuration sources according to Spring Cloud Config's precedence rules.
+
+One important distinction: a Git repository is not automatically a secure secrets store. Private repositories can still expose secrets to anyone with repository access, and committed secrets can remain in Git history after deletion.
+
+
+### 3.2 Compare the decisions
+
+| Criterion                | Git                          | Local filesystem                                 | Database                  | Secrets platform                 |
+| ------------------------ | ---------------------------- | ------------------------------------------------ | ------------------------- | -------------------------------- |
+| Version history          | Excellent                    | Limited unless added separately                  | Must be designed          | Often strong for secret versions |
+| Pull-request review      | Native                       | No                                               | No, by default            | Platform-dependent               |
+| Rollback                 | Git commit/tag               | Manual                                           | Custom process            | Version-dependent                |
+| Team collaboration       | Excellent                    | Limited                                          | Good with tooling         | Good with tooling                |
+| Secret lifecycle         | Requires additional controls | Requires additional controls                     | Requires careful controls | Primary strength                 |
+| Multi-instance operation | Shared remote repository     | Requires shared storage or separate local copies | Shared database           | Platform-dependent               |
+| Best fit                 | Application configuration    | Local labs                                       | Specialized workflows     | Sensitive and dynamic values     |
+
+### 3.3 My recommendation for your microservices architecture
+
+For your Spring Boot services, I would start with this division:
+
+- Git: application properties, timeouts, feature flags, service-specific settings, and non-secret environment configuration.
+- Deployment environment: Config Server URL, active deployment profile, and other minimum settings needed before remote configuration is available.
+- Secret manager or orchestrator secret mechanism: database passwords, RabbitMQ credentials, OAuth client secrets, private keys, and similar sensitive values.
+- Spring Cloud Config Server: the HTTP interface through which application services obtain configuration.
+
+You do not need a separate repository per microservice just because the services are independently deployed. A single configuration repository is usually simpler initially.
+
+Split repositories when there is a concrete reason, such as separate team ownership, access-control boundaries, release policies, or independent configuration lifecycles.
+
+### 3.4 Configuration repository structure
+
+For example, a single Git repository could contain:
+
+```
+config-repo/
+├── application.yml
+├── application-docker.yml
+├── gateway.yml
+├── gateway-docker.yml
+├── product-service.yml
+├── product-service-docker.yml
+├── review-service.yml
+├── review-service-docker.yml
+├── recommendation-service.yml
+└── product-composite-service.yml
+```
+
+The names matter:
+
+- `application.yml` contains common defaults.
+- `application-docker.yml` contains settings shared by applications using the `docker` profile.
+- `gateway.yml` contains gateway-specific settings.
+- `gateway-docker.yml` contains gateway-specific Docker overrides.
+
+For example:
+
+```
+# application.yml
+logging:
+  level:
+    root: INFO
+
+app:
+  connect-timeout: 2s
+  read-timeout: 5s
+```
+
+```
+# product-service.yml
+server:
+  port: 8081
+
+app:
+  service-name: product-service
+```
+
+```
+# product-service-docker.yml
+spring:
+  data:
+    mongodb:
+      uri: mongodb://mongo:27017/products
+```
+
+This separates common policy from service-specific configuration and deployment-specific overrides.
+
+Important: Spring Cloud Config's default Git repository searches for application and profile files in its configured search paths. You should not assume arbitrary directory names automatically map to services. If you use directories, configure `search-paths` accordingly.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
+
+
+## 4. Design decision: how configuration is resolved
+
+The Config Server receives three important identifiers:
+
+- Application: which service is requesting configuration.
+- Profile: which environment or configuration variant is active.
+- Label: which Git branch, tag, or commit should be used.
+
+The conventional HTTP API is:
+
+```
+/{application}/{profile}[/{label}]
+```
+
+For example:
+
+```
+GET http://config-server:8888/product-service/docker/main
+```
+
+This requests configuration for `product-service`, with the `docker` profile, from the Git label `main`.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
+
+
+### 4.1 How the files combine
+
+Suppose the repository contains:
+
+```
+# application.yml
+app:
+  connect-timeout: 2s
+  read-timeout: 5s
+```
+
+```
+# application-docker.yml
+app:
+  read-timeout: 10s
+```
+
+```
+# product-service.yml
+app:
+  service-name: product-service
+```
+
+```
+# product-service-docker.yml
+app:
+  read-timeout: 15s
+```
+
+For a request using application `product-service` and profile `docker`, the effective configuration includes:
+
+```
+app:
+  connect-timeout: 2s
+  read-timeout: 15s
+  service-name: product-service
+```
+
+The more specific service-and-profile setting overrides the less specific default for the same property.
+
+The Config Server exposes a resolved environment with property sources and precedence information. This is not simply concatenating four YAML files as text; property-source precedence and profile processing determine the effective values.
+
+### 4.2 What about `application.yml` inside the microservice?
+
+Your local Spring Boot `application.yml` does not disappear.
+
+You still need local or deployment-provided configuration for matters such as:
+
+- Locating the Config Server.
+- Choosing the active profile.
+- Establishing the application name.
+- Providing safe startup defaults where appropriate.
+
+Remote configuration then contributes additional property sources to the Spring `Environment`.
+
+Remember that high-precedence sources such as command-line arguments, environment variables, and deployment-provided overrides can take precedence over remote values. Therefore, changing Git does not necessarily mean the application's effective value will change if another property source overrides it.
+
+## 5. Design decision: how clients locate the Config Server
+
+This decision connects directly to your previous work on Eureka and service discovery.
+
+There are two common patterns.
+
+### Option A — Config-first discovery
+
+The client knows the Config Server's URL and connects directly to it during startup.
+
+```excalidraw
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "id": "UCnGBC7fOM1vFGNMVI17w",
+      "type": "text",
+      "x": 5.803127288818359,
+      "y": -105.5,
+      "width": 185,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a1",
+      "roundness": null,
+      "seed": 994620716,
+      "version": 413,
+      "versionNonce": 1133499165,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792572053996,
+      "created": 1792434200272,
+      "link": null,
+      "locked": false,
+      "text": "Config Server",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Config Server",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "EG-CPGYs2LQkCEE_Hw2CI",
+      "type": "text",
+      "x": 29.153125762939453,
+      "y": -61.5,
+      "width": 138.3000030517578,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a2",
+      "roundness": null,
+      "seed": 155007916,
+      "version": 298,
+      "versionNonce": 1136748413,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792572053996,
+      "created": 1792442717724,
+      "link": null,
+      "locked": false,
+      "text": "config-server:8888",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "config-server:8888",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "hlUWXjTA3t59QbFB-tj6R",
+      "type": "text",
+      "x": 41.266666412353516,
+      "y": 113,
+      "width": 101.46666717529297,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a3",
+      "roundness": null,
+      "seed": 2076935956,
+      "version": 98,
+      "versionNonce": 1434391603,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442765358,
+      "link": null,
+      "locked": false,
+      "text": "Initial array",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Initial array",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "e9miYzobg_Q_irPLTetw8",
+      "type": "rectangle",
+      "x": 37.30000305175781,
+      "y": 171.809375,
+      "width": 189.5,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a4",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 907436564,
+      "version": 201,
+      "versionNonce": 349289597,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "D6I0PwLVPXT4eZ5BvbLv3"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442784709,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "D6I0PwLVPXT4eZ5BvbLv3",
+      "type": "text",
+      "x": 124.71666955947876,
+      "y": 183.44062499999998,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a4V",
+      "roundness": null,
+      "seed": 1757900948,
+      "version": 159,
+      "versionNonce": 664016339,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442801934,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "e9miYzobg_Q_irPLTetw8",
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "SsDeokVES5FGRPe_cJpll",
+      "type": "rectangle",
+      "x": 242.95781326293948,
+      "y": 172.7375,
+      "width": 192.99999999999994,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a5",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 278899116,
+      "version": 277,
+      "versionNonce": 1539253469,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "CLMMphBKNBXJwomUelNiT"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442790111,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "CLMMphBKNBXJwomUelNiT",
+      "type": "text",
+      "x": 332.67447996139526,
+      "y": 184.36875,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a5V",
+      "roundness": null,
+      "seed": 1323757972,
+      "version": 174,
+      "versionNonce": 517464947,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442804237,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "SsDeokVES5FGRPe_cJpll",
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "6lY3AZHm2E2bXQtkIkraJ",
+      "type": "rectangle",
+      "x": 450.3125,
+      "y": 171.5,
+      "width": 184.49999999999997,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 401073324,
+      "version": 243,
+      "versionNonce": 1168146749,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "6epJMRN8JUOkTb0sYIDJ-"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442794856,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "6epJMRN8JUOkTb0sYIDJ-",
+      "type": "text",
+      "x": 535.8125,
+      "y": 183.13125,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6V",
+      "roundness": null,
+      "seed": 1758219948,
+      "version": 161,
+      "versionNonce": 1133575443,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443204321,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "6lY3AZHm2E2bXQtkIkraJ",
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "UIGe73Iq5OLWOv4-X9o7x",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 270.5,
+      "width": 354.73333740234375,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a8",
+      "roundness": null,
+      "seed": 121108884,
+      "version": 118,
+      "versionNonce": 936858013,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442972985,
+      "link": null,
+      "locked": false,
+      "text": "Step 1: Compare the first two elements",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 1: Compare the first two elements",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "A1gX1fFjWKDRQ8pwfvSoq",
+      "type": "text",
+      "x": 180.66666650772095,
+      "y": 317.5,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a9",
+      "roundness": null,
+      "seed": 1740808724,
+      "version": 102,
+      "versionNonce": 1362485939,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442985056,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "ohDyGbzyv_lWlKr7TakbN",
+      "type": "text",
+      "x": 465.7166666984558,
+      "y": 317.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aA",
+      "roundness": null,
+      "seed": 1070164628,
+      "version": 156,
+      "versionNonce": 1872041469,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442989501,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "-FQ63PgydbBW6xRdTnSap",
+      "type": "arrow",
+      "x": 321.84072494477346,
+      "y": 337,
+      "width": 20.736456238139024,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aC",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1257068436,
+      "version": 164,
+      "versionNonce": 1349325907,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443017496,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20.736456238139024,
+          -1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "moveMidPointsWithElement": true
+    },
+    {
+      "id": "ioGFWcAp2pFNrYxepqKq7",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 402,
+      "width": 269.73333740234375,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aD",
+      "roundness": null,
+      "seed": 1724302356,
+      "version": 147,
+      "versionNonce": 131812957,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443035700,
+      "link": null,
+      "locked": false,
+      "text": "Step 2: Compare the next pair",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 2: Compare the next pair",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "sguHkWnZ2Xaiif9IWC6AB",
+      "type": "text",
+      "x": 183.19166660308838,
+      "y": 450.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aE",
+      "roundness": null,
+      "seed": 1357943444,
+      "version": 175,
+      "versionNonce": 1896681971,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "0vZdNcYDVUTAiIFdJEpmv",
+      "type": "text",
+      "x": 468.24166679382324,
+      "y": 450.5,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aF",
+      "roundness": null,
+      "seed": 334045204,
+      "version": 229,
+      "versionNonce": 1065056957,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "ruKnUpyd8gXi4cLtk98jN",
+      "type": "arrow",
+      "x": 340.5715246191928,
+      "y": 452,
+      "width": 16.589164990511218,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aG",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 807525012,
+      "version": 266,
+      "versionNonce": 605838227,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -16.589164990511218,
+          1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "LDjhc0M5hmo7t-ogyed7Q",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 355,
+      "width": 524.9000244140625,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aH",
+      "roundness": null,
+      "seed": 577825172,
+      "version": 141,
+      "versionNonce": 2132220701,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "id": "7g7_G6X4vuSrCjYT8OXqc",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1792571507394,
+      "created": 1792443062023,
+      "link": null,
+      "locked": false,
+      "text": "A.compareTo(B) is negative, so the run is ascending so far.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "A.compareTo(B) is negative, so the run is ascending so far.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "Ill1X3fA_tLk27_3ZywaR",
+      "type": "arrow",
+      "x": 321.74894243386814,
+      "y": 475.68085239399215,
+      "width": 20.736456238139024,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aI",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 229730324,
+      "version": 245,
+      "versionNonce": 1976660275,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443089151,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20.736456238139024,
+          -1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "LzNgkZwSuilRs6lCKwDnH",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 492,
+      "width": 539.7666625976562,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aJ",
+      "roundness": null,
+      "seed": 907889044,
+      "version": 137,
+      "versionNonce": 522170237,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443148006,
+      "link": null,
+      "locked": false,
+      "text": "B.compareTo(C) is negative, so the ascending run continues.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B.compareTo(C) is negative, so the ascending run continues.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "cIPbgyJfFZxsQBSQ9rf-4",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 537,
+      "width": 201.06666564941406,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aK",
+      "roundness": null,
+      "seed": 220271252,
+      "version": 108,
+      "versionNonce": 34540413,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571707072,
+      "created": 1792443154966,
+      "link": null,
+      "locked": false,
+      "text": "Step 3: Accept the run",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 3: Accept the run",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "IirBEJIdXoGSSfRdmmDfC",
+      "type": "rectangle",
+      "x": -172.1999969482422,
+      "y": 93.75,
+      "width": 256.5,
+      "height": 53.999999999999986,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [
+        "9dGHeAQ9I0lLHhLVbecxW"
+      ],
+      "frameId": null,
+      "index": "aKG",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 1873986324,
+      "version": 499,
+      "versionNonce": 92368861,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "sw_uSR4UAr1bstWjIAp2g"
+        }
+      ],
+      "updated": 1792572053996,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "sw_uSR4UAr1bstWjIAp2g",
+      "type": "text",
+      "x": -114.6833267211914,
+      "y": 108.25,
+      "width": 141.46665954589844,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [
+        "9dGHeAQ9I0lLHhLVbecxW"
+      ],
+      "frameId": null,
+      "index": "aKV",
+      "roundness": null,
+      "seed": 1374351788,
+      "version": 455,
+      "versionNonce": 920742973,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792572053996,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Product Service",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "IirBEJIdXoGSSfRdmmDfC",
+      "originalText": "Product Service",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "4ntyCTMsqj_K6KGBPI4ck",
+      "type": "rectangle",
+      "x": 102.3062515258789,
+      "y": 91.75,
+      "width": 266.49999999999994,
+      "height": 58.000000000000014,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [
+        "9dGHeAQ9I0lLHhLVbecxW"
+      ],
+      "frameId": null,
+      "index": "aL",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 140163092,
+      "version": 619,
+      "versionNonce": 1203952797,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "wcPFKxxquAgD9sd88_Fh5"
+        }
+      ],
+      "updated": 1792572053996,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "wcPFKxxquAgD9sd88_Fh5",
+      "type": "text",
+      "x": 173.88958358764648,
+      "y": 108.25,
+      "width": 123.33333587646484,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [
+        "9dGHeAQ9I0lLHhLVbecxW"
+      ],
+      "frameId": null,
+      "index": "aLG",
+      "roundness": null,
+      "seed": 84113068,
+      "version": 513,
+      "versionNonce": 802636029,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792572053996,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Order Service",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "4ntyCTMsqj_K6KGBPI4ck",
+      "originalText": "Order Service",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "paRuBDzSCq-5csYRSAjRp",
+      "type": "rectangle",
+      "x": 234.3125,
+      "y": 96,
+      "width": 178.49999999999994,
+      "height": 70.49999999999997,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aLV",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 772533524,
+      "version": 419,
+      "versionNonce": 1441600179,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "qSJj_B1xVqESBJelxbuah"
+        }
+      ],
+      "updated": 1792571991362,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "qSJj_B1xVqESBJelxbuah",
+      "type": "text",
+      "x": 283.36249923706055,
+      "y": 118.75,
+      "width": 80.4000015258789,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aM",
+      "roundness": null,
+      "seed": 1434368940,
+      "version": 334,
+      "versionNonce": 422110717,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571991362,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Gateway",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "paRuBDzSCq-5csYRSAjRp",
+      "originalText": "Gateway",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "tOe5o53lr8-1wBnt9evlF",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 671.5,
+      "width": 617.7000122070314,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aW",
+      "roundness": null,
+      "seed": 1797304468,
+      "version": 210,
+      "versionNonce": 852965075,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571707072,
+      "created": 1792443234326,
+      "link": null,
+      "locked": false,
+      "text": "TimSort can recognize the whole array as an ascending run and\nleave it unchanged. It has no reason to compare C against A during\nthis scan.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "TimSort can recognize the whole array as an ascending run and leave it unchanged. It has no reason to compare C against A during this scan.",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "7g7_G6X4vuSrCjYT8OXqc",
+      "type": "arrow",
+      "x": 341.9916018838546,
+      "y": 320.90432213838733,
+      "width": 21.65819465352797,
+      "height": 0.13772144489394123,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aX",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 555248788,
+      "version": 403,
+      "versionNonce": 663933651,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443705595,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -21.65819465352797,
+          0.13772144489394123
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "XPr_DMZ875l8WgNMvKfxz",
+      "type": "arrow",
+      "x": 98.05312728881836,
+      "y": -18,
+      "width": 0.5,
+      "height": 34,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aY",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 167182451,
+      "version": 196,
+      "versionNonce": 1956649309,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792572053996,
+      "created": 1792571516813,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0.5,
+          34
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "_rUmBpUsO-gArgBG4RLNs",
+      "type": "text",
+      "x": -26.713542938232422,
+      "y": 40.5,
+      "width": 250.03334045410156,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aZ",
+      "roundness": null,
+      "seed": 1134664285,
+      "version": 190,
+      "versionNonce": 1869538749,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792572053996,
+      "created": 1792571521935,
+      "link": null,
+      "locked": false,
+      "text": "HTTP configuration request",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "HTTP configuration request",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "-QeAte5IrEW6fai5QjWQ3",
+      "type": "rectangle",
+      "x": -156.4437484741211,
+      "y": 89,
+      "width": 544,
+      "height": 108.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aa",
+      "roundness": null,
+      "seed": 709795635,
+      "version": 122,
+      "versionNonce": 1054904157,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571980663,
+      "created": 1792571532277,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "KznHgyoKadSt_maH3yYoK",
+      "type": "text",
+      "x": -56.977088928222656,
+      "y": 100.5,
+      "width": 345.0666809082031,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ab",
+      "roundness": null,
+      "seed": 1875452157,
+      "version": 140,
+      "versionNonce": 146301171,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571980663,
+      "created": 1792571537415,
+      "link": null,
+      "locked": false,
+      "text": "Spring Cloud Config Server",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Spring Cloud Config Server",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "f_64nb1ayoaEozoWbEfon",
+      "type": "embeddable",
+      "x": 134.5,
+      "y": 455,
+      "width": 50,
+      "height": 37.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ac",
+      "roundness": null,
+      "seed": 266444061,
+      "version": 13,
+      "versionNonce": 1812560285,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571779852,
+      "created": 1792571771038,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "E2vAb45SVBGK_MO88a9w3",
+      "type": "arrow",
+      "x": 678,
+      "y": -2.5,
+      "width": 308.883371169126,
+      "height": 371.25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ad",
+      "roundness": null,
+      "seed": 1087599987,
+      "version": 5,
+      "versionNonce": 721217821,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571792587,
+      "created": 1792571790671,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -308.883371169126,
+          371.25
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": {
+        "elementId": "4ntyCTMsqj_K6KGBPI4ck",
+        "mode": "orbit",
+        "fixedPoint": [
+          0.43024013606646583,
+          1.277777777777778
+        ]
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "GtBy56UKp0znivQDFD6AV",
+      "type": "text",
+      "x": -37.743751525878906,
+      "y": 149.5,
+      "width": 306.6000061035156,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ae",
+      "roundness": null,
+      "seed": 645623485,
+      "version": 106,
+      "versionNonce": 1177590717,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571980663,
+      "created": 1792571852473,
+      "link": null,
+      "locked": false,
+      "text": "Reads, resolves and exposes configuration",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Reads, resolves and exposes configuration",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    }
+  ],
+  "appState": {
+    "gridSize": 20,
+    "gridStep": 5,
+    "gridModeEnabled": false,
+    "viewBackgroundColor": "#ffffff",
+    "lockedMultiSelections": {}
+  },
+  "files": {}
+}
+```
+
+For example, a client can use `spring.config.import` in its `application.yml`:
+
+Example bootstrap configuration:
+
+```
+spring:
+  application:
+    name: product-service
+
+  config:
+    import: "configserver:http://config-server:8888"
+```
+Here:
+
+- `spring.application.name` identifies the application's configuration.
+- `spring.config.import` tells Spring Boot to import external configuration from the Config Server.
+- `configserver:` identifies the Spring Cloud Config import protocol.
+
+The client requests configuration using its application name and active profile. Conceptually, the request looks like this:
+
+```
+GET /product-service/default
+```
+
+The actual request path can vary with the profile and configuration settings.
+
+This uses the Config Data mechanism available in modern Spring Boot and Spring Cloud Config versions.
+
+Advantages:
+
+- Simple and easy to understand.
+- Does not require Eureka to locate the Config Server.
+- fewer infrastructure dependencies and easy local development.
+- Avoids making configuration startup dependent on service discovery.
+
+Disadvantage:
+
+\- The Config Server address must be provided through local configuration or the deployment environment. clients need to know the Config Server's address, and you must manage its address when the deployment changes.
+
+### Option B — Discovery-first configuration
+
+In this architecture, the Config Server registers itself with a discovery service such as Netflix Eureka. Clients discover its location through the registry instead of relying on a fixed address.
+
+```excalidraw
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "id": "UCnGBC7fOM1vFGNMVI17w",
+      "type": "text",
+      "x": -74.69687271118164,
+      "y": -121,
+      "width": 325.99999999999994,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a1",
+      "roundness": null,
+      "seed": 994620716,
+      "version": 617,
+      "versionNonce": 9080403,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792572223522,
+      "created": 1792434200272,
+      "link": null,
+      "locked": false,
+      "text": "Eureka Discovery Server",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Eureka Discovery Server",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "EG-CPGYs2LQkCEE_Hw2CI",
+      "type": "text",
+      "x": 14.153125762939453,
+      "y": -77,
+      "width": 112.30000305175781,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a2",
+      "roundness": null,
+      "seed": 155007916,
+      "version": 390,
+      "versionNonce": 1936411635,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792572223522,
+      "created": 1792442717724,
+      "link": null,
+      "locked": false,
+      "text": "Service registry",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Service registry",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "hlUWXjTA3t59QbFB-tj6R",
+      "type": "text",
+      "x": 41.266666412353516,
+      "y": 113,
+      "width": 101.46666717529297,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a3",
+      "roundness": null,
+      "seed": 2076935956,
+      "version": 98,
+      "versionNonce": 1434391603,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442765358,
+      "link": null,
+      "locked": false,
+      "text": "Initial array",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Initial array",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "e9miYzobg_Q_irPLTetw8",
+      "type": "rectangle",
+      "x": 37.30000305175781,
+      "y": 171.809375,
+      "width": 189.5,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a4",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 907436564,
+      "version": 201,
+      "versionNonce": 349289597,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "D6I0PwLVPXT4eZ5BvbLv3"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442784709,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "D6I0PwLVPXT4eZ5BvbLv3",
+      "type": "text",
+      "x": 124.71666955947876,
+      "y": 183.44062499999998,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a4V",
+      "roundness": null,
+      "seed": 1757900948,
+      "version": 159,
+      "versionNonce": 664016339,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442801934,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "e9miYzobg_Q_irPLTetw8",
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "SsDeokVES5FGRPe_cJpll",
+      "type": "rectangle",
+      "x": 242.95781326293948,
+      "y": 172.7375,
+      "width": 192.99999999999994,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a5",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 278899116,
+      "version": 277,
+      "versionNonce": 1539253469,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "CLMMphBKNBXJwomUelNiT"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442790111,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "CLMMphBKNBXJwomUelNiT",
+      "type": "text",
+      "x": 332.67447996139526,
+      "y": 184.36875,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a5V",
+      "roundness": null,
+      "seed": 1323757972,
+      "version": 174,
+      "versionNonce": 517464947,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442804237,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "SsDeokVES5FGRPe_cJpll",
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "6lY3AZHm2E2bXQtkIkraJ",
+      "type": "rectangle",
+      "x": 450.3125,
+      "y": 171.5,
+      "width": 184.49999999999997,
+      "height": 48.2625,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 401073324,
+      "version": 243,
+      "versionNonce": 1168146749,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "6epJMRN8JUOkTb0sYIDJ-"
+        }
+      ],
+      "updated": 1792571507393,
+      "created": 1792442794856,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "6epJMRN8JUOkTb0sYIDJ-",
+      "type": "text",
+      "x": 535.8125,
+      "y": 183.13125,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a6V",
+      "roundness": null,
+      "seed": 1758219948,
+      "version": 161,
+      "versionNonce": 1133575443,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443204321,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "6lY3AZHm2E2bXQtkIkraJ",
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "UIGe73Iq5OLWOv4-X9o7x",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 270.5,
+      "width": 354.73333740234375,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a8",
+      "roundness": null,
+      "seed": 121108884,
+      "version": 118,
+      "versionNonce": 936858013,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442972985,
+      "link": null,
+      "locked": false,
+      "text": "Step 1: Compare the first two elements",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 1: Compare the first two elements",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "A1gX1fFjWKDRQ8pwfvSoq",
+      "type": "text",
+      "x": 180.66666650772095,
+      "y": 317.5,
+      "width": 14.666666984558105,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "a9",
+      "roundness": null,
+      "seed": 1740808724,
+      "version": 102,
+      "versionNonce": 1362485939,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442985056,
+      "link": null,
+      "locked": false,
+      "text": "A",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "A",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "ohDyGbzyv_lWlKr7TakbN",
+      "type": "text",
+      "x": 465.7166666984558,
+      "y": 317.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aA",
+      "roundness": null,
+      "seed": 1070164628,
+      "version": 156,
+      "versionNonce": 1872041469,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792442989501,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "-FQ63PgydbBW6xRdTnSap",
+      "type": "arrow",
+      "x": 321.84072494477346,
+      "y": 337,
+      "width": 20.736456238139024,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aC",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1257068436,
+      "version": 164,
+      "versionNonce": 1349325907,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443017496,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20.736456238139024,
+          -1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "moveMidPointsWithElement": true
+    },
+    {
+      "id": "ioGFWcAp2pFNrYxepqKq7",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 402,
+      "width": 269.73333740234375,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aD",
+      "roundness": null,
+      "seed": 1724302356,
+      "version": 147,
+      "versionNonce": 131812957,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443035700,
+      "link": null,
+      "locked": false,
+      "text": "Step 2: Compare the next pair",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 2: Compare the next pair",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "sguHkWnZ2Xaiif9IWC6AB",
+      "type": "text",
+      "x": 183.19166660308838,
+      "y": 450.5,
+      "width": 13.566666603088379,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aE",
+      "roundness": null,
+      "seed": 1357943444,
+      "version": 175,
+      "versionNonce": 1896681971,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "text": "B",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "0vZdNcYDVUTAiIFdJEpmv",
+      "type": "text",
+      "x": 468.24166679382324,
+      "y": 450.5,
+      "width": 13.5,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aF",
+      "roundness": null,
+      "seed": 334045204,
+      "version": 229,
+      "versionNonce": 1065056957,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "text": "C",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "C",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "ruKnUpyd8gXi4cLtk98jN",
+      "type": "arrow",
+      "x": 340.5715246191928,
+      "y": 452,
+      "width": 16.589164990511218,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aG",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 807525012,
+      "version": 266,
+      "versionNonce": 605838227,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507393,
+      "created": 1792443048296,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -16.589164990511218,
+          1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "LDjhc0M5hmo7t-ogyed7Q",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 355,
+      "width": 524.9000244140625,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aH",
+      "roundness": null,
+      "seed": 577825172,
+      "version": 141,
+      "versionNonce": 2132220701,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "id": "7g7_G6X4vuSrCjYT8OXqc",
+          "type": "arrow"
+        }
+      ],
+      "updated": 1792571507394,
+      "created": 1792443062023,
+      "link": null,
+      "locked": false,
+      "text": "A.compareTo(B) is negative, so the run is ascending so far.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "A.compareTo(B) is negative, so the run is ascending so far.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "Ill1X3fA_tLk27_3ZywaR",
+      "type": "arrow",
+      "x": 321.74894243386814,
+      "y": 475.68085239399215,
+      "width": 20.736456238139024,
+      "height": 1,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aI",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 229730324,
+      "version": 245,
+      "versionNonce": 1976660275,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443089151,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20.736456238139024,
+          -1
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "LzNgkZwSuilRs6lCKwDnH",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 492,
+      "width": 539.7666625976562,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#2f9e44",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aJ",
+      "roundness": null,
+      "seed": 907889044,
+      "version": 137,
+      "versionNonce": 522170237,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443148006,
+      "link": null,
+      "locked": false,
+      "text": "B.compareTo(C) is negative, so the ascending run continues.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "B.compareTo(C) is negative, so the ascending run continues.",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "cIPbgyJfFZxsQBSQ9rf-4",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 537,
+      "width": 201.06666564941406,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aK",
+      "roundness": null,
+      "seed": 220271252,
+      "version": 108,
+      "versionNonce": 34540413,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571707072,
+      "created": 1792443154966,
+      "link": null,
+      "locked": false,
+      "text": "Step 3: Accept the run",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Step 3: Accept the run",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "IirBEJIdXoGSSfRdmmDfC",
+      "type": "rectangle",
+      "x": -183.1999969482422,
+      "y": 35.75,
+      "width": 256.5,
+      "height": 85,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aKG",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 1873986324,
+      "version": 636,
+      "versionNonce": 1923306899,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "sw_uSR4UAr1bstWjIAp2g"
+        }
+      ],
+      "updated": 1792572223522,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "sw_uSR4UAr1bstWjIAp2g",
+      "type": "text",
+      "x": -122.31666564941406,
+      "y": 40.75,
+      "width": 134.73333740234375,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aKV",
+      "roundness": null,
+      "seed": 1374351788,
+      "version": 591,
+      "versionNonce": 224996147,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792572223522,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Config Server\n\nRegisters itself",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "IirBEJIdXoGSSfRdmmDfC",
+      "originalText": "Config Server\n\nRegisters itself",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "4ntyCTMsqj_K6KGBPI4ck",
+      "type": "rectangle",
+      "x": 91.3062515258789,
+      "y": 35.75,
+      "width": 266.49999999999994,
+      "height": 85,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aL",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 140163092,
+      "version": 749,
+      "versionNonce": 673402067,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "wcPFKxxquAgD9sd88_Fh5"
+        }
+      ],
+      "updated": 1792572223522,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "wcPFKxxquAgD9sd88_Fh5",
+      "type": "text",
+      "x": 119.87291717529297,
+      "y": 40.75,
+      "width": 209.36666870117188,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aLG",
+      "roundness": null,
+      "seed": 84113068,
+      "version": 644,
+      "versionNonce": 1449671283,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792572223522,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Config Client\n\nLooks up Config Server",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "4ntyCTMsqj_K6KGBPI4ck",
+      "originalText": "Config Client\n\nLooks up Config Server",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "paRuBDzSCq-5csYRSAjRp",
+      "type": "rectangle",
+      "x": 234.3125,
+      "y": 96,
+      "width": 178.49999999999994,
+      "height": 70.49999999999997,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aLV",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 772533524,
+      "version": 419,
+      "versionNonce": 1441600179,
+      "isDeleted": true,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "qSJj_B1xVqESBJelxbuah"
+        }
+      ],
+      "updated": 1792571991362,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "qSJj_B1xVqESBJelxbuah",
+      "type": "text",
+      "x": 283.36249923706055,
+      "y": 118.75,
+      "width": 80.4000015258789,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aM",
+      "roundness": null,
+      "seed": 1434368940,
+      "version": 334,
+      "versionNonce": 422110717,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571991362,
+      "created": 1792443219987,
+      "link": null,
+      "locked": false,
+      "text": "Gateway",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "paRuBDzSCq-5csYRSAjRp",
+      "originalText": "Gateway",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "tOe5o53lr8-1wBnt9evlF",
+      "type": "text",
+      "x": 37.30000305175781,
+      "y": 671.5,
+      "width": 617.7000122070314,
+      "height": 75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aW",
+      "roundness": null,
+      "seed": 1797304468,
+      "version": 210,
+      "versionNonce": 852965075,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571707072,
+      "created": 1792443234326,
+      "link": null,
+      "locked": false,
+      "text": "TimSort can recognize the whole array as an ascending run and\nleave it unchanged. It has no reason to compare C against A during\nthis scan.",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "TimSort can recognize the whole array as an ascending run and leave it unchanged. It has no reason to compare C against A during this scan.",
+      "autoResize": false,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "7g7_G6X4vuSrCjYT8OXqc",
+      "type": "arrow",
+      "x": 341.9916018838546,
+      "y": 320.90432213838733,
+      "width": 21.65819465352797,
+      "height": 0.13772144489394123,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aX",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 555248788,
+      "version": 403,
+      "versionNonce": 663933651,
+      "isDeleted": true,
+      "boundElements": [],
+      "updated": 1792571507394,
+      "created": 1792443705595,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -21.65819465352797,
+          0.13772144489394123
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "XPr_DMZ875l8WgNMvKfxz",
+      "type": "arrow",
+      "x": 342.05312728881836,
+      "y": 223.5,
+      "width": 0.5,
+      "height": 34,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aY",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 167182451,
+      "version": 236,
+      "versionNonce": 764856285,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792572133160,
+      "created": 1792571516813,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0.5,
+          34
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "_rUmBpUsO-gArgBG4RLNs",
+      "type": "text",
+      "x": -26.713542938232422,
+      "y": 40.5,
+      "width": 250.03334045410156,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aZ",
+      "roundness": null,
+      "seed": 1134664285,
+      "version": 191,
+      "versionNonce": 1055476061,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792572117689,
+      "created": 1792571521935,
+      "link": null,
+      "locked": false,
+      "text": "HTTP configuration request",
+      "fontSize": 20,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "HTTP configuration request",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "-QeAte5IrEW6fai5QjWQ3",
+      "type": "rectangle",
+      "x": -156.4437484741211,
+      "y": 89,
+      "width": 544,
+      "height": 108.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aa",
+      "roundness": null,
+      "seed": 709795635,
+      "version": 122,
+      "versionNonce": 1054904157,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571980663,
+      "created": 1792571532277,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "KznHgyoKadSt_maH3yYoK",
+      "type": "text",
+      "x": -56.977088928222656,
+      "y": 100.5,
+      "width": 345.0666809082031,
+      "height": 35,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ab",
+      "roundness": null,
+      "seed": 1875452157,
+      "version": 140,
+      "versionNonce": 146301171,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571980663,
+      "created": 1792571537415,
+      "link": null,
+      "locked": false,
+      "text": "Spring Cloud Config Server",
+      "fontSize": 28,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "center",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Spring Cloud Config Server",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "f_64nb1ayoaEozoWbEfon",
+      "type": "embeddable",
+      "x": 134.5,
+      "y": 455,
+      "width": 50,
+      "height": 37.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ac",
+      "roundness": null,
+      "seed": 266444061,
+      "version": 13,
+      "versionNonce": 1812560285,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571779852,
+      "created": 1792571771038,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "E2vAb45SVBGK_MO88a9w3",
+      "type": "arrow",
+      "x": 678,
+      "y": -2.5,
+      "width": 308.883371169126,
+      "height": 371.25,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ad",
+      "roundness": null,
+      "seed": 1087599987,
+      "version": 5,
+      "versionNonce": 721217821,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571792587,
+      "created": 1792571790671,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -308.883371169126,
+          371.25
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": {
+        "elementId": "4ntyCTMsqj_K6KGBPI4ck",
+        "mode": "orbit",
+        "fixedPoint": [
+          0.43024013606646583,
+          1.277777777777778
+        ]
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "GtBy56UKp0znivQDFD6AV",
+      "type": "text",
+      "x": -37.743751525878906,
+      "y": 149.5,
+      "width": 306.6000061035156,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ae",
+      "roundness": null,
+      "seed": 645623485,
+      "version": 106,
+      "versionNonce": 1177590717,
+      "isDeleted": true,
+      "boundElements": null,
+      "updated": 1792571980663,
+      "created": 1792571852473,
+      "link": null,
+      "locked": false,
+      "text": "Reads, resolves and exposes configuration",
+      "fontSize": 16,
+      "baseFontSize": null,
+      "fontFamily": 6,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "containerId": null,
+      "originalText": "Reads, resolves and exposes configuration",
+      "autoResize": true,
+      "lineHeight": 1.25,
+      "labelPosition": null
+    },
+    {
+      "id": "HoXoL6o0f3F3qj880KWc6",
+      "type": "arrow",
+      "x": -56.5,
+      "y": 25,
+      "width": 0,
+      "height": 33,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "af",
+      "roundness": null,
+      "seed": 1653326909,
+      "version": 205,
+      "versionNonce": 1962832915,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792572223522,
+      "created": 1792572136450,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          -33
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "fixedSegments": null
+    },
+    {
+      "id": "p-R98V-iQ6toO2nNUgXCr",
+      "type": "arrow",
+      "x": 214.56550962582378,
+      "y": 27.75,
+      "width": 0.06550962582377906,
+      "height": 38.75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 0,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ag",
+      "roundness": null,
+      "seed": 1857128125,
+      "version": 258,
+      "versionNonce": 64780723,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792572223522,
+      "created": 1792572174691,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          -0.06550962582377906,
+          -38.75
+        ]
+      ],
+      "startBinding": null,
+      "endBinding": null,
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false,
+      "fixedSegments": null
+    }
+  ],
+  "appState": {
+    "gridSize": 20,
+    "gridStep": 5,
+    "gridModeEnabled": false,
+    "viewBackgroundColor": "#ffffff",
+    "lockedMultiSelections": {}
+  },
+  "files": {}
+}
+```
+
+After discovery, the client retrieves configuration from the Config Server.
+
+A client configuration might look like this:
+
+```
+spring:
+  application:
+    name: product-service
+
+  cloud:
+    config:
+      discovery:
+        enabled: true
+        service-id: config-server
+
+  config:
+    import: "optional:configserver:"
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka-server:8761/eureka/
+```
+This setup requires the appropriate Eureka Discovery Client and Spring Cloud Config Client dependencies, plus the discovery service to be available early enough for startup.
+
+The Config Server must also register with Eureka under the service ID `config-server` (unless configured otherwise).
+
+The exact configuration and bootstrap behavior depend on your Spring Cloud release and the Config Data setup. Discovery-first also requires the appropriate discovery client and a working Eureka connection before remote configuration can be located.
+
+### Direct connection vs. discovery
+
+| Consideration             | Direct connection                          | Discovery-based                    |
+| ------------------------- | ------------------------------------------ | ---------------------------------- |
+| Initial setup             | Simpler                                    | More components                    |
+| Client knows server URL   | Yes                                        | Knows discovery server URL         |
+| Dynamic server location   | Requires URL or DNS management             | Registry resolves the location     |
+| Infrastructure dependency | Config Server                              | Discovery server and Config Server |
+| Typical use               | Small systems, fixed endpoints, containers | Larger microservice ecosystems     |
+
+Important startup consideration: discovery does not eliminate the bootstrap dependency. If a service needs configuration from the Config Server and must use Eureka to locate it, Eureka must be reachable first. Likewise, the Config Server's own settings must be available without creating an impossible startup cycle.
+
+For many modern Spring Boot applications, direct `spring.config.import` is a straightforward starting point. Use discovery-based lookup when it adds real value to your deployment architecture.
+### 5.1 Which should you choose?
+
+| Situation                                    | Recommendation                                  |
+| -------------------------------------------- | ----------------------------------------------- |
+| Docker Compose development                   | Config-first with the Compose service name      |
+| Kubernetes                                   | Usually a stable Config Server Service DNS name |
+| Eureka-based legacy architecture             | Discovery-first can be appropriate              |
+| Production platform with stable internal DNS | Config-first is often simpler                   |
+| Config Server address changes dynamically    | Discovery-first may be useful                   |
+
+My recommendation for your current Docker Compose microservices project: start with config-first.
+
+For example:
+
+```
+spring:
+  config:
+    import: "configserver:http://config-server:8888"
+```
+
+Here, `config-server` must be the actual Compose service name or otherwise resolvable hostname on the client's network.
+
+This avoids a bootstrap dependency on Eureka. It does not remove the need for Eureka for ordinary service discovery elsewhere in your application.
+
+Also, don't confuse these two kinds of discovery:
+
+- Configuration discovery: finding the Config Server before application configuration is loaded.
+- Application service discovery: finding product, review, or recommendation service instances for normal requests.
+
+They solve different problems.
+
+## 3. Design decision: Securing configuration
+
+Configuration security has two distinct concerns:
+
+- Access control: Who is allowed to retrieve configuration from the Config Server?
+- Secret protection: How do you prevent passwords, tokens and other secrets from being exposed?
+
+Both must be addressed.
+
+#### 3.1 Protect the Config Server API
+
+Without access control, someone who can reach the Config Server may be able to retrieve configuration containing internal endpoints, database connection details or other sensitive information.
+
+For example, a Config Server exposes application configuration through endpoints such as:
+
+```
+GET /product-service/default
+GET /order-service/prod
+```
+
+You can protect these endpoints with Spring Security and HTTP Basic authentication as a simple example.
+
+Add the Spring Security dependency to the Config Server, then configure a security filter chain:
+
+```
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    SecurityFilterChain securityFilterChain(
+            HttpSecurity http) throws Exception {
+
+        http
+            .authorizeHttpRequests(authorize -> authorize
+                .anyRequest().authenticated()
+            )
+            .httpBasic(Customizer.withDefaults());
+
+        return http.build();
+    }
+}
+```
+
+This is an illustrative baseline. Production deployments should also use HTTPS, secure credential storage, appropriate authorization rules and a suitable authentication mechanism for service-to-service access. CSRF settings should be considered based on whether browser-based sessions or only stateless API clients are used.
+
+The client can then supply credentials using the supported Config Client authentication properties, or use another configured authentication mechanism. Avoid embedding production credentials directly in a committed YAML file.
+
+#### 3.2 Avoid storing secrets in plain text
+
+Consider this configuration:
+
+```
+spring:
+  datasource:
+    url: jdbc:postgresql://db.internal:5432/shop
+    username: shop_user
+    password: super-secret-password
+```
+
+This is dangerous if committed to Git, even if the repository is private.
+
+A better approach is to keep non-sensitive configuration in Git and retrieve secrets from a dedicated secrets manager.
+
+For example:
+
+```
+spring:
+  datasource:
+    url: jdbc:postgresql://db.internal:5432/shop
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+```
+
+The environment variables must be supplied securely by your deployment platform or secret-management integration. Merely using `${DB_PASSWORD}` does not make a secret secure if the value is stored in a committed file or exposed through logs or environment inspection.
+
+Common options include:
+
+- HashiCorp Vault: central secret storage, access policies, dynamic credentials and secret rotation.
+- Cloud secret managers: for example, AWS Secrets Manager, Azure Key Vault or Google Secret Manager.
+- Container orchestration secrets: such as Kubernetes Secrets, with encryption at rest, restricted RBAC and appropriate cluster configuration.
+- Encrypted configuration values: useful when the Config Server is configured to decrypt supported encrypted properties, but encryption keys must be protected separately.
+
+Spring Cloud Config supports encrypted properties and can decrypt values when properly configured. Encryption is not a substitute for API authentication, repository access control or secure key management.
+
+#### 3.3 A practical security model
+
+- Git repository
+
+Stores application settings, environment profiles and non-sensitive defaults. Repository access is restricted and changes are reviewed.
+
+- Config Server
+
+Authenticates clients, authorizes requests, uses HTTPS and restricts access to configuration endpoints.
+
+- Secrets manager
+
+Stores database passwords, signing keys, API tokens and other credentials. Access is limited to the applications that need them.
+
+- Microservices
+
+Receive configuration at startup and retrieve secrets through an authorized mechanism. Logs and diagnostic endpoints must not disclose sensitive values.
+
+## 4. Putting the decisions together
+
+For a typical Spring Boot microservices application, a sensible starting architecture is:
+
+| Decision                 | Recommended starting point                                                             |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| Configuration repository | Git                                                                                    |
+| Client connection        | Direct Config Server URL                                                               |
+| API security             | Spring Security with HTTPS                                                             |
+| Secrets                  | Vault or an appropriate platform secret manager                                        |
+| Configuration changes    | Git review and version-controlled deployments                                          |
+| Availability             | Multiple Config Server instances where needed                                          |
+| Configuration refresh    | Explicit refresh or a suitable event-driven mechanism, if runtime updates are required |
+
+Keep in mind that externalized configuration does not automatically mean live updates. A client normally loads configuration during startup; applying changes to running instances requires an appropriate refresh strategy and consideration of which properties can safely change at runtime.
+
+### Practical starting architecture
+
+For a typical Spring Boot microservices system, I would begin with the following decisions:
+
+| Decision                   | Starting choice                                                                                |
+| -------------------------- | ---------------------------------------------------------------------------------------------- |
+| Repository                 | Private Git repository with reviewed changes                                                   |
+| Configuration organization | Shared defaults, service-specific settings and environment profiles                            |
+| Bootstrap                  | Direct Config Server URL through stable DNS, unless service discovery provides a clear benefit |
+| API security               | Spring Security, HTTPS and least-privilege service identities                                  |
+| Secrets                    | Dedicated secrets manager                                                                      |
+| Resilience                 | Multiple Config Server instances where availability requirements justify them                  |
+| Updates                    | Controlled refresh or restart, with explicit failure handling                                  |
+
+The right choices depend on your scale, security requirements, deployment platform and availability goals.
+
+## Spring Cloud Config Server API
+The config server exposes a REST API that can be used by its clients to retrieve their configuration.
+
+The Spring Cloud Config Server API is an HTTP API that allows clients and operators to retrieve configuration from a centralized configuration repository.
+
+In your Spring Boot microservices architecture, it sits between the configuration repository (such as Git) and services like `product-service`, `review-service`, `recommendation-service`, and `gateway`.
+
+The key idea is that the API identifies which configuration to retrieve using the application name, active profile, and optionally a repository label.
+
+### 1. How the API works
+
+Config Client / HTTP caller
+
+Requests configuration for product-service
+
+Config Server REST API
+
+Resolves application, profile, and label
+
+Environment Repository
+
+Reads Git-backed configuration and combines applicable property sources
+
+HTTP response
+
+Resolved configuration returned as JSON or YAML
+
+You can call these endpoints manually with `curl`, a browser in a development environment, or an HTTP client. Spring Cloud Config clients use the API as part of their startup configuration process.
+
+Assume your Config Server is running at:
+
+```
+http://localhost:8888
+```
+
+And your Git repository contains:
+
+```
+config-repo/
+├── application.yml
+├── application-docker.yml
+├── product-service.yml
+├── product-service-docker.yml
+└── gateway.yml
+```
+
+We'll use this repository throughout the examples.
+
+### 2. The main API endpoint
+
+The standard environment endpoint is:
+
+```
+GET /{application}/{profile}[/{label}]
+```
+
+For example:
+
+```
+GET http://localhost:8888/product-service/docker/main
+```
+
+The three path parameters have different meanings.
+
+| Parameter     | Example           | Meaning                                              |
+| ------------- | ----------------- | ---------------------------------------------------- |
+| `application` | `product-service` | Identifies the application configuration to retrieve |
+| `profile`     | `docker`          | Selects the configuration profile                    |
+| `label`       | `main`            | Selects the Git branch, tag, or commit to read       |
+
+The label is optional. If omitted, the Config Server uses its configured default label.
+
+The application name normally corresponds to `spring.application.name` in the client application. The profile corresponds to the active Spring profile.
+
+### 3. The API response: JSON Environment
+
+Let's call the main endpoint:
+
+```
+curl http://localhost:8888/product-service/docker/main
+```
+
+A simplified response looks like this:
+
+```
+{
+  "name": "product-service",
+  "profiles": [
+    "docker"
+  ],
+  "label": "main",
+  "version": "a1b2c3d4",
+  "propertySources": [
+    {
+      "name": "product-service-docker.yml",
+      "source": {
+        "server.port": 8081,
+        "app.product.page-size": 50
+      }
+    },
+    {
+      "name": "product-service.yml",
+      "source": {
+        "app.product.page-size": 20
+      }
+    },
+    {
+      "name": "application.yml",
+      "source": {
+        "logging.level.root": "INFO"
+      }
+    }
+  ]
+}
+```
+
+This is an illustrative response, not the output from a live server. Actual property-source names, fields, and contents depend on your repository and Config Server version.
+
+Let's understand the important fields.
+
+| Field                      | Meaning                                         |
+| -------------------------- | ----------------------------------------------- |
+| `name`                     | Resolved application name                       |
+| `profiles`                 | Profiles used for resolution                    |
+| `label`                    | Configuration revision label                    |
+| `version`                  | Repository version information, when available  |
+| `propertySources`          | Ordered list of configuration sources           |
+| `propertySources[].name`   | Identifies the source                           |
+| `propertySources[].source` | Contains the source's property names and values |
+
+#### Why does `propertySources` contain multiple entries?
+
+Because the effective configuration can come from several files.
+
+In the example:
+
+```
+product-service-docker.yml
+          |
+          v
+product-service.yml
+          |
+          v
+application.yml
+```
+
+The more specific property source has higher precedence for conflicting properties.
+
+Consequently:
+
+```
+app.product.page-size = 50
+```
+
+The service-specific Docker value wins over the default service value of `20`.
+
+This is closely related to the Spring `Environment` and `PropertySource` abstractions. The Config Server exposes the resolved configuration and its sources rather than merely returning one original YAML file.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
++1
+
+
+
+### 4. Requesting YAML or properties instead of JSON
+
+Sometimes you want to inspect configuration directly without interpreting the JSON response.
+
+Spring Cloud Config supports several representations.
+
+Examples assume a server running on localhost:8888.
+
+JSON Environment
+
+```
+GET /product-service/docker/main
+```
+
+Returns the Environment object with metadata and ordered property sources.
+
+YAML representation
+
+```
+GET /product-service-docker.yml
+```
+
+```
+curl http://localhost:8888/product-service-docker.yml
+```
+
+Returns a YAML representation of the resolved configuration.
+
+Properties representation
+
+```
+GET /product-service-docker.properties
+```
+
+```
+curl http://localhost:8888/product-service-docker.properties
+```
+
+Returns configuration in Java properties format.
+
+Label-specific YAML
+
+```
+GET /main/product-service-docker.yml
+```
+
+Requests the configuration using the main Git label.
+
+The documented resource patterns include `/{application}/{profile}[/{label}]`, `/{application}-{profile}.yml`, and their properties equivalents.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
++1
+
+
+
+Important distinction: JSON Environment responses preserve property-source metadata. YAML and properties responses are flattened representations, so they are not necessarily faithful copies of any single file in Git.
+
+### 5. Multiple profiles in one request
+
+Spring Boot applications can activate multiple profiles. The Config Server API supports a comma-separated profile list.
+
+For example:
+
+```
+GET /product-service/docker,monitoring/main
+```
+
+Using `curl`:
+
+```
+curl 'http://localhost:8888/product-service/docker,monitoring/main'
+```
+
+Conceptually, the client is requesting configuration for:
+
+```
+spring:
+  application:
+    name: product-service
+
+  profiles:
+    active: docker,monitoring
+```
+
+This allows the configuration to combine deployment-specific settings with additional profile-specific settings.
+
+For example:
+
+- `application.yml` — common defaults.
+- `application-docker.yml` — Docker-specific settings.
+- `application-monitoring.yml` — monitoring-related settings.
+- `product-service.yml` — product-specific defaults.
+- `product-service-docker.yml` — product settings for Docker.
+- `product-service-monitoring.yml` — product settings for monitoring.
+
+The exact result depends on Spring's profile processing and property-source precedence rules. When profiles conflict, later active profiles can override earlier profile values, subject to the overall property-source ordering.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
++1
+
+
+
+### 6. Requesting a specific Git label
+
+The optional label lets you select a particular version of configuration.
+
+For example:
+
+```
+## Main branch
+curl http://localhost:8888/product-service/docker/main
+
+## Release tag
+curl http://localhost:8888/product-service/docker/release-2026.10
+```
+
+This is particularly useful for the configuration-versioning design decision we discussed earlier.
+
+Suppose you have:
+
+```
+main
+release-2026.10
+release-2026.09
+```
+
+You can request the configuration associated with a particular label, assuming it exists in the repository and the backend supports it.
+
+#### What if the Git branch contains a slash?
+
+Suppose the branch is named:
+
+```
+release/2026.10
+```
+
+A slash can be ambiguous in the URL because the endpoint already uses path segments to distinguish application, profile, and label.
+
+Spring Cloud Config documents a special encoding: replace the slash in the label with `(_)`.
+
+For example:
+
+```
+curl 'http://localhost:8888/product-service/docker/release(_)2026.10'
+```
+
+This is a special Config Server convention, not ordinary URL percent encoding.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
+
+
+### 7. Serving arbitrary files: the plain-text API
+
+Not all configuration files are YAML or `.properties`.
+
+You might want to store files such as:
+
+```
+config-repo/
+├── product-service.yml
+├── gateway.yml
+├── logback.xml
+└── nginx.conf
+```
+
+The Config Server supports a separate resource endpoint:
+
+```
+GET /{application}/{profile}/{label}/{path}
+```
+
+For example:
+
+```
+curl http://localhost:8888/product-service/docker/main/logback.xml
+```
+
+This asks the server to retrieve `logback.xml` in the context of `product-service`, the `docker` profile, and the `main` label.
+
+Why is this different from the Environment API?
+
+- The Environment API resolves and combines property sources.
+- The plain-text API returns a matching file resource.
+- If multiple resources match, the plain-text endpoint returns the first match rather than aggregating all matching files.
+- Supported placeholders such as `${...}` can be resolved against the effective environment.
+
+This endpoint can be useful for environment-specific logging configuration, proxy configuration, or other text resources.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
++1
+
+
+
+For binary resources, the Config Server documentation also describes support using the `Accept: application/octet-stream` header for supported backends.
+
+### 8. What about encryption and decryption endpoints?
+
+Spring Cloud Config also supports endpoints for encrypting and decrypting property values when encryption is configured on the server.
+
+Conceptually, the endpoints are:
+
+```
+POST /encrypt
+POST /decrypt
+```
+
+For example, you might encrypt a sensitive value before storing it in the repository:
+
+```
+curl -X POST \
+  http://localhost:8888/encrypt \
+  -d 'example-secret'
+```
+
+The response is an encrypted representation, not a usable plaintext password.
+
+A repository property could then use the encrypted value:
+
+```
+spring:
+  datasource:
+    password: '{cipher}ENCRYPTED_VALUE_HERE'
+```
+
+The `{cipher}` prefix tells Spring Cloud Config's property decryption mechanism that the value is encrypted.
+
+Important considerations:
+
+- Encryption must be configured and the necessary key material supplied securely.
+- The encryption endpoint is an administrative capability and must not be exposed without appropriate protection.
+- Encryption does not replace authentication, authorization, or secret rotation.
+- Never use a real production password in a tutorial or experiment with an unsecured server.
+
+See the [official reference documentation](https://docs.spring.io/spring-cloud-config/reference/?utm_source=chatgpt.com) for the encryption configuration applicable to your Spring Cloud release.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
++1
+
+
+
+### 9. Error handling: what can go wrong?
+
+A Config Server request can fail for several reasons.
+
+| Situation                          | What to investigate                                                                     |
+| ---------------------------------- | --------------------------------------------------------------------------------------- |
+| HTTP `404`                         | Incorrect application/profile/label, missing resource, or repository resolution failure |
+| HTTP `401`                         | Authentication required or invalid credentials                                          |
+| HTTP `403`                         | Authenticated caller lacks permission                                                   |
+| HTTP `5xx`                         | Repository, Git access, backend, or server-side error                                   |
+| Request times out                  | Network connectivity, Git latency, or an unavailable server                             |
+| Response has unexpected properties | Profile selection, property-source precedence, label, or cached repository state        |
+
+The exact HTTP status and error body can vary with the failure, backend, security configuration, and Spring Cloud version. A `404`, for example, should not automatically be interpreted as proof that a specific file is absent from Git.
+
+A useful troubleshooting sequence is:
+
+```
+## 1. Check a basic application configuration request
+curl -i http://localhost:8888/product-service/default
+
+## 2. Check the Docker profile
+curl -i http://localhost:8888/product-service/docker
+
+## 3. Request the exact Git label
+curl -i http://localhost:8888/product-service/docker/main
+
+## 4. Inspect the YAML representation
+curl -i http://localhost:8888/product-service-docker.yml
+```
+
+Start with the simplest request and add the profile and label incrementally. This helps isolate whether the problem is application naming, profile selection, or repository revision.
+
+### 10. How the Config Client uses the API
+
+When you configure a modern Spring Boot client like this:
+
+```
+spring:
+  application:
+    name: product-service
+
+  config:
+    import: "configserver:http://localhost:8888"
+```
+
+the Config Client uses the server API during application configuration loading.
+
+Conceptually:
+
+```
+Product service starts
+        |
+        v
+Spring Config Data processing
+        |
+        v
+Config Client requests remote configuration
+        |
+        v
+GET /product-service/{profiles}/{label}
+        |
+        v
+Config Server resolves property sources
+        |
+        v
+Environment returned to the client
+        |
+        v
+Spring binds configuration properties
+        |
+        v
+Application initializes
+```
+
+The actual requests depend on the client version, configured profiles, label, and any additional settings. You don't normally need to construct the HTTP request manually when using the Config Client.
+
+One final distinction is worth remembering: the Config Server REST API and the Spring Boot Actuator management API are different APIs.
+
+- Config Server endpoints retrieve configuration, serve resources, and support configured encryption operations.
+- Client-side Actuator endpoints, such as `/actuator/refresh` when enabled, concern the running application's management and refresh behavior. They are not the same as the Config Server's configuration retrieval endpoints.
+
+See the official [Spring Cloud Config reference](https://docs.spring.io/spring-cloud-config/reference/?utm_source=chatgpt.com) for the version-specific endpoint and client behavior.
+
+#### Recommended hands-on exercise
+
+Use your own `product-service` configuration repository to compare these three requests:
+
+```
+curl http://localhost:8888/product-service/default
+curl http://localhost:8888/product-service/docker
+curl http://localhost:8888/product-service/docker/main
+```
+
+Compare the `profiles`, `label`, and `propertySources` fields in each response. Then change one non-sensitive property in Git and repeat the requests.
+
+This exercise demonstrates the core API contract: application + profile + label determine which configuration the Config Server resolves and returns.
+
+### Spring Cloud Config Server API — Summary
+
+Assuming the Config Server runs at `http://localhost:8888`, these are the main API endpoint patterns.
+
+#### 1. Environment API
+
+| Method | Endpoint                           | Purpose                                                           |
+| ------ | ---------------------------------- | ----------------------------------------------------------------- |
+| `GET`  | `/{application}/{profile}`         | Retrieve resolved configuration for an application and profile    |
+| `GET`  | `/{application}/{profile}/{label}` | Retrieve configuration from a specific Git branch, tag, or commit |
+
+Example:
+
+```
+curl http://localhost:8888/product-service/docker/main
+```
+
+Returns a JSON `Environment` containing application metadata and ordered property sources.
+
+#### 2. YAML and Properties API
+
+| Method | Endpoint                                      | Purpose                                            |
+| ------ | --------------------------------------------- | -------------------------------------------------- |
+| `GET`  | `/{application}-{profile}.yml`                | Retrieve resolved configuration as YAML            |
+| `GET`  | `/{application}-{profile}.yaml`               | YAML representation                                |
+| `GET`  | `/{application}-{profile}.properties`         | Retrieve resolved configuration as Java properties |
+| `GET`  | `/{label}/{application}-{profile}.yml`        | YAML configuration for a specific label            |
+| `GET`  | `/{label}/{application}-{profile}.properties` | Properties configuration for a specific label      |
+
+Example:
+
+```
+curl http://localhost:8888/product-service-docker.yml
+curl http://localhost:8888/product-service-docker.properties
+```
+
+#### 3. Plain-text Resource API
+
+| Method | Endpoint                                  | Purpose                                                    |
+| ------ | ----------------------------------------- | ---------------------------------------------------------- |
+| `GET`  | `/{application}/{profile}/{label}/{path}` | Retrieve a matching file from the configuration repository |
+
+Example:
+
+```
+curl http://localhost:8888/product-service/docker/main/logback.xml
+```
+
+Useful for resources such as logging configuration and other text files.
+
+#### 4. Encryption API
+
+Available when encryption is configured on the server.
+
+| Method | Endpoint   | Purpose                    |
+| ------ | ---------- | -------------------------- |
+| `POST` | `/encrypt` | Encrypt a supplied value   |
+| `POST` | `/decrypt` | Decrypt an encrypted value |
+
+Example:
+
+```
+curl -X POST http://localhost:8888/encrypt \
+  -d 'example-secret'
+```
+
+Protect these endpoints carefully; they should not be publicly accessible without appropriate security controls.
+
+#### 5. Important parameters
+
+| Parameter     | Example           | Meaning                                                                |
+| ------------- | ----------------- | ---------------------------------------------------------------------- |
+| `application` | `product-service` | Application configuration name                                         |
+| `profile`     | `docker`          | Active configuration profile; multiple profiles can be comma-separated |
+| `label`       | `main`            | Git branch, tag, or commit                                             |
+| `path`        | `logback.xml`     | File path for the resource API                                         |
+
+#### 6. Quick reference
+
+Resolved Environment
+
+`GET /{application}/{profile}[/{label}]`
+
+JSON metadata and ordered property sources.
+
+YAML / Properties
+
+`GET /{application}-{profile}.{format}`
+
+Configuration rendered as YAML or properties.
+
+Resource API
+
+`GET /{application}/{profile}/{label}/{path}`
+
+Retrieve a matching repository resource.
+
+Encryption
+
+`POST /encrypt` · `POST /decrypt`
+
+Encrypt or decrypt values when server encryption is configured.
+
+For the exact endpoint behavior supported by your Spring Cloud release, see the [official Spring Cloud Config reference](https://docs.spring.io/spring-cloud-config/reference/?utm_source=chatgpt.com).
+
+Remember: the Environment API resolves configuration; the YAML and properties endpoints render it; the resource API retrieves individual files; and the encryption endpoints handle encrypted values.
+
+## 6. Implementing the Config Server
+
+Let's build the server as a separate Spring Boot application.
+
+### 6.1 Add the dependency
+
+Maven:
+
+```
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-config-server</artifactId>
+</dependency>
+```
+
+Use the Spring Cloud BOM compatible with your Spring Boot version rather than selecting an arbitrary Config release.
+
+### 6.2 Enable the server
+
+```
+package com.example.configserver;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.config.server.EnableConfigServer;
+
+@SpringBootApplication
+@EnableConfigServer
+public class ConfigServerApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(
+            ConfigServerApplication.class,
+            args
+        );
+    }
+}
+```
+
+`@EnableConfigServer` enables the Config Server functionality in the Spring Boot application.
+
+### 6.3 Configure the Git repository
+
+For a development example:
+
+```
+# application.yml of config-server
+server:
+  port: 8888
+
+spring:
+  application:
+    name: config-server
+
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/your-org/config-repo.git
+          default-label: main
+          clone-on-start: true
+```
+
+Replace the example Git URI with your actual repository.
+
+A few design details matter here:
+
+- `uri` identifies the configuration repository.
+- `default-label` selects the default Git label when a request does not specify one.
+- `clone-on-start` causes the server to check the repository during startup instead of waiting for its first configuration request.
+
+The latter is useful because an invalid repository URL or inaccessible Git server can otherwise remain undetected until a client requests configuration.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
+
+
+For private Git repositories, provide credentials or SSH authentication through a secure deployment mechanism. Avoid committing repository passwords or private keys into `application.yml`.
+
+### 6.4 Test the Config Server
+
+Start the server and request configuration:
+
+```
+curl http://localhost:8888/product-service/docker/main
+```
+
+Or request YAML directly:
+
+```
+curl http://localhost:8888/product-service-docker.yml
+```
+
+The first endpoint returns a JSON representation of the resolved environment. The second returns YAML.
+
+A successful response confirms that the server can resolve configuration for the requested application, profile, and label. It does not yet prove that your microservice will load it correctly.
+
+## 7. Implementing the Config Client
+
+The Config Client is the library integrated into each microservice that needs remote configuration.
+
+### 7.1 Add the dependency
+
+For example, in `product-service`:
+
+```
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-config</artifactId>
+</dependency>
+```
+
+Your dependency management should use the Spring Cloud release train that matches your Spring Boot version.
+
+### 7.2 Configure the client
+To be able to get their configurations from the config server, our microservices need to be up-
+dated. The microservices will use Spring’s retry mechanism to reconnect to a config server. This
+is especially useful when the whole landscape of microservices and its config server are started
+simultaneously – for example, when using the docker compose up command.
+
+In this scenario, many of the clients will be trying to connect to the config server before it is ready,
+and the retry logic will make the clients connect to the config server successfully once it is up
+and running.
+
+For a modern Spring Boot application using Config Data:
+
+```
+# product-service/src/main/resources/application.yml
+spring:
+  application:
+    name: product-service
+
+  config:
+    import: "configserver:http://localhost:8888"
+```
+
+This example assumes the service is running on the same machine as the Config Server.
+
+Inside Docker Compose, use the service's reachable network hostname instead:
+
+```
+spring:
+  config:
+    import: "configserver:http://config-server:8888"
+```
+
+You can also choose a profile through the deployment environment:
+
+```
+spring:
+  profiles:
+    active: docker
+```
+
+For a production deployment, it's generally better to set the active profile through environment-specific deployment configuration instead of baking it into the application image.
+
+What if the Config Server is optional?
+
+```
+spring:
+  config:
+    import: "optional:configserver:http://config-server:8888"
+```
+
+The `optional:` prefix allows startup to proceed when the Config Server cannot be contacted. Use it only when local configuration is sufficient and safe for the application to start.
+
+If the service needs remote configuration to establish essential connections, silently starting without it can create a misleading healthy-looking but unusable service.
+
+### 7.3 Consume the remote property
+
+Suppose `product-service.yml` in Git contains:
+
+```
+app:
+  product:
+    page-size: 50
+```
+
+Bind it through a typed configuration class:
+
+```
+package com.example.product.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "app.product")
+public record ProductProperties(int pageSize) {
+}
+```
+
+Enable configuration properties:
+
+```
+@SpringBootApplication
+@EnableConfigurationProperties(ProductProperties.class)
+public class ProductServiceApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(
+            ProductServiceApplication.class, args);
+    }
+}
+```
+
+Then inject the settings where needed:
+
+```
+@Service
+public class ProductService {
+
+    private final ProductProperties properties;
+
+    public ProductService(ProductProperties properties) {
+        this.properties = properties;
+    }
+
+    public int getPageSize() {
+        return properties.pageSize();
+    }
+}
+```
+
+The important architectural separation is that your service consumes `ProductProperties`; it does not know whether the values came from Git, a local file, an environment variable, or the Config Server.
+
+That makes configuration sourcing replaceable without redesigning the business logic.
+
+## 8. Design decision: startup order and failure behavior
+
+Centralized configuration introduces a dependency into application startup. This must be designed intentionally.
+
+### 8.1 The startup dependency chain
+
+For a typical config-first deployment:
+
+```
+Container starts
+      |
+      v
+Spring Boot begins initialization
+      |
+      v
+Config Client requests remote properties
+      |
+      v
+Config Server reads its repository
+      |
+      v
+Client resolves effective properties
+      |
+      v
+Application creates beans and connections
+      |
+      v
+Application becomes ready
+```
+
+This creates a dependency chain:
+
+```
+Git repository
+      |
+      v
+Config Server
+      |
+      v
+Microservice startup
+      |
+      v
+Application readiness
+```
+
+The chain describes the startup-time dependency, not necessarily the application's entire runtime dependency graph.
+
+### 8.2 What happens if Git is unavailable?
+
+The answer depends on the point of failure.
+
+| Failure scenario                                                      | Likely consequence                                                                                      |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Git unavailable when Config Server starts with `clone-on-start: true` | Server startup can fail.                                                                                |
+| Git unavailable on the first request with lazy cloning                | The configuration request fails.                                                                        |
+| Git unavailable after a successful clone                              | The server may continue serving configuration from its local working copy.                              |
+| Config Server unavailable when a required client starts               | Client startup fails unless an optional import or fallback strategy permits it.                         |
+| Config Server unavailable after the client has started                | The application can generally continue using its already-loaded configuration.                          |
+| Client refreshes while Config Server or repository is unavailable     | Refresh may fail; the current configuration is not automatically replaced by a valid new configuration. |
+
+These behaviors depend on the repository backend, cache state, client settings, and refresh mechanism.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
++1
+
+
+
+### 8.3 Should every service fail if the Config Server is unavailable?
+
+Not necessarily.
+
+There are two reasonable policies:
+
+Fail-fast policy
+
+Use when remote configuration is essential for safe startup.
+
+Examples include an application that cannot determine its required database endpoint or must not start without mandatory security configuration.
+
+Graceful-start policy
+
+Use when a validated local configuration can safely support startup.
+
+This requires a deliberate fallback strategy. The local fallback should be known to be compatible with the deployed application version and should not expose the application to unsafe defaults.
+
+Do not use `optional:configserver:` simply to suppress startup errors. Decide what the service is allowed to do without centralized configuration first.
+
+### 8.4 Docker Compose implications
+
+For your microservices setup, `depends_on` can control container startup order, but basic ordering does not prove that the Config Server is ready to serve configuration.
+
+A production-minded Compose setup should consider:
+
+- A Config Server health check.
+- Dependency health conditions where supported.
+- Client connection timeouts and bounded retries.
+- Whether clients can safely start from local configuration.
+- Whether the Config Server can reach Git during initialization.
+- Restart behavior that does not produce an endless crash loop.
+
+Even with health checks, clients should handle transient failures because startup ordering is not a guarantee of permanent availability.
+
+## 9. Design decision: configuration refresh and consistency
+
+Centralizing configuration makes updates easier to distribute, but publishing a new value is not the same as applying it to every running service.
+
+### 9.1 The default lifecycle
+
+Consider changing this property in Git:
+
+```
+app:
+  product:
+    page-size: 50
+```
+
+to:
+
+```
+app:
+  product:
+    page-size: 100
+```
+
+The lifecycle is:
+
+1. Commit the new configuration to Git.
+2. The Config Server fetches or otherwise observes the updated repository revision according to its repository settings.
+3. A running client must retrieve the updated configuration.
+4. The client must apply the changed property.
+5. Any components that depend on the property must support the relevant update behavior.
+
+If steps 3–5 don't happen, a running application can continue using its old value.
+
+### 9.2 Three refresh strategies
+
+| Strategy            | How it works                                                                   | Best fit                               |
+| ------------------- | ------------------------------------------------------------------------------ | -------------------------------------- |
+| Restart or redeploy | New instances load the latest approved configuration                           | Predictable, immutable deployments     |
+| Actuator refresh    | A running application reloads supported configuration and refresh-scoped beans | Selected runtime-tunable properties    |
+| Spring Cloud Bus    | A message is broadcast to subscribed application instances to trigger refresh  | Larger deployments with many instances |
+
+For many production systems, rolling deployment with versioned configuration is easier to reason about than mutating every running process in place.
+
+Refresh is useful when you genuinely need runtime changes, but it adds operational complexity.
+
+### 9.3 What does `@RefreshScope` do?
+
+Consider a component that uses a configurable timeout:
+
+```
+@Component
+@RefreshScope
+public class RemoteClientSettings {
+
+    @Value("${app.read-timeout:5s}")
+    private Duration readTimeout;
+
+    public Duration getReadTimeout() {
+        return readTimeout;
+    }
+}
+```
+
+`@RefreshScope` allows a supported bean to be recreated when a refresh is triggered. This is not the same as automatically monitoring Git or continuously polling the Config Server.
+
+Also, refreshing one bean does not guarantee that every dependent resource can be reconfigured safely. Database pools, TLS contexts, message consumers, and other long-lived resources may require explicit lifecycle handling or a restart.
+
+### 9.4 Configuration consistency across replicas
+
+Imagine three instances of `product-service`:
+
+```
+product-service-1 -> page-size = 50
+product-service-2 -> page-size = 50
+product-service-3 -> page-size = 100
+```
+
+During an update, the instances may temporarily disagree.
+
+This matters when a property changes business behavior, API contracts, routing rules, or data interpretation.
+
+To control this:
+
+- Version and review configuration changes.
+- Avoid changing incompatible settings independently of application releases.
+- Prefer immutable versioned releases for high-impact settings.
+- Use coordinated rollout or refresh procedures.
+- Monitor which configuration revision each instance has loaded.
+
+Spring Cloud Config centralizes distribution, but it does not provide a universal atomic transaction that updates all microservices simultaneously.
+
+## 10. Design decision: securing configuration in transit and at rest
+
+Configuration often contains sensitive infrastructure details and sometimes credentials. Security must cover the entire path from the repository to the running application.
+
+Git / Secret Manager
+
+Repository permissions, secret controls, audit history
+
+Config Server
+
+Authenticated access, TLS, least privilege
+
+Microservice
+
+Restricted access, controlled logging, secure runtime configuration
+
+### 10.1 Protecting configuration in transit
+
+Use HTTPS for the client-to-Config-Server connection in production, with certificate validation enabled.
+
+For example, your client might use:
+
+```
+spring:
+  config:
+    import: "configserver:https://config.internal.example"
+```
+
+The certificate must be trusted by the client JVM, and the hostname must match the certificate.
+
+If the Config Server retrieves configuration from a private Git repository, that connection also needs secure transport and authentication.
+
+### 10.2 Protecting configuration at rest
+
+Git access control protects who can read the repository, but it does not automatically make stored credentials safe.
+
+For example, avoid committing:
+
+```
+spring:
+  datasource:
+    username: application_user
+    password: production-password
+```
+
+Prefer a deployment-provided secret or a dedicated secret manager.
+
+Spring Cloud Config supports property encryption and decryption, but encrypted values require careful key management. If the decryption key is stored beside the encrypted values and is accessible to the same principals, the protection may be largely ineffective.
+
+A dedicated secret manager is often preferable for credentials that need rotation, dynamic issuance, or tightly scoped access.
+
+### 10.3 Does the Config Server need to be exposed through Spring Cloud Gateway?
+
+Usually, no.
+
+You previously configured your gateway as the externally accessible HTTPS edge. Keep the Config Server on an internal network unless there is a specific operational requirement to expose it.
+
+A sensible topology is:
+
+```
+External clients
+      |
+      v
+HTTPS Gateway
+      |
+      +----> Product / Review / Other APIs
+
+Internal application network
+      |
+      +----> Config Server ----> Git repository
+      |
+      +----> Eureka
+```
+
+The Config Server should be reachable by the applications that need it, not automatically by every external client.
+
+If you need to inspect configuration during development, use a restricted internal route, authenticated access, or a controlled administrative path. Avoid publicly exposing endpoints that return configuration values.
+
+### 10.4 Authentication and authorization
+
+Consider separate access policies for:
+
+- Microservices retrieving configuration.
+- Operators administering the Config Server.
+- Developers reviewing the Git repository.
+- The Config Server authenticating to Git.
+- Workloads retrieving secrets.
+
+For production, use service identities, least-privilege permissions, TLS, and appropriate audit logging.
+
+Spring Cloud Config's support for encrypted properties is useful, but encryption is not a substitute for authorization or secure secret storage.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+
+GitHub
+
++1
+
+
+
+## 11. Design decision: high availability and scaling
+
+A centralized Config Server creates a potential shared dependency. That doesn't mean it must become a single point of failure.
+
+### 11.1 One server versus multiple instances
+
+For a development environment:
+
+```
+Product service ----+
+Review service ------+----> Config Server ----> Git
+Gateway -------------+
+```
+
+One server is usually enough.
+
+For production, consider multiple instances:
+
+```
+Product service ----+
+Review service ------+----> Config Server instance A --+
+Gateway -------------+                                 |
+                                                       +--> Git repository
+Product service ----+                                 |
+Review service ------+----> Config Server instance B --+
+```
+
+Both instances should use the same intended configuration source and compatible settings.
+
+Spring Cloud Config's Git backend maintains local working copies. Multiple Config Server instances can have different local caches and observe remote changes at different times. A shared Git repository alone does not guarantee instantaneous identical state across all instances.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.spring.io\&sz=32)
+
+Home
+
+
+
+### 11.2 Design for startup availability
+
+Ask these questions:
+
+1. Can the Config Server reach Git at startup?
+2. Can it serve the last known configuration if Git temporarily fails?
+3. Does it have persistent local storage if that behavior is required?
+4. Will clients retry safely if the server is temporarily unavailable?
+5. Are multiple Config Server instances deployed behind a stable internal address?
+6. What happens if the entire configuration system is unavailable during a deployment?
+
+For production, you might combine multiple Config Server instances, health checks, bounded retries, a durable repository, and a deliberate client fallback policy.
+
+### 11.3 Should configuration be cached?
+
+There are two distinct caching concerns:
+
+- Server-side repository cache: the Config Server's local Git working copy.
+- Client-side effective configuration: the property values already loaded into a running Spring application.
+
+The client normally continues using its loaded values until they are replaced through refresh or a new application startup.
+
+Do not confuse this with a guarantee that the client can always start offline. A new client still needs an available source unless you have implemented a suitable local fallback.
+
+## 12. Design decision: how configuration is versioned
+
+Git gives you a powerful capability: configuration can be associated with a specific version of the repository.
+
+The Config Server's `label` can refer to a branch, tag, or commit identifier.
+
+For example:
+
+```
+GET /product-service/docker/release-2026.10
+```
+
+This makes it possible to select a configuration revision intentionally rather than always consuming whatever happens to be at the latest branch head.
+
+### Recommended deployment policy
+
+For a development environment:
+
+```
+application -> main branch -> current development configuration
+```
+
+For a controlled release:
+
+```
+application release
+        |
+        v
+approved configuration tag
+        |
+        v
+deploy compatible application + configuration
+```
+
+For production, pinning a validated configuration revision can improve reproducibility and rollback.
+
+However, don't assume that specifying a label automatically pins every running instance forever. If the label is a mutable branch name, its contents can change. For stronger reproducibility, use an immutable commit or protected tag, along with a deployment process that records the exact revision.
+
+### Why application and configuration versions must be compatible
+
+Suppose application version 2 introduces:
+
+```
+app:
+  retry:
+    max-attempts: 5
+```
+
+but application version 1 does not understand the new setting.
+
+That might be harmless if the setting is ignored, or problematic if a deployment assumes the new behavior is already active.
+
+Similarly, removing a property can break an older application that still requires it.
+
+Treat configuration changes as changes to the operational interface of your service. Review them, validate them, and coordinate breaking changes with application deployments.
+
+## 13. Integrating Spring Cloud Config with your existing architecture
+
+Let's connect the design decisions to your existing Spring Boot microservices.
+
+| Existing component        | Relationship with Config Server                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Spring Cloud Gateway      | Loads its own routing, TLS, and service-related configuration.                                          |
+| Eureka Server             | Can have its own configuration and provide service discovery independently.                             |
+| Product service           | Loads product-specific properties and infrastructure settings.                                          |
+| Review service            | Loads review-specific properties and messaging settings.                                                |
+| Recommendation service    | Loads recommendation-specific settings.                                                                 |
+| Product composite service | Loads settings for its orchestration behavior.                                                          |
+| Docker Compose            | Supplies the initial Config Server address and deployment environment.                                  |
+| OAuth2 / Keycloak / Auth0 | Issuer URLs and client settings may be externalized; secrets require secure handling.                   |
+| RabbitMQ                  | Hostnames and operational settings may be externalized; credentials should be protected.                |
+| MongoDB / MySQL           | Connection settings may be externalized; passwords and sensitive connection details require protection. |
+
+### 13.1 A practical Docker Compose deployment
+
+An illustrative setup:
+
+```
+services:
+  config-server:
+    build: ./config-server
+    ports:
+      - "8888:8888"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    networks:
+      - backend
+
+  product-service:
+    build: ./product-service
+    environment:
+      SPRING_CONFIG_IMPORT: configserver:http://config-server:8888
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      - config-server
+    networks:
+      - backend
+
+networks:
+  backend:
+```
+
+This illustrates the network relationship, not a complete production deployment.
+
+The service hostname `config-server` works when the services share the Compose network and the service is listening on the expected port.
+
+For production, also configure readiness checks, secrets, TLS where appropriate, retry policy, and dependency health conditions. If the Config Server is unavailable during client startup, basic `depends_on` ordering alone will not guarantee a successful startup.
+
+### 13.2 A useful separation of configuration responsibilities
+
+I recommend keeping the following distinction:
+
+Config Server configuration
+
+- Git repository URI.
+- Repository credentials or secret references.
+- Server port and security configuration.
+- Local cache and repository refresh settings.
+
+Client bootstrap configuration
+
+- Application name.
+- Config Server address or discovery-first settings.
+- Active profile.
+- Any settings strictly necessary before remote configuration loads.
+
+Remote application configuration
+
+- Timeouts and retry policies.
+- Service-specific application settings.
+- Database and message-broker connection properties.
+- Feature flags and other environment-dependent values.
+
+Deployment secrets
+
+\- Passwords, API keys, OAuth client secrets, private keys, and other credentials.
+
+This separation reduces circular dependencies. For example, the Config Server cannot rely exclusively on its own remote configuration to discover the Git repository it needs in order to fetch that configuration.
+
+## 14. Design decision checklist
+
+When deciding how to introduce Spring Cloud Config into a microservices architecture, I would document the following decisions.
+
+| Decision                 | Recommended starting point                | Revisit when                                          |
+| ------------------------ | ----------------------------------------- | ----------------------------------------------------- |
+| Configuration repository | Git                                       | Teams need stronger isolation or specialized storage  |
+| Repository organization  | One repository for all services           | Ownership, access, or release policies diverge        |
+| Config Server location   | Internal network                          | Platform or topology requirements change              |
+| Client discovery         | Config-first using a stable hostname      | Dynamic discovery is a real requirement               |
+| Environment separation   | Spring profiles                           | Deployment policy needs stronger isolation            |
+| Version selection        | Protected branch or immutable release tag | You need more advanced promotion workflows            |
+| Client startup           | Fail fast for required configuration      | A validated offline fallback is available             |
+| Runtime refresh          | Restart or rolling deployment             | Specific settings require runtime changes             |
+| Secret management        | Dedicated secret storage                  | Security requirements demand a different model        |
+| Availability             | One instance in development               | Production availability objectives require redundancy |
+| Configuration rollout    | Reviewed, versioned changes               | More sophisticated progressive rollout is needed      |
+
+## 15. Common mistakes to avoid
+
+1. Putting every password in Git. Centralization improves management, but it does not automatically secure secrets.
+2. Using `optional:configserver:` without a fallback strategy. The application might start with incomplete configuration.
+3. Assuming Git changes automatically update running services. Refresh or restart is still needed.
+4. Making Eureka a prerequisite unnecessarily. Config-first with a stable internal URL is often simpler.
+5. Exposing the Config Server publicly. Keep it internal and protect its endpoints.
+6. Assuming all instances immediately see the same revision. Repository caches and refresh timing can differ.
+7. Ignoring application/configuration compatibility. A configuration revision must be compatible with the deployed code.
+8. Using an unpinned production branch without an audit strategy. Record which configuration revision was deployed.
+9. Assuming refresh reconfigures every resource. Some resources require explicit reinitialization or a process restart.
+10. Using incompatible Spring Boot and Spring Cloud versions. Manage dependency versions through the appropriate release train and BOM.
+
+## 16. Suggested learning roadmap
+
+Given your current work with Spring Boot, Docker Compose, Eureka, Gateway, and externalized configuration, I would study these topics in this order:
+
+1. Fundamentals
+
+   Understand externalized configuration, the Spring `Environment`, property sources, profiles, and property precedence.
+2. Config Server
+
+   Create a server, connect it to Git, configure repository labels, and test the HTTP endpoints.
+3. Config Client
+
+   Import remote configuration, bind values using `@ConfigurationProperties`, and inspect effective values.
+4. Design decisions
+
+   Compare Git versus other backends, config-first versus discovery-first, repository layout, and configuration versioning.
+5. Security
+
+   Protect the server, secure the Git connection, externalize credentials, and distinguish configuration encryption from secret management.
+6. Reliability
+
+   Test Git outages, Config Server restarts, client startup retries, cached configuration, and multiple server instances.
+7. Refresh and deployment
+
+   Explore `@RefreshScope`, Actuator refresh, Spring Cloud Bus, and controlled configuration rollouts.
+8. Architecture lab
+
+   Integrate Config Server with your existing Compose-based services and verify the behavior during startup, configuration changes, and failures.
+
+For the authoritative reference, start with the Spring Cloud Config documentation:
+
+- [Spring Cloud Config Reference Documentation](https://docs.spring.io/spring-cloud-config/reference/?utm_source=chatgpt.com)
+- [Git backend configuration and repository design](https://docs.spring.io/spring-cloud-config/reference/server/environment-repository/git-backend.html?utm_source=chatgpt.com)
+- [Spring Cloud Config project overview](https://spring.io/projects/spring-cloud-config?utm_source=chatgpt.com)
+
+The main architectural takeaway: Spring Cloud Config centralizes the delivery of configuration, but you still need explicit decisions about where configuration lives, which revision each service consumes, how clients start, how secrets are protected, and how changes are rolled out safely. Those decisions are what turn a working Config Server into a reliable microservices configuration architecture.
+
+### Official documentation
+
+- [Spring Cloud Config Reference](https://docs.spring.io/spring-cloud-config/reference/?utm_source=chatgpt.com)
+- [Spring Boot Externalized Configuration](https://docs.spring.io/spring-boot/reference/features/external-config.html?utm_source=chatgpt.com)
+- [Spring Cloud Config Encryption and Decryption](https://docs.spring.io/spring-cloud-config/reference/server/encryption-and-decryption.html?utm_source=chatgpt.com)
+- [HashiCorp Vault Documentation](https://developer.hashicorp.com/vault/docs?utm_source=chatgpt.com)
+
+- [Spring Cloud Config Reference](https://docs.spring.io/spring-cloud-config/reference/?utm_source=chatgpt.com)
+- [Spring Cloud Config Client](https://docs.spring.io/spring-cloud-config/reference/client.html?utm_source=chatgpt.com)
+- [Spring Cloud Config Server](https://docs.spring.io/spring-cloud-config/reference/server.html?utm_source=chatgpt.com)
+- [Encryption and decryption](https://docs.spring.io/spring-cloud-config/reference/server/encryption-and-decryption.html?utm_source=chatgpt.com)
+- [Spring Security Servlet Applications](https://docs.spring.io/spring-security/reference/servlet/index.html?utm_source=chatgpt.com)
+
+The key architectural idea: Git manages configuration, the Config Server distributes it, discovery helps clients locate it when needed, and security controls protect both access to configuration and the secrets it contains.

@@ -1,0 +1,929 @@
+# Helm – Kubernetes Package Manager
+
+Helm is a package manager for Kubernetes. It helps you define, install, configure, upgrade, and manage Kubernetes applications without manually maintaining large numbers of Kubernetes YAML manifests.
+
+Think of Helm as the equivalent of:
+
+- `apt` / `dnf` for installing Linux packages.
+- `npm` for managing JavaScript packages.
+- `Maven` for managing Java application dependencies.
+
+However, Helm manages Kubernetes application deployments rather than operating-system or programming-language packages.
+
+Let's understand how it fits into Kubernetes, how it works, and how to use it.
+
+## Why do we need Helm?
+
+deploying a microservice to Kubernetes requires writing manifest files
+that declare the desired state of a Deployment object and a Service object. If we also need to add
+some configuration for the microservices, manifests for ConfigMaps and Secrets must be added.
+The approach of declaring a desired state and handing over the responsibility to Kubernetes to
+ensure that the actual state is always as close as possible to the desired state is very useful.
+However, writing and maintaining these manifest files can become a significant maintenance
+overhead. The files will contain a lot of boilerplate code, meaning duplicated manifests that
+will look the same for all microservices. It is also cumbersome to handle environment-specific
+settings without duplicating the whole set of manifest files, even though only a fraction of the
+content needs to be updated.
+In the case of a few microservices that will only be deployed to a few environments, such as a test,
+QA, and production environment, this might not be a major issue to handle. When the number
+of microservices grows to tens and hundreds and it must be possible to deploy different groups
+of microservices to different test, QA, and production environments, this quickly becomes an
+unmanageable maintenance problem.
+
+Before Helm, you could deploy an application using Kubernetes YAML manifests.
+
+For example, suppose you want to deploy Nginx. You might have three manifests:
+
+```
+nginx/
+├── deployment.yaml
+├── service.yaml
+└── configmap.yaml
+```
+
+Each file defines a Kubernetes resource.
+
+You can deploy them using:
+
+```
+kubectl apply -f nginx/
+```
+
+This works well for simple applications.
+
+But consider a more complex application:
+
+```
+e-commerce/
+├── product-service/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── configmap.yaml
+├── order-service/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── configmap.yaml
+├── payment-service/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── configmap.yaml
+├── mongodb/
+├── rabbitmq/
+└── ingress/
+```
+
+You now have many Kubernetes resources to manage.
+
+Several problems appear:
+
+| Problem                  | Description                                                            |
+| ------------------------ | ---------------------------------------------------------------------- |
+| Repetition               | Similar YAML configurations are repeated across services.              |
+| Environment differences  | Development, testing, and production need different configurations.    |
+| Configuration management | Changing image versions or replica counts requires editing manifests.  |
+| Version management       | It is difficult to track which application configuration was deployed. |
+| Upgrades                 | Updating an application requires managing multiple resources.          |
+| Rollbacks                | Returning to a previous deployment configuration requires manual work. |
+
+Helm addresses these problems by introducing charts, templates, values, and releases.
+
+## What is Helm?
+
+Helm is a Kubernetes application package manager.
+
+It introduces four important concepts:
+
+1. Chart
+
+A package containing Kubernetes resource templates and default configuration.
+
+2. Values
+
+Configuration parameters used to customize a chart.
+
+3. Templates
+
+YAML templates that Helm renders into Kubernetes manifests.
+
+4. Release
+
+An installed instance of a Helm chart in a Kubernetes cluster.
+
+For example, you can use one Nginx chart to create multiple releases:
+
+```
+                    Nginx Helm Chart
+                           |
+             +-------------+-------------+
+             |             |             |
+             v             v             v
+        Development      Testing     Production
+             |             |             |
+        1 Replica      2 Replicas    5 Replicas
+        NodePort       ClusterIP     LoadBalancer
+```
+
+Each release uses the same chart but different configuration values.
+
+## Helm Architecture
+
+Helm 3 uses a client-side architecture.
+
+Unlike older Helm 2, Helm 3 does not require a server-side component called Tiller inside the Kubernetes cluster.
+
+The Helm CLI communicates directly with the Kubernetes API Server.
+
+The main components are:
+
+| Component             | Responsibility                                                                   |
+| --------------------- | -------------------------------------------------------------------------------- |
+| Helm CLI              | Provides commands to install, upgrade, uninstall, and manage charts.             |
+| Chart                 | Contains application resource templates and metadata.                            |
+| Values                | Supplies configuration to chart templates.                                       |
+| Kubernetes API Server | Receives the rendered Kubernetes manifests.                                      |
+| Kubernetes cluster    | Creates and manages the actual resources.                                        |
+| Release storage       | Stores release information and revision history, normally in Kubernetes Secrets. |
+
+Important: Helm does not replace Kubernetes.
+
+Helm generates Kubernetes manifests and submits them to the Kubernetes API Server. Kubernetes remains responsible for scheduling containers, maintaining replicas, managing networking, and reconciling the desired state.
+
+## Helm Chart Structure
+
+A Helm chart is a directory containing files that describe how to deploy an application.
+
+Let's create a simple Nginx chart.
+
+```
+nginx-chart/
+│
+├── Chart.yaml
+│
+├── values.yaml
+│
+├── charts/
+│
+└── templates/
+    ├── deployment.yaml
+    ├── service.yaml
+    ├── configmap.yaml
+    ├── ingress.yaml
+    └── _helpers.tpl
+```
+
+Let's understand each file.
+
+### 1. Chart.yaml
+
+A package is known as a chart in Helm. A chart contains templates, default values for the templates, and optional dependencies on definitions in other charts. Each component that needs to be deployed (meaning the microservices and the resource managers they depend on like databases and queue managers) will have its own chart describing how to deploy it.
+
+Chart Contains metadata describing the chart.
+
+```yml
+## Chart API version.
+apiVersion: v2
+
+## Chart name.
+name: nginx
+
+## Short description.
+description: A Helm chart for deploying Nginx.
+
+## Chart type.
+type: application
+
+## Chart package version.
+version: 1.0.0
+
+## Version of the application being deployed.
+appVersion: "1.27.0"
+```
+
+There are two important versions:
+
+| Field        | Meaning                                           |
+| ------------ | ------------------------------------------------- |
+| `version`    | Version of the Helm chart itself.                 |
+| `appVersion` | Version of the application packaged by the chart. |
+
+For example, you might update the chart from `1.0.0` to `1.1.0` without changing the Nginx application version.
+
+### 2. values.yaml
+
+Contains default configuration values.
+
+```yml
+## Number of Nginx Pod replicas.
+replicaCount: 2
+
+## Container image configuration.
+image:
+  repository: nginx
+  tag: "1.27"
+  pullPolicy: IfNotPresent
+
+## Kubernetes Service configuration.
+service:
+  type: NodePort
+  port: 80
+  targetPort: 80
+  nodePort: 30080
+```
+
+The advantage is that you can change deployment configuration without editing the Kubernetes resource templates.
+
+For example:
+
+```
+replicaCount: 5
+```
+
+Instead of editing the Deployment manifest directly.
+
+### 3. templates/deployment.yaml
+
+This is where Helm becomes interesting.
+
+Instead of writing fixed Kubernetes YAML, you write a template.
+
+```yml
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: {{ .Release.Name }}-nginx
+
+spec:
+  replicas: {{ .Values.replicaCount }}
+
+  selector:
+    matchLabels:
+      app: nginx
+
+  template:
+    metadata:
+      labels:
+        app: nginx
+
+    spec:
+      containers:
+        - name: nginx
+
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          ports:
+            - containerPort: 80
+```
+
+Notice these expressions:
+
+| Expression                 | Meaning                           |
+| -------------------------- | --------------------------------- |
+| `.Release.Name`            | Name of the Helm release.         |
+| `.Values.replicaCount`     | Replica count from `values.yaml`. |
+| `.Values.image.repository` | Container image repository.       |
+| `.Values.image.tag`        | Container image version.          |
+
+Helm uses Go templates to generate the final YAML manifests.
+
+### 4. templates/service.yaml
+
+```yml
+apiVersion: v1
+kind: Service
+
+metadata:
+  name: {{ .Release.Name }}-service
+
+spec:
+  type: {{ .Values.service.type }}
+
+  selector:
+    app: nginx
+
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      nodePort: {{ .Values.service.nodePort }}
+```
+
+The template generates a normal Kubernetes Service manifest.
+
+## How Helm Works
+
+Let's follow the deployment process.
+
+{/* 1\. Helm Chart
+
+Chart.yaml + values.yaml + templates/
+
+2\. Helm Template Engine
+
+Combines templates with configuration values
+
+3\. Rendered Kubernetes YAML
+
+Deployment, Service, ConfigMap, etc.
+
+4\. Kubernetes API Server
+
+Helm submits the generated resources
+
+5\. Kubernetes Cluster
+
+Controllers reconcile the desired state */}
+
+![](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/concepts/deployment-and-release/helm/How-Helm-Works.png)
+
+For example, consider this command:
+
+```sh
+helm install nginx-release ./nginx-chart
+```
+
+Helm:
+
+1. Reads the chart.
+2. Loads the default values from `values.yaml`.
+3. Processes the templates.
+4. Generates Kubernetes YAML manifests.
+5. Submits the resources to the Kubernetes API Server.
+6. Records the installation as a Helm release.
+
+The resulting Kubernetes Deployment might look like:
+
+```yml
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: nginx-release-nginx
+
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: nginx
+
+  template:
+    metadata:
+      labels:
+        app: nginx
+
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+```
+
+Notice that Helm expressions have disappeared. Kubernetes receives ordinary YAML.
+
+## Helm Values and Environment Configuration
+
+One of Helm's most useful features is the ability to deploy the same chart into different environments.
+
+Suppose you have:
+
+```
+nginx-chart/
+├── Chart.yaml
+├── values.yaml
+└── templates/
+    ├── deployment.yaml
+    └── service.yaml
+```
+
+You can create separate values files:
+
+```
+environments/
+├── development.yaml
+├── staging.yaml
+└── production.yaml
+```
+
+development.yaml
+
+```yml
+replicaCount: 1
+
+image:
+  repository: nginx
+  tag: "1.27"
+
+service:
+  type: NodePort
+```
+
+staging.yaml
+
+```yml
+replicaCount: 2
+
+image:
+  repository: nginx
+  tag: "1.27"
+
+service:
+  type: ClusterIP
+```
+
+production.yaml
+
+```yml
+replicaCount: 5
+
+image:
+  repository: nginx
+  tag: "1.27"
+
+service:
+  type: LoadBalancer
+```
+
+Now you can deploy the same chart differently.
+
+```sh
+## Development
+helm install nginx-dev ./nginx-chart -f environments/development.yaml
+
+## Staging
+helm install nginx-staging ./nginx-chart -f environments/staging.yaml
+
+## Production
+helm install nginx-prod ./nginx-chart -f environments/production.yaml
+```
+
+This provides configuration reuse without duplicating Kubernetes manifests.
+
+You can also override individual values using `--set`:
+
+```sh
+helm install nginx-prod ./nginx-chart \
+  --set replicaCount=5 \
+  --set image.tag=1.28
+```
+
+Configuration precedence: values supplied using `--set` override values supplied through `-f`, which override the chart's default `values.yaml`.
+
+## Helm Commands
+
+These are the main commands you will use.
+
+### 1. Chart management
+
+| Command                      | Description                                        |
+| ---------------------------- | -------------------------------------------------- |
+| `helm create nginx`          | Creates a new chart scaffold.                      |
+| `helm lint ./nginx-chart`    | Validates chart structure and basic configuration. |
+| `helm show chart nginx`      | Displays chart metadata.                           |
+| `helm show values nginx`     | Displays default chart values.                     |
+| `helm package ./nginx-chart` | Packages a chart into a `.tgz` archive.            |
+
+### 2. Installation and deployment
+
+| Command                                               | Description                                  |
+| ----------------------------------------------------- | -------------------------------------------- |
+| `helm install nginx ./nginx-chart`                    | Installs a chart.                            |
+| `helm install nginx ./nginx-chart -f production.yaml` | Installs using custom values.                |
+| `helm upgrade nginx ./nginx-chart`                    | Upgrades an existing release.                |
+| `helm upgrade --install nginx ./nginx-chart`          | Installs if missing, otherwise upgrades.     |
+| `helm uninstall nginx`                                | Removes a release and its managed resources. |
+
+### 3. Release management
+
+| Command                   | Description                                  |
+| ------------------------- | -------------------------------------------- |
+| `helm list`               | Lists releases in the current namespace.     |
+| `helm list -A`            | Lists releases across all namespaces.        |
+| `helm status nginx`       | Displays release status.                     |
+| `helm history nginx`      | Displays release revision history.           |
+| `helm rollback nginx 1`   | Rolls back to revision 1.                    |
+| `helm get values nginx`   | Displays release values.                     |
+| `helm get manifest nginx` | Displays the generated Kubernetes manifests. |
+
+### 4. Debugging and rendering
+
+These commands are particularly useful when learning Helm.
+
+```sh
+## Render templates locally without installing anything.
+helm template nginx ./nginx-chart
+
+## Render templates using custom values.
+helm template nginx ./nginx-chart -f production.yaml
+
+## Validate chart.
+helm lint ./nginx-chart
+
+## Simulate an installation or upgrade.
+helm install nginx ./nginx-chart --dry-run --debug
+```
+
+`helm template` is particularly important because it allows you to inspect the exact YAML Helm generates before sending anything to Kubernetes.
+
+## Helm Releases and Versioning
+
+A release is an installed instance of a Helm chart.
+
+For example:
+
+```sh
+helm install nginx ./nginx-chart
+```
+
+Here:
+
+- `nginx` is the release name.
+- `./nginx-chart` is the chart location.
+
+Now upgrade it:
+
+```sh
+helm upgrade nginx ./nginx-chart --set replicaCount=5
+```
+
+Helm creates a new release revision.
+
+![Helm release history](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/concepts/deployment-and-release/helm/Helm-release-history.png)
+{/* 1. Revision 1
+
+   Initial installation
+
+   2 replicas, Nginx 1.27
+2. Revision 2
+
+   Upgrade
+
+   5 replicas, Nginx 1.27
+3. Revision 3
+
+   Upgrade
+
+   5 replicas, Nginx 1.28
+4. Rollback to revision 1
+
+   Rollback
+
+   Returns to the previous chart configuration and release state. */}
+
+Helm stores release information in Kubernetes Secrets by default.
+
+You can inspect them:
+
+```sh
+kubectl get secrets -n default
+```
+
+Typical names look like:
+
+```
+sh.helm.release.v1.nginx.v1
+sh.helm.release.v1.nginx.v2
+sh.helm.release.v1.nginx.v3
+```
+
+Note that Helm rollback is not a universal rollback of all external effects. For example, database migrations, external cloud resources, or persistent data changes may not be reversed automatically.
+
+## Helm Repositories and Public Charts
+
+You do not always need to create your own charts.
+
+You can use charts published by other developers and organizations.
+
+A Helm repository is a location where Helm charts are published and distributed.
+
+For example, Bitnami publishes charts for applications such as:
+
+- PostgreSQL
+- Redis
+- RabbitMQ
+- MongoDB
+
+The general workflow is:
+
+```sh
+## Add a chart repository.
+helm repo add bitnami https://charts.bitnami.com/bitnami
+
+## Update repository information.
+helm repo update
+
+## Search available charts.
+helm search repo bitnami
+
+## Install Redis.
+helm install my-redis bitnami/redis
+
+## Inspect chart configuration.
+helm show values bitnami/redis
+```
+
+Repositories are not the only distribution mechanism. Helm charts can also be distributed as packaged `.tgz` files or through OCI-compatible container registries.
+
+For example, an OCI chart can be installed using:
+
+```sh
+helm install my-chart oci://registry.example.com/charts/my-chart
+```
+
+## Helm vs kubectl
+
+This is an important distinction.
+
+| Feature                   | kubectl                                | Helm                                       |
+| ------------------------- | -------------------------------------- | ------------------------------------------ |
+| Purpose                   | Manage Kubernetes resources            | Package and manage Kubernetes applications |
+| Configuration             | YAML manifests                         | YAML templates + values                    |
+| Reusability               | Requires manual organization and reuse | Built-in chart templating                  |
+| Environment configuration | Separate manifests or overlays         | Separate values files                      |
+| Installation              | `kubectl apply`                        | `helm install`                             |
+| Upgrades                  | Apply updated manifests                | `helm upgrade`                             |
+| Rollbacks                 | Requires additional mechanisms         | Release revision rollback                  |
+| Application packaging     | No built-in chart concept              | Helm charts                                |
+
+They are complementary tools, not competing tools.
+
+For example:
+
+```
+kubectl get pods
+kubectl get deployments
+kubectl get services
+```
+
+You can still use `kubectl` to inspect resources installed through Helm.
+
+Similarly, Helm can manage the lifecycle of those resources.
+
+## Helm vs Kustomize
+
+You will often encounter Kustomize alongside Helm.
+
+Both solve Kubernetes configuration reuse, but they approach the problem differently.
+
+| Feature              | Helm                      | Kustomize                                    |
+| -------------------- | ------------------------- | -------------------------------------------- |
+| Approach             | Template-based            | Overlay-based                                |
+| Main concept         | Charts                    | Bases and overlays                           |
+| Configuration        | Values                    | Patches and replacements                     |
+| Templating           | Go templates              | No general-purpose template engine           |
+| Packaging            | Charts                    | Directory-based configurations               |
+| Releases and history | Built-in                  | Not built in                                 |
+| Rollbacks            | Built-in release rollback | Usually handled by Git or deployment tooling |
+
+Example:
+
+Helm
+
+```yml
+replicas: {{ .Values.replicaCount }}
+```
+
+Kustomize
+
+```yml
+## kustomization.yaml
+resources:
+  - deployment.yaml
+
+replicas:
+  - name: nginx
+    count: 5
+```
+
+For smaller system landscapes with only a few Deployment objects, simpler templating tools can be sufficient. For example, if you are already familiar with **Ansible**
+and its **Jinja2** templates, they can be used instead. Also, kubectl itself comes with
+built-in support for Kustomize, offering a template-free alternative to customize
+Kubernetes manifest files.
+
+A practical guideline:
+
+- Use Helm when you need reusable application packages, configurable templates, and release management.
+- Use Kustomize when you want to maintain Kubernetes YAML and apply environment-specific overlays without introducing a template engine.
+- You can also use both together in a deployment workflow.
+
+## Helm in a Real Kubernetes Architecture
+
+Consider your microservices application:
+
+- Product Service
+- Recommendation Service
+- Review Service
+- Product Composite Service
+- MongoDB
+- RabbitMQ
+- API Gateway
+
+Without Helm, you might maintain separate manifests for every application and environment.
+
+With Helm, you could organize the deployment as follows:
+
+```
+kubernetes/
+│
+├── charts/
+│   ├── product-service/
+│   ├── recommendation-service/
+│   ├── review-service/
+│   ├── product-composite/
+│   ├── api-gateway/
+│   └── infrastructure/
+│       ├── mongodb/
+│       └── rabbitmq/
+│
+├── environments/
+│   ├── development/
+│   │   ├── product.yaml
+│   │   ├── recommendation.yaml
+│   │   └── gateway.yaml
+│   │
+│   ├── staging/
+│   │
+│   └── production/
+│
+└── README.md
+```
+
+You could deploy each microservice independently:
+
+```sh
+helm upgrade --install product \
+  ./charts/product-service \
+  -f environments/development/product.yaml
+
+helm upgrade --install recommendation \
+  ./charts/recommendation-service \
+  -f environments/development/recommendation.yaml
+```
+
+For larger applications, you can also use an umbrella chart that declares multiple dependent charts.
+
+A Helm chart dependency can be declared in `Chart.yaml`:
+
+```yml
+apiVersion: v2
+name: ecommerce
+version: 1.0.0
+
+dependencies:
+  - name: product-service
+    version: 1.0.0
+    repository: "file://../product-service"
+
+  - name: recommendation-service
+    version: 1.0.0
+    repository: "file://../recommendation-service"
+```
+
+This allows you to manage several related charts through one parent chart.
+
+For production, consider whether independently deployed microservices should remain independently managed releases rather than coupling all their lifecycles into one umbrella release.
+
+## Helm Limitations and Important Considerations
+
+Helm is useful, but it does not solve every Kubernetes deployment problem.
+
+| Concern       | Explanation                                                                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secrets       | Helm values files should not contain unprotected production credentials. Use Kubernetes Secrets integrated with an appropriate secret-management solution. |
+| Dependencies  | Chart dependencies must be managed and versioned carefully.                                                                                                |
+| Rollbacks     | Rollbacks do not automatically undo database migrations or external side effects.                                                                          |
+| State         | Helm tracks release state, but Kubernetes controllers still manage runtime state.                                                                          |
+| Configuration | Poorly structured templates can become difficult to maintain.                                                                                              |
+| Drift         | Manual changes made using `kubectl` can cause differences between the deployed resources and the chart's intended configuration.                           |
+
+Also, Helm is not itself a continuous deployment system.
+
+For automated Git-based deployments, it is commonly integrated with tools such as:
+
+- Argo CD
+- Flux CD
+- GitLab CI/CD
+- GitHub Actions
+- Jenkins
+
+For example, Argo CD can use Helm charts as an application source and continuously reconcile the cluster with the desired configuration stored in Git.
+
+## Recommended Helm Learning Roadmap
+
+For your Kubernetes study structure, I would organize Helm under:
+
+`infrastructure-devops/orchestration/kubernetes/package-management/helm/`
+
+Here is a suggested TOC:
+
+### Helm Learning Roadmap
+
+From fundamentals to production deployment
+
+1. Helm Fundamentals
+   - What is Helm?
+   - Why Kubernetes needs package management
+   - Helm architecture
+   - Helm 3 architecture and Tiller removal
+   - Helm vs kubectl vs Kustomize
+2. Helm Installation and Configuration
+   - Installing Helm CLI
+   - Connecting Helm to Kubernetes
+   - Helm commands
+   - Namespaces and contexts
+   - Helm environment configuration
+3. Helm Charts
+   - Chart structure
+   - Chart.yaml
+   - values.yaml
+   - templates/
+   - \_helpers.tpl
+   - NOTES.txt
+   - Chart dependencies
+   - Chart versioning
+4. Helm Templating
+   - Go template syntax
+   - Values and built-in objects
+   - Conditionals and loops
+   - Named templates
+   - Template functions
+   - Pipelines
+   - Include and required
+   - Template validation
+5. Chart Configuration
+   - Default values
+   - Custom values files
+   - Environment-specific configuration
+   - Values precedence
+   - Schema validation using values.schema.json
+   - Secrets management
+6. Chart Development and Testing
+   - Creating charts
+   - Linting
+   - Rendering templates
+   - Dry-run deployments
+   - Unit testing
+   - Integration testing
+   - Chart packaging
+7. Release Management
+   - Installing releases
+   - Upgrading releases
+   - Rollbacks
+   - Release history
+   - Release storage
+   - Uninstalling releases
+8. Chart Distribution
+   - Helm repositories
+   - Repository indexing
+   - Chart publishing
+   - OCI registries
+   - Chart provenance and signing
+   - Chart version management
+9. Advanced Helm
+   - Chart dependencies
+   - Umbrella charts
+   - Library charts
+   - Hooks
+   - CRDs
+   - Post-renderers
+   - Helm plugins
+10. Helm in CI/CD and GitOps
+    - Helm in Jenkins/GitHub Actions
+    - Helm with Argo CD
+    - Helm with Flux CD
+    - Environment promotion
+    - Automated deployments
+    - Rollback strategies
+11. Production Best Practices
+    - Chart design
+    - Resource requests and limits
+    - Probes
+    - Security
+    - Secrets
+    - Version pinning
+    - Upgrade strategies
+    - Troubleshooting
+
+### 15. Practical Labs
+
+I recommend progressing through these labs in order:
+
+| Lab                              | Objective                                                                  |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| 1. First Helm installation       | Install Nginx using an existing public chart.                              |
+| 2. Create your first chart       | Convert your existing Nginx Deployment and Service YAML into a Helm chart. |
+| 3. Template Kubernetes resources | Replace hardcoded values with Helm template expressions.                   |
+| 4. Environment configuration     | Deploy Nginx to development and production using separate values files.    |
+| 5. Upgrade and rollback          | Change the image version and replica count, then roll back.                |
+| 6. Chart dependencies            | Deploy an application with a database dependency.                          |
+| 7. Microservices deployment      | Package your Spring Boot microservices into individual charts.             |
+| 8. GitOps deployment             | Deploy your Helm charts using Argo CD.                                     |
+
+My recommendation: Start with Lab 2 using the Nginx Deployment and NodePort Service manifests you have already been studying. This makes the connection between ordinary Kubernetes manifests and Helm templates very clear.
+
+The key concept to remember is:
+
+Kubernetes manifests describe the resources you want. Helm charts package and parameterize those manifests, while Helm releases manage their deployment lifecycle. z

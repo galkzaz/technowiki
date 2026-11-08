@@ -1,0 +1,308 @@
+This paragraph describes an important part of LLM deployment: preparing the model for execution and choosing an inference engine.
+
+Let's break it down, especially from a software engineering and Java backend perspective.
+
+## 1. Why do we need an inference engine?
+
+When you train an LLM, you produce a trained model containing billions of learned parameters (weights).
+
+For example:
+
+```
+Llama Model
+├── Architecture
+├── Configuration
+├── Tokenizer
+└── Learned Weights
+    ├── Layer 1 weights
+    ├── Layer 2 weights
+    ├── Layer 3 weights
+    └── ...
+```
+
+However, having these weights does not automatically mean you can execute the model efficiently.
+
+You need software that knows how to:
+
+1. Load the model weights into RAM or GPU VRAM.
+2. Construct or initialize the model architecture.
+3. Process input tokens.
+4. Execute the neural network operations.
+5. Manage GPU memory and computational resources.
+6. Generate output tokens.
+7. Handle multiple inference requests efficiently.
+
+This software is called an Inference Engine (or is provided as part of an inference runtime/server).
+
+Think of it this way:
+
+- The model contains the learned knowledge and architecture.
+- The inference engine provides the execution machinery.
+- The application sends requests to the inference engine and receives generated responses.
+
+LLM inference architecture
+
+Java / Spring Boot Application
+
+Business logic and application APIs
+
+HTTP REST / gRPC
+
+LLM Inference Server / Engine
+
+Model loading, execution, memory management, token generation
+
+LLM Model Artifact
+
+Weights, architecture configuration, tokenizer
+
+Hardware
+
+CPU · GPU · RAM · GPU VRAM
+
+## 2. What are ONNX, GGUF, and Safetensors?
+
+These are formats used to represent or store model data. They are not inference engines themselves.
+
+Each has a different purpose.
+
+[Open Neural Network Exchange - ONNX Logo PNG Vector (SVG) Free Download](https://images.openai.com/static-rsc-4/ADlDw839V9H7fZHd63xcgrg8KAAXYnfzuVihTWDiJl3IY3kVmKQKC5eD5Tk6dIPAgE3m2LVuCL8zfJGbr6Uu-dYMU2-aysFvIqkcqWf6kT1L9MopmLs92HOKAmbOqF9uuVKMJreDG3WXHhAykBsG2ctZShcHc6WA0XUO_qIBo8o?purpose=inline)
+
+A. ONNX
+
+Interoperability format
+
+- Represents a model as a computational graph.
+- Supports exchanging models between different frameworks.
+- Can be executed using ONNX Runtime.
+- Supports CPU and several accelerator backends.
+
+Typical use: Deploying models across different frameworks and hardware environments.
+
+[GGUF: квантизация с калибровкой (imatrix) / Хабр](https://images.openai.com/static-rsc-4/9-x5ju0kMoQRt2Paez20f4d-HMMtH4G-5DH1-ZrnHnrMReczaiWqT4pjuRu4FKKq7SiboM2Ozz6ixb_FwSKZgHEn6EftOGX6wSx6jyIfURTkI4JiL5_QN_K2G07hoUAxbJ4s8wNVk-jcjpe3bd9UELchf8RKGDUxWCaGemTUoLk?purpose=inline)
+
+B. GGUF
+
+LLM model format
+
+- Designed primarily for efficient LLM inference.
+- Stores model metadata, tensors, and related information.
+- Supports different quantization levels.
+- Commonly used with llama.cpp.
+
+Typical use: Running quantized LLMs locally on CPUs, GPUs, and mixed hardware.
+
+[Understanding SafeTensors: A Secure Alternative to Pickle for ML Models - DEV Community](https://images.openai.com/static-rsc-4/oKpqkA0Ob9RX0JVkKMFTXOgctenVAzKcK22v56_kkoW7tCciSWbPzP3e-RedKlqEOsRR5h1SuhYkioYYF3j1jItH6w5r9GdyWWycDJZaEFItEQJUSk4HjR0CtfdPircW2ZFvMkC4HWPNLx4abTDBPziljajmS7gS7Ia0JRSr1RY?purpose=inline)
+
+C. Safetensors
+
+Tensor storage format
+
+- Stores model tensors (weights).
+- Designed for safe and efficient loading.
+- Common in Hugging Face model repositories.
+- Does not itself define the complete inference execution process.
+
+Typical use: Storing and distributing model weights for frameworks such as PyTorch and Transformers.
+
+### Comparison
+
+| Feature        | ONNX                                         | GGUF                                         | Safetensors                           |
+| -------------- | -------------------------------------------- | -------------------------------------------- | ------------------------------------- |
+| Main purpose   | Model representation and exchange            | LLM storage and execution-oriented packaging | Tensor storage                        |
+| Quantization   | Supported through compatible representations | Widely supported                             | Possible, but not its primary purpose |
+| Common runtime | ONNX Runtime                                 | llama.cpp                                    | PyTorch / Transformers                |
+| CPU inference  | Yes                                          | Yes                                          | Depends on runtime                    |
+| GPU inference  | Yes                                          | Yes                                          | Depends on runtime                    |
+
+Important distinction: These formats are not interchangeable in every situation. The inference engine must support the model architecture, operators, and format you choose.
+
+## 3. What is an Inference Engine?
+
+An inference engine is the software responsible for executing a trained model to produce predictions or generated output.
+
+Different engines specialize in different environments.
+
+Here are important examples:
+
+| Inference engine | Main purpose                       | Typical environment        |
+| ---------------- | ---------------------------------- | -------------------------- |
+| llama.cpp        | Efficient local LLM inference      | CPU, GPU, edge             |
+| vLLM             | High-throughput LLM serving        | GPU servers                |
+| TensorRT-LLM     | Optimized NVIDIA GPU LLM inference | NVIDIA GPUs                |
+| ONNX Runtime     | General model inference            | CPU, GPU, accelerators     |
+| Hugging Face TGI | LLM serving                        | GPU infrastructure         |
+| Ollama           | Simplified local LLM deployment    | Local machines and servers |
+
+### Example: Same model, different inference engines
+
+Imagine you want to deploy Llama 3.1 8B.
+
+You could use:
+
+```
+                 Llama 3.1 8B
+                       |
+          +------------+------------+
+          |            |            |
+          v            v            v
+      llama.cpp       vLLM       TensorRT-LLM
+          |            |            |
+          v            v            v
+      Local CPU    GPU Server   NVIDIA GPU
+```
+
+The same underlying model can be executed using different inference engines, provided the model format and architecture are supported.
+
+However, performance, hardware requirements, memory consumption, and serving capabilities can differ significantly.
+
+## 4. How do we choose an inference engine?
+
+This is where the paragraph introduces an important software engineering concept: Nonfunctional Requirements (NFRs).
+
+A Java developer may not implement the inference engine, but the developer helps determine the requirements that influence its selection.
+
+Consider these requirements:
+
+| Nonfunctional requirement | Question to answer                         | Example                          |
+| ------------------------- | ------------------------------------------ | -------------------------------- |
+| Latency                   | How quickly should a response arrive?      | Under 2 seconds                  |
+| Throughput                | How many requests must be processed?       | 1,000 requests/minute            |
+| Scalability               | Can the system handle increasing users?    | Scale to 10,000 concurrent users |
+| Availability              | How often must the service be operational? | 99.9%                            |
+| Resource consumption      | How much hardware can we afford?           | Maximum GPU memory budget        |
+| Security                  | Where can model data be processed?         | On-premises deployment           |
+| Cost                      | What is the acceptable operating cost?     | Monthly GPU budget               |
+
+### Latency vs. Throughput
+
+These two requirements are particularly important.
+
+Latency measures how long it takes to process a request.
+
+For an LLM, you should distinguish:
+
+- Time to first token (TTFT): Time until the first generated token arrives.
+- Inter-token latency: Time between subsequent generated tokens.
+- End-to-end latency: Total time to finish generating the response.
+
+Throughput measures how much work the system can process over time.
+
+For LLMs, it can be measured as:
+
+- Requests per second.
+- Input tokens per second.
+- Output tokens per second.
+
+For example:
+
+| Engine   | TTFT   | Output throughput |
+| -------- | ------ | ----------------- |
+| Engine A | 200 ms | 50 tokens/sec     |
+| Engine B | 500 ms | 200 tokens/sec    |
+
+These are hypothetical measurements.
+
+Engine A might be preferable for an interactive chatbot where users value immediate responses. Engine B might be preferable for a high-volume batch generation system.
+
+The best choice depends on the application's requirements and workload.
+
+## 5. How does this relate to Java developers?
+
+Consider a Spring Boot application that provides an AI-powered customer support service.
+
+You don't necessarily need to run the LLM inside the Java application.
+
+Instead, deploy the LLM separately and communicate with it through an API.
+
+```
+             Customer
+                 |
+                 v
+        Spring Boot Backend
+                 |
+                 v
+          AI Integration
+                 |
+           HTTP / REST
+                 |
+                 v
+          LLM Inference Server
+                 |
+                 v
+             Llama 3.1
+                 |
+                 v
+          Generated Response
+```
+
+For example, your Java application might communicate with a vLLM server through its OpenAI-compatible API.
+
+A simplified Spring Boot client:
+
+```
+@Service
+public class LlmService {
+
+    private final RestClient restClient;
+
+    public LlmService(RestClient.Builder builder) {
+        this.restClient = builder
+            .baseUrl("http://localhost:8000")
+            .build();
+    }
+
+    public String generate(String prompt) {
+
+        return restClient.post()
+            .uri("/v1/chat/completions")
+            .body(Map.of(
+                "model", "meta-llama/Llama-3.1-8B-Instruct",
+                "messages", List.of(
+                    Map.of(
+                        "role", "user",
+                        "content", prompt
+                    )
+                )
+            ))
+            .retrieve()
+            .body(String.class);
+    }
+}
+```
+
+The Java application handles business logic, authentication, authorization, API integration, and other application responsibilities.
+
+The inference server handles model execution.
+
+This separation also allows you to replace the inference engine without necessarily changing your Java application's business logic, provided the API contract remains compatible.
+
+## 6. Putting the concepts together
+
+The paragraph you provided describes three related decisions:
+
+Step 1 — Choose a model format
+
+How will the trained model be represented and stored?
+
+Examples: ONNX, GGUF, Safetensors
+
+Step 2 — Choose an inference engine
+
+What software will load and execute the model?
+
+Examples: vLLM, llama.cpp, ONNX Runtime, TensorRT-LLM
+
+Step 3 — Choose infrastructure based on NFRs
+
+What hardware and deployment environment are needed?
+
+Examples: CPU, GPU, cloud, on-premises, Kubernetes
+
+Final result
+
+An inference service that satisfies the application's latency, throughput, scalability, cost, and security requirements.
+
+The key idea: Model format, inference engine, and infrastructure are three separate but related deployment decisions. Together, they determine how efficiently your LLM operates in production.
+
+For your roadmap, I would place this topic under `MLOps → Model Deployment → LLM Deployment → Model Formats and Inference Engines`.

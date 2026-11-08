@@ -1,0 +1,1426 @@
+# StatefulSets
+
+## Overview
+## Stateless vs. Stateful Workloads
+## StatefulSet Architecture
+## StatefulSet Components
+### Stable Network Identity
+### Stable Storage Identity
+### Ordered Pod Deployment
+### Ordered Pod Termination
+## StatefulSet and Headless Services
+## StatefulSet and Persistent Storage
+### VolumeClaimTemplates
+### PersistentVolumeClaims
+### PersistentVolumes
+## Pod Management Policies
+### OrderedReady
+### Parallel
+## Update Strategies
+### RollingUpdate
+### OnDelete
+## Scaling StatefulSets
+## StatefulSet Lifecycle and Pod Recovery
+## Running Databases and Message Brokers on Kubernetes
+### StatefulSet vs. Deployment
+### StatefulSet Limitations
+### Kubernetes Operators
+### Database Operators
+### External vs. In-Cluster Databases
+
+#### 1. Overview
+
+When deploying applications on Kubernetes, one important architectural decision is where to run stateful services such as:
+
+- Relational databases: MySQL, PostgreSQL, MariaDB.
+- NoSQL databases: MongoDB, Cassandra.
+- Message brokers: RabbitMQ, Apache Kafka.
+- Caching systems: Redis.
+- Search engines: Elasticsearch, OpenSearch.
+
+There are two main approaches:
+
+1. External databases: Run databases outside the Kubernetes cluster, either on dedicated infrastructure, virtual machines, Docker containers, or managed cloud database services.
+2. In-cluster databases: Run databases inside Kubernetes as stateful workloads, typically using StatefulSets, PersistentVolumes, PersistentVolumeClaims, and sometimes Kubernetes Operators.
+
+Both approaches are valid in production environments. The choice depends on operational capabilities, availability requirements, storage infrastructure, cost, scalability, and organizational architecture.
+
+The central architectural question is not whether Kubernetes can run databases. It can. The question is whether Kubernetes is the appropriate platform for managing the complete database lifecycle in a particular environment.
+
+Today, running production databases, message brokers, and other stateful services inside Kubernetes is a well-established practice.
+
+an important architectural principle: running a stateful service on Kubernetes does not automatically make it a good idea.
+
+The decision depends on operational complexity, reliability requirements, storage infrastructure, backup strategy, and the availability of managed services.
+
+
+Kubernetes now provides a much more mature foundation for stateful workloads.
+
+| Capability            | Earlier Kubernetes ecosystem   | Modern Kubernetes                 |
+| --------------------- | ------------------------------ | --------------------------------- |
+| Stateful workloads    | Relatively immature            | Well established                  |
+| StatefulSet           | Limited operational experience | Mature workload controller        |
+| Persistent storage    | Limited integrations           | CSI storage ecosystem             |
+| Dynamic provisioning  | Less widespread                | Standard capability               |
+| Storage orchestration | More manual                    | Automated through CSI drivers     |
+| Database operators    | Limited ecosystem              | Mature operator ecosystem         |
+| Automated recovery    | More manual                    | Operator-driven recovery          |
+| Monitoring            | Basic integrations             | Extensive observability ecosystem |
+
+#### 2. Understanding External Databases
+
+An external database is a database service that runs outside the Kubernetes cluster.
+
+Kubernetes hosts the application workloads, while database infrastructure is managed independently.
+
+For example, consider a microservices application containing:
+
+- Product Service
+- Recommendation Service
+- Review Service
+- Product Composite Service
+
+The application services run inside Kubernetes, but MySQL, MongoDB, and RabbitMQ run outside the cluster.
+
+[Working with Microservices-14: Creating Amazon RDS MySQL(8.0.31) database for the Kubernetes cluster in the Production stage. | by Cumhur M. Akkaya | Medium](https://images.openai.com/static-rsc-4/_fg8fOLoid5PxvcsHeRCGdGPxB1VUYvtBrCbXbK7fhMfUiLUPweDFkzXbosezabGR4CTIBj7JcAOXVGdW6qF5bO32xRZ_kl9KJ_Rvwdc3-9DhiKXJlvtYbLMrysQfv_coWhA3DnM3clwSmVySmIyTh9ITOkokbk4BQxtoBs0Lps?purpose=inline)
+
+[cmakkaya.medium.com](https://cmakkaya.medium.com/working-with-microservices-14-creating-amazon-rds-mysql-database-for-kubernetes-cluster-in-the-5771a6208469?utm_source=chatgpt.com)
+
+##### 2.1 External Database Architecture
+
+```
+                  Kubernetes Cluster
+       ┌─────────────────────────────────────┐
+       │                                     │
+       │       Application Workloads         │
+       │                                     │
+       │  ┌─────────────────────────────┐    │
+       │  │ Product Service             │    │
+       │  └──────────────┬──────────────┘    │
+       │                 │                   │
+       │  ┌──────────────▼──────────────┐    │
+       │  │ Recommendation Service      │    │
+       │  └──────────────┬──────────────┘    │
+       │                 │                   │
+       │  ┌──────────────▼──────────────┐    │
+       │  │ Review Service              │    │
+       │  └──────────────┬──────────────┘    │
+       │                 │                   │
+       └─────────────────┼───────────────────┘
+                         │
+                  Network Connection
+                         │
+             ┌───────────▼────────────┐
+             │ External Infrastructure│
+             │                        │
+             │  MySQL                 │
+             │  MongoDB               │
+             │  RabbitMQ              │
+             │                        │
+             └────────────────────────┘
+```
+
+The application Pods communicate with databases through network connections.
+
+For example:
+
+```
+spring.datasource.url=jdbc:mysql://mysql.example.com:3306/products
+```
+
+The database hostname resolves to an external database endpoint rather than a Kubernetes Service.
+
+##### 2.2 Types of External Databases
+
+External databases can be deployed in several ways.
+
+A. Self-managed databases on virtual machines
+
+The organization provisions virtual machines and installs database software.
+
+```
+Kubernetes Cluster
+       |
+       | Network
+       |
+       +----> VM 1: MySQL
+       |
+       +----> VM 2: MongoDB
+       |
+       +----> VM 3: RabbitMQ
+```
+
+The organization manages:
+
+- Database installation and configuration.
+- Operating system updates.
+- Database upgrades.
+- Replication and clustering.
+- Backup and recovery.
+- Monitoring and availability.
+
+This approach provides considerable control but requires database administration expertise.
+
+B. Databases running in Docker containers outside Kubernetes
+
+This is the approach used in the book's example.
+
+```
+Development Machine
+│
+├── Kubernetes Cluster
+│   ├── Product Service
+│   ├── Recommendation Service
+│   └── Review Service
+│
+└── Docker Compose
+    ├── MySQL Container
+    ├── MongoDB Container
+    └── RabbitMQ Container
+```
+
+Docker Compose manages the database containers independently of Kubernetes.
+
+This is useful for development and educational environments because it allows you to practice Kubernetes application deployment without introducing database orchestration complexity.
+
+However, running databases as ordinary Docker containers does not automatically provide production-grade availability, replication, or disaster recovery.
+
+C. Managed database services (DBaaS)
+
+Cloud providers offer database services where the provider manages much of the underlying database infrastructure.
+
+Examples:
+
+| Provider        | Managed database services                                                |
+| --------------- | ------------------------------------------------------------------------ |
+| AWS             | Amazon RDS, Aurora, DocumentDB, Amazon MQ                                |
+| Microsoft Azure | Azure Database for MySQL, Azure Database for PostgreSQL, Azure Cosmos DB |
+| Google Cloud    | Cloud SQL, AlloyDB, Firestore                                            |
+| MongoDB         | MongoDB Atlas                                                            |
+
+[A Beginner’s Guide to RDS Backup and Restore on AWS - DEV Community](https://images.openai.com/static-rsc-4/6X9vtEV7_csavwt5DaOfgw5Vq-JWcBYbwIikr3WajaZyNsIHMT7PftOne40zzjR9n5j8X_nH2LngX0NN71FH_4BekfTkohFmeZYsjkM9jD2TohRWic8KtKGxjxF2ZuydpWNsKwVybOoCK6OaEnQPhAJKF5v2esTbfZGoWxDC15Q?purpose=inline)
+
+[Expanding MongoDB Atlas availability on GCP | Google Cloud Blog](https://images.openai.com/static-rsc-4/3nWLsyKLF-AWMR6mT6vhl4-lchMx9Zh-_0Y3aqyRdnBd9rvotJ9Qnb2aJy0g4AfLeY5jmzriwcEJYmghnAvwivtjzh0281EPOTXStggu2LXRwkKUeaNYVg1Xu8rvLvZlSj0tYhoboB-ChTTKZvlHfBFba6bphGB19m3u3dvAzFQ?purpose=inline)
+
+[Best practices for setting up Cloud SQL for MySQL Instance | Google Cloud](https://images.openai.com/static-rsc-4/1gZZUEZKZHnY9kte214sGwICvx_vYUzscngqNXIJ-yhxNFRYFkFeACIgOWiMAzCdNJ7BG1dI9Z1yWeE8YraqgCl4VEs6RFKwPcUhtxOHL-eZQtz8kGnGsITnBrC8_JV6Os2QTP6tkSzFom8lFxKUq22z2tlcz6RFkqkL1FR8gJI?purpose=inline)
+
+[Amazon RDS on AWS](https://images.openai.com/static-rsc-4/oEw66neH43nawe_XWPodRj67lxXj_4ClbTIt1whEl9vOnrBiEuoFial_DVo94FFTfyADJNMqVpksSUdJ2QK6fcJv6yxPCENUQ5U6Ikhc-jazoLOuCvbfgdaOnYB8ItEPNVvpYtjNIwlzHnh_YwxaCq6F2FhYcSQsXDhyk5wKHyY?purpose=inline)
+
+[Personalized Retail Media Platforms—Powered by MongoDB | MongoDB](https://images.openai.com/static-rsc-4/K_YiymOkIrZcNw0dUyVQkSQPQ5XHwzET3eQaId_lm2nBFHUfVW55vkVNaV8pCaEUyPS-YQipqM-pg8BnP_vONujP0ego5EX-I0M0Y9R8sSe7XkEKnGjIIma1bvQd3kB08MGf8iWq5O5sjusPy3T92F83mNdqZDmVoepeAzTLl28?purpose=inline)
+
+[About disaster recovery (DR) in Cloud SQL  |  Cloud SQL for MySQL  |  Google Cloud Documentation](https://images.openai.com/static-rsc-4/7X1Ui9y_YrA7dOiZedYkROH5D1qAOcAEkiN9fKPgGYXqUwTcSyAyZAytiK0u-Kd3yZF8yyLa5_aUVeodTYre756U95MH9zjy7uzvtNHVBywbl_z-yGqF7IAjB3odFWiGts_RH9pmzgRZpsrVw-V8s7C18w-gq2X7pK10Y7A7ZL8?purpose=inline)
+
+The organization still manages database-level concerns such as schema design, queries, permissions, and capacity planning, but the provider handles many infrastructure responsibilities.
+
+The exact responsibilities depend on the service and configuration.
+
+#### 3. Understanding In-Cluster Databases
+
+An in-cluster database is a database deployed inside the Kubernetes cluster.
+
+Unlike an external database, its Pods are managed by Kubernetes controllers and its storage is integrated with Kubernetes storage resources.
+
+Typical Kubernetes resources include:
+
+- StatefulSet
+- PersistentVolumeClaim (PVC)
+- PersistentVolume (PV)
+- StorageClass
+- Headless Service
+- ClusterIP Service
+
+[Stateful Application in Kubernetes | Simplyblock](https://images.openai.com/static-rsc-4/oPfzH3TrUDyDwdRyT-rTzwbiXnYFq7wWYxfrl6ORY6qN2CagTadjOFPYWKXwu6fdFb9wAoFwqipxMeH_sM53B_ySNyBrSQniqXJYrJ1pLk_XtERBkrwQOy_jbN5-kgjvyj4iBK2g8bAJC6Mlo1Dnv3ukR7gXDfvq5CfYNQ1xiVg?purpose=inline)
+
+[simplyblock.io](https://simplyblock.io/glossary/stateful-application-in-kubernetes/?utm_source=chatgpt.com)
+
+##### 3.1 In-Cluster Database Architecture
+
+Consider a PostgreSQL database with three instances.
+
+```
+                  Kubernetes Cluster
+       ┌────────────────────────────────────┐
+       │                                    │
+       │          Application Pods          │
+       │                                    │
+       │       Product Service              │
+       │       Recommendation Service       │
+       │       Review Service               │
+       │                 │                  │
+       │                 ▼                  │
+       │        Database Service            │
+       │                 │                  │
+       │          Database Pods             │
+       │                                    │
+       │   ┌────────┐ ┌────────┐ ┌────────┐ │
+       │   │ DB-0   │ │ DB-1   │ │ DB-2   │ │
+       │   │Primary │ │Replica │ │Replica │ │
+       │   └───┬────┘ └───┬────┘ └───┬────┘ │
+       │       │          │          │      │
+       │   ┌───▼────┐ ┌───▼────┐ ┌───▼────┐ │
+       │   │ PVC-0  │ │ PVC-1  │ │ PVC-2  │ │
+       │   └───┬────┘ └───┬────┘ └───┬────┘ │
+       │       │          │          │      │
+       │   ┌───▼──────────▼──────────▼────┐ │
+       │   │     Persistent Storage       │ │
+       │   └──────────────────────────────┘ │
+       │                                    │
+       │          Database Operator        │
+       └────────────────────────────────────┘
+```
+
+The diagram illustrates a database cluster with a primary and two replicas. The primary/replica relationship is managed by database software and potentially a database Operator, not by StatefulSet itself.
+
+##### 3.2 Why StatefulSets Are Important
+
+A Deployment is primarily designed for stateless application Pods. Kubernetes can replace a failed Pod with another Pod without requiring the replacement to retain the previous Pod's identity.
+
+Databases have different requirements.
+
+For example, a database instance may need:
+
+- A stable identity.
+- A stable network hostname.
+- Persistent storage.
+- Predictable Pod creation and termination.
+- Ordered deployment and scaling.
+
+StatefulSets address these requirements.
+
+Consider a StatefulSet named `postgres`:
+
+```
+postgres-0
+postgres-1
+postgres-2
+```
+
+Each Pod receives a stable identity.
+
+Even if `postgres-1` is deleted and recreated, its replacement retains the same ordinal identity.
+
+Each Pod can also have its own PersistentVolumeClaim.
+
+```
+postgres-0 ─── postgres-pvc-postgres-0
+postgres-1 ─── postgres-pvc-postgres-1
+postgres-2 ─── postgres-pvc-postgres-2
+```
+
+When a Pod is rescheduled, Kubernetes can reattach its associated persistent storage, subject to the storage driver's capabilities and availability.
+
+Important: StatefulSet provides workload identity and storage association. It does not implement database replication, consistency, or automatic database failover.
+
+#### 4. Kubernetes Operators and Database Management
+
+One of the most important developments in the Kubernetes ecosystem is the Operator pattern.
+
+To understand why Operators matter, first consider what Kubernetes does and does not understand about a database.
+
+##### 4.1 What StatefulSet Manages vs. What a Database Needs
+
+A StatefulSet understands Kubernetes resources and Pod lifecycle operations.
+
+For example, it can:
+
+- Create database Pods.
+- Maintain stable Pod identities.
+- Associate Pods with persistent storage.
+- Recreate failed Pods.
+- Scale the number of Pods.
+- Apply configured update strategies.
+
+However, a StatefulSet does not understand database-specific operations.
+
+For example, it does not inherently know:
+
+- Which database instance is the primary.
+- Which instances are replicas.
+- How to replicate database transactions.
+- How to promote a replica when the primary fails.
+- How to prevent split-brain scenarios.
+- How to perform database-aware backups.
+- How to restore database consistency.
+
+This is where database Operators become useful.
+
+##### 4.2 What Is a Kubernetes Operator?
+
+A Kubernetes Operator is an application-specific controller that extends Kubernetes to manage the lifecycle of a particular application or service.
+
+It combines:
+
+1. Custom Resource Definition (CRD): Defines new Kubernetes API resources representing application-specific configurations.
+2. Custom Resource (CR): Describes the desired state of an application instance.
+3. Controller: Continuously observes the actual state and reconciles it with the desired state.
+
+For example, instead of manually creating several PostgreSQL Pods and configuring replication, you can declare a PostgreSQL cluster using a custom resource.
+
+```
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres-cluster
+spec:
+  instances: 3
+
+  storage:
+    size: 10Gi
+```
+
+Illustrative CloudNativePG Cluster resource; actual production configuration requires additional settings.
+
+The Operator observes this resource and performs the necessary operations to create and maintain the PostgreSQL cluster.
+
+##### 4.3 How the Operator Works
+
+[Understanding Kubernetes Operators - Earthly Blog](https://images.openai.com/static-rsc-4/-SLBDYrZpc1jtcEZv0OQ8vZg-skz-b_5YA5gcXq3dSO-HqPVrEUAy9jM17ufmaeUeK4E4N2t_dqXXIwqTbyPobERwKg_t0sTAMMVbdNUbY4OkfNEuq7rVglP3DQqm-NN7L03HPLIDsP8kbCepy7ZT_NWQ68SdQRUXptGyJZW-us?purpose=inline)
+
+[earthly.dev](https://earthly.dev/blog/kubernetes-operators/?utm_source=chatgpt.com)
+
+The process works as follows:
+
+1. An administrator creates a database custom resource.
+2. Kubernetes stores the desired configuration in its API.
+3. The Operator detects the resource.
+4. The Operator creates the required Kubernetes resources.
+5. The Operator configures database-specific functionality.
+6. The Operator continuously monitors the database cluster.
+7. If the actual state differs from the desired state, the Operator attempts to reconcile it.
+
+For example, suppose a PostgreSQL primary fails.
+
+```
+Before failure:
+
+  PostgreSQL Primary
+         |
+    Replication
+       /   \
+   Replica Replica
+     A       B
+
+
+After primary failure:
+
+  PostgreSQL Primary
+       FAILED
+
+   Replica A  Replica B
+       |
+       +----> Operator detects failure
+       |
+       +----> Promotes an eligible replica
+       |
+       +----> Reconfigures cluster
+       |
+       +----> Restores desired topology
+```
+
+The exact failover process depends on the database Operator and database technology.
+
+##### 4.4 Examples of Database Operators
+
+| Database / Service | Kubernetes solution          | Purpose                           |
+| ------------------ | ---------------------------- | --------------------------------- |
+| PostgreSQL         | CloudNativePG                | PostgreSQL cluster lifecycle      |
+| MySQL              | Percona Operator for MySQL   | MySQL clustering and management   |
+| MongoDB            | Percona Operator for MongoDB | MongoDB replica sets and sharding |
+| RabbitMQ           | RabbitMQ Cluster Operator    | RabbitMQ cluster lifecycle        |
+| Redis              | Redis-compatible Operators   | Redis deployment and management   |
+| Kafka              | Strimzi                      | Kafka cluster lifecycle           |
+
+Operators can automate many complicated tasks, but they do not eliminate the need for database administrators, operational expertise, or disaster recovery planning.
+
+#### 5. StatefulSet vs. Deployment for Databases
+
+A common question is:
+
+Why can't we simply deploy a database using a Deployment?
+
+Technically, it is possible to run a single-instance database using a Deployment with persistent storage. However, StatefulSet is generally a better fit for applications requiring stable identity and storage association.
+
+| Feature             | Deployment                         | StatefulSet                                       |
+| ------------------- | ---------------------------------- | ------------------------------------------------- |
+| Pod identity        | Generally interchangeable          | Stable ordinal identity                           |
+| Pod naming          | Generated names                    | Predictable names                                 |
+| Storage association | Requires additional configuration  | Supports per-Pod PVC templates                    |
+| Network identity    | Not inherently stable per Pod      | Stable Pod network identity with Headless Service |
+| Ordered deployment  | No StatefulSet ordering guarantees | Supports ordered deployment                       |
+| Ordered termination | No StatefulSet ordering guarantees | Supports ordered termination                      |
+| Scaling             | General-purpose                    | Supports stateful scaling semantics               |
+| Typical use         | Stateless applications             | Stateful applications                             |
+
+##### Example: Deployment
+
+```
+Deployment: mysql
+       |
+       ├── mysql-7d8f9a-x1
+       ├── mysql-7d8f9a-x2
+       └── mysql-7d8f9a-x3
+```
+
+The Pods are interchangeable from the Deployment controller's perspective.
+
+##### Example: StatefulSet
+
+```
+StatefulSet: mysql
+       |
+       ├── mysql-0
+       │      └── mysql-pvc-mysql-0
+       |
+       ├── mysql-1
+       │      └── mysql-pvc-mysql-1
+       |
+       └── mysql-2
+              └── mysql-pvc-mysql-2
+```
+
+Each Pod has a predictable identity and its own storage claim.
+
+Important distinction: StatefulSet is not a database clustering mechanism. It provides Kubernetes-level lifecycle management. The database software or Operator must handle database-level clustering.
+
+#### 6. Advantages of External Databases
+
+Let's examine why organizations continue to use external databases even though Kubernetes supports stateful workloads.
+
+##### 6.1 Reduced Kubernetes Operational Complexity
+
+Running databases inside Kubernetes introduces additional operational responsibilities.
+
+For example, the team must understand:
+
+- StatefulSets.
+- PersistentVolumes and PersistentVolumeClaims.
+- StorageClasses and CSI drivers.
+- Database Operators.
+- Database replication.
+- Pod scheduling and topology.
+- Backup and restoration.
+- Storage failure scenarios.
+
+When using managed databases, the organization can delegate many infrastructure responsibilities to the cloud provider.
+
+##### 6.2 Independent Database Lifecycle
+
+Applications and databases have different lifecycle requirements.
+
+Consider:
+
+```
+Application Lifecycle:
+
+Build → Test → Deploy → Scale → Update
+
+Database Lifecycle:
+
+Provision → Initialize → Replicate → Backup
+         → Upgrade → Recover → Maintain
+```
+
+Applications may be deployed several times per day, while database upgrades may require extensive preparation and controlled maintenance windows.
+
+Keeping databases outside Kubernetes allows both environments to evolve independently.
+
+##### 6.3 Independent Availability
+
+Suppose a Kubernetes cluster experiences a serious failure.
+
+If the database runs externally, the database infrastructure may continue operating while the application cluster is being recovered.
+
+```
+             Kubernetes Cluster
+             ┌──────────────────┐
+             │                  │
+             │ Application Pods │
+             │                  │
+             │ Cluster Failure  │
+             └────────┬─────────┘
+                      │
+                      X
+                      │
+                      ▼
+             External Database
+             ┌──────────────────┐
+             │                  │
+             │ MySQL            │
+             │ MongoDB          │
+             │ RabbitMQ         │
+             │                  │
+             │ Still Running    │
+             └──────────────────┘
+```
+
+This separation can reduce the impact of Kubernetes cluster failures.
+
+However, the applications still need network connectivity to the databases, and the external databases must have their own high-availability architecture.
+
+##### 6.4 Managed Backup and Recovery
+
+Managed database services often provide features such as:
+
+- Automated backups.
+- Point-in-time recovery.
+- Database snapshots.
+- Replication.
+- Automated failover.
+- Monitoring and maintenance.
+
+These capabilities reduce the operational burden, although configuration, retention policies, recovery objectives, and restore testing remain the customer's responsibility.
+
+##### 6.5 Independent Scaling
+
+Application scaling and database scaling are not necessarily correlated.
+
+For example:
+
+```
+Application:
+
+Product Service
+  2 Pods → 10 Pods
+
+Database:
+
+MySQL
+  Remains at its existing capacity
+```
+
+Increasing the number of application Pods does not necessarily require increasing database instances.
+
+Likewise, database capacity can be increased independently of application deployment.
+
+#### 7. Disadvantages of External Databases
+
+External databases also introduce architectural trade-offs.
+
+##### 7.1 Network Latency
+
+Applications must communicate with databases over a network.
+
+```
+Application Pod
+      |
+      | Network request
+      ▼
+External Database
+      |
+      | Query execution
+      ▼
+Application Pod
+```
+
+Network latency can affect application response times, especially when an application makes many sequential database calls.
+
+However, an external database does not necessarily mean high latency. Databases deployed in the same cloud region and connected through private networking can have very good performance.
+
+##### 7.2 Network Dependency
+
+Applications depend on network connectivity to external database endpoints.
+
+Potential problems include:
+
+- Network interruptions.
+- DNS resolution failures.
+- Firewall misconfiguration.
+- Routing problems.
+- Connection exhaustion.
+- TLS certificate problems.
+
+Applications should use connection pooling, sensible timeouts, retries with backoff, and appropriate circuit-breaking strategies.
+
+##### 7.3 Additional Infrastructure Costs
+
+Managed database services can be expensive, particularly when running multiple database instances, replicas, and storage volumes.
+
+The actual comparison must include:
+
+- Database instance costs.
+- Storage costs.
+- Backup costs.
+- Network transfer costs.
+- Monitoring costs.
+- Engineering and operational costs.
+
+Self-managing a database is not automatically cheaper once operational staffing and infrastructure are included.
+
+##### 7.4 Vendor Dependency
+
+Using managed database services may introduce cloud-provider dependencies.
+
+For example:
+
+- Amazon RDS-specific features.
+- Azure database integrations.
+- Google Cloud SQL-specific configuration.
+
+Migrating to another provider might require configuration changes or database migration work.
+
+#### 8. Advantages of In-Cluster Databases
+
+Running databases inside Kubernetes also has several important advantages.
+
+##### 8.1 Unified Infrastructure Management
+
+Applications and databases can be managed through the same Kubernetes platform.
+
+For example, an organization can use:
+
+- Kubernetes manifests.
+- Helm charts.
+- GitOps.
+- Argo CD or Flux.
+- Kubernetes RBAC.
+- Prometheus and Grafana.
+
+The deployment and configuration of application infrastructure can be managed declaratively.
+
+##### 8.2 Infrastructure as Code
+
+Database infrastructure can be described using Kubernetes YAML manifests and custom resources.
+
+For example:
+
+```
+Git Repository
+     |
+     ▼
+Database Configuration
+     |
+     ▼
+GitOps Controller
+     |
+     ▼
+Kubernetes API
+     |
+     ▼
+Database Operator
+     |
+     ▼
+Database Cluster
+```
+
+This allows database configuration to be version-controlled, reviewed, and deployed through controlled infrastructure workflows.
+
+##### 8.3 Portability
+
+Kubernetes provides a relatively consistent API across different environments.
+
+An organization can deploy database workloads on:
+
+- Local Kubernetes clusters.
+- On-premises Kubernetes.
+- Amazon EKS.
+- Azure AKS.
+- Google GKE.
+
+However, portability is not automatic.
+
+Different environments may have different storage drivers, storage performance characteristics, networking capabilities, and backup integrations.
+
+##### 8.4 Better Integration with Kubernetes Ecosystem
+
+In-cluster databases can integrate with:
+
+- Kubernetes monitoring.
+- Logging systems.
+- Secret management.
+- Service discovery.
+- Network policies.
+- Resource quotas.
+- GitOps workflows.
+
+This provides a consistent operational environment.
+
+##### 8.5 Reduced External Infrastructure Dependency
+
+Organizations running Kubernetes on-premises may not have access to managed database services.
+
+Deploying databases inside Kubernetes allows them to operate database infrastructure using their existing computing and storage resources.
+
+This is particularly useful for private cloud, edge computing, and environments with strict infrastructure control requirements.
+
+#### 9. Disadvantages of In-Cluster Databases
+
+Despite its benefits, running databases inside Kubernetes introduces significant responsibilities.
+
+##### 9.1 Storage Complexity
+
+Database performance and reliability depend heavily on storage.
+
+Kubernetes uses PersistentVolumes and PersistentVolumeClaims to provide persistent storage.
+
+A PVC requests storage, while a PV represents the actual storage resource.
+
+```
+Database Pod
+     |
+     ▼
+PersistentVolumeClaim
+     |
+     ▼
+StorageClass
+     |
+     ▼
+CSI Driver
+     |
+     ▼
+Storage Infrastructure
+```
+
+The Container Storage Interface (CSI) allows Kubernetes to integrate with different storage systems.
+
+Examples include:
+
+- Cloud block storage.
+- Network-attached storage.
+- Distributed storage systems.
+- Local persistent storage.
+
+However, storage behavior varies.
+
+For example, some volumes can be attached to only one node at a time. If a database Pod moves to another node, the storage system may need to detach and reattach the volume.
+
+This can delay recovery.
+
+##### 9.2 Database Availability Is Not Guaranteed by Kubernetes
+
+Kubernetes can restart failed Pods, but restarting a database Pod does not necessarily restore database availability immediately.
+
+Consider:
+
+```
+Database Primary
+       |
+       X
+       |
+   Pod Failure
+       |
+       ▼
+Kubernetes Restarts Pod
+       |
+       ▼
+Database Recovery
+       |
+       ▼
+Database Available
+```
+
+Database startup may involve:
+
+- Recovering transaction logs.
+- Replaying database transactions.
+- Checking data consistency.
+- Reconnecting replicas.
+- Re-establishing replication.
+
+These processes take time.
+
+Kubernetes liveness and readiness probes also need to be designed carefully so they do not cause unnecessary restarts during database recovery.
+
+##### 9.3 Cluster Failure Can Affect Applications and Databases
+
+When both applications and databases run in the same Kubernetes cluster, a major cluster failure can affect both.
+
+```
+             Kubernetes Cluster
+       ┌────────────────────────────┐
+       │                            │
+       │  Application Services      │
+       │             │              │
+       │             ▼              │
+       │       Database Cluster     │
+       │                            │
+       │       Cluster Failure      │
+       │             │              │
+       │       Both Affected        │
+       └────────────────────────────┘
+```
+
+This does not mean that an in-cluster database cannot achieve high availability.
+
+It means that the architecture must account for common failure domains.
+
+For example, database replicas should be distributed across separate nodes and, where appropriate, separate availability zones.
+
+Backups should also be stored independently of the cluster.
+
+##### 9.4 Operational Complexity
+
+Running production databases on Kubernetes requires knowledge of two operational domains:
+
+1. Kubernetes administration.
+2. Database administration.
+
+A team needs to understand both Kubernetes-level and database-level failure scenarios.
+
+A database Operator helps automate operations, but someone must still understand its behavior and limitations.
+
+##### 9.5 Backup and Disaster Recovery
+
+PersistentVolumes provide persistent storage, not complete backup or disaster recovery.
+
+For example:
+
+```
+Database Pod
+     |
+     ▼
+PersistentVolume
+     |
+     ▼
+Database Data
+```
+
+If the storage system is corrupted or deleted, the data may be lost.
+
+A production architecture should include:
+
+- Automated database backups.
+- Transaction log backups where supported.
+- Point-in-time recovery.
+- Off-cluster backup storage.
+- Cross-zone or cross-region recovery where required.
+- Regular restoration testing.
+
+A database replica is not a substitute for a backup. Accidental deletion or logical corruption can be replicated to other instances.
+
+#### 10. Production Architecture Comparison
+
+Now let's compare both approaches from a production architecture perspective.
+
+##### 10.1 High-Level Comparison
+
+| Consideration          | External / Managed               | In-Cluster                           |
+| ---------------------- | -------------------------------- | ------------------------------------ |
+| Deployment location    | Outside Kubernetes               | Inside Kubernetes                    |
+| Lifecycle management   | Independent infrastructure       | Kubernetes controllers and Operators |
+| Storage management     | External storage infrastructure  | Kubernetes storage integration       |
+| Database replication   | Managed service or DBA           | Database software / Operator         |
+| High availability      | Managed HA or self-managed       | Database clustering and Operator     |
+| Backup                 | Provider or DBA-managed          | Operator or external backup solution |
+| Scaling                | Independent database scaling     | Operator and storage-aware scaling   |
+| Portability            | Depends on provider              | Potentially more portable            |
+| Operational complexity | Usually lower with DBaaS         | Usually higher                       |
+| Infrastructure control | Depends on service               | Greater control                      |
+| Kubernetes dependency  | Lower                            | Higher                               |
+| Cost                   | Managed-service premium possible | Infrastructure and operational costs |
+
+##### 10.2 Availability and Failure-Domain Comparison
+
+This is one of the most important architectural differences.
+
+Consider three possible failure scenarios:
+
+| Failure scenario                  | External database               | In-cluster database                                                             |
+| --------------------------------- | ------------------------------- | ------------------------------------------------------------------------------- |
+| Application Pod failure           | Database unaffected             | Database unaffected                                                             |
+| Kubernetes worker-node failure    | Database generally unaffected   | Database Pods may need rescheduling                                             |
+| Kubernetes control-plane failure  | Database can continue operating | Existing database processes may continue, but Kubernetes management is impaired |
+| Entire Kubernetes cluster failure | Database may remain available   | Database may become unavailable                                                 |
+| Database storage failure          | Depends on external storage HA  | Depends on PV/storage infrastructure                                            |
+
+Notice that an external database separates the database from the Kubernetes cluster's failure domain.
+
+However, an external database can still have its own failures. External placement alone does not guarantee high availability.
+
+##### 10.3 High Availability Is an Independent Design Concern
+
+Whether the database runs inside or outside Kubernetes, you still need a high-availability architecture.
+
+For example:
+
+External database with high availability
+
+Kubernetes application cluster
+
+App Pod 1
+
+App Pod 2
+
+External database infrastructure
+
+Database endpoint
+
+Stable application connection endpoint
+
+Primary
+
+Availability Zone A
+
+Standby
+
+Availability Zone B
+
+Database replication and managed failover
+
+This architecture allows application infrastructure and database infrastructure to have separate availability and recovery strategies.
+
+#### 11. Choosing Between External and In-Cluster Databases
+
+There is no universally correct answer. The decision should be based on the organization's infrastructure and operational requirements.
+
+##### 11.1 When to Prefer External Databases
+
+External databases are generally preferable when:
+
+1. The organization already uses managed database services.
+2. The team has limited Kubernetes database administration experience.
+3. The database is business-critical and requires mature managed HA capabilities.
+4. Database operations are handled by a dedicated DBA team.
+5. The database must remain available independently of Kubernetes cluster failures.
+6. The organization wants to minimize Kubernetes operational complexity.
+7. The database has specialized storage or performance requirements.
+
+Example: Enterprise application
+
+Imagine an enterprise application running on Amazon EKS.
+
+```
+AWS Environment
+│
+├── EKS Cluster
+│   ├── API Gateway
+│   ├── Product Service
+│   ├── Order Service
+│   └── Payment Service
+│
+├── Amazon RDS
+│   └── PostgreSQL
+│
+├── MongoDB Atlas
+│   └── MongoDB
+│
+└── Amazon MQ
+    └── RabbitMQ-compatible messaging
+```
+
+The application team manages Kubernetes workloads, while database infrastructure is managed through specialized services.
+
+This separation is particularly useful when database availability is more important than having a completely Kubernetes-native deployment model.
+
+##### 11.2 When to Prefer In-Cluster Databases
+
+In-cluster databases are worth considering when:
+
+1. The organization operates its own Kubernetes platform.
+2. Managed database services are unavailable or restricted.
+3. The team has strong Kubernetes and database expertise.
+4. Infrastructure portability is important.
+5. Database Operators provide the required functionality.
+6. The organization wants a unified declarative infrastructure workflow.
+7. Storage and networking infrastructure meet database requirements.
+
+Example: On-premises enterprise platform
+
+```
+On-Premises Infrastructure
+│
+└── Kubernetes Cluster
+    │
+    ├── Application Workloads
+    │   ├── Product Service
+    │   ├── Order Service
+    │   └── Payment Service
+    │
+    ├── Database Operators
+    │   ├── PostgreSQL Operator
+    │   └── MongoDB Operator
+    │
+    ├── Stateful Workloads
+    │   ├── PostgreSQL Cluster
+    │   └── MongoDB Cluster
+    │
+    └── Storage Infrastructure
+        └── Distributed Persistent Storage
+```
+
+This architecture can be attractive when an organization wants to operate its entire application and data platform on its own infrastructure.
+
+##### 11.3 When to Use Each Approach
+
+| Environment                        | Suggested approach                                              |
+| ---------------------------------- | --------------------------------------------------------------- |
+| Local learning environment         | Docker Compose or Kubernetes                                    |
+| Small development team             | External databases or simple in-cluster deployments             |
+| Small production environment       | Managed databases where affordable                              |
+| Enterprise cloud environment       | Usually managed databases                                       |
+| Enterprise on-premises environment | External databases or Operators                                 |
+| Private cloud                      | In-cluster databases are a valid option                         |
+| Edge computing                     | In-cluster databases may be necessary                           |
+| Highly regulated environment       | Depends on control, compliance, and infrastructure requirements |
+| Multi-cloud architecture           | Evaluate portability versus managed-service capabilities        |
+
+The word usually is important here. For example, some enterprises deliberately operate databases on Kubernetes because they have standardized their storage, Operators, security, and recovery processes.
+
+#### 12. Production Considerations for In-Cluster Databases
+
+Before running a production database inside Kubernetes, several areas deserve special attention.
+
+##### 12.1 Persistent Storage and CSI
+
+Use an appropriate StorageClass and CSI driver.
+
+Evaluate:
+
+- Storage durability.
+- IOPS and throughput.
+- Read/write latency.
+- Volume attachment behavior.
+- Multi-zone support.
+- Snapshot capabilities.
+- Expansion support.
+- Recovery behavior after node failure.
+
+Avoid assuming that every Kubernetes storage solution is suitable for database workloads.
+
+For example, a database with heavy random I/O may perform poorly on a storage backend designed primarily for general-purpose file sharing.
+
+##### 12.2 Replication and High Availability
+
+Use database-native replication or a suitable database Operator.
+
+For example, a three-instance PostgreSQL cluster might have:
+
+```
+                  PostgreSQL Cluster
+
+                  Primary (DB-0)
+                        |
+                Streaming Replication
+                   /          \
+                  ▼            ▼
+             Replica (DB-1) Replica (DB-2)
+```
+
+If DB-0 fails, the database management system or Operator can promote an eligible replica.
+
+However, failover must consider replication lag, data consistency, quorum, fencing, and split-brain prevention.
+
+##### 12.3 Pod Scheduling and Failure Domains
+
+Distribute database instances across different Kubernetes worker nodes.
+
+Use:
+
+- Pod anti-affinity.
+- Topology spread constraints.
+- Node affinity when appropriate.
+- PodDisruptionBudgets.
+
+For example:
+
+```
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: postgres
+```
+
+This example protects against voluntary disruptions reducing the number of matching available Pods below two.
+
+It does not prevent involuntary failures, and it does not guarantee database quorum or correctness.
+
+##### 12.4 Backup and Recovery
+
+A production backup strategy should define:
+
+| Concept                | Meaning                                                   |
+| ---------------------- | --------------------------------------------------------- |
+| RPO                    | Maximum acceptable data loss measured in time             |
+| RTO                    | Maximum acceptable recovery time                          |
+| Full backup            | Complete database backup                                  |
+| Incremental backup     | Captures changes since a previous backup                  |
+| Point-in-time recovery | Restores a database to a specific time                    |
+| Off-site backup        | Backup stored independently of the primary infrastructure |
+
+For example:
+
+```
+PostgreSQL Cluster
+       |
+       ▼
+Backup Process
+       |
+       ▼
+Object Storage
+       |
+       ├── Full Backups
+       └── Transaction Logs
+                |
+                ▼
+        Point-in-Time Recovery
+```
+
+Never rely solely on the database's PersistentVolume as a backup.
+
+##### 12.5 Monitoring and Observability
+
+Monitor both Kubernetes and database-level metrics.
+
+Kubernetes metrics:
+
+- Pod CPU and memory.
+- Pod restarts.
+- PVC capacity.
+- Storage I/O.
+- Node health.
+- Pod scheduling failures.
+
+Database metrics:
+
+- Active connections.
+- Query latency.
+- Transaction throughput.
+- Replication lag.
+- Lock contention.
+- Database size.
+- Disk utilization.
+- Backup status.
+
+Tools such as Prometheus and Grafana can help collect and visualize these metrics.
+
+##### 12.6 Security
+
+Consider:
+
+- Kubernetes Secrets or an external secret manager.
+- Encryption in transit using TLS.
+- Encryption at rest.
+- NetworkPolicies.
+- Database authentication and authorization.
+- Least-privilege RBAC.
+- Backup encryption.
+- Credential rotation.
+
+A database being inside the Kubernetes cluster does not automatically make it secure.
+
+#### 13. Practical Example: The Book's Microservices Architecture
+
+Let's return to the architecture from the book.
+
+It uses:
+
+- MySQL.
+- MongoDB.
+- RabbitMQ.
+- Product Service.
+- Recommendation Service.
+- Review Service.
+- Product Composite Service.
+
+The book runs the databases as Docker containers outside Kubernetes using Docker Compose.
+
+##### 13.1 Book's Original Architecture
+
+```
+                 Development Environment
+┌────────────────────────────────────────────────┐
+│                                                │
+│             Kubernetes Cluster                 │
+│                                                │
+│   ┌────────────────────────────────────────┐   │
+│   │          Product Composite             │   │
+│   └───────────────────┬────────────────────┘   │
+│                       │                        │
+│          ┌────────────┼─────────────┐          │
+│          ▼            ▼             ▼          │
+│     Product       Recommendation   Review      │
+│     Service         Service        Service     │
+│                                                │
+└──────────────────────┬─────────────────────────┘
+                       │
+                       │ Network
+                       ▼
+┌────────────────────────────────────────────────┐
+│                Docker Compose                   │
+│                                                │
+│     MySQL          MongoDB         RabbitMQ     │
+│                                                │
+└────────────────────────────────────────────────┘
+```
+
+This design is appropriate for learning Kubernetes application workloads without simultaneously learning database orchestration.
+
+##### 13.2 Modern Alternative: Everything Inside Kubernetes
+
+```
+                  Kubernetes Cluster
+┌──────────────────────────────────────────────────┐
+│                                                  │
+│             Application Workloads                │
+│                                                  │
+│   Product       Recommendation       Review      │
+│   Service          Service           Service     │
+│                                                  │
+│   ────────────────────────────────────────────   │
+│                                                  │
+│             Stateful Workloads                   │
+│                                                  │
+│   PostgreSQL     MongoDB       RabbitMQ           │
+│   Operator       Operator      Operator           │
+│      │              │             │              │
+│      ▼              ▼             ▼              │
+│   Stateful      Stateful      Stateful           │
+│   Database      Database      Cluster            │
+│      │              │             │              │
+│      ▼              ▼             ▼              │
+│   PVC/PV         PVC/PV        PVC/PV              │
+│                                                  │
+└──────────────────────────────────────────────────┘
+```
+
+This is a possible modern Kubernetes architecture, provided the chosen Operators and storage infrastructure support the required functionality.
+
+##### 13.3 Modern Alternative: Hybrid Architecture
+
+A hybrid architecture combines external and in-cluster stateful services.
+
+For example:
+
+```
+                  Kubernetes Cluster
+┌──────────────────────────────────────────────┐
+│                                              │
+│             Application Workloads            │
+│                                              │
+│   Product       Recommendation      Review   │
+│   Service          Service          Service  │
+│                                              │
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+              External Infrastructure
+┌──────────────────────────────────────────────┐
+│                                              │
+│   Managed MySQL                              │
+│   MongoDB Atlas                              │
+│                                              │
+└──────────────────────────────────────────────┘
+
+              Kubernetes Cluster
+┌──────────────────────────────────────────────┐
+│                                              │
+│   RabbitMQ Operator                          │
+│          │                                   │
+│          ▼                                   │
+│   RabbitMQ Cluster                           │
+│          │                                   │
+│          ▼                                   │
+│   Persistent Storage                         │
+│                                              │
+└──────────────────────────────────────────────┘
+```
+
+There is no requirement that every stateful service follow the same deployment strategy.
+
+For example, an organization might use managed MySQL but operate RabbitMQ inside Kubernetes because its messaging requirements and operational capabilities differ.
+
+#### 14. Best Practices
+
+Regardless of the deployment approach, follow these architectural principles.
+
+| Best practice                                       | Explanation                                                                        |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Separate application and database lifecycles        | Applications and databases have different deployment and maintenance requirements. |
+| Use StatefulSets for appropriate stateful workloads | StatefulSets provide stable identity and persistent storage association.           |
+| Prefer Operators for complex database clusters      | Operators automate database-specific lifecycle operations.                         |
+| Use reliable persistent storage                     | Database storage must satisfy durability and performance requirements.             |
+| Implement database replication                      | Replication supports availability and read scaling where appropriate.              |
+| Maintain independent backups                        | Protect data against storage failures and accidental deletion.                     |
+| Test disaster recovery                              | Regularly verify that backups can actually be restored.                            |
+| Monitor database and Kubernetes metrics             | Monitor both infrastructure health and database behavior.                          |
+| Apply security controls                             | Protect database credentials, network connections, and stored data.                |
+| Design for failure domains                          | Avoid placing every database replica on the same node or availability zone.        |
+| Evaluate managed services                           | Do not introduce unnecessary database operational complexity.                      |
+| Define RPO and RTO                                  | Establish measurable recovery requirements.                                        |
+
+#### 15. Summary: External vs. In-Cluster Databases
+
+The following diagram summarizes the architectural decision.
+
+#### Where should databases run?
+
+Application workloads on Kubernetes
+
+Deployments, Services, Ingress, etc.
+
+Evaluate database requirements
+
+Availability · Storage · Cost · Expertise · Operations
+
+External databases
+
+Good when managed operations matter
+
+- Managed DBaaS
+- Dedicated VMs
+- External Docker services
+- Independent lifecycle
+
+In-cluster databases
+
+Good when Kubernetes control matters
+
+- StatefulSets
+- PersistentVolumes
+- Database Operators
+- Kubernetes-native management
+
+Both architectures can support production workloads when properly designed and operated.
+
+##### Key concepts to remember
+
+| Concept               | Responsibility                                                 |
+| --------------------- | -------------------------------------------------------------- |
+| Deployment            | Manages stateless application workloads                        |
+| StatefulSet           | Manages Pods requiring stable identity and storage association |
+| PersistentVolume      | Represents persistent storage                                  |
+| PersistentVolumeClaim | Requests persistent storage                                    |
+| StorageClass          | Defines storage provisioning characteristics                   |
+| CSI                   | Integrates external storage systems with Kubernetes            |
+| Headless Service      | Provides stable network identities for StatefulSet Pods        |
+| Database Operator     | Automates database-specific lifecycle management               |
+| DBaaS                 | Provides managed database infrastructure                       |
+| Replication           | Maintains database copies across instances                     |
+| High Availability     | Keeps services operational despite failures                    |
+| Backup and Recovery   | Protects data and enables restoration                          |
+
+##### Final conclusion
+
+The original book's recommendation was reasonable for its time, but its restriction of Kubernetes to stateless workloads is outdated.
+
+Modern Kubernetes supports both stateless and stateful workloads. StatefulSets, persistent storage, CSI drivers, and database Operators have made running production databases on Kubernetes a viable architectural choice.
+
+However, Kubernetes does not automatically solve database administration problems.
+
+The most important distinction is:
+
+- Kubernetes manages the lifecycle of containers and their associated resources.
+- Database software manages data consistency, transactions, replication, and database-level recovery.
+- Database Operators connect these two worlds by automating database-specific operations.
+- Managed database services allow organizations to delegate much of the database infrastructure management.
+
+For your Kubernetes learning sequence, I recommend understanding external databases first, then StatefulSets and persistent storage, and finally database Operators and production database orchestration. This gives you a clear progression from basic workload management to production-grade stateful infrastructure.
+### Managed Database Services
+## Production Considerations
+### Data Persistence
+### Replication and High Availability
+### Backup and Recovery
+### Disaster Recovery
+### Storage Performance
+## Practical Labs
+### Deploying a StatefulSet
+### Persistent Storage with StatefulSets
+### Scaling StatefulSets
+### Updating StatefulSets
+### Running a Database with a Kubernetes Operator
+## Best Practices
+## Further Reading

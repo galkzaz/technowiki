@@ -1,0 +1,1219 @@
+# Dijkstra’s Algorithm for Dense Graphs
+
+Dijkstra’s algorithm is commonly implemented using a min-priority queue (binary heap). However, for dense graphs, a simpler implementation that uses an adjacency matrix and linear search to find the next vertex can be more efficient.
+
+The important point is that the best implementation depends on the relationship between the number of vertices \\(V\\) and edges \\(E\\).
+
+The underlying shortest-path algorithm does not change. What changes is how we select the next vertex to process.
+
+## 1. What is a dense graph?
+
+A graph is considered dense when it contains a large number of edges relative to the maximum possible number of edges.
+
+For a simple directed graph without self-loops:
+
+\\[ E\_{\max}=V(V-1) \\]
+
+For an undirected graph:
+
+\\[ E\_{\max}=\frac{V(V-1)}{2} \\]
+
+For example, consider a directed graph with 100 vertices:
+
+- Maximum possible edges: \\(100 \times 99 = 9,900\\).
+- If it contains 100 edges, it is sparse.
+- If it contains 8,000 edges, it is dense.
+
+The distinction matters because different graph representations and Dijkstra implementations have different performance characteristics.
+
+## 1. Main idea
+
+In the priority-queue implementation, we use a min-priority queue to efficiently retrieve the unvisited vertex with the smallest tentative distance.
+
+For dense graphs, we can eliminate the priority queue and simply scan the `dist[]` array to find that vertex.
+
+The algorithm maintains three arrays:
+
+| Array        | Purpose                                                  |
+| ------------ | -------------------------------------------------------- |
+| `dist[v]`    | Best known distance from source `s` to vertex `v`.       |
+| `pred[v]`    | Predecessor of `v` on the currently best-known path.     |
+| `visited[v]` | Whether the shortest distance to `v` has been finalized. |
+
+Initially:
+
+```
+dist[]    = [∞, ∞, ∞, ..., ∞]
+pred[]    = [-1, -1, -1, ..., -1]
+visited[] = [false, false, false, ..., false]
+```
+
+Then:
+
+```
+dist[s] = 0
+```
+
+All vertices are initially considered unreachable until a path from the source is discovered.
+
+## 3. How does Dijkstra work with an adjacency matrix?
+
+Consider this weighted, directed graph:
+
+```
+       4
+  A --------> B
+  |           |
+  | 1         | 2
+  v           v
+  C --------> D
+       5
+```
+
+Its adjacency matrix could be represented as:
+
+| From / To | A | B | C | D |
+| --------- | - | - | - | - |
+| A         | 0 | 4 | 1 | ∞ |
+| B         | ∞ | 0 | ∞ | 2 |
+| C         | ∞ | ∞ | 0 | 5 |
+| D         | ∞ | ∞ | ∞ | 0 |
+
+Here, \\(\infty\\) means there is no direct edge.
+
+Starting from A:
+
+1. Initialize all distances to infinity, except `dist[A] = 0`.
+2. Find the unvisited vertex with the smallest distance using a linear scan.
+3. Mark that vertex as visited.
+4. Examine its possible outgoing edges by scanning its matrix row.
+5. Relax its outgoing edges.
+6. Repeat until all reachable vertices are finalized.
+
+Notice that we don't need a priority queue. The distance array itself provides the priorities, and a linear scan finds the minimum.
+
+## 2. How the algorithm selects the next vertex
+
+Because of the adjacency matrix structure, this variation no longer needs a priority
+queue; instead, at each iteration it selects the unvisited vertex with smallest dist[]
+value.
+
+The algorithm repeatedly searches the unvisited vertices for the one with the smallest tentative distance.
+
+For example:
+
+```
+Vertex:     A    B    C    D    E
+dist[]:     0    6    8   17   17
+visited:    T    T    F    F    F
+```
+
+The unvisited vertices are C, D, and E.
+
+Their tentative distances are:
+
+```
+C = 8
+D = 17
+E = 17
+```
+
+Therefore, C is selected because it has the smallest tentative distance.
+
+The selection can be implemented using a linear scan:
+
+```
+findMinDistance(dist, visited)
+
+    min = ∞
+    minVertex = -1
+
+    for v = 0 to V - 1 do
+        if visited[v] == false AND dist[v] < min then
+            min = dist[v]
+            minVertex = v
+
+    return minVertex
+```
+
+If the function returns `-1`, no reachable unvisited vertex remains.
+
+Figure demonstrates the execution on a small graph.
+![Dijkstra’s Algorithm dense graph example](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/dijkstra/implementation/linear-scan-adjacency-matrix/example1.png)
+## Pseudocode
+
+```
+singleSourceShortest(G, s)
+
+    // Initialization
+    foreach vertex v in V do
+        dist[v] = ∞                           (1)
+        pred[v] = -1
+        visited[v] = false
+
+    dist[s] = 0
+
+    // Process reachable vertices
+    while some unvisited vertex v has dist[v] < ∞ do     (2)
+
+        // Find the unvisited vertex with minimum distance
+        u = find the vertex with the smallest dist[u]    (3)
+            among all unvisited vertices
+
+        // Finalize its shortest distance
+        if dist[u] = ∞ then
+            return
+
+        visited[u] = true
+
+        // Relax outgoing edges
+        foreach neighbor v of u do
+
+            w = weight of edge (u, v)
+            newLen = dist[u] + w
+
+            if newLen < dist[v] then       (4)
+                dist[v] = newLen
+                pred[v] = u
+
+            end if
+
+        end foreach
+
+    end while
+
+    return dist, pred
+```
+1. (1) Initially all vertices are considered to be unreachable.
+2. (2) Stop if all unvisited vertices v have dist[v] = ∞.
+3. (3) Find the vertex that has the shortest distance to source.
+4. (4) If a shorter path is discovered from s to v, record new length
+
+Helper function: Find minimum-distance vertex
+```
+findMinDistance(dist, visited)
+
+    min = ∞
+    minVertex = -1
+
+    foreach vertex v in V do
+
+        if visited[v] = false AND dist[v] < min then
+            min = dist[v]
+            minVertex = v
+        end if
+
+    end foreach
+
+    return minVertex
+```
+Let's break down the textbook pseudocode.
+
+### Step 1: Initialize the arrays
+
+```
+foreach v in V do
+    dist[v] = ∞
+    pred[v] = -1
+    visited[v] = false
+
+dist[s] = 0
+```
+
+Every vertex starts with an infinite distance because no path has been discovered yet.
+
+The source has distance zero because the distance from a vertex to itself is zero.
+
+### Step 2: Select the minimum-distance unvisited vertex
+
+```
+while some unvisited vertex v has dist[v] < ∞ do
+
+    u = find dist[u] that is smallest of unvisited vertices
+```
+
+This is the main difference from the priority-queue implementation.
+
+Instead of:
+
+```
+u = extractMin(PQ)
+```
+
+we perform a linear scan over `dist[]`.
+
+### Step 3: Finalize the selected vertex
+
+```
+if dist[u] = ∞ then return
+
+visited[u] = true
+```
+
+Once the vertex with the smallest tentative distance is selected, its distance is finalized.
+
+Because all edge weights are nonnegative, no alternative path through another unvisited vertex can produce a shorter distance.
+
+The `dist[u] = ∞` check is a termination safeguard. If the minimum remaining distance is infinity, all remaining vertices are unreachable.
+
+In the textbook's `while` condition, this check is logically redundant because the loop already requires a finite distance. It is useful in implementations where the loop instead runs a fixed number of times.
+
+### Step 4: Relax outgoing edges
+
+```
+foreach neighbor v of u do
+
+    w = weight of edge (u, v)
+
+    newLen = dist[u] + w
+
+    if newLen < dist[v] then
+        dist[v] = newLen
+        pred[v] = u
+```
+
+For every outgoing edge from `u`, we check whether traveling through `u` provides a shorter path to `v`.
+
+For example:
+
+```
+A --6--> B --3--> D
+```
+
+If:
+
+```
+dist[A] = 0
+dist[B] = 6
+weight(B, D) = 3
+dist[D] = 12
+```
+
+Then:
+
+```
+newLen = dist[B] + weight(B, D)
+       = 6 + 3
+       = 9
+```
+
+Since `9 < 12`, we update:
+
+```
+dist[D] = 9
+pred[D] = B
+```
+## Step-by-step walkthrough 1
+
+We will use the same directed weighted graph, with source vertex 0, and execute Dijkstra's algorithm using an adjacency matrix and linear search (without a priority queue).
+![](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/dijkstra/walkthrough2.png)
+
+```
+                       11
+              (1) ------------> (4)
+             ^                      \
+           6/                        \ 3
+           /                          \
+          /                            v
+         (0)------18---->(3) <--4--- (5)
+           \             ^          /
+             \ 8      9/           /                 
+              \     /             /                   
+               v  /              /                  
+               (2) <------------/
+                       7
+```   
+
+### 1. Graph and edge list
+
+The graph contains 6 vertices and 8 directed edges:
+
+| Edge  | Weight |
+| ----- | ------ |
+| 0 → 1 | 6      |
+| 0 → 2 | 8      |
+| 0 → 3 | 18     |
+| 1 → 4 | 11     |
+| 2 → 3 | 9      |
+| 4 → 5 | 3      |
+| 5 → 2 | 7      |
+| 5 → 3 | 4      |
+
+### 2. Adjacency matrix
+
+The rows represent source vertices, and the columns represent destination vertices.
+
+- `0` on the diagonal means the distance from a vertex to itself.
+- A number represents the weight of an existing directed edge.
+- `∞` means there is no direct edge.
+
+Adjacency matrix
+
+| From / To | 0   | 1   | 2   | 3   | 4   | 5   |
+| --------- | --- | --- | --- | --- | --- | --- |
+| 0         | 0   | 6   | 8   | 18  | ∞   | ∞   |
+| 1         | ∞   | 0   | ∞   | ∞   | 11  | ∞   |
+| 2         | ∞   | ∞   | 0   | 9   | ∞   | ∞   |
+| 3         | ∞   | ∞   | ∞   | 0   | ∞   | ∞   |
+| 4         | ∞   | ∞   | ∞   | ∞   | 0   | 3   |
+| 5         | ∞   | ∞   | 7   | 4   | ∞   | 0   |
+
+For example:
+
+- `matrix[0][1] = 6`: edge 0 → 1 has weight 6.
+- `matrix[1][4] = 11`: edge 1 → 4 has weight 11.
+- `matrix[4][1] = ∞`: there is no edge 4 → 1.
+
+Notice that the matrix is not symmetric because the graph is directed.
+
+### 3. Initial state
+
+We start Dijkstra's algorithm from vertex 0.
+
+```
+dist[]    = [0, ∞, ∞, ∞, ∞, ∞]
+pred[]    = [-1, -1, -1, -1, -1, -1]
+visited[] = [F,  F,  F,  F,  F,  F]
+```
+
+Where:
+
+- `dist[]`: shortest distance discovered so far from source 0.
+- `pred[]`: predecessor used to reconstruct the shortest path.
+- `visited[]`: whether the vertex's shortest distance has been finalized.
+
+Initially, only vertex 0 has a finite distance.
+
+### 4. Step-by-step execution
+
+For each iteration, we perform two operations:
+
+1. Find the unvisited vertex with the smallest `dist[]` value using a linear scan.
+2. Mark it visited and examine its entire adjacency-matrix row to relax outgoing edges.
+
+We scan vertices in ascending order when selecting the minimum. Therefore, if two vertices have equal distances, the vertex with the smaller index is selected first.
+
+#### Initial state
+
+Before the first iteration
+
+| Vertex      | 0   | 1   | 2   | 3   | 4   | 5   |
+| ----------- | --- | --- | --- | --- | --- | --- |
+| `dist[]`    | 0   | ∞   | ∞   | ∞   | ∞   | ∞   |
+| `visited[]` | F   | F   | F   | F   | F   | F   |
+
+The next vertex is 0 because its distance is 0.
+
+#### Iteration 1 — Select vertex 0
+
+Selected vertex: 0
+
+Mark vertex 0 as visited.
+
+Now examine row 0 of the adjacency matrix:
+
+```
+Vertex 0: [0, 6, 8, 18, ∞, ∞]
+```
+
+Relax its outgoing edges:
+
+| Edge  | Calculation | Result                |
+| ----- | ----------- | --------------------- |
+| 0 → 1 | 0 + 6 = 6   | Update `dist[1] = 6`  |
+| 0 → 2 | 0 + 8 = 8   | Update `dist[2] = 8`  |
+| 0 → 3 | 0 + 18 = 18 | Update `dist[3] = 18` |
+
+Updated arrays:
+
+```
+dist[]    = [0, 6, 8, 18, ∞, ∞]
+pred[]    = [-1, 0, 0, 0, -1, -1]
+visited[] = [T, F, F, F, F, F]
+```
+
+The unvisited vertex with the smallest distance is vertex 1 (distance 6).
+
+#### Iteration 2 — Select vertex 1
+
+Selected vertex: 1
+
+Mark vertex 1 as visited.
+
+Examine row 1:
+
+```
+Vertex 1: [∞, 0, ∞, ∞, 11, ∞]
+```
+
+Only one outgoing edge exists: 1 → 4.
+
+| Edge  | Calculation | Result                |
+| ----- | ----------- | --------------------- |
+| 1 → 4 | 6 + 11 = 17 | Update `dist[4] = 17` |
+
+Updated arrays:
+
+```
+dist[]    = [0, 6, 8, 18, 17, ∞]
+pred[]    = [-1, 0, 0, 0, 1, -1]
+visited[] = [T, T, F, F, F, F]
+```
+
+The remaining unvisited vertices have distances:
+
+```
+Vertex 2 = 8
+Vertex 3 = 18
+Vertex 4 = 17
+Vertex 5 = ∞
+```
+
+Select vertex 2 (distance 8).
+
+#### Iteration 3 — Select vertex 2
+
+Selected vertex: 2
+
+Mark vertex 2 as visited.
+
+Examine row 2:
+
+```
+Vertex 2: [∞, ∞, 0, 9, ∞, ∞]
+```
+
+Relax edge 2 → 3:
+
+| Edge  | Calculation | Result                |
+| ----- | ----------- | --------------------- |
+| 2 → 3 | 8 + 9 = 17  | Update `dist[3] = 17` |
+
+Why update vertex 3?
+
+Previously, we discovered a direct path:
+
+```
+0 → 3 = 18
+```
+
+Now we have discovered a shorter indirect path:
+
+```
+0 → 2 → 3
+  8 + 9 = 17
+```
+
+Since 17 is smaller than 18, we update its distance and predecessor.
+
+Updated arrays:
+
+```
+dist[]    = [0, 6, 8, 17, 17, ∞]
+pred[]    = [-1, 0, 0, 2, 1, -1]
+visited[] = [T, T, T, F, F, F]
+```
+
+Now:
+
+```
+Vertex 3 = 17
+Vertex 4 = 17
+Vertex 5 = ∞
+```
+
+There is a tie between vertices 3 and 4.
+
+Because our linear scan examines vertices in ascending order, we select vertex 3 first.
+
+#### Iteration 4 — Select vertex 3
+
+Selected vertex: 3
+
+Mark vertex 3 as visited.
+
+Examine row 3:
+
+```
+Vertex 3: [∞, ∞, ∞, 0, ∞, ∞]
+```
+
+Vertex 3 has no outgoing edges.
+
+Therefore, no distances or predecessors are updated.
+
+```
+dist[]    = [0, 6, 8, 17, 17, ∞]
+pred[]    = [-1, 0, 0, 2, 1, -1]
+visited[] = [T, T, T, T, F, F]
+```
+
+The next unvisited vertex with the smallest distance is vertex 4 (distance 17).
+
+#### Iteration 5 — Select vertex 4
+
+Selected vertex: 4
+
+Mark vertex 4 as visited.
+
+Examine row 4:
+
+```
+Vertex 4: [∞, ∞, ∞, ∞, 0, 3]
+```
+
+Relax edge 4 → 5:
+
+| Edge  | Calculation | Result                |
+| ----- | ----------- | --------------------- |
+| 4 → 5 | 17 + 3 = 20 | Update `dist[5] = 20` |
+
+Updated arrays:
+
+```
+dist[]    = [0, 6, 8, 17, 17, 20]
+pred[]    = [-1, 0, 0, 2, 1, 4]
+visited[] = [T, T, T, T, T, F]
+```
+
+The only remaining unvisited vertex is vertex 5, with distance 20.
+
+#### Iteration 6 — Select vertex 5
+
+Selected vertex: 5
+
+Mark vertex 5 as visited.
+
+Examine row 5:
+
+```
+Vertex 5: [∞, ∞, 7, 4, ∞, 0]
+```
+
+There are two outgoing edges.
+
+| Edge  | Calculation | Comparison | Result    |
+| ----- | ----------- | ---------- | --------- |
+| 5 → 2 | 20 + 7 = 27 | 27 > 8     | No update |
+| 5 → 3 | 20 + 4 = 24 | 24 > 17    | No update |
+
+Neither edge provides a shorter path.
+
+Final arrays:
+
+```
+dist[]    = [0, 6, 8, 17, 17, 20]
+pred[]    = [-1, 0, 0, 2, 1, 4]
+visited[] = [T, T, T, T, T, T]
+```
+
+All vertices have been finalized. The algorithm terminates.
+
+### 5. Complete execution summary
+
+| Iteration | Selected vertex | Distance | Relaxation result       | Finalized vertices |
+| --------- | --------------- | -------- | ----------------------- | ------------------ |
+| 1         | 0               | 0        | Update 1, 2, 3          | 0                  |
+| 2         | 1               | 6        | Update 4                | 01                 |
+| 3         | 2               | 8        | Improve 3 from 18 to 17 | 012                |
+| 4         | 3               | 17       | No outgoing edges       | 0123               |
+| 5         | 4               | 17       | Update 5                | 01234              |
+| 6         | 5               | 20       | No improvements         | 012345             |
+
+The distance and predecessor arrays after each iteration:
+
+| State   | `dist[]`                | `pred[]`                   |
+| ------- | ----------------------- | -------------------------- |
+| Initial | `[0, ∞, ∞, ∞, ∞, ∞]`    | `[-1, -1, -1, -1, -1, -1]` |
+| After 0 | `[0, 6, 8, 18, ∞, ∞]`   | `[-1, 0, 0, 0, -1, -1]`    |
+| After 1 | `[0, 6, 8, 18, 17, ∞]`  | `[-1, 0, 0, 0, 1, -1]`     |
+| After 2 | `[0, 6, 8, 17, 17, ∞]`  | `[-1, 0, 0, 2, 1, -1]`     |
+| After 3 | `[0, 6, 8, 17, 17, ∞]`  | `[-1, 0, 0, 2, 1, -1]`     |
+| After 4 | `[0, 6, 8, 17, 17, 20]` | `[-1, 0, 0, 2, 1, 4]`      |
+| After 5 | `[0, 6, 8, 17, 17, 20]` | `[-1, 0, 0, 2, 1, 4]`      |
+
+### 6. Final shortest paths
+
+We reconstruct each shortest path by following the `pred[]` array backward from the destination to the source.
+
+**Shortest-path results**
+```
+Vertex 0                        **0**
+0 
+
+Vertex 1                        **6**
+0 → 1
+
+Vertex 2                        **8**
+0 → 2
+
+Vertex 3                        **17**
+0 → 2 → 3
+
+Vertex 4                        **17**
+0 → 1 → 4
+
+Vertex 5                        **20**
+0 → 1 → 4 → 5
+```
+The final predecessor tree is:
+
+```
+             0
+           /   \
+          1     2
+          |     |
+          4     3
+          |
+          5
+```
+
+The shortest-path tree contains these edges:
+
+```
+0 → 1  (6)
+0 → 2  (8)
+1 → 4  (11)
+2 → 3  (9)
+4 → 5  (3)
+```
+
+Notice that the direct edge `0 → 3` with weight 18 is not included in the shortest-path tree because the indirect path `0 → 2 → 3` has cost 17.
+
+### 7. What this walkthrough demonstrates about the dense-graph implementation
+
+There are three important observations:
+
+1. No priority queue is needed. We find the next vertex by scanning `dist[]` and selecting the smallest unvisited value.
+2. The adjacency matrix scans entire rows. Even if a vertex has only one outgoing edge, we inspect all six possible destinations in its row.
+3. A vertex can receive a better tentative distance before being finalized. Vertex 3 changes from 18 to 17 when vertex 2 is processed.
+
+For this particular graph, \\(V=6\\) and \\(E=8\\). It is actually a sparse graph, not a dense graph; we are using it to demonstrate the matrix-based implementation, not because it is an ideal dense-graph example.
+
+The implementation still works correctly, but an adjacency list with a priority queue would generally be more space-efficient for this graph.
+
+## Step-by-Step Walkthrough 2
+
+
+We will apply Dijkstra's algorithm to the graph in your image, using vertex 0 as the source, as in our previous examples.
+Figure demonstrates the execution on a small graph.
+![Dijkstra’s Algorithm dense graph example](/docs/assets/software-systems/algorithms-data-structures/algorithms/concepts/searching/graph-searching/routing-for-graphs/shortest-path/single-source-shortest-path/dijkstra/implementation/linear-scan-adjacency-matrix/walkthrough2.png)
+
+This is a directed, weighted graph. All edge weights are nonnegative, so Dijkstra's algorithm is applicable.
+
+### 1. Identify the vertices and edges
+
+The graph contains five vertices and seven directed edges.
+
+| Edge  | Weight |
+| ----- | ------ |
+| 0 → 1 | 2      |
+| 0 → 4 | 4      |
+| 1 → 2 | 3      |
+| 2 → 4 | 1      |
+| 2 → 3 | 5      |
+| 4 → 3 | 7      |
+| 3 → 0 | 8      |
+
+Pay attention to the arrow directions:
+
+- The edge between 2 and 4 is 2 → 4, not 4 → 2.
+- The edge between 3 and 0 is 3 → 0, not 0 → 3.
+
+### 2. Adjacency matrix
+
+Rows represent source vertices; columns represent destination vertices.
+
+| From / To | 0   | 1   | 2   | 3   | 4   |
+| --------- | --- | --- | --- | --- | --- |
+| 0         | 0   | 2   | ∞   | ∞   | 4   |
+| 1         | ∞   | 0   | 3   | ∞   | ∞   |
+| 2         | ∞   | ∞   | 0   | 5   | 1   |
+| 3         | 8   | ∞   | ∞   | 0   | ∞   |
+| 4         | ∞   | ∞   | ∞   | 7   | 0   |
+
+For example:
+
+- `matrix[0][1] = 2`: edge 0 → 1.
+- `matrix[0][4] = 4`: edge 0 → 4.
+- `matrix[2][4] = 1`: edge 2 → 4.
+- `matrix[4][2] = ∞`: no edge 4 → 2.
+
+### 3. Initialization
+
+We start from vertex 0.
+
+Initialize the three arrays:
+
+```
+dist[]    = [0, ∞, ∞, ∞, ∞]
+pred[]    = [-1, -1, -1, -1, -1]
+visited[] = [F,  F,  F,  F,  F]
+```
+
+- `dist[]`: best-known distance from source 0.
+- `pred[]`: predecessor of each vertex.
+- `visited[]`: whether its shortest distance has been finalized.
+
+Initially, only vertex 0 has a known distance.
+
+### 4. Step-by-step execution
+
+We repeat two operations:
+
+1. Find the unvisited vertex with the smallest `dist[]` using linear search.
+2. Mark it as visited and relax its outgoing edges.
+
+#### Iteration 1 — Select vertex 0
+
+Selected vertex: 0
+
+Vertex 0 has the smallest tentative distance (0).
+
+Mark it visited:
+
+```
+visited[] = [T, F, F, F, F]
+```
+
+Examine row 0 of the adjacency matrix:
+
+```
+Vertex 0: [0, 2, ∞, ∞, 4]
+```
+
+Outgoing edges:
+
+| Edge  | Calculation | Result               |
+| ----- | ----------- | -------------------- |
+| 0 → 1 | 0 + 2 = 2   | Update `dist[1] = 2` |
+| 0 → 4 | 0 + 4 = 4   | Update `dist[4] = 4` |
+
+Updated arrays:
+
+```
+dist[]    = [0, 2, ∞, ∞, 4]
+pred[]    = [-1, 0, -1, -1, 0]
+visited[] = [T, F, F, F, F]
+```
+
+The unvisited vertices have these distances:
+
+```
+Vertex 1 = 2
+Vertex 2 = ∞
+Vertex 3 = ∞
+Vertex 4 = 4
+```
+
+Therefore, select vertex 1 next.
+
+#### Iteration 2 — Select vertex 1
+
+Selected vertex: 1
+
+Vertex 1 has the smallest unvisited distance (2).
+
+Mark it visited:
+
+```
+visited[] = [T, T, F, F, F]
+```
+
+Examine row 1:
+
+```
+Vertex 1: [∞, 0, 3, ∞, ∞]
+```
+
+Outgoing edge:
+
+| Edge  | Calculation | Result               |
+| ----- | ----------- | -------------------- |
+| 1 → 2 | 2 + 3 = 5   | Update `dist[2] = 5` |
+
+Updated arrays:
+
+```
+dist[]    = [0, 2, 5, ∞, 4]
+pred[]    = [-1, 0, 1, -1, 0]
+visited[] = [T, T, F, F, F]
+```
+
+Remaining unvisited vertices:
+
+```
+Vertex 2 = 5
+Vertex 3 = ∞
+Vertex 4 = 4
+```
+
+Select vertex 4 because its distance (4) is smaller than vertex 2's distance (5).
+
+#### Iteration 3 — Select vertex 4
+
+Selected vertex: 4
+
+Mark vertex 4 visited:
+
+```
+visited[] = [T, T, F, F, T]
+```
+
+Examine row 4:
+
+```
+Vertex 4: [∞, ∞, ∞, 7, 0]
+```
+
+Outgoing edge:
+
+| Edge  | Calculation | Result                |
+| ----- | ----------- | --------------------- |
+| 4 → 3 | 4 + 7 = 11  | Update `dist[3] = 11` |
+
+Updated arrays:
+
+```
+dist[]    = [0, 2, 5, 11, 4]
+pred[]    = [-1, 0, 1, 4, 0]
+visited[] = [T, T, F, F, T]
+```
+
+Remaining unvisited vertices:
+
+```
+Vertex 2 = 5
+Vertex 3 = 11
+```
+
+Select vertex 2.
+
+#### Iteration 4 — Select vertex 2
+
+Selected vertex: 2
+
+Mark vertex 2 visited:
+
+```
+visited[] = [T, T, T, F, T]
+```
+
+Examine row 2:
+
+```
+Vertex 2: [∞, ∞, 0, 5, 1]
+```
+
+There are two outgoing edges.
+
+| Edge  | Calculation | Comparison | Result                |
+| ----- | ----------- | ---------- | --------------------- |
+| 2 → 3 | 5 + 5 = 10  | 10 < 11    | Update `dist[3] = 10` |
+| 2 → 4 | 5 + 1 = 6   | 6 > 4      | No update             |
+
+Important observation:
+
+Before processing vertex 2, we had discovered this path to vertex 3:
+
+```
+0 → 4 → 3
+
+4 + 7 = 11
+```
+
+Now we discover a shorter path:
+
+```
+0 → 1 → 2 → 3
+
+2 + 3 + 5 = 10
+```
+
+Therefore, we replace the previous distance of 11 with 10 and change the predecessor of vertex 3 from 4 to 2.
+
+Updated arrays:
+
+```
+dist[]    = [0, 2, 5, 10, 4]
+pred[]    = [-1, 0, 1, 2, 0]
+visited[] = [T, T, T, F, T]
+```
+
+The only remaining unvisited vertex is vertex 3, with distance 10.
+
+#### Iteration 5 — Select vertex 3
+
+Selected vertex: 3
+
+Mark vertex 3 visited:
+
+```
+visited[] = [T, T, T, T, T]
+```
+
+Examine row 3:
+
+```
+Vertex 3: [8, ∞, ∞, 0, ∞]
+```
+
+Outgoing edge:
+
+| Edge  | Calculation | Comparison | Result    |
+| ----- | ----------- | ---------- | --------- |
+| 3 → 0 | 10 + 8 = 18 | 18 > 0     | No update |
+
+No distance or predecessor changes.
+
+All vertices have now been finalized, so Dijkstra's algorithm terminates.
+
+### 5. Complete execution summary
+
+| Iteration | Selected vertex | Distance | Relaxation result       |
+| --------- | --------------- | -------- | ----------------------- |
+| 1         | 0               | 0        | Update 1 = 2, 4 = 4     |
+| 2         | 1               | 2        | Update 2 = 5            |
+| 3         | 4               | 4        | Update 3 = 11           |
+| 4         | 2               | 5        | Improve 3 from 11 to 10 |
+| 5         | 3               | 10       | No improvement          |
+
+#### Distance and predecessor arrays after each iteration
+
+| State   | `dist[]`           | `pred[]`               |
+| ------- | ------------------ | ---------------------- |
+| Initial | `[0, ∞, ∞, ∞, ∞]`  | `[-1, -1, -1, -1, -1]` |
+| After 0 | `[0, 2, ∞, ∞, 4]`  | `[-1, 0, -1, -1, 0]`   |
+| After 1 | `[0, 2, 5, ∞, 4]`  | `[-1, 0, 1, -1, 0]`    |
+| After 4 | `[0, 2, 5, 11, 4]` | `[-1, 0, 1, 4, 0]`     |
+| After 2 | `[0, 2, 5, 10, 4]` | `[-1, 0, 1, 2, 0]`     |
+| After 3 | `[0, 2, 5, 10, 4]` | `[-1, 0, 1, 2, 0]`     |
+
+### 6. Final shortest paths
+
+### Shortest paths from vertex 0
+
+Vertex 0
+
+0
+
+## 0
+
+Vertex 1
+
+0 → 1
+
+## 2
+
+Vertex 2
+
+0 → 1 → 2
+
+## 5
+
+Vertex 3
+
+0 → 1 → 2 → 3
+
+## 10
+
+Vertex 4
+
+0 → 4
+
+## 4
+
+The final predecessor array is:
+
+```
+pred[] = [-1, 0, 1, 2, 0]
+```
+
+The resulting shortest-path tree is:
+
+```
+             0
+           /   \
+          1     4
+          |
+          2
+          |
+          3
+```
+
+Its edges are:
+
+```
+0 → 1  (2)
+1 → 2  (3)
+2 → 3  (5)
+0 → 4  (4)
+```
+
+### 7. Important observations
+
+This graph demonstrates several useful Dijkstra concepts:
+
+1. An indirect path can be shorter than a previously discovered path. Vertex 3 initially receives distance 11 through vertex 4, then improves to 10 through vertex 2.
+2. Relaxation does not always cause an update. The edge 2 → 4 proposes distance 6, but vertex 4 already has distance 4.
+3. Directed edges matter. Although 3 → 0 exists, 0 → 3 does not.
+4. Finalization is permanent. Once vertex 4 is finalized with distance 4, later paths cannot improve it because all edge weights are nonnegative.
+
+Final result:
+
+```
+Source: 0
+
+Shortest distances:
+[0, 2, 5, 10, 4]
+
+Predecessors:
+[-1, 0, 1, 2, 0]
+
+Selection order:
+0 → 1 → 4 → 2 → 3
+```
+
+This example also illustrates why Dijkstra's algorithm must distinguish between a tentative distance and a finalized shortest distance.
+
+## 4. Why is the adjacency matrix useful here?
+
+An adjacency matrix stores the weight of every possible edge.
+
+For example:
+
+```
+       A    B    C    D
+A      0    6    8   18
+B      ∞    0    ∞    ∞
+C      ∞    ∞    0    9
+D      ∞    ∞    ∞    0
+```
+
+To inspect outgoing edges from vertex A, we simply scan row A:
+
+```
+A: [0, 6, 8, 18]
+```
+
+This takes \\(O(V)\\) time.
+
+For all vertices, scanning their rows takes \\(O(V^2)\\).
+
+The adjacency matrix also makes it straightforward to inspect all possible neighbors of a selected vertex without maintaining a separate priority queue.
+
+## 5. Complexity analysis
+
+ The efficiency of this version is determined by con‐
+sidering how fast the smallest dist[] value in V – S can be retrieved. The while
+loop is executed V times, since S grows one vertex at a time. Finding the smallest
+dist[u] in V – S inspects all V vertices. Note that each edge is inspected exactly
+once in the inner loop within the while loop. Since E can never be larger than V2,
+the total running time of this version is O (V2)
+
+Let's understand where this comes from.
+
+| Operation                     | Frequency                | Cost per operation | Total |
+| ----------------------------- | ------------------------ | ------------------ | ----- |
+| Initialize arrays             | V                        | O(1)               | O(V)  |
+| Find minimum unvisited vertex | V                        | O(V)               | O(V²) |
+| Mark vertex visited           | V                        | O(1)               | O(V)  |
+| Inspect outgoing edges        | E (with adjacency lists) | O(1) per edge      | O(E)  |
+
+Therefore:
+
+\\[ T(V,E)=O(V)+O(V^2)+O(E) \\]
+
+\\[ \boxed{O(V^2+E)} \\]
+
+For the adjacency matrix implementation, however, the inner loop scans all V possible neighbors for every selected vertex:
+
+\\[ O(V)\times O(V)=O(V^2) \\]
+
+Therefore:
+
+\\[ \boxed{T(V,E)=O(V^2)} \\]
+
+Since a simple graph has at most \\(O(V^2)\\) edges, the textbook's \\(O(V^2+E)\\) also simplifies to \\(O(V^2)\\).
+
+An important clarification: The textbook's complexity summary \\(O(V^2+E)\\) describes the linear-selection approach when outgoing neighbors can be enumerated in \\(O(\text{out-degree})\\), as with an adjacency list. When using an adjacency matrix, inspecting a row costs \\(O(V)\\), giving \\(O(V^2)\\) overall.
+
+### Space complexity
+
+| Component        | Space |
+| ---------------- | ----- |
+| Adjacency matrix | O(V²) |
+| `dist[]`         | O(V)  |
+| `pred[]`         | O(V)  |
+| `visited[]`      | O(V)  |
+
+Total:
+
+\\[ \boxed{O(V^2)} \\]
+
+The algorithm's auxiliary space, excluding the graph representation, is \\(O(V)\\).
+
+## 6. Comparison with priority-queue Dijkstra
+
+| Feature              | Dense graph version | Priority-queue version         |
+| -------------------- | ------------------- | ------------------------------ |
+| Graph representation | Adjacency matrix    | Adjacency list                 |
+| Minimum selection    | Linear scan         | Extract minimum                |
+| Priority queue       | Not required        | Required                       |
+| Priority update      | Direct array update | Decrease-key or lazy insertion |
+| Time complexity      | O(V²)               | O((V+E) log V)                 |
+| Graph storage        | O(V²)               | O(V+E)                         |
+| Typical use          | Dense graphs        | Sparse graphs                  |
+
+## 7. Important note about the textbook's statement
+
+The textbook says:
+
+> Each edge is inspected exactly once in the inner loop within the while loop.
+
+This is accurate when the implementation iterates over actual neighbors using adjacency lists.
+
+With an adjacency matrix, the inner loop scans all V possible destinations for each finalized vertex. It therefore examines \\(V^2\\) matrix positions, including positions where no edge exists.
+
+This distinction explains why the matrix implementation has \\(O(V^2)\\) time complexity.
+
+The central idea: For dense graphs, scanning the distance array to find the next vertex is often more efficient than maintaining a heap. The algorithm trades the heap's logarithmic operations for straightforward linear scans, achieving \\(O(V^2)\\) time with an adjacency matrix.
+
+## 2. Why does the usual priority-queue implementation become less attractive?
+
+Recall the two main Dijkstra implementations:
+
+Binary min-heap + adjacency list
+
+- Extracting the minimum vertex: \\(O(\log V)\\).
+- Updating a priority using decrease-key: \\(O(\log V)\\).
+- Examining all adjacency lists: \\(O(E)\\).
+
+Overall:
+
+\\[ O((V+E)\log V) \\]
+
+Linear search + adjacency matrix
+
+- Finding the unvisited vertex with minimum distance: \\(O(V)\\).
+- Repeating this for all vertices: \\(O(V^2)\\).
+- Examining all possible neighbors using the matrix: \\(O(V^2)\\).
+
+Overall:
+
+\\[ O(V^2) \\]
+
+For a dense graph, \\(E\\) approaches \\(V^2\\). Therefore, the heap-based implementation becomes:
+
+\\[ O((V+V^2)\log V) \\]
+
+\\[ =O(V^2\log V) \\]
+
+But the linear-search implementation remains:
+
+\\[ O(V^2) \\]
+
+Better asymptotic complexity for dense graphs
+
+The linear-search implementation avoids the logarithmic overhead of maintaining a heap.
+

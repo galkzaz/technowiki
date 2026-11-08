@@ -4,37 +4,789 @@ title: Circuit Breaker
 sidebar_position: 1
 ---
 
-# Circuit Breaker
+There might be cases where you don’t want to keep trying
+future requests to a given service after you know it’s failing. By doing that, you can
+save time wasted in response timeouts and alleviate potential congestion of the
+target service. This is especially useful for external service calls when there are no
+other resilience mechanisms in place like the service registry with health checks.
+For these scenarios, you can use a circuit breaker. The circuit is closed when
+everything works fine. After a configurable number of request failures, the circuit
+becomes open. Then, the requests are not even tried, and the circuit breaker
+implementation returns a predefined response. Now and then, the circuit may
+switch to half-open to check again if the target service is working. In that case,
+the circuit will transition to close. If it’s still failing, it goes back to the open state.
+
+The retry pattern is useful when a downstream service is momentarily unavailable. But
+what if it stays down for more than a few instants? At that point we could stop forwarding requests to it until we’re sure that it’s back. Continuing to send requests won’t be
+beneficial for the caller or the callee. In that scenario, the circuit breaker pattern
+comes in handy. That’s the topic of the next section. 
+
+A circuit breaker ensures fault tolerance when a downstream 
+service exceeds the maximum number of failures allowed by blocking any 
+communication between upstream and downstream services. The logic is 
+based on three states: closed, open, and half-open.
+
+In the world of distributed systems, you can establish circuit breakers at the integration points between components. Think about Edge Service and Catalog Service. In a
+typical scenario, the circuit is closed, meaning that the two services can interact over the
+network. For each server error response returned by Catalog Service, the circuit breaker
+in Edge Service would register the failure. When the number of failures exceeds a certain threshold, the circuit breaker trips, and the circuit transitions to open.
+ While the circuit is open, communications between Edge Service and Catalog Service are not allowed. Any request that should be forwarded to Catalog Service will fail
+right away. In this state, either an error is returned to the client, or fallback logic is
+executed. After an appropriate amount of time to permit the system to recover, the
+circuit breaker transitions to a half-open state, allowing the next call to Catalog Service
+to go through. That is an exploratory phase to check if there are still issues in contacting the downstream service. If the call succeeds, the circuit breaker is reset and transitions to closed. Otherwise it goes back to being open. 
+
+Unlike with retries, when the circuit breaker trips, no calls to the downstream service
+are allowed anymore. Like with retries, the circuit breaker’s behavior depends on a
+threshold and a timeout, and it lets you define a fallback method to call. The goal of
+resilience is to keep the system available to users, even in the face of failures. In the
+worst-case scenario, like when a circuit breaker trips, you should guarantee a graceful
+degradation. You can adopt different strategies for the fallback method. For example,
+you might decide to return a default value or the last available value from a cache, in
+case of a GET request.
+
+The Circuit Breaker pattern helps a distributed system avoid repeatedly calling a dependency that is failing or responding too slowly. Instead of allowing every request to wait for the same failing service, the circuit breaker temporarily blocks calls, gives the dependency time to recover, and later tests whether it can handle traffic again.
+
+a circuit breaker can be used to minimize the
+damage that a slow or unresponsive downstream microservice can cause in a large-scale system
+landscape of synchronously communicating microservices.
+
+In a microservices architecture, imagine that `Order Service` calls `Payment Service`. If the Payment Service becomes unavailable, continuing to send requests can waste threads, connections, and time in the Order Service. Those resource shortages can then cause failures in other parts of the system.
+
+The circuit breaker is designed to contain that failure and help prevent a local problem from becoming a cascading failure.
 
 ## Overview
 
-Describe this reliability concept and where it applies.
+### The problem: repeated calls to a failing dependency
 
----
+Suppose an Order Service calls a Payment Service synchronously:
+```
+                  Order Service
+
+            Receives customer requests
+                       ↓
+                Payment Service
+
+          Unavailable or extremely slow
+
+Requests wait, time out, and consume resources
+```
+Without protection, many concurrent requests may wait for timeouts. New requests keep arriving, threads or connections become occupied, and the Order Service may eventually become unhealthy too.
+
+This is one way a **cascading failure** develops.
+
+### The solution: stop calling temporarily
+
+A circuit breaker monitors calls to a dependency. If failures or slow calls exceed configured thresholds, it opens the circuit and rejects further calls without making the remote request.
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/reliability/circuit-breaker/example-1.png)
+
+After a waiting period, the breaker can enter half-open mode and test whether the dependency has recovered.
+
+The circuit breaker does not repair the Payment Service. It protects the caller while the dependency is unhealthy and allows a controlled recovery check.
+
+### What does the pattern protect?
+
+- Caller threads, connections, and other limited resources.
+- The failing dependency from excessive repeated traffic.
+- Other services from some forms of cascading failure.
+- The overall request path from repeatedly waiting on a dependency that is unlikely to succeed.
+
+It does not guarantee that every customer request succeeds. The application still needs a sensible response to a rejected call, such as returning a temporary failure, deferring work, or using a safe fallback.
 
 ## Core Ideas
 
-- 
-- 
-- 
+A circuit breaker is more than a rule such as “fail after three errors.” It is a small state machine that makes decisions based on recent call outcomes.
 
----
+Its core ideas are:
 
-## Real-World Examples
+1. Observe calls. Record successes, failures, and—if configured—slow calls.
+2. Evaluate recent behavior. Use a sliding window to determine whether the dependency is behaving badly.
+3. Open the circuit. Stop sending calls when the configured conditions are met.
+4. Wait before testing. Allow the dependency time to recover.
+5. Probe carefully. Permit a limited number of test calls in half-open state.
+6. Resume or block. Close the circuit if the test calls indicate recovery; reopen it if they indicate continued problems.
 
-- 
-- 
+A few terms are important:
 
----
+| Term              | Meaning                                                        |
+| ----------------- | -------------------------------------------------------------- |
+| Failure rate      | Percentage of recorded calls that count as failures            |
+| Slow-call rate    | Percentage of recorded calls that exceed a configured duration |
+| Sliding window    | The recent calls or recent period used to calculate rates      |
+| Failure threshold | Configured rate that can trigger opening                       |
+| Wait duration     | Time the breaker stays open before attempting recovery checks  |
+| Permitted calls   | Number of calls allowed while half-open                        |
 
-## Common Problems
 
-- 
-- 
+**Important**: a circuit breaker normally observes the calls that pass through it. It does not automatically know whether a business operation succeeded in every meaningful sense. For example, an HTTP 200 response might contain a business-level rejection, and a timeout might occur after a payment was actually processed. Configure failure classification and business-operation handling carefully.
 
----
+## States: losed, Open, and Half-Open States
 
-## Related Topics
+the classic design of a circuit breaker, as illustrated in the following state 
+diagram:
+![Circuit breaker state diagram](/docs/assets/software-engineering/design-architecture/distributed-systems/reliability/circuit-breaker/circuit-breaker-state-diagram.png)
 
-- 
-- 
+. A circuit breaker starts as Closed, allowing requests to be processed.
+. As long as the requests are processed successfully, it stays in the Closed state.
+. If failures start to happen, a counter starts to count up.
+. If a threshold of failures is reached within a specified period of time, the circuit breaker 
+will trip, that is, go to the Open state, not allowing further requests to be processed. Both 
+the threshold of failures and the period of time are configurable.
+. Instead, a request will fast fail, meaning it will return immediately with an exception.
+. After a configurable period of time, the circuit breaker will enter a Half Open state and 
+allow one request to go through, as a probe, to see whether the failure has been resolved.
+. If the probe request fails, the circuit breaker goes back to the Open state.
+. If the probe request succeeds, the circuit breaker goes to the initial Closed state, allowing 
+new requests to be processed.
+
+Let’s assume we have a REST service, called **myService**, that is protected by a circuit breaker 
+using Resilience4j.
+If the service starts to produce internal errors – for example, because it can’t reach a service it 
+depends on – we might get a response from the service such as 500 Internal Server Error. 
+After a number of configurable attempts, the circuit will open and we will get a fast failure that 
+returns an error message such as CircuitBreaker 'myService' is open. When the error is 
+resolved and we make a new attempt (after the configurable wait time), the circuit breaker will 
+allow a new attempt as a probe. If the call succeeds, the circuit breaker will be closed again; that 
+is, operating normally.
+
+The key features of a circuit breaker are as follows:
+• If a circuit breaker detects too many faults, it will open its circuit – that is, not allow new
+calls.
+• When the circuit is open, a circuit breaker will perform fail-fast logic. This means that it
+doesn’t wait for a new fault, for example, a timeout, to happen on subsequent calls. In-
+stead, it directly redirects the call to a fallback method. The fallback method can apply
+various business logic to produce a best-effort response. For example, a fallback method
+can return data from a local cache or simply return an immediate error message. This will
+prevent a microservice from becoming unresponsive if the services it depends on stop
+responding normally. This is specifically useful under high load.
+• After a while, the circuit breaker will be half-open, allowing new calls to see whether the
+issue that caused the failures is gone. If new failures are detected by the circuit breaker,
+it will open the circuit again and go back to the fail-fast logic. Otherwise, it will close the
+circuit and go back to normal operation. This makes a microservice resilient to faults, or
+self-healing – a capability that is indispensable in a system landscape of microservices
+that communicate synchronously with each other.
+
+A circuit breaker typically has three main states. Understanding these states is the foundation for understanding the entire pattern.
+
+### 1. Closed state
+
+The circuit is closed during normal operation. Calls are allowed to reach the Payment Service, and the breaker records their outcomes.
+
+- Successful calls contribute to the success statistics.
+- Calls classified as failures contribute to the failure statistics.
+- Slow calls may contribute to a separate slow-call statistic.
+
+If the configured failure-rate or slow-call-rate threshold is reached, the breaker can transition to open.
+
+Example: the Payment Service is responding normally, so the Order Service continues sending payment requests.
+
+A closed circuit does not mean every request will succeed. It means the breaker is allowing requests through.
+
+### 2. Open state
+
+The breaker has detected enough evidence of unhealthy behavior and temporarily stops calls to the dependency.
+
+- New calls are rejected locally.
+- The remote service is not called for those rejected requests.
+- The breaker waits for its configured open-state duration.
+
+In Resilience4j, a call rejected because the circuit is open typically raises a `CallNotPermittedException`.
+
+Example: Payment Service calls are failing frequently. Instead of making every new order request wait for another timeout, the Order Service quickly receives a circuit-open rejection and applies its own failure policy.
+
+This is sometimes called fail fast: the caller stops waiting for an operation that the breaker has decided not to attempt.
+
+### 3. Half-open state
+
+After the waiting period, the breaker permits a limited number of calls to test the dependency.
+
+- If the permitted calls indicate recovery, the breaker closes.
+- If they fail or are too slow according to the configured rules, the breaker opens again.
+- Calls beyond the permitted test allowance may still be rejected.
+
+Example: Payment Service has restarted. The breaker does not immediately release every waiting customer request into it. It permits a small number of test calls first.
+
+Half-open is important because a recovering service may still be warming up, reconnecting to its database, or struggling with a backlog.
+
+### Compare the three states
+
+| Property                  | Closed           | Open                   | Half-open                |
+| ------------------------- | ---------------- | ---------------------- | ------------------------ |
+| Normal calls allowed?     | Yes              | No                     | Limited number           |
+| Calls sent to dependency? | Yes              | No                     | Yes, for permitted calls |
+| Outcomes monitored?       | Yes              | Not for rejected calls | Yes, for permitted calls |
+| Main purpose              | Normal operation | Contain failure        | Test recovery            |
+
+### State Transitions
+
+The breaker follows a state machine. The following diagram shows the typical flow.
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/reliability/circuit-breaker/state-transitions.png)
+
+There are a few details worth remembering:
+
+- **Closed → Open**: The breaker usually needs a sufficiently large sample window before it can evaluate the configured rate threshold.
+- Open → Half-open: The breaker waits for a configured duration. This is not necessarily a check that the remote service is healthy; it simply allows a later test.
+- Half-open → Closed: The permitted calls satisfy the recovery criteria.
+- Half-open → Open: The permitted calls show continued failure or excessive slowness.
+
+The exact state-transition rules depend on the circuit-breaker implementation and its configuration. Some implementations also support special states such as disabled or forced open.
+
+**A subtle point: what happens to rejected requests?**
+
+The breaker does not normally queue open-state requests for later execution. They are rejected immediately, and the application must decide what to do with them.
+
+For example, an order request rejected because the payment circuit is open might receive a temporary error, or the application might save a pending operation for later processing. It should not silently report that payment succeeded.
+
+## Failure Thresholds
+
+A circuit breaker needs a rule for deciding when enough failures have occurred to open the circuit.
+
+Two common settings are:
+
+- Failure-rate threshold
+- Minimum number of calls
+
+These settings work together.
+
+### 1. Failure-rate threshold
+
+Suppose we configure:
+
+- Failure-rate threshold: 50%
+- Minimum number of calls: 10
+- Sliding window: last 10 calls
+
+Consider these outcomes:
+
+| Call | Result  |
+| ---- | ------- |
+| 1    | Success |
+| 2    | Failure |
+| 3    | Success |
+| 4    | Failure |
+| 5    | Failure |
+| 6    | Success |
+| 7    | Failure |
+| 8    | Failure |
+| 9    | Success |
+| 10   | Failure |
+
+There are six failures out of ten calls:
+
+$$
+\text{Failure Rate}=\frac{6}{10}\times100=60\\%
+$$
+
+Because the failure rate is 60%, exceeding the 50% threshold, the breaker can open once its evaluation conditions are satisfied.
+
+The minimum-call requirement prevents a tiny sample from causing an unreliable decision. For example, one failure out of one call is a 100% failure rate, but that may not be enough evidence to declare a dependency unhealthy.
+
+### 2. Sliding windows
+
+Circuit breakers commonly use one of two window types:
+
+| Window type | How it works                                            | Useful when                                     |
+| ----------- | ------------------------------------------------------- | ----------------------------------------------- |
+| Count-based | Examines the most recent $N$ calls                  | You want a fixed number of recent observations  |
+| Time-based  | Examines calls recorded during the last $T$ seconds | You want behavior measured over a recent period |
+
+A count-based window of 20 calls could represent a fraction of a second during heavy traffic, but several minutes during low traffic. A time-based window has a fixed duration, but the number of observations varies with traffic.
+
+In Resilience4j, the breaker evaluates the failure rate after the configured minimum number of calls has been recorded. A time-based window uses time buckets, while a count-based window uses a bounded set of recent outcomes.
+
+### Which failures should count?
+
+Not every unsuccessful call should necessarily count as a dependency failure.
+
+For example:
+
+- Connection refused: generally a dependency failure.
+- Downstream timeout: generally a failure or slow call, depending on configuration and how it is recorded.
+- Invalid customer input: usually not a dependency failure.
+- Expected business rejection, such as a card being declined: often not a system-health failure.
+- Circuit-open rejection: not a new failed call to the dependency because the dependency was not called.
+
+You should configure exception classification to match the operation's semantics. Otherwise, expected business outcomes can open the breaker unnecessarily, or real infrastructure failures can be excluded from the statistics.
+
+### Choosing a threshold
+
+A 50% threshold is not universally correct. Choose thresholds based on:
+
+- Normal failure rates and traffic volume.
+- The cost of waiting for a failing dependency.
+- The dependency's timeout and latency characteristics.
+- How quickly the system needs to react.
+- The consequences of opening the circuit too early or too late.
+
+A breaker that opens too easily can interrupt healthy traffic. One that opens too late can allow a failure to consume too many resources.
+
+## Slow-Call Thresholds
+
+A dependency can be harmful even when it technically succeeds.
+
+Imagine the Payment Service normally responds in 80 ms. During an incident, it starts taking 8 seconds per request but still returns successful responses eventually.
+
+A failure-rate threshold alone might not open the circuit because the calls are succeeding. The Order Service can nevertheless become exhausted while waiting.
+
+A slow-call threshold lets the breaker respond to this kind of degradation.
+
+### 6.1 Slow-call duration threshold
+
+Suppose:
+
+- Slow-call duration threshold: 2 seconds
+- Slow-call-rate threshold: 50%
+- Minimum number of calls: 10
+
+If at least five of the ten recorded calls take longer than 2 seconds, the slow-call rate reaches 50%. If the configured criteria are satisfied, the breaker can open.
+
+$$ 
+\text{Slow Call Rate}= \frac{\text{Calls exceeding the duration threshold}} {\text{Total recorded calls}}\times100\\% 
+$$
+For example:
+
+| Call | Duration | Classified as slow? |
+| ---- | -------- | ------------------- |
+| 1    | 100 ms   | No                  |
+| 2    | 150 ms   | No                  |
+| 3    | 2.5 s    | Yes                 |
+| 4    | 3.0 s    | Yes                 |
+| 5    | 200 ms   | No                  |
+| 6    | 2.2 s    | Yes                 |
+| 7    | 2.8 s    | Yes                 |
+| 8    | 300 ms   | No                  |
+| 9    | 2.4 s    | Yes                 |
+| 10   | 120 ms   | No                  |
+
+Five of the ten calls are slow, so the slow-call rate is 50%.
+
+### 6.2 Slow-call duration versus request timeout
+
+These settings serve different purposes.
+
+| Setting                      | Purpose                                                        |
+| ---------------------------- | -------------------------------------------------------------- |
+| Timeout                      | Limits how long a caller waits for an operation                |
+| Slow-call duration threshold | Classifies a call as slow for breaker statistics               |
+| Slow-call-rate threshold     | Determines how much slow-call behavior can trigger the breaker |
+
+For example, a request timeout could be 5 seconds while the slow-call duration threshold is 2 seconds. Calls taking 3 seconds might succeed, but they still count as slow.
+
+A circuit breaker is not itself a substitute for a timeout. If you need to bound how long an operation can block, configure the appropriate timeout mechanism as well.
+
+### 6.3 When are slow-call thresholds useful?
+
+They are especially useful for:
+
+- Database queries becoming progressively slower.
+- Services suffering from thread-pool exhaustion.
+- External APIs experiencing high latency.
+- Dependencies under overload that return responses too late to be useful.
+- Preventing slow downstream calls from consuming caller resources for extended periods.
+
+Set the threshold relative to the actual latency objective. A 2-second threshold might be appropriate for one operation and much too generous—or too strict—for another.
+
+## 7. Recovery Strategies
+
+Opening the circuit is only half the story. The system must also decide how to behave while the dependency is unavailable and how to resume normal operation safely.
+
+### 7.1 Wait before probing
+
+After opening, the breaker waits for a configured duration before entering half-open state.
+
+Why wait? If the dependency is restarting or recovering from overload, immediate repeated probes may add pressure before it is ready.
+
+The waiting period should reflect the dependency's behavior and recovery time. A fixed wait duration is a practical mechanism, not proof that the dependency will be healthy when the timer expires.
+
+### 7.2 Permit a limited number of test calls
+
+In half-open state, allow only a limited number of calls to test the dependency.
+
+For example, permit three test calls:
+
+- Three successes, within the configured evaluation rules → close the circuit.
+- Enough failures or slow calls to violate the recovery criteria → open the circuit again.
+
+Do not confuse the permitted test-call count with the minimum number of calls used to evaluate failure rates in the normal sliding window. They serve different purposes.
+
+### 7.3 Use fallbacks carefully
+
+When a call is rejected, the application may have an alternative response.
+
+Examples:
+
+| Dependency             | Possible fallback                              | Important limitation                                          |
+| ---------------------- | ---------------------------------------------- | ------------------------------------------------------------- |
+| Recommendation Service | Omit recommendations                           | Usually acceptable if recommendations are optional            |
+| Product catalog        | Serve cached product information               | Data may be stale                                             |
+| Shipping estimate      | Return “temporarily unavailable”               | Do not invent an estimate                                     |
+| Payment Service        | Mark the payment outcome as unknown or pending | Never assume the payment failed or succeeded without evidence |
+| Inventory Service      | Reject or defer the operation                  | Do not claim inventory is reserved unless it is               |
+
+A fallback is appropriate only if it preserves the business meaning of the operation.
+
+A fallback should not turn a failed critical operation into a fake success. For example, a circuit-open payment call should not cause an order to be marked `PAID`.
+
+### 7.4 Combine the breaker with timeouts
+
+The timeout and circuit breaker have complementary roles:
+
+- The timeout limits the duration of an individual call.
+- The circuit breaker reacts to a pattern of recent failures or slow calls.
+- Together, they limit both individual waiting time and repeated calls to a struggling dependency.
+
+Without a timeout, a single call might hang for a long time before the breaker can record its outcome. Without a breaker, every new request may continue making slow calls until it individually times out.
+
+### 7.5 Avoid a recovery traffic spike
+
+When a dependency recovers, releasing all traffic immediately can overwhelm it again. Half-open test calls help control the initial recovery check, but they are not a complete traffic-ramping solution.
+
+For high-traffic systems, consider combining the breaker with:
+
+- Rate limiting or concurrency limits.
+- Bounded queues.
+- Backpressure.
+- Load shedding.
+- Gradual traffic ramp-up where the architecture supports it.
+
+## 8. Circuit Breaker vs. Retry
+
+These patterns are often used together, but they solve different problems.
+
+Retry asks: “Should I try this operation again?”
+
+Circuit breaker asks: “Should I attempt this operation at all right now?”
+
+| Dimension                  | Retry                                                | Circuit breaker                                               |
+| -------------------------- | ---------------------------------------------------- | ------------------------------------------------------------- |
+| Primary purpose            | Recover from transient failures                      | Stop repeated calls to an unhealthy dependency                |
+| Behavior after failure     | Attempts another call, subject to policy             | Records the outcome and may open the circuit                  |
+| Best suited for            | Temporary network glitches, transient service errors | Sustained failures or excessive latency                       |
+| Resource risk              | Can increase load if overused                        | Helps reduce load by rejecting calls                          |
+| Typical controls           | Max attempts, backoff, jitter, retryable errors      | Failure threshold, slow-call threshold, window, wait duration |
+| Can it make a remote call? | Yes, for each attempt                                | Only when the state permits it                                |
+
+:::note
+
+Be careful when configuring retry and circuit breaker settings so that, for
+example, the circuit breaker doesn’t open the circuit before the intended
+number of retries has been completed!
+
+:::
+
+### Example: Payment Service is temporarily unavailable
+
+Imagine an order request reaches the Payment Service and gets a transient connection error.
+
+A retry policy might make one additional attempt after a short delay. If that succeeds, the operation completes normally.
+
+But if the Payment Service is down for several minutes, retrying every request repeatedly can amplify the outage.
+
+The circuit breaker eventually opens, preventing new requests from repeatedly calling the failing service.
+
+Typical interaction
+```
+                Business operation
+                     ↓
+                Circuit breaker
+
+May reject the call before it reaches the dependency
+                     ↓
+                Retry policy
+
+May retry eligible failures within a bounded policy
+                     ↓
+                Remote dependency
+
+This is one possible arrangement, not a universal ordering rule. The placement of the breaker and retry policy determines whether the breaker observes individual attempts or the overall retried operation.
+```
+### Why decorator order matters
+
+In libraries such as Resilience4j, retry and circuit breaker can be composed around the same operation. The nesting order affects what the breaker observes.
+
+- If the breaker wraps the retry, the breaker may observe the overall retried operation as one call.
+- If the retry wraps the breaker, each attempt may pass through the breaker separately.
+
+This distinction affects failure counts, how quickly the breaker opens, and how many calls are made during an outage.
+
+Whatever the arrangement, retries should be bounded and should respect the overall deadline. A retry is also safe only when repeating the operation cannot create unacceptable duplicate effects—or when idempotency mechanisms make repetition safe.
+
+For payments, a client timeout does not prove that the original payment was not processed. Use a provider-supported idempotency key or another reliable reconciliation mechanism before retrying an operation that could charge the customer twice.
+
+## 9. Real-World Examples
+
+### 9.1 E-commerce: Order Service → Payment Service
+```
+Order Service
+
+Receives the order and requests payment authorization.
+↓
+Circuit breaker opens
+
+The Payment Service is repeatedly timing out. New payment calls are temporarily blocked.
+↓
+Order remains pending
+
+The application records an appropriate state and communicates that payment could not yet be confirmed.
+```
+The important business rule is that `PENDING` is not the same as `PAID`. When the Payment Service becomes available again, the system can resume or reconcile the payment workflow without incorrectly confirming the order.
+
+### 9.2 Product page: Recommendation Service
+
+A product page may call Product, Pricing, Inventory, and Recommendation services.
+
+If Recommendation Service is slow, a circuit breaker can stop repeated calls to it while the page still displays the essential product information. The application omits the optional recommendations rather than failing the entire page.
+
+This is a good fallback because recommendations are not essential to showing the product itself.
+
+### 9.3 External API: Shipping provider
+
+A shipping provider may have rate limits, intermittent outages, or high latency.
+
+A circuit breaker can stop repeated calls when the provider is unhealthy. Depending on the business rules, the application may defer shipping-rate calculation or display a clear temporary-unavailability message.
+
+It should not fabricate a shipping cost or promise a delivery date that has not been confirmed.
+
+### 9.4 Database access
+
+A circuit breaker can sometimes protect an application from repeatedly attempting operations against a database endpoint that is consistently failing. However, it is not a universal solution for database overload.
+
+Connection-pool limits, query timeouts, database health, transaction management, and load control are also important. A breaker around database calls must be designed carefully so that transient database problems do not unnecessarily interrupt all database operations.
+
+## 10. Common Problems and Misconfigurations
+
+### 10.1 Opening the circuit too aggressively
+
+If the minimum number of calls is too low, a small number of failures can trigger the breaker during otherwise healthy operation.
+
+Solution: tune the sliding window, minimum-call count, and thresholds using actual traffic and failure patterns.
+
+### 10.2 Opening too slowly
+
+If the threshold is too high or the window is poorly chosen, the breaker may keep allowing calls during a sustained outage.
+
+Solution: consider the cost of waiting, downstream capacity, request deadlines, and how quickly the system must contain failures.
+
+### 10.3 Missing timeouts
+
+A circuit breaker does not automatically impose a maximum execution time on every call. If a remote call hangs indefinitely, the application can still exhaust resources.
+
+Solution: configure appropriate connection, read, request, and operation-level deadlines for the client in use.
+
+### 10.4 Counting business rejections as dependency failures
+
+If a Payment Service returns a normal response saying that a card was declined, that does not necessarily mean the service itself is unhealthy.
+
+Solution: configure which exceptions and results count as infrastructure failures, and keep business outcomes distinct from system-health signals.
+
+### 10.5 Retry storms
+
+When a dependency becomes unhealthy, every caller may retry at once. This can overwhelm the dependency just as it begins recovering.
+
+Solution: bound retries, use exponential backoff and jitter, respect deadlines, and avoid retrying non-idempotent operations without protection.
+
+### 10.6 Treating fallback as success
+
+Returning a default response can hide an important failure. For example, returning “payment successful” because a fallback ran is dangerous.
+
+Solution: define fallbacks according to business semantics, preserve uncertainty, and expose degraded operation through metrics and logs.
+
+### 10.7 Assuming the breaker is shared across all instances
+
+In many applications, including the common Resilience4j setup in a Spring Boot service, circuit-breaker state is local to an application instance. If there are five replicas, each may have different recent call statistics and a different breaker state.
+
+Solution: understand the scope of the implementation. A local breaker is often useful because each instance can protect its own resources, but it does not automatically coordinate one global decision across the cluster.
+
+### 10.8 Ignoring half-open behavior
+
+Too many test calls can overload a recovering service; too few can delay detection of recovery.
+
+Solution: configure the permitted half-open calls and waiting duration according to the dependency's capacity and recovery characteristics.
+
+### 10.9 Confusing a circuit-open rejection with a remote failure
+
+When the breaker rejects a call, no new call reaches the dependency. Counting these rejections as if the remote service failed again can distort monitoring and retry logic.
+
+Solution: distinguish dependency-call failures from local circuit-open rejections in metrics and error handling.
+
+### 10.10 Ignoring partial and ambiguous outcomes
+
+A timeout may occur after a remote operation has already succeeded. This is especially risky for order creation, payments, and other state-changing operations.
+
+Solution: use idempotency keys, explicit operation states, durable records, and reconciliation. A circuit breaker protects resources; it does not establish whether a remote business operation committed.
+
+## 11. Configuration: What Should You Tune?
+
+A circuit breaker is only as effective as its configuration. These are the principal settings to understand, especially when implementing the pattern with Resilience4j.
+
+| Setting                                        | What it controls                                                                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `slidingWindowType`                            | Whether the window is based on call count or time                                                                               |
+| `slidingWindowSize`                            | Number of calls or time buckets in the window                                                                                   |
+| `minimumNumberOfCalls`                         | Minimum observations before rate-based evaluation                                                                               |
+| `failureRateThreshold`                         | Failure percentage that can trigger opening                                                                                     |
+| `slowCallDurationThreshold`                    | Duration beyond which a call counts as slow                                                                                     |
+| `slowCallRateThreshold`                        | Slow-call percentage that can trigger opening                                                                                   |
+| `waitDurationInOpenState`                      | How long the breaker remains open before recovery testing                                                                       |
+| `permittedNumberOfCallsInHalfOpenState`        | Number of calls permitted during half-open                                                                                      |
+| `automaticTransitionFromOpenToHalfOpenEnabled` | Whether the breaker automatically transitions after the wait duration, rather than waiting for a call to trigger the transition |
+| `recordExceptions` / `ignoreExceptions`        | Which exceptions are counted or excluded from failure statistics                                                                |
+
+Exact defaults and available options can depend on the library version. Check the version used by your project before relying on a particular default.
+
+### Illustrative Resilience4j configuration
+
+For example, a Payment Service breaker might be configured in `application.yml` like this:
+
+```
+resilience4j:
+  circuitbreaker:
+    instances:
+      paymentService:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50
+        slowCallDurationThreshold: 2s
+        slowCallRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+```
+
+This is an illustrative starting point, not a production-ready universal configuration.
+
+With these settings, the breaker uses a 20-call sliding window and requires at least 10 calls before evaluating rates. A failure rate of at least 50%, or a slow-call rate of at least 50% where the slow-call duration is 2 seconds, can trigger opening. After 10 seconds, the breaker can begin half-open recovery with three permitted calls.
+
+Notice that the configuration does not define the request timeout. Configure that separately using the relevant HTTP client or other timeout mechanism.
+
+### How do you choose real values?
+
+Start with your service's latency objective and normal operating behavior.
+
+For example, if a downstream operation should normally finish within 300 ms, a slow-call threshold of 2 seconds may be reasonable—or it may be too high, depending on the business deadline. Use observed latency distributions, dependency behavior, and failure testing to decide.
+
+Avoid copying thresholds from another service without considering differences in traffic, latency, and business importance.
+
+## 12. Monitoring and Observability
+
+A circuit breaker should be observable. Otherwise, a service may start rejecting calls and the team may not know why.
+
+Monitor at least these signals:
+
+- State transitions: how often the breaker moves between closed, open, and half-open.
+- Failure rate: proportion of recorded calls classified as failures.
+- Slow-call rate: proportion of calls exceeding the configured duration.
+- Call outcomes: successful, failed, slow, and not-permitted calls.
+- Open-state duration: how long the breaker remains open.
+- Fallback outcomes: whether the application successfully handles a rejected call.
+- Business outcomes: whether orders, payments, or other critical operations ultimately complete.
+
+In a Spring Boot application, Resilience4j can integrate with Micrometer for metrics, which can be collected by Prometheus and visualized in Grafana when the appropriate dependencies and configuration are in place.
+
+A useful alert is not simply “the breaker opened.” It should help answer:
+
+1. Which dependency is affected?
+2. Is the problem failure rate, latency, or both?
+3. How many customer requests are affected?
+4. Is the fallback working?
+5. Is the dependency recovering, or does the circuit repeatedly reopen?
+
+Circuit-breaker metrics are diagnostic signals. They do not replace end-to-end service-level indicators such as successful order completion and request latency.
+
+## 13. Testing the Circuit Breaker
+
+You should verify both normal operation and failure behavior.
+
+| Test scenario                      | Expected behavior                                      |
+| ---------------------------------- | ------------------------------------------------------ |
+| Dependency is healthy              | Calls pass through and the breaker remains closed      |
+| Failures exceed the threshold      | The breaker opens                                      |
+| Circuit is open                    | Calls are rejected without reaching the dependency     |
+| Open-state wait expires            | Recovery testing becomes possible                      |
+| Half-open test calls succeed       | The breaker closes according to its recovery rules     |
+| Half-open test calls fail          | The breaker opens again                                |
+| Dependency is slow                 | Slow-call statistics can trigger opening               |
+| Expected business rejection occurs | It is not misclassified as an infrastructure failure   |
+| Fallback runs                      | It preserves the correct business meaning              |
+| Multiple service replicas run      | Each breaker behaves according to its configured scope |
+
+A practical lab is to create a small Spring Boot Order Service that calls a simulated Payment Service. Add a switch to make the Payment Service return errors, delay responses, or recover. Then observe the circuit's state transitions and metrics.
+
+Test retries separately as well. Verify the number of actual remote attempts, the overall deadline, and whether a retried operation can produce duplicate side effects.
+
+## 14. Related Topics
+
+The circuit breaker belongs in the resiliency patterns section of your distributed-systems reliability documentation. It works alongside other mechanisms, but it does not replace them.
+
+| Related topic                      | Relationship to Circuit Breaker                                                                                                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Timeouts                           | Limit how long an individual operation may wait                                                                                |
+| Retries                            | Reattempt eligible transient failures                                                                                          |
+| Exponential backoff and jitter     | Spread retries over time to avoid synchronized retry storms                                                                    |
+| Bulkhead                           | Limits resource consumption so one failing dependency cannot consume everything                                                |
+| Rate limiting                      | Restricts request rates to protect capacity                                                                                    |
+| Load shedding                      | Rejects work when the system cannot safely handle more                                                                         |
+| Fallbacks and graceful degradation | Defines what the application can still do when a dependency is unavailable                                                     |
+| Idempotency                        | Makes repeated operations safe where supported by the business operation                                                       |
+| Deadlines and time limiters        | Bound end-to-end waiting time or operation execution time, depending on implementation                                         |
+| Observability and alerting         | Reveals breaker states, failure patterns, and customer impact                                                                  |
+| Health checks                      | Help assess service readiness and health; they are not the same as a circuit breaker                                           |
+| Saga and transactional outbox      | Help manage distributed business workflows and reliable event publication; they solve different problems from circuit breaking |
+
+### Circuit breaker vs. health check
+
+These are particularly easy to confuse.
+
+A health check reports something about the health or readiness of a service instance. A circuit breaker tracks recent outcomes of calls made by a caller and decides whether to allow further calls.
+
+A Payment Service may report healthy while a particular network route from the Order Service is broken. Conversely, the Payment Service may be recovering while a caller's breaker is still open until its recovery period expires.
+
+### Circuit breaker vs. bulkhead
+
+A circuit breaker stops calls based on recent failure or slowness statistics. A bulkhead limits the resources that calls can consume, such as concurrent requests or thread-pool capacity.
+
+They complement each other: the breaker reduces repeated calls to an unhealthy dependency, while the bulkhead limits the damage caused by calls that are still allowed.
+
+## 15. Recommended TOC for Your TechnoWiki
+
+Since your existing reliability section already has `resiliency-patterns` and `retries`, I would put the conceptual pattern under `resiliency-patterns/circuit-breaker.mdx`, with a separate implementation page if you want to cover Resilience4j in detail.
+
+```
+reliability/
+├── overview.mdx
+├── resiliency-patterns/
+│   ├── _category_.json
+│   ├── overview.mdx
+│   ├── circuit-breaker.mdx
+│   ├── timeout.mdx
+│   ├── bulkhead.mdx
+│   ├── rate-limiting.mdx
+│   └── graceful-degradation.mdx
+├── retries.mdx
+└── observability-reliability.mdx
+```
+
+Suggested headings for `circuit-breaker.mdx`:
+
+1. Overview
+2. Core Ideas
+3. Closed, Open, and Half-Open States
+4. State Transitions
+5. Failure Thresholds
+6. Slow-Call Thresholds
+7. Recovery Strategies
+8. Circuit Breaker vs. Retry
+9. Real-World Examples
+10. Common Problems
+11. Configuration and Tuning
+12. Monitoring and Observability
+13. Testing the Circuit Breaker
+14. Related Topics
+
+Keep Resilience4j implementation details in a separate page, for example `resilience4j-circuit-breaker.mdx`, if you plan to include Spring Boot dependencies, annotations, YAML configuration, fallback methods, tests, and metrics integration.
+
+The conceptual page should explain why and how the pattern works. The implementation page should explain how to use it in your application.
+
+The central idea to remember is that a circuit breaker does not make a failing dependency healthy. It prevents the caller from repeatedly depending on that failure, gives the dependency time to recover, and allows a controlled return to normal operation.

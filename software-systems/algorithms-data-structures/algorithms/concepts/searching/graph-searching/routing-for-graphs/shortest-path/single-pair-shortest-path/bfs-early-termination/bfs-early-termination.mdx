@@ -1,0 +1,691 @@
+# BFS with Early Termination
+
+BFS with Early Termination is an optimization of the standard Breadth-First Search algorithm used when we want to find the shortest path between a specific source and destination.
+
+Instead of exploring every vertex reachable from the source, we stop the search as soon as the destination is discovered, because BFS guarantees that the first discovered path to that destination is a shortest path.
+
+This is particularly useful for the Single-Pair Shortest Path (SPSP) problem.
+
+## 1. Standard BFS versus BFS with Early Termination
+
+Let's start with the difference.
+
+Suppose we have this unweighted graph:
+
+```
+             A
+           /   \
+          B     C
+         / \     \
+        D   E     F
+             \
+              G
+
+        H --- I --- J
+```
+
+Assume the edges are:
+
+```
+A → B
+A → C
+B → D
+B → E
+C → F
+E → G
+
+H → I
+I → J
+```
+
+We want to find the shortest path from `A` to `G`.
+
+### Standard BFS (SSSP)
+
+Standard BFS continues until its queue becomes empty.
+
+It explores all vertices reachable from `A`:
+
+```
+A → B → C → D → E → F → G
+```
+
+It calculates distances and predecessors for every reachable vertex.
+
+### BFS with Early Termination (SPSP)
+
+BFS with Early Termination stops as soon as it discovers `G`.
+
+It doesn't need to finish processing all reachable vertices.
+
+```
+A → B → E → G
+```
+
+The resulting shortest path has three edges.
+
+Notice that vertices in the disconnected component (`H`, `I`, and `J`) are never explored by either algorithm.
+
+## 2. Why is early termination safe?
+
+This is the most important concept.
+
+BFS uses a FIFO queue, which guarantees that vertices are explored in nondecreasing order of their distance from the source.
+
+Consider the BFS levels:
+
+```
+Level 0:          A
+
+Level 1:        B   C
+
+Level 2:      D   E   F
+
+Level 3:          G
+```
+
+BFS explores all vertices at distance 0 before distance 1, all vertices at distance 1 before distance 2, and so on.
+
+Suppose we discover `G` while processing `E`.
+
+We know:
+
+```
+dist[A] = 0
+dist[B] = 1
+dist[E] = 2
+```
+
+Therefore:
+
+```
+dist[G] = dist[E] + 1
+        = 2 + 1
+        = 3
+```
+
+Could another path to `G` have a distance of 2?
+
+No.
+
+For that to happen, there would need to be an edge from a vertex at distance 1 to `G`. But BFS processes all distance-1 vertices before processing any distance-2 vertex.
+
+If such an edge existed, `G` would already have been discovered before we processed `E`.
+
+Therefore, when BFS first discovers `G`, its distance is guaranteed to be optimal.
+
+This is why we can safely terminate at discovery time rather than waiting for the destination to be dequeued.
+
+## 3. Algorithm walkthrough
+
+Let's use the following graph and find the shortest path from `A` to `G`.
+
+```
+             A
+           /   \
+          B     C
+         / \     \
+        D   E     F
+             \
+              G
+```
+
+Edges:
+
+```
+A → B
+A → C
+B → D
+B → E
+C → F
+E → G
+```
+
+We use three arrays:
+
+- `visited[]`: whether a vertex has been discovered.
+- `dist[]`: shortest known distance from the source.
+- `pred[]`: predecessor used to reach each vertex.
+
+### Step 1: Initialization
+
+Source is `A`, destination is `G`.
+
+```
+dist[A] = 0
+
+dist[B] = ∞
+dist[C] = ∞
+dist[D] = ∞
+dist[E] = ∞
+dist[F] = ∞
+dist[G] = ∞
+```
+
+All vertices are initially unvisited, except the source.
+
+```
+visited[A] = true
+```
+
+Queue:
+
+```
+FRONT → [A] ← REAR
+```
+
+### Step 2: Dequeue A
+
+Remove `A` from the queue.
+
+```
+Q = []
+```
+
+Examine its neighbors: `B` and `C`.
+
+Both are undiscovered.
+
+For `B`:
+
+```
+visited[B] = true
+dist[B] = dist[A] + 1 = 1
+pred[B] = A
+```
+
+For `C`:
+
+```
+visited[C] = true
+dist[C] = dist[A] + 1 = 1
+pred[C] = A
+```
+
+Enqueue both:
+
+```
+FRONT → [B, C] ← REAR
+```
+
+### Step 3: Dequeue B
+
+Remove `B`:
+
+```
+FRONT → [C] ← REAR
+```
+
+Examine its neighbors: `D` and `E`.
+
+For `D`:
+
+```
+visited[D] = true
+dist[D] = dist[B] + 1 = 2
+pred[D] = B
+```
+
+For `E`:
+
+```
+visited[E] = true
+dist[E] = dist[B] + 1 = 2
+pred[E] = B
+```
+
+Enqueue both:
+
+```
+FRONT → [C, D, E] ← REAR
+```
+
+### Step 4: Dequeue C
+
+Remove `C`:
+
+```
+FRONT → [D, E] ← REAR
+```
+
+Its neighbor is `F`.
+
+```
+visited[F] = true
+dist[F] = dist[C] + 1 = 2
+pred[F] = C
+```
+
+Enqueue `F`:
+
+```
+FRONT → [D, E, F] ← REAR
+```
+
+### Step 5: Dequeue D
+
+Remove `D`:
+
+```
+FRONT → [E, F] ← REAR
+```
+
+`D` has no neighbors, so nothing changes.
+
+### Step 6: Dequeue E
+
+Remove `E`:
+
+```
+FRONT → [F] ← REAR
+```
+
+Examine its neighbor `G`.
+
+`G` is undiscovered, so we update its information:
+
+```
+visited[G] = true
+dist[G] = dist[E] + 1 = 3
+pred[G] = E
+```
+
+Now we check:
+
+```
+G == target?
+```
+
+Yes!
+
+Shortest path found
+
+We immediately terminate BFS. We do not need to enqueue `G` or process the remaining queue.
+
+The queue at termination is:
+
+```
+FRONT → [F] ← REAR
+```
+
+Notice that `F` is still waiting in the queue. It doesn't matter because our destination has already been reached optimally.
+
+### Step 7: Reconstruct the path
+
+The predecessor array contains:
+
+```
+pred[G] = E
+pred[E] = B
+pred[B] = A
+pred[A] = NIL
+```
+
+Follow the predecessors backward:
+
+```
+G ← E ← B ← A
+```
+
+Reverse the result:
+
+```
+A → B → E → G
+```
+
+Final result:
+
+```
+Shortest distance = 3
+Shortest path     = A → B → E → G
+```
+
+## 4. Pseudocode
+
+Here is the complete algorithm:
+
+```
+BFS-Early-Termination(G, source, target)
+
+    for each vertex v in G.V:
+        visited[v] = false
+        dist[v] = ∞
+        pred[v] = NIL
+
+    visited[source] = true
+    dist[source] = 0
+
+    if source == target:
+        return (0, [source])
+
+    Q = empty queue
+    ENQUEUE(Q, source)
+
+    while Q is not empty:
+
+        u = DEQUEUE(Q)
+
+        for each neighbor v of u:
+
+            if visited[v] == false:
+
+                visited[v] = true
+                dist[v] = dist[u] + 1
+                pred[v] = u
+
+                if v == target:
+                    path = RECONSTRUCT-PATH(pred, source, target)
+                    return (dist[v], path)
+
+                ENQUEUE(Q, v)
+
+    return (∞, no path)
+```
+
+The important part is:
+
+```
+if visited[v] == false:
+
+    visited[v] = true
+    dist[v] = dist[u] + 1
+    pred[v] = u
+
+    if v == target:
+        return (dist[v], RECONSTRUCT-PATH(...))
+
+    ENQUEUE(Q, v)
+```
+
+We first mark the vertex as discovered and record its distance and predecessor. Then we check whether it is the target.
+
+We return immediately if it is.
+
+Why don't we enqueue the target?
+
+Because we only need its distance and path. We don't need to explore its neighbors.
+
+## 5. Alternative: Terminate when the target is dequeued
+
+There is another valid implementation.
+
+Instead of checking the target when discovering it, check it immediately after dequeuing it:
+
+```
+while Q is not empty:
+
+    u = DEQUEUE(Q)
+
+    if u == target:
+        return (dist[u], RECONSTRUCT-PATH(pred, source, target))
+
+    for each neighbor v of u:
+
+        if not visited[v]:
+
+            visited[v] = true
+            dist[v] = dist[u] + 1
+            pred[v] = u
+
+            ENQUEUE(Q, v)
+```
+
+Both approaches are correct, but they differ slightly.
+
+| Aspect                           | Stop on discovery             | Stop on dequeue         |
+| -------------------------------- | ----------------------------- | ----------------------- |
+| When do we check the target?     | When a neighbor is discovered | When removed from queue |
+| Is shortest distance guaranteed? | Yes                           | Yes                     |
+| Does target enter the queue?     | No                            | Yes                     |
+| May explore more vertices?       | Usually fewer                 | Potentially more        |
+| Path reconstruction              | Uses predecessor array        | Uses predecessor array  |
+
+My recommendation: Use termination on discovery for SPSP. It avoids putting the target in the queue when we already know its shortest path.
+
+## 6. Time and space complexity
+
+Early termination can reduce the amount of work performed, but it does not change BFS's worst-case complexity.
+
+### Time complexity
+
+With an adjacency list:
+
+$$
+\boxed{O(V+E)}
+$$
+
+Why?
+
+- Initializing the arrays takes $O(V)$.
+- Each discovered vertex is enqueued at most once.
+- Each processed vertex has its adjacency list examined at most once.
+- In the worst case, we may still explore the entire reachable component.
+
+However, in practice, the algorithm may terminate much earlier.
+
+For example:
+
+```
+A → B → C → D → E → F → G
+```
+
+If we want the path from `A` to `B`, BFS can terminate immediately after processing `A`, without exploring the rest of the graph.
+
+### Space complexity
+
+The algorithm maintains:
+
+| Structure          | Space      |
+| ------------------ | ---------- |
+| `visited[]`        | $O(V)$ |
+| `dist[]`           | $O(V)$ |
+| `pred[]`           | $O(V)$ |
+| Queue              | $O(V)$ |
+| Reconstructed path | $O(V)$ |
+
+Therefore, auxiliary space is:
+
+$$
+\boxed{O(V)}
+$$
+
+The graph itself requires $O(V+E)$ space when represented using an adjacency list.
+
+## 7. Important considerations and edge cases
+
+### 7.1 Source equals destination
+
+Consider:
+
+```
+source = A
+target = A
+```
+
+The shortest path is simply:
+
+```
+A
+```
+
+And:
+
+```
+distance = 0
+```
+
+That's why we handle this case before starting BFS.
+
+### 7.2 Destination is unreachable
+
+Consider:
+
+```
+A → B → C
+
+X → Y
+```
+
+We want to find a path from `A` to `Y`.
+
+BFS explores the component containing `A`, but eventually the queue becomes empty.
+
+Since `Y` was never discovered:
+
+```
+dist[Y] = ∞
+pred[Y] = NIL
+```
+
+The algorithm returns:
+
+```
+No path exists
+```
+
+### 7.3 Multiple shortest paths
+
+Consider:
+
+```
+       A
+      / \
+     B   C
+      \ /
+       D
+```
+
+There are two shortest paths:
+
+```
+A → B → D
+A → C → D
+```
+
+Both have distance 2.
+
+BFS with early termination returns one of them, depending on neighbor processing order.
+
+If you need all shortest paths, you must maintain multiple predecessors for a vertex when they produce the same shortest distance.
+
+### 7.4 Directed versus undirected graphs
+
+The algorithm works for both.
+
+For a directed graph, only follow outgoing edges:
+
+```
+A → B
+```
+
+This does not mean that `B` can reach `A`.
+
+For an undirected graph, each edge can be traversed in both directions.
+
+### 7.5 Weighted graphs
+
+BFS with early termination is not a general weighted shortest-path algorithm.
+
+For example:
+
+```
+       10
+   A ------> D
+    \
+     \ 2
+      v
+      B
+      |
+      | 3
+      v
+      D
+```
+
+BFS might discover the direct path first:
+
+```
+A → D
+Cost = 10
+```
+
+But the cheaper path is:
+
+```
+A → B → D
+Cost = 5
+```
+
+BFS minimizes the number of edges, not the total weight.
+
+Use Dijkstra for nonnegative, unequal edge weights.
+
+## 8. BFS Early Termination versus Bidirectional BFS
+
+These two techniques are related, but they are not the same.
+
+| Feature           | BFS with Early Termination     | Bidirectional BFS                 |
+| ----------------- | ------------------------------ | --------------------------------- |
+| Search direction  | Source to destination          | Both source and destination       |
+| Number of queues  | One                            | Two                               |
+| Main optimization | Stop when target is discovered | Meet in the middle                |
+| Graph requirement | Equal edge weights             | Equal edge weights                |
+| Typical use       | Ordinary SPSP                  | Large graphs with known endpoints |
+
+For example, suppose the shortest path contains six edges.
+
+Ordinary BFS explores outward from the source:
+
+```
+A → B → C → D → E → F → G
+```
+
+Bidirectional BFS explores from both ends:
+
+```
+Forward:   A → B → C
+Backward:  G → F → E
+                 |
+              Meet here
+```
+
+The second approach can significantly reduce exploration in graphs with a large branching factor.
+
+## 9. Where it belongs in your DSA documentation
+
+I recommend this structure:
+
+```
+shortest-path-algorithms/
+│
+├── overview.mdx
+│
+├── problem-types/
+│   ├── single-source-shortest-path.mdx
+│   ├── single-pair-shortest-path.mdx
+│   └── all-pairs-shortest-path.mdx
+│
+├── single-source-shortest-path/
+│   ├── bfs-shortest-path.mdx
+│   ├── dijkstra/
+│   ├── bellman-ford/
+│   └── dag-shortest-path/
+│
+└── single-pair-shortest-path/
+    ├── overview.mdx
+    ├── bfs-early-termination.mdx
+    ├── bidirectional-bfs.mdx
+    ├── bidirectional-dijkstra.mdx
+    └── a-star.mdx
+```
+
+## 10. Key takeaways
+
+- BFS with Early Termination is an optimization of ordinary BFS for the SPSP problem.
+- It uses the same FIFO queue, visited array, distance array, and predecessor array.
+- It terminates when the destination is first discovered.
+- This is safe because BFS explores vertices in nondecreasing order of distance.
+- It returns one shortest path, not necessarily all shortest paths.
+- Its worst-case complexity remains $O(V+E)$, but it can avoid exploring many irrelevant vertices.
+- It works for unweighted graphs or graphs with equal edge weights.
+
+What to study next: Bidirectional BFS. It builds on the same BFS principles but searches simultaneously from the source and destination, which is especially interesting when the graph is large.

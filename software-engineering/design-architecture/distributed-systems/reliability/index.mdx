@@ -4,8 +4,6 @@ title: Distributed Systems Reliability
 sidebar_position: 1
 ---
 
-## Overview
-
 Distributed systems operate in unreliable environments where:
 - networks fail
 - nodes crash
@@ -13,11 +11,121 @@ Distributed systems operate in unreliable environments where:
 - messages are duplicated
 - services become unavailable
 
+Distributed systems reliability is about designing a system that **continues to provide correct, useful service even when some of its components fail, become slow, lose connectivity, or behave unexpectedly**.
+
+This is especially important in microservice architectures built with Spring Boot, API gateways, databases, service discovery, and messaging systems such as RabbitMQ or Kafka.
+
+A distributed system is fundamentally different from a single-process application: its components communicate over networks, and the network itself can fail independently of the components.
+
 Reliability engineering focuses on designing systems that continue operating correctly despite these failures.
 
----
+## What does reliability mean?
 
-# Goals of Reliability
+Imagine an e-commerce application composed of several services:
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/reliability/What-does-reliability-mean.png)
+
+Now suppose the Payment Service becomes slow.
+
+- Product information is still available.
+- Orders might be created but cannot yet be paid.
+- Requests that depend on payment may time out.
+- Threads in the Order Service may become blocked while waiting for payment.
+- If retries are poorly designed, the additional requests may overload Payment even further.
+
+A reliable system does not necessarily prevent the Payment Service from failing. Instead, it limits the consequences of that failure and provides an appropriate response.
+
+For example, it might return an order with `PAYMENT_PENDING`, preserve the order, and retry payment processing safely later.
+
+**The central idea**: reliability is not simply preventing failures. It is managing failures so that the system continues to behave acceptably.
+
+## Reliability, availability, and fault tolerance
+
+These concepts are related, but they are not interchangeable.
+
+| Concept         | Main question                                                  | Example                                                                    |
+| --------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Reliability     | Does the system continue to provide correct service over time? | Orders are processed correctly without losing them.                        |
+| Availability    | Is the service ready to be used when requested?                | The order API responds successfully when a client calls it.                |
+| Fault tolerance | Can the system continue operating despite certain failures?    | A replica takes over when another instance crashes.                        |
+| Resilience      | Can the system withstand disruption and recover?               | The application isolates a failing service and restores normal operation.  |
+| Durability      | Does committed data survive failures?                          | A confirmed order survives a database restart.                             |
+| Consistency     | Do operations and reads obey the system's data rules?          | A payment is not recorded as successful without the required confirmation. |
+
+A system can be available but unreliable. For example, an API that responds successfully while returning incorrect order totals is available, but it is not providing correct service.
+
+Likewise, a system can be reliable without being available every second. A banking system might temporarily reject transactions rather than risk processing the same payment twice.
+
+These distinctions help us define what reliability actually means for a particular application.
+
+## Why distributed systems are difficult to make reliable
+
+In a traditional application, a function call inside the same process usually returns a result or throws an exception. In a distributed system, a remote call crosses a network, which introduces uncertainty.
+
+Consider this request:
+
+```
+Order Service  ── create payment ──>  Payment Service
+```
+
+The Payment Service receives the request, charges the customer, and sends a response. But the response gets lost because of a network failure.
+
+What does the Order Service know?
+
+It knows that it did not receive a response. It does not know whether the payment succeeded.
+
+There are several possible failure scenarios:
+
+1\. Process failure
+
+The Payment Service crashes before processing the request.
+
+Possible result: payment was never attempted.
+
+2\. Network failure
+
+The request or response is lost.
+
+Possible result: the payment succeeded, but the caller never learned that.
+
+3\. Slow response
+
+The service is alive but responds too slowly.
+
+Possible result: caller threads remain occupied while requests accumulate.
+
+4\. Dependency failure
+
+The Payment Service works, but its database or an external payment provider fails.
+
+Possible result: a healthy application instance cannot complete its work.
+
+There are also partial failures, where one component fails while the rest of the system continues running. These are among the most important problems in distributed systems.
+
+### The timeout problem
+
+A timeout tells the caller to stop waiting after a specified duration. It does not automatically cancel work already performed by the remote service.
+
+For example:
+
+```
+t = 0 ms    Order Service sends payment request
+t = 100 ms  Payment Service charges customer
+t = 500 ms  Order Service timeout expires
+t = 600 ms  Payment Service sends response
+```
+
+The caller has timed out, but the customer has already been charged.
+
+If the Order Service blindly retries, the customer might be charged twice.
+
+This is why reliability requires a combination of timeouts, retry policies, idempotency, durable state, and sometimes reconciliation.
+
+## Goals of Reliability in Distributed Systems
+
+The goals of reliability describe what we want a distributed system to achieve when components fail, networks become unreliable, or workloads change.
+
+In software engineering, reliability is not simply keeping servers running. A reliable system should continue delivering correct results, protect important data, limit the impact of failures, and recover within acceptable limits.
 
 A reliable distributed system aims to:
 
@@ -28,7 +136,662 @@ A reliable distributed system aims to:
 - avoid cascading failures
 - maintain acceptable performance under stress
 
----
+Let's connect these goals to a Spring Boot microservices application.
+
+### The main goals of reliability
+
+1\. **Correctness**
+
+The system should produce results that satisfy its business rules, even when failures occur.
+
+Example: An order must not be marked `PAID` unless the payment workflow has established that payment succeeded.
+
+Correctness is fundamental: returning a successful HTTP response is not enough if the underlying result is wrong.
+
+2\. **High availability**
+
+The system should remain accessible and provide useful service when requested.
+
+Example: If one Order Service instance crashes, the load balancer routes requests to healthy instances.
+
+Availability can be measured using an SLI and managed through an SLO, such as 99.9% successful requests over a defined period.
+
+3\. **Fault tolerance**
+
+The system should continue operating when specified components fail.
+
+Example: A replicated database can continue serving reads after one replica becomes unavailable, provided the remaining topology and consistency requirements permit it.
+
+Fault tolerance depends on the failure model. Replication cannot protect against every failure, such as a bug that corrupts data on every replica.
+
+4\. **Failure containment**
+
+A failure in one component should not unnecessarily bring down unrelated components.
+
+Example: If the Recommendation Service is unavailable, customers should still be able to browse products and place orders.
+
+Circuit breakers, bulkheads, timeouts, and load shedding help prevent cascading failures.
+
+5\. **Data durability and integrity**
+
+Important committed data should survive failures, and data should not be corrupted or silently lost.
+
+Example: An order that has been committed to the database should survive an application restart.
+
+Transactions, durable storage, backups, replication, and recovery procedures support this goal. Durability and integrity are related, but distinct: data can survive a crash and still be incorrect.
+
+6\. **Recoverability**
+
+After a failure, the system should return to an acceptable operating state within a defined period.
+
+Example: After RabbitMQ becomes available again, consumers resume processing queued order events without losing accepted work.
+
+Recovery goals are often expressed through RTO (Recovery Time Objective) and RPO (Recovery Point Objective).
+
+7\. **Predictable performance under failure**
+
+The system should degrade in a controlled way rather than collapse under slow dependencies or excessive traffic.
+
+Example: When Payment Service latency increases, the Order Service enforces deadlines and concurrency limits instead of allowing requests to accumulate indefinitely.
+
+Timeouts, bounded retries, bulkheads, rate limits, and capacity planning support this goal.
+
+### Reliability does not mean that nothing ever fails
+
+Consider an e-commerce system with three services:
+
+```
+                 API Gateway
+                      |
+               +------+------+
+               |             |
+          Product Service  Order Service
+                              |
+                              v
+                        Payment Service
+```
+
+Suppose the Payment Service fails temporarily.
+
+There are two possible designs.
+
+1. **Unreliable behavior**
+
+     Failure spreads through the system
+
+     - Order requests wait indefinitely.
+     - Threads and connections become exhausted.
+     - Retries increase the load.
+     - The entire application becomes unavailable.
+
+2. **Reliability-oriented behavior**
+
+     The failure is contained
+
+     - Payment requests time out within a defined deadline.
+     - A circuit breaker limits calls to the failing dependency.
+     - Orders that can safely be accepted remain `PAYMENT_PENDING`.
+     - The system retries or reconciles payment according to its business rules.
+     - Product browsing continues to work.
+
+The second design does not prevent the Payment Service from failing. It prevents that failure from unnecessarily destroying the rest of the system.
+
+One qualification matters: accepting an order while payment is unavailable is appropriate only if the business permits pending orders and the system can preserve and reconcile their state safely.
+
+### Goals, mechanisms, and measurements
+
+It helps to separate three things that are often confused.
+
+| Goal                    | Possible mechanisms                   | How to evaluate it                          |
+| ----------------------- | ------------------------------------- | ------------------------------------------- |
+| High availability       | Replicas, health checks, failover     | Availability SLI                            |
+| Correctness             | Invariants, validation, transactions  | Correctness tests and invariant checks      |
+| Fault tolerance         | Redundancy, replication, isolation    | Fault-injection tests                       |
+| Failure containment     | Circuit breakers, bulkheads           | Blast radius and unaffected request success |
+| Data durability         | Persistent storage, backups, outbox   | Recovery and data-loss tests                |
+| Recoverability          | Automated recovery, runbooks, backups | RTO and RPO                                 |
+| Predictable performance | Deadlines, rate limits, load shedding | Latency percentiles and error rates         |
+
+Notice that **a mechanism is not itself a goal**.
+
+For example, installing Resilience4j does not prove that a service is reliable. You must show that the configured policies actually limit failures and that the business operation still behaves correctly.
+
+### How to prioritize reliability goals
+
+Not every operation needs the same trade-offs.
+
+Consider these examples:
+
+- **Product recommendations**: It may be acceptable to return no recommendations when the recommendation engine fails.
+- **Product browsing**: A cached result may be acceptable if its age is within the business-defined freshness limit.
+- **Payment processing**: Avoid reporting success when the outcome is unknown. Duplicate charges must be prevented or safely reconciled.
+- **Order persistence**: An accepted order must not disappear simply because a message broker temporarily becomes unavailable.
+- **Account balances**: Correctness and consistency may be more important than allowing every request to proceed during a partition.
+
+This leads to a critical principle:
+
+**Reliability means meeting the required level of service and correctness under defined failure conditions—not maximizing availability at any cost**.
+
+A system that rejects an unsafe payment transaction can be behaving more reliably than one that returns success immediately but risks charging the customer twice.
+
+## Key Concepts
+
+Key concepts are the fundamental ideas that help us reason about reliability before choosing a particular technology or implementation.
+
+### 1. Partial failure
+
+A partial failure occurs when some components of a distributed system fail while others continue to operate.
+
+Consider this architecture:
+
+![Partial failure](/docs/assets/software-engineering/design-architecture/distributed-systems/reliability/Partial-failure.png)
+
+The gateway and two services are healthy, but Payment is unavailable.
+
+The system is neither completely operational nor completely down. Different operations have different outcomes.
+
+This is one of the defining characteristics of distributed systems: **there may be no single, immediately available view of the health of the entire system.**
+
+For example, the Order Service might know that a payment request timed out, but it cannot necessarily know whether the Payment Service processed the request before the timeout.
+
+**Engineering implication**: design each service and business workflow to handle the failure of its dependencies explicitly.
+
+### 2. Fault, error, and failure
+
+These terms describe different stages of a problem.
+
+| Term    | Meaning                                                               | Example                                                            |
+| ------- | --------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Fault   | The underlying cause of a problem                                     | A network interface fails                                          |
+| Error   | An incorrect internal state or result caused by a fault               | A service cannot obtain the payment response                       |
+| Failure | The externally observable service behavior violates its specification | The order API cannot meet its response or correctness requirements |
+
+A fault does not always cause an error, and an error does not always cause an externally visible failure.
+
+For instance, one database replica might fail, but automatic failover could allow the application to continue serving requests correctly.
+
+**Engineering implication**: preventing every fault is often impossible. A more practical goal is to detect errors, contain their effects, and recover before they become larger failures.
+
+### 3. Reliability versus availability
+
+Reliability concerns continued correct service over time. Availability concerns whether a service is usable when needed.
+
+Consider two APIs:
+
+- API A responds to 99.99% of requests, but sometimes returns incorrect payment totals.
+- API B temporarily rejects requests during a database partition, preventing potentially inconsistent transactions.
+
+API A may have higher measured availability while violating an important correctness requirement.
+
+A useful reliability strategy therefore tracks more than uptime. It also considers successful operations, data integrity, latency, and recovery.
+
+### 4. Fault tolerance and resilience
+
+These concepts are related but emphasize different capabilities.
+
+- Fault tolerance: continue operating despite specified faults.
+- Resilience: withstand disruption, limit its impact, and recover to an acceptable state.
+
+For example, running three Product Service instances provides redundancy. Routing traffic around a failed instance supports fault tolerance. Detecting the failure, containing its impact, restoring capacity, and verifying normal behavior are parts of the broader resilience process.
+
+Neither concept means that every operation must succeed during every possible failure.
+
+### 5. Redundancy and replication
+
+Redundancy provides alternative resources. Replication maintains multiple copies of data or service instances.
+
+Examples include:
+
+- Multiple Spring Boot instances behind a load balancer.
+- Database replicas.
+- Multiple message-broker nodes.
+- Redundant network paths.
+
+However, redundancy only helps when the remaining resources can continue providing the required service.
+
+If every replica depends on the same unavailable database, adding more application instances will not solve the underlying problem.
+
+Likewise, database replicas can share correlated failures caused by a bad deployment, data corruption, or a shared infrastructure outage.
+
+### 6. Timeouts and uncertain outcomes
+
+Distributed calls can fail in ways that are invisible to the caller.
+
+```
+Order Service                 Payment Service
+     |                               |
+     |------ charge customer ------->|
+     |                               | Charge succeeds
+     |          Response lost        |
+     |<------------- X --------------|
+     |                               |
+     | Timeout                       |
+```
+
+The Order Service knows that it did not receive a response. It does not know whether the charge succeeded.
+
+A timeout limits how long the caller waits; it does not prove that the remote operation failed.
+
+This distinction is crucial for payment processing, order creation, messaging, and any operation with side effects.
+
+**Engineering implication**: use idempotency keys, durable operation state, and reconciliation where necessary. Do not blindly retry an operation simply because its response was lost.
+
+### 7. Graceful degradation
+
+Graceful degradation means preserving essential functionality when optional functionality becomes unavailable.
+
+For example:
+
+- Recommendations disappear when the Recommendation Service fails.
+- Product browsing continues using an acceptably fresh cache.
+- Checkout records a pending payment if the business workflow permits it.
+- The system rejects unsafe financial operations rather than pretending they succeeded.
+
+The goal is to preserve the most important user and business capabilities, not to make every feature work regardless of circumstances.
+
+## Failure Scenarios
+
+Failure scenarios describe concrete situations that reliability engineering must anticipate.
+
+A useful way to study them is to ask four questions:
+
+1. What failed?
+2. What does the caller know about the failure?
+3. What happens to dependent components?
+4. How can the system recover safely?
+
+### 2.1 Process or instance failure
+
+Scenario: A Spring Boot instance crashes because of an out-of-memory error.
+
+```
+                  Load Balancer
+                  /           \
+          Instance A        Instance B
+            CRASHED            HEALTHY
+                                  |
+                             Handles traffic
+```
+
+Potential consequences:
+
+- Requests in progress fail.
+- Local in-memory state disappears.
+- Scheduled tasks may stop.
+- Work not persisted elsewhere may be lost.
+
+Possible mitigations:
+
+- Multiple instances.
+- Health checks and traffic removal.
+- Process supervision and automatic restart.
+- Durable storage for important state.
+- Graceful shutdown and in-flight request handling.
+
+One important consideration: restarting a process does not recover an operation that was performed but never recorded durably.
+
+### 2.2 Network partition
+
+Scenario: The Order Service cannot communicate with Payment, but both services are still running.
+
+Possible causes include routing failures, firewall changes, broken network interfaces, or a partition between availability zones.
+
+The consequences depend on the operation:
+
+- Product browsing might continue.
+- Payment status might become temporarily unknown.
+- New payment attempts might need to be rejected or deferred.
+- Replicated data might become temporarily inconsistent.
+
+Mitigations include deadlines, controlled retries, circuit breakers, durable queues, and explicit handling of uncertain business outcomes.
+
+Network partitions also affect consistency choices. A distributed system may have to choose between serving some requests with potentially stale information and refusing those requests until the required coordination is possible.
+
+### 2.3 Slow dependency
+
+Scenario: The database normally responds in 20 milliseconds but starts taking 5 seconds per query.
+
+The database is technically available, yet the application may become unusable.
+
+```
+Slow database
+     |
+     v
+Requests wait longer
+     |
+     v
+Threads and connections accumulate
+     |
+     v
+Request queues grow
+     |
+     v
+Application becomes overloaded
+```
+
+This can be more dangerous than an immediate failure because requests continue consuming resources.
+
+Mitigations:
+
+- Connection and query timeouts.
+- Bounded concurrency.
+- Circuit breakers where appropriate.
+- Query optimization and capacity management.
+- Load shedding.
+- Monitoring queue lengths and latency percentiles.
+
+A circuit breaker should not be treated as a substitute for diagnosing a persistently slow database.
+
+### 2.4 Dependency failure
+
+Scenario: Payment Service is healthy, but its external payment provider is unavailable.
+
+This illustrates why the health of a service instance does not guarantee the success of its business operations.
+
+Mitigations:
+
+- Dependency-specific timeouts.
+- Limited retries for appropriate failures.
+- Circuit breakers.
+- A durable pending-payment workflow.
+- Reconciliation with the payment provider.
+
+Fallback behavior must reflect the business meaning of the operation. Returning an empty recommendation list may be acceptable; reporting a successful payment without confirmation is not.
+
+### 2.5 Data loss or corruption
+
+Scenario: A database crash occurs during a write, or an application bug stores incorrect order totals.
+
+Potential consequences include missing orders, incorrect financial records, and inconsistent state across services.
+
+Mitigations:
+
+- Database transactions and integrity constraints.
+- Durable storage and appropriate replication.
+- Backups and tested restoration procedures.
+- Schema validation and business invariants.
+- Auditing and reconciliation.
+- Protection against correlated failures and destructive changes.
+
+Replication alone is not a complete backup strategy. If an incorrect deletion propagates to replicas, the replicas may faithfully reproduce the data loss.
+
+### 2.6 Duplicate requests or message delivery
+
+Scenario: A Payment Service charges a customer but crashes before acknowledging the message. The broker delivers the message again.
+
+```
+RabbitMQ
+   |
+   | PaymentRequested
+   v
+Payment Consumer
+   |
+   | Charge succeeds
+   |
+   X Consumer crashes before acknowledgement
+   |
+   v
+Message redelivered
+```
+
+Without safeguards, the payment might be executed twice.
+
+Mitigations:
+
+- Idempotency keys.
+- Durable records of processed operations.
+- Deduplication.
+- Correct transaction and acknowledgement boundaries.
+- Reconciliation for operations involving external providers.
+
+A broker's delivery guarantee alone does not guarantee that the business effect occurs exactly once.
+
+### 2.7 Cascading failure
+
+Scenario: A slow Payment Service causes requests to accumulate in Order Service, which then exhausts its threads and starts failing unrelated operations.
+
+Cascading failures are especially dangerous because the initial failure spreads beyond the component that caused it.
+
+Mitigations:
+
+- Timeouts and end-to-end deadlines.
+- Circuit breakers.
+- Bulkheads and concurrency limits.
+- Bounded retries with backoff and jitter.
+- Rate limiting and load shedding.
+- Graceful degradation.
+
+The design goal is to limit the blast radius: the number of components and operations affected by a single failure.
+
+### 2.8 Overload and traffic spikes
+
+Scenario: A promotional event increases request volume from 1,000 to 20,000 requests per second.
+
+Even with healthy components, the system might run out of CPU, memory, connections, or queue capacity.
+
+Mitigations:
+
+- Capacity planning and load testing.
+- Horizontal scaling where appropriate.
+- Rate limiting.
+- Backpressure and bounded queues.
+- Caching.
+- Prioritization of essential work.
+- Load shedding when demand exceeds safe capacity.
+
+An unbounded queue can make an overloaded system appear to accept work while latency and memory consumption grow until the service fails.
+
+### 2.9 Common-cause failure
+
+Scenario: Every service instance is running, but all of them lose access to the same database cluster or availability zone.
+
+Adding more replicas does not help if all replicas depend on the same failed resource.
+
+Mitigations include failure-domain separation, independent recovery paths, tested backups, and avoiding unnecessary shared dependencies.
+
+This is why reliability planning must examine the whole architecture rather than just count service instances.
+
+#### Failure scenario summary
+
+| Failure scenario            | Main risk                        | Typical protection                      |
+| --------------------------- | -------------------------------- | --------------------------------------- |
+| Instance crash              | Lost capacity or in-flight work  | Redundancy and restart                  |
+| Network partition           | Uncertain communication          | Deadlines and explicit failure handling |
+| Slow dependency             | Resource exhaustion              | Timeouts and concurrency limits         |
+| External dependency failure | Incomplete business operations   | Isolation and recovery workflow         |
+| Data loss or corruption     | Irrecoverable or incorrect state | Durability, backups, integrity checks   |
+| Duplicate delivery          | Repeated side effects            | Idempotency and deduplication           |
+| Cascading failure           | System-wide outage               | Circuit breakers and bulkheads          |
+| Overload                    | Queues and resources exhausted   | Rate limits and load shedding           |
+| Common-cause failure        | All replicas affected            | Failure-domain separation               |
+
+## Design Considerations
+
+Design considerations are the decisions engineers make to ensure that the system can meet its reliability goals under the failure scenarios above.
+
+### 3.1 Define reliability requirements first
+
+Before selecting a library or infrastructure platform, define what the application must guarantee.
+
+For example:
+
+| Requirement         | Example target                                                |
+| ------------------- | ------------------------------------------------------------- |
+| Availability        | 99.9% monthly availability for the order API                  |
+| Latency             | 99% of eligible reads finish within 300 ms                    |
+| Data loss           | No acknowledged orders lost under the specified failure model |
+| Recovery            | Restore service within 30 minutes after a regional disaster   |
+| Payment correctness | No duplicate charges for the same logical payment operation   |
+
+These are illustrative requirements, not universal targets. A real project must specify how each measurement is calculated and under which failures the guarantee applies.
+
+The distinction between a requirement and an implementation matters. "Use three replicas" is an implementation decision; "continue serving reads after one instance fails" is a behavior requirement.
+
+### 3.2 Choose the right failure-handling strategy
+
+Not every operation should use the same approach.
+
+Optional operation
+
+Example: fetch recommendations.
+
+Preferred behavior: degrade gracefully or return a suitable default.
+
+Read operation
+
+Example: retrieve product details.
+
+Preferred behavior: use an appropriate cache, or fail within a bounded time if no safe result is available.
+
+Critical state-changing operation
+
+Example: charge a customer.
+
+Preferred behavior: preserve operation identity and state, handle ambiguous outcomes explicitly, and retry only when safe.
+
+Asynchronous operation
+
+Example: send an order confirmation email.
+
+Preferred behavior: persist the work, retry under a bounded policy, and isolate poison messages for investigation.
+
+This is an important design principle: failure handling should reflect the business semantics of the operation.
+
+### 3.3 Establish deadlines, not just individual timeouts
+
+Suppose an API Gateway allows a total request duration of 2 seconds, while the Order Service calls three dependencies sequentially.
+
+If each downstream call is allowed to consume 2 seconds, the entire request could take substantially longer than the gateway's deadline.
+
+Instead, establish an end-to-end deadline and allocate the remaining time across the calls.
+
+For example:
+
+```
+Overall request budget: 2,000 ms
+
+Order Service processing:       200 ms
+Product Service:                400 ms
+Inventory Service:              400 ms
+Remaining budget / overhead:  1,000 ms
+```
+
+These are illustrative allocations. Real budgets depend on the request path, latency distributions, retries, and required safety margins.
+
+When a deadline is nearly exhausted, starting another retry may be pointless and could waste resources.
+
+### 3.4 Prevent retries from making the failure worse
+
+Retries are useful for transient failures, but they can amplify load.
+
+Imagine 100 requests per second, each making three attempts. Under a failure, the downstream service could receive up to 300 attempts per second for those operations.
+
+The situation becomes worse when multiple layers retry independently.
+
+Good retry design includes:
+
+- A small maximum attempt count.
+- Exponential backoff and jitter.
+- A total deadline.
+- A policy that distinguishes transient errors from permanent errors.
+- Idempotency for operations with side effects.
+- Coordination between retries at different layers.
+
+Retry only when the expected benefit outweighs the extra load and risk.
+
+### 3.5 Minimize shared dependencies and failure blast radius
+
+Shared components can become common points of failure.
+
+For example, all microservices might depend on one database cluster, one message broker, or one configuration server.
+
+Questions to ask:
+
+- Does this dependency need to be shared?
+- Can the service continue in a degraded mode if it becomes unavailable?
+- Is there a recovery path if it fails?
+- Will one overloaded component exhaust resources in other services?
+- Are replicas separated across independent failure domains?
+
+Avoiding every shared dependency is not realistic. The goal is to understand which dependencies are critical and design their failure behavior deliberately.
+
+### 3.6 Design data operations for safe recovery
+
+Distributed workflows often span several databases and services, so a single ACID transaction cannot normally cover the entire operation.
+
+Consider creating an order and publishing an event.
+
+```
+Order Service
+    |
+    +--> Save order to database
+    |
+    +--> Publish OrderCreated to RabbitMQ
+```
+
+If the database write succeeds but publishing fails, the order exists but downstream services may never learn about it.
+
+A transactional outbox addresses this by saving the order and an event record in the same local database transaction. A separate publisher delivers the event, possibly more than once, so consumers must still handle duplicates.
+
+For multi-service workflows, also consider:
+
+- Explicit state machines.
+- Sagas and compensating actions.
+- Idempotent consumers.
+- Durable event records.
+- Reconciliation of uncertain outcomes.
+
+Recovery should restore a valid business state, not merely restart the processes.
+
+### 3.7 Balance consistency and availability
+
+During a network partition, a distributed system may not be able to guarantee both uninterrupted responses and strong consistency for every operation.
+
+For example, two isolated regions might each receive a request to spend the same account balance. Allowing both requests without coordination risks overspending.
+
+A system may instead reject or defer some transactions until it can establish that they are safe.
+
+The appropriate choice depends on the business:
+
+- Product descriptions can often tolerate bounded staleness.
+- Shopping-cart updates may support carefully designed conflict resolution.
+- Financial transactions generally need stronger coordination and invariant protection.
+
+Do not apply a single consistency strategy to every piece of data.
+
+### 3.8 Make reliability observable
+
+A system cannot be operated reliably if its failures are invisible.
+
+Useful signals include:
+
+- Request success and failure rates.
+- p50, p95, and p99 latency.
+- Timeout and retry counts.
+- Circuit breaker state transitions.
+- Thread-pool and connection-pool saturation.
+- Queue depth and message age.
+- Database replication lag.
+- Business-level failures, such as payments stuck in `PENDING`.
+
+Distributed tracing helps connect a slow gateway request to a particular downstream call, while metrics reveal whether the problem affects one request or the entire service.
+
+Alert on symptoms that matter to users and business outcomes, not merely on whether a process is running.
+
+### 3.9 Test failures deliberately
+
+Reliability assumptions should be tested rather than accepted on faith.
+
+For a Spring Boot microservices project, useful exercises include:
+
+1. Kill one service instance and verify traffic continues through healthy instances.
+2. Delay Payment Service responses and verify the request deadline is respected.
+3. Disable RabbitMQ temporarily and verify accepted work is preserved according to the system's contract.
+4. Deliver the same payment event twice and verify there is no duplicate charge.
+5. Saturate a dependency's connection pool and verify unrelated operations remain functional.
+6. Restore a database backup and measure the actual recovery time and data loss.
+
+Chaos engineering extends this approach by deliberately injecting controlled faults into a system while monitoring its behavior. It should be performed with clear hypotheses, safeguards, and a recovery plan.
 
 # Why Reliability Matters
 
@@ -233,7 +996,916 @@ Partial functionality is often better than total outage.
 
 Failures must be diagnosable.
 
----
+
+
+## Reliability Metrics
+
+Reliability needs measurable goals rather than vague statements such as "the application should never fail."
+
+When we design a reliable distributed system, we need to answer four practical questions:
+
+- MTBF: How long does the system operate before a failure occurs?
+- MTTR: How long does it take to recover from a failure?
+- Latency: How long does the system take to respond to a request?
+- Error rate: How often do requests fail?
+
+These metrics complement one another. A service can fail rarely but take hours to recover, or remain available while responding so slowly that users cannot use it effectively.
+
+### 4.1 Availability
+
+Availability is the proportion of time a service is usable.
+
+$$
+A=\frac{\text{Uptime}}{\text{Uptime}+\text{Downtime}}
+$$
+
+For a service that was usable for 99.9% of a measurement period, its availability was 99.9%.
+
+The familiar availability targets translate into the following approximate downtime budgets:
+
+| Availability target | Downtime per 30-day month |
+| ------------------- | ------------------------- |
+| 99%                 | 7 hours, 12 minutes       |
+| 99.9%               | 43 minutes, 12 seconds    |
+| 99.95%              | 21 minutes, 36 seconds    |
+| 99.99%              | 4 minutes, 19 seconds     |
+| 99.999%             | 26 seconds                |
+
+These are illustrative budgets, assuming continuous measurement and that all downtime counts against the target. Actual service-level agreements may define measurement windows, exclusions, and what counts as unavailable.
+
+### 4.2 Reliability and failure rate
+
+For a repairable system, engineers may measure how frequently failures occur and how quickly service is restored.
+
+Two useful metrics are:
+
+- MTBF (Mean Time Between Failures): average operating time between failures, using a clearly defined measurement method.
+- MTTR (Mean Time to Repair/Recover): average time to restore service after a failure.
+
+For example, suppose a service operates for long periods but takes 45 minutes to recover after every failure. Reducing recovery time to five minutes can significantly improve availability even if failures occur just as often.
+
+MTTR is used with slightly different meanings in different organizations, so a team should define whether it means repair, recovery, or resolution.
+
+### 1. MTBF — Mean Time Between Failures
+
+MTBF measures the average operating time between failures. It helps us understand how frequently a system or component experiences a failure.
+
+For example, imagine an Order Service that runs for a long time but occasionally crashes because of a memory leak.
+
+![]/docs/assets/software-engineering/design-architecture/distributed-systems/reliability/(MTBF-example1.png)
+The mean time between failures is:
+
+$$
+\text{MTBF}=\frac{\text{Total operating time}}{\text{Number of failures}}
+$$
+
+Using the three operating intervals above:
+
+$$
+\text{MTBF}=\frac{10+14+12}{3}=12\text{ hours}
+$$
+
+On average, the service operates for 12 hours between failures.
+
+#### What does MTBF tell us?
+
+A higher MTBF generally means failures occur less frequently.
+
+| MTBF      | Interpretation                                   |
+| --------- | ------------------------------------------------ |
+| 2 hours   | Failures occur relatively frequently             |
+| 24 hours  | Approximately one failure per day on average     |
+| 720 hours | Approximately one failure per 30 days on average |
+
+These are illustrative averages, not predictions of exactly when the next failure will occur.
+
+#### MTBF in distributed systems
+
+Consider a system with these components:
+
+- API Gateway
+- Order Service
+- Payment Service
+- Database
+- Message broker
+
+You can measure MTBF for individual components, but first define what counts as a failure. A process crash, an unavailable endpoint, and a failed business transaction are different events.
+
+Also, a component failure does not necessarily mean the whole system has failed. If the Payment Service instance crashes but another instance handles requests, the system may continue operating.
+
+One important caveat: MTBF is most naturally used for repairable systems and components. For an entire service, it is often more useful to define a customer-visible failure event and measure the time between such events.
+
+### 2. MTTR — Mean Time To Repair/Recover
+
+MTTR measures the average time needed to restore a failed system or component to working condition.
+
+You may see MTTR expanded as Mean Time To Repair or Mean Time To Recovery. The terminology varies across organizations, so when defining a metric, specify exactly what the timer measures.
+
+Imagine the Order Service experiences three failures:
+
+| Failure   | Time until service is restored |
+| --------- | ------------------------------ |
+| Failure 1 | 10 minutes                     |
+| Failure 2 | 20 minutes                     |
+| Failure 3 | 30 minutes                     |
+| Total     | 60 minutes                     |
+
+The calculation is:
+
+$$
+\text{MTTR}=\frac{\text{Total recovery time}}{\text{Number of failures}}
+$$
+
+$$
+\text{MTTR}=\frac{60}{3}=20\text{ minutes}
+$$
+
+On average, it takes 20 minutes to restore the service after a failure.
+
+#### What counts as recovery?
+
+In a distributed system, recovery does not always mean restarting a process.
+
+Recovery could mean:
+
+- Restarting a crashed Spring Boot container.
+- Replacing an unhealthy instance with a healthy replica.
+- Restoring a database from a backup.
+- Re-establishing connectivity to a dependency.
+- Recovering message processing after a broker outage.
+- Restoring normal service after an incident or deployment rollback.
+
+Be precise about the endpoint. If the container restarts in 30 seconds but requests continue failing for another 5 minutes, measuring only restart time understates the real recovery time experienced by users.
+
+#### How MTBF and MTTR work together
+
+MTBF tells us how frequently failures occur; MTTR tells us how quickly we recover.
+
+| System | MTBF      | MTTR     | General interpretation                                   |
+| ------ | --------- | -------- | -------------------------------------------------------- |
+| A      | 100 hours | 1 hour   | Failures are relatively infrequent and recovery is quick |
+| B      | 100 hours | 10 hours | Same failure frequency, but recovery takes longer        |
+| C      | 500 hours | 1 hour   | Failures are less frequent, and recovery is quick        |
+
+For a simple repairable system that alternates between operating and being repaired, a commonly used approximation of availability is:
+
+$$
+A=\frac{\text{MTBF}}{\text{MTBF}+\text{MTTR}}
+$$
+
+For System A:
+
+$$
+A=\frac{100}{100+1}\approx99.01\\%
+$$
+
+For System B:
+
+$$
+A=\frac{100}{100+10}\approx90.91\\%
+$$
+
+This is a simplified model. It assumes the measured operating and repair periods represent the system's actual uptime and downtime. Real service availability can be affected by redundancy, partial failures, maintenance, and other factors.
+
+The lesson is that reducing recovery time can improve availability even if the failure frequency stays the same.
+
+#### How do we reduce MTTR in a microservices architecture?
+
+- Automated recovery: Restart unhealthy instances or replace failed containers.
+- Health checks: Detect instances that are running but cannot serve requests correctly.
+- Redundancy: Route requests to healthy replicas rather than waiting for a failed instance to recover.
+- Observability: Use logs, metrics, traces, and actionable alerts to identify the cause quickly.
+- Runbooks and automation: Make common recovery procedures repeatable.
+- Backups and tested restoration: Reduce the time required to recover lost or corrupted data.
+
+A critical distinction: restarting a service does not necessarily repair the underlying problem. If a database is corrupt or a payment transaction has an unknown outcome, recovery may require additional steps.
+
+### 3. Latency — How Long Does a Request Take?
+
+Latency is the time between a request being made and the corresponding response being received.
+
+Suppose a customer places an order through this architecture:
+```
+                   Client
+
+            Sends an order request
+                     ↓
+                API Gateway
+                     ↓
+               Order Service
+                     ↓
+          Payment Service + Database
+                     ↓
+          Client receives response
+
+End-to-end latency includes the time spent across the complete request path.
+```
+The customer might experience 250 milliseconds of latency even if each individual service is fast. Network communication, database queries, connection pools, queues, locks, and downstream calls can all add delay.
+
+#### Average latency is not enough
+
+Suppose 1,000 requests produce these response times:
+
+- 950 requests finish in 100 ms.
+- 40 requests finish in 300 ms.
+- 10 requests finish in 2,000 ms.
+
+The average is:
+
+$$
+\frac{950(100)+40(300)+10(2000)}{1000} =135\text{ ms}
+$$
+
+An average latency of 135 ms sounds good, but it hides the fact that some users wait 2 seconds.
+
+This is why we use latency percentiles.
+
+| Metric | Meaning                                              |
+| ------ | ---------------------------------------------------- |
+| p50    | 50% of requests finish within this time — the median |
+| p95    | 95% of requests finish within this time              |
+| p99    | 99% of requests finish within this time              |
+| p99.9  | 99.9% of requests finish within this time            |
+
+For the example above, p50 is 100 ms, p95 is 100 ms, and p99 is 300 ms under the usual nearest-rank percentile convention. The slowest 10 requests take 2 seconds, so the p99.9 is 2 seconds.
+
+The exact percentile calculation can vary by measurement system, especially for small samples.
+
+#### Why tail latency matters in distributed systems
+
+Imagine a service that calls five downstream services in parallel and waits for all five to respond. Even if each service is usually fast, one unusually slow dependency can delay the entire request.
+
+This is called a tail-latency problem.
+
+For example:
+
+- Inventory Service: 40 ms
+- Pricing Service: 50 ms
+- Customer Service: 35 ms
+- Shipping Service: 45 ms
+- Recommendation Service: 1,500 ms
+
+If the request must wait for every service, its completion time may be dominated by the Recommendation Service. If recommendations are optional, the system could instead return the order result without waiting for them.
+
+#### Latency and timeouts
+
+A timeout places an upper bound on how long a caller waits for an operation.
+
+For example, an Order Service might allow a maximum of 500 ms for a particular downstream call. If the dependency takes longer, the caller times out and applies its failure policy.
+
+But a timeout does not prove that the operation failed. The remote service might have completed the operation while its response was delayed or lost. This is especially important for payments and order creation, where retries may need idempotency protection.
+
+#### How do we improve latency?
+
+- Find slow database queries and missing indexes.
+- Reduce unnecessary synchronous service-to-service calls.
+- Cache appropriate, frequently requested data.
+- Tune connection pools and resource limits.
+- Set sensible deadlines and timeouts.
+- Avoid unbounded queues and thread-pool exhaustion.
+- Use traces to find which part of the request path contributes most to the delay.
+
+Latency is a reliability concern because a service that technically responds but routinely exceeds its response-time objective may be unusable to customers.
+
+### 4. Error Rates — How Often Do Requests Fail?
+
+Error rate measures the proportion of requests or operations that fail during a specified period.
+
+For an API, a basic error-rate calculation is:
+
+$$
+\text{Error Rate}= \frac{\text{Failed Requests}}{\text{Total Requests}}\times100\\%
+$$
+
+Suppose the Order Service processes 10,000 requests in one minute, and 200 fail.
+
+$$
+\text{Error Rate}=\frac{200}{10000}\times100=2\\%
+$$
+
+The service has a 2% error rate for that measurement window.
+
+Requests in one minute
+
+![](/docs/assets/software-engineering/design-architecture/distributed-systems/reliability/ErrorRates-example2.png)
+
+#### What counts as an error?
+
+This is an important design decision. Not every error has the same meaning.
+
+Consider an HTTP API:
+
+| Result                      | Is it necessarily a service error?                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| `200 OK`                    | Usually successful at the HTTP level, but business correctness still matters                 |
+| `400 Bad Request`           | Often a client input error, not a server reliability failure                                 |
+| `401 Unauthorized`          | Often an authentication or authorization outcome                                             |
+| `429 Too Many Requests`     | May indicate rate limiting or overload protection                                            |
+| `500 Internal Server Error` | Usually a server-side failure                                                                |
+| `503 Service Unavailable`   | Usually a service availability failure                                                       |
+| Timeout                     | The caller did not receive a response within its deadline; the remote outcome may be unknown |
+
+If you count every HTTP status of 400 or higher as a service error, a sudden increase in invalid client requests could make your reliability dashboard look worse even though your service is operating correctly.
+
+Instead, define the metric around the operation you want to protect. For example, you might track:
+
+- Server-side HTTP errors (`5xx`).
+- Requests that time out.
+- Failed order-creation operations.
+- Failed payment attempts caused by infrastructure problems.
+- Requests that violate an agreed latency objective.
+
+These measurements answer different questions and should not automatically be combined into one number.
+
+#### Error rate versus error count
+
+An error count tells you how many failures occurred. An error rate tells you how many failures occurred relative to traffic.
+
+| Period    | Total requests | Failed requests | Error rate |
+| --------- | -------------- | --------------- | ---------- |
+| Morning   | 1,000          | 50              | 5%         |
+| Afternoon | 100,000        | 500             | 0.5%       |
+
+The afternoon has more failed requests, but a much lower error rate. Both metrics matter: the count helps estimate the volume of failures, while the rate helps compare periods with different traffic volumes.
+
+#### Error rate and error budget
+
+Suppose your service has an SLO requiring 99.9% of eligible requests to succeed over a 30-day period.
+
+The corresponding error budget is 0.1% of eligible requests.
+
+If there are 10 million eligible requests, the budget is:
+
+$$
+10{,}000{,}000\times0.001=10{,}000
+$$
+
+That means up to 10,000 requests may fail while the service still meets this request-based objective, assuming the SLO's measurement rules are followed.
+
+The error budget helps teams decide whether to prioritize new features or reliability improvements. It is not permission to ignore individual failures, particularly failures involving lost orders, incorrect payments, or corrupted data.
+
+#### How do we reduce error rates?
+
+- Fix recurring application bugs.
+- Detect unhealthy dependencies before they cause widespread failures.
+- Use bounded retries for transient failures when retrying is safe.
+- Apply circuit breakers to limit repeated calls to failing dependencies.
+- Use bulkheads to prevent one dependency from exhausting all resources.
+- Validate inputs and handle expected business errors explicitly.
+- Make message processing idempotent and monitor dead-letter queues.
+- Test failure scenarios, including timeouts, overload, and dependency outages.
+
+One caution: retries can make an error rate look better while making the system less reliable overall if they cause duplicate operations, overload a struggling service, or delay requests beyond their deadlines. Track both the final user-visible outcome and the underlying failed attempts where appropriate.
+
+### 5. How the four metrics fit together
+
+Consider a Payment Service that experiences occasional outages.
+
+| Metric     | What it tells you                    | Example question                                                   |
+| ---------- | ------------------------------------ | ------------------------------------------------------------------ |
+| MTBF       | Frequency of failures                | How often does the service become unavailable?                     |
+| MTTR       | Time to restore service              | How long does recovery take after an outage?                       |
+| Latency    | Speed of responses                   | Are payment requests finishing within the response-time objective? |
+| Error rate | Frequency of unsuccessful operations | What percentage of payment requests fail?                          |
+
+These metrics can reveal different symptoms of the same incident.
+
+For example, a database may become overloaded. First, latency rises. Then requests begin timing out, so the error rate increases. If the problem brings down the service, a failure event occurs; the time until the service is restored contributes to MTTR.
+
+A system may also have excellent MTBF and MTTR but poor latency. That is why no single metric is sufficient to assess reliability.
+
+### 6. Practical example: monitoring a Spring Boot microservice
+
+For your Spring Boot microservices, a useful initial dashboard might include:
+
+| Metric            | Example measurement                                | Why monitor it?                                |
+| ----------------- | -------------------------------------------------- | ---------------------------------------------- |
+| Failure frequency | Service incidents per week                         | Identify recurring failures                    |
+| Recovery time     | Time from incident start to restored service       | Evaluate recovery effectiveness                |
+| Latency           | HTTP request duration at p50, p95, p99             | Detect slow requests and tail-latency problems |
+| Error rate        | Failed eligible requests / total eligible requests | Detect failures relative to traffic            |
+| Request volume    | Requests per second                                | Put latency and errors into traffic context    |
+| Dependency health | Timeouts and failures by downstream service        | Find the source of cascading problems          |
+
+Tools such as Micrometer, Spring Boot Actuator, Prometheus, and Grafana can help collect and visualize request metrics. Distributed tracing can help identify which downstream call is responsible for a slow request.
+
+For a meaningful SLO, define the eligible requests, the measurement window, the success criteria, and the latency threshold explicitly. For example, “99.9% of eligible order-creation requests succeed within 500 ms over a rolling 30-day window” is much more actionable than “the Order Service should be fast and reliable.”
+
+### 7. Where these topics belong in your TechnoWiki TOC
+
+I would organize them under `reliability/overview.mdx` → Reliability Metrics, with separate detailed pages only if you plan to develop them substantially.
+
+```
+reliability/
+├── overview.mdx
+└── observability-reliability.mdx
+```
+
+In `overview.mdx`:
+
+```
+Reliability Metrics
+├── Availability
+├── MTBF and MTTR
+├── Latency and Error Rates
+├── SLI, SLO, and SLA
+└── Error Budgets
+```
+
+Keep the conceptual explanations here. In `observability-reliability.mdx`, explain how to collect, visualize, alert on, and investigate these metrics using monitoring and tracing tools.
+
+The key takeaway: MTBF describes how often failures occur, MTTR describes how quickly recovery happens, latency describes how long requests take, and error rate describes how often operations fail. Together, they provide a much more useful picture of reliability than any one metric alone.
+
+### 4.3 SLI, SLO, and SLA
+
+These terms help turn reliability into an engineering objective.
+
+| Term                          | Meaning                                                                                      | Example                                                    |
+| ----------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| SLI — Service Level Indicator | A measured aspect of service quality                                                         | Percentage of valid API requests completed successfully    |
+| SLO — Service Level Objective | The target for that measurement                                                              | 99.9% of valid requests succeed over 30 days               |
+| SLA — Service Level Agreement | An agreement with users or customers, potentially including consequences for missing targets | A contractual availability commitment with service credits |
+
+A useful SLI for an API might measure successful requests, while another measures latency.
+
+A request can succeed but take 15 seconds, which may still be unacceptable. Therefore, reliability objectives often include both success rate and response-time targets.
+
+For latency, teams commonly track percentiles:
+
+- p50: the median request latency.
+- p95: 95% of requests complete at or below this latency.
+- p99: 99% of requests complete at or below this latency.
+
+An SLO might require 99.9% of eligible requests to succeed and 99% to finish within 300 milliseconds. Those are separate requirements and should be measured separately.
+
+### 4.4 Error budgets
+
+An error budget is the amount of unreliability permitted by an SLO.
+
+If your availability SLO is 99.9%, your error budget is 0.1% of the measurement period.
+
+The budget helps a team balance new releases against reliability work. When the budget is being consumed too quickly, the team may prioritize bug fixes, capacity improvements, or safer deployment strategies over risky changes.
+
+The important point: reliability is an explicit product and engineering goal, not just a collection of infrastructure techniques.
+
+
+
+## 5. The major techniques used to build reliable systems
+
+Reliability is not achieved through a single design pattern. It comes from combining techniques that address different failure modes.
+
+5.1 Redundancy and replication
+
+Run multiple instances or maintain replicas so that one failure does not necessarily make a service unavailable.
+
+Example: three Product Service instances behind a load balancer.
+
+Addresses: instance failures and some infrastructure failures.
+
+5.2 Circuit breaker
+
+Stop repeatedly calling a dependency that is failing. After a recovery interval, permit limited trial requests to determine whether it has recovered.
+
+Example: the Order Service stops calling an unhealthy Recommendation Service.
+
+Addresses: repeated failures and cascading overload.
+
+
+5.3 Timeouts and retries
+
+Limit how long a caller waits, and retry selected transient failures using a bounded policy with backoff and jitter.
+
+Example: retry a temporary network failure after a short delay rather than immediately sending hundreds of requests.
+
+Addresses: transient failures, but requires safeguards against overload and duplicate operations.
+
+
+5.4 Bulkhead isolation
+
+Separate resources so that failure in one dependency cannot consume all the resources needed by unrelated operations.
+
+Example: payment calls use a dedicated, limited concurrency pool instead of sharing all outbound-call capacity.
+
+Addresses: resource exhaustion and failure propagation.
+
+5.5 Durable messaging and asynchronous processing
+
+Persist messages and process them asynchronously so that temporary consumer failures do not necessarily lose accepted work.
+
+Example: an Order Service publishes an `OrderCreated` event for a Payment Service to process.
+
+Addresses: temporary unavailability, load spikes, and decoupling—provided delivery and acknowledgement are configured correctly.
+
+5.6 Idempotency
+
+Make repeated delivery of the same logical operation safe, typically by recording an idempotency key and its outcome.
+
+Example: retrying the same payment request does not charge the customer twice.
+
+Addresses: duplicate requests and repeated message delivery.
+
+5.7 Observability and recovery
+
+Use metrics, structured logs, distributed traces, health checks, alerts, and recovery procedures to detect and diagnose failures.
+
+Example: identify that slow database queries are causing Payment Service timeouts.
+
+Addresses: detecting, diagnosing, and recovering from failures.
+
+These techniques complement one another. A circuit breaker cannot recover lost data; a retry cannot guarantee that an operation was executed only once; and replication cannot help if every replica shares the same failed dependency.
+
+## 6. Understanding resilience patterns in practice
+
+Let's look more closely at the patterns, because they often work together in a Spring Boot microservice.
+
+### 6.1 Timeout
+
+A timeout limits the time spent waiting for a dependency.
+
+```
+Product product = productClient.getProduct(productId);
+```
+
+Without suitable time limits, a slow remote call can occupy threads or connections for too long.
+
+A timeout policy should account for the total request deadline, not just the timeout of an individual call. If a request has a 2-second budget, three sequential calls each allowed to wait for 2 seconds could exceed that budget significantly.
+
+### 6.2 Retry
+
+Retry is appropriate when a failure is likely to be temporary.
+
+A simplified policy might be:
+
+```
+Attempt 1: immediate
+Attempt 2: wait 100 ms
+Attempt 3: wait 250 ms
+Attempt 4: wait 500 ms
+Then: stop and report failure
+```
+
+The values are illustrative, not universal. Production policies should use a bounded number of attempts, an overall deadline, appropriate backoff and jitter, and a clear list of retryable failures.
+
+Avoid retrying every failure. A validation error or an authorization failure usually will not be fixed by repeating the same request.
+
+Most importantly, consider whether the operation is safe to repeat.
+
+### 6.3 Circuit breaker
+
+A circuit breaker tracks failures and temporarily blocks calls when a dependency appears unhealthy.
+
+CLOSED
+
+Calls are allowed
+
+Failure threshold is reached
+
+OPEN
+
+Calls are rejected immediately
+
+Recovery interval expires
+
+HALF-OPEN
+
+Limited trial calls test recovery
+
+Success → CLOSED
+
+Failure → OPEN
+
+An important distinction: a circuit breaker does not make a failed service healthy. It protects the caller and gives the dependency time to recover. The application still needs a policy for what to return when the circuit is open.
+
+For example, a Recommendation Service might return an empty recommendation list, while a Payment Service should generally not pretend that payment succeeded.
+
+### 6.4 Bulkhead
+
+A bulkhead isolates resource consumption. If one dependency becomes slow, it should not be able to consume every thread or connection required by the application.
+
+Possible isolation mechanisms include:
+
+- Dedicated thread pools.
+- Concurrency limits and semaphores.
+- Separate connection pools.
+- Per-dependency quotas.
+- Separate processes or deployment resources.
+
+A bulkhead is particularly useful when one service calls several independent downstream services with different latency and failure characteristics.
+
+### 6.5 Fallback
+
+A fallback defines what to do when the preferred operation cannot complete.
+
+Examples:
+
+- Product recommendations: return an empty list.
+- Product details: return a cached copy if its freshness is acceptable.
+- Order creation: preserve the order as pending if the business workflow supports it.
+- Payment confirmation: report an unknown or pending status and reconcile it later rather than falsely reporting success.
+
+A fallback is not always a successful result. Sometimes rejecting a request safely is more reliable than returning misleading data.
+
+### 6.6 Rate limiting and load shedding
+
+A service can fail even when all its dependencies are healthy if incoming traffic exceeds its capacity.
+
+Rate limiting restricts request rates, while load shedding rejects excess work before the service becomes completely overwhelmed.
+
+These techniques help prevent overload from turning a temporary performance problem into a system-wide outage.
+
+## 7. Cascading failures: the problem reliability engineering tries to prevent
+
+One of the most dangerous distributed-system failure modes is a cascading failure.
+
+Consider this dependency chain:
+
+```
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Order Service
+  |
+  v
+Payment Service
+  |
+  v
+Payment Provider
+```
+
+Suppose the Payment Provider becomes slow.
+
+1. Payment Service requests take longer to finish.
+2. Order Service requests wait longer for Payment Service.
+3. More threads and connections remain occupied.
+4. Requests accumulate, increasing memory use and queue lengths.
+5. The Order Service starts timing out or rejecting requests.
+6. The Gateway receives more failed or delayed requests.
+7. Retries add more load to the already overloaded system.
+
+A single slow dependency has now affected several services.
+
+The solution is layered protection:
+
+| Protection                 | Purpose                                                    |
+| -------------------------- | ---------------------------------------------------------- |
+| Timeout                    | Prevent indefinitely waiting for a dependency              |
+| Bounded retry with backoff | Recover from transient failures without retrying forever   |
+| Circuit breaker            | Stop repeated calls to an unhealthy dependency             |
+| Bulkhead                   | Keep one dependency from consuming all available resources |
+| Rate limiting              | Control incoming work                                      |
+| Load shedding              | Reject excess work before overload spreads                 |
+| Observability              | Detect the failure chain and identify its origin           |
+
+These mechanisms need coordinated configuration. For example, aggressive retries can undermine a circuit breaker by multiplying traffic, while excessively long timeouts can keep resources occupied long after a request is useful.
+
+## 8. Reliability in Spring Boot with Resilience4j
+
+Since your roadmap includes Spring Boot and distributed systems, let's connect the concepts to a practical Java implementation.
+
+Resilience4j is a fault-tolerance library for Java. It provides modules for circuit breakers, retries, rate limiters, bulkheads, and time limiters. Spring Boot integrations allow these capabilities to be applied to application operations.
+
+Here is a conceptual example using annotations:
+
+```
+@Service
+public class ProductService {
+
+    @Retry(name = "productService")
+    @CircuitBreaker(
+        name = "productService",
+        fallbackMethod = "getProductFallback"
+    )
+    public Product getProduct(String id) {
+        return remoteProductClient.getProduct(id);
+    }
+
+    public Product getProductFallback(
+            String id, Throwable cause) {
+        return productCache.find(id)
+            .orElseThrow(() ->
+                new ProductUnavailableException(id, cause)
+            );
+    }
+}
+```
+
+This illustrates the intent, not a complete production configuration. It assumes the appropriate Resilience4j Spring integration, annotation imports, client, cache, and application-specific exception are defined.
+
+Notice that the fallback uses a cache if available and otherwise fails explicitly. It does not fabricate a product.
+
+### What each Resilience4j component does
+
+| Component        | Responsibility                                                                    |
+| ---------------- | --------------------------------------------------------------------------------- |
+| `CircuitBreaker` | Temporarily blocks calls when failure conditions indicate an unhealthy dependency |
+| `Retry`          | Repeats selected failed operations according to a retry policy                    |
+| `TimeLimiter`    | Limits the waiting time for supported asynchronous operations                     |
+| `Bulkhead`       | Limits concurrent operations or isolates execution resources                      |
+| `RateLimiter`    | Limits how frequently operations are permitted                                    |
+
+A `TimeLimiter` deserves special attention: it does not automatically guarantee that the underlying remote operation has stopped. Cancellation depends on the execution model and the underlying client.
+
+Likewise, annotations alone do not make an operation safe to retry. Payment operations, for example, still need idempotency and a well-defined way to handle ambiguous outcomes.
+
+### How should these mechanisms be combined?
+
+A common conceptual arrangement is:
+
+```
+Incoming request
+      |
+      v
+   Rate limit
+      |
+      v
+   Bulkhead
+      |
+      v
+ Circuit breaker
+      |
+      v
+ Bounded retry
+      |
+      v
+ Timeout-aware remote client
+      |
+      v
+ Downstream service
+```
+
+This is an illustrative policy layout, not a universal execution order. The actual order depends on decorator nesting, framework integration, and whether the timeout applies to each attempt or the entire operation.
+
+The most important design questions are:
+
+- What is the total deadline?
+- Which failures are retryable?
+- Is repeating the operation safe?
+- How much concurrent work is allowed?
+- What happens when the circuit is open?
+- Can the business operation continue asynchronously?
+
+You should learn the individual mechanisms first, then study their composition and interaction.
+
+## 9. Reliability beyond individual services
+
+Resilience patterns protect individual calls, but distributed-system reliability also depends on how data and workflows behave across multiple services.
+
+### 9.1 Messaging reliability
+
+Suppose the Order Service publishes an `OrderCreated` event to RabbitMQ.
+
+```
+Order Service
+     |
+     | publish OrderCreated
+     v
+ RabbitMQ
+     |
+     | deliver event
+     v
+ Payment Service
+```
+
+Several problems can occur:
+
+- The order is saved, but the event is never published.
+- The broker delivers the same event more than once.
+- The consumer crashes after processing the event but before acknowledging it.
+- The consumer is unavailable for several minutes.
+- Messages accumulate faster than consumers can process them.
+
+Common solutions include:
+
+- Transactional outbox: persist business changes and an event record in the same local database transaction.
+- Idempotent consumers: safely handle duplicate messages.
+- Acknowledgements and redelivery: support recovery from consumer failures.
+- Dead-letter queues: isolate messages that cannot be processed successfully.
+- Backpressure and consumer scaling: control the rate of incoming work.
+
+The transactional outbox solves the local dual-write problem, but it does not guarantee exactly-once effects throughout the entire distributed workflow. Duplicate publication and delivery still need to be handled.
+
+### 9.2 Consistency and reliability
+
+Consider a payment workflow:
+
+```
+Order created
+     |
+     v
+Payment requested
+     |
+     v
+Payment provider charges customer
+     |
+     v
+Payment confirmation recorded
+     |
+     v
+Order marked PAID
+```
+
+What happens if the customer is charged but the confirmation cannot be recorded?
+
+The system may temporarily disagree about the payment state.
+
+This is not merely an availability problem. It is a consistency and recovery problem.
+
+Useful techniques include:
+
+- Durable state transitions.
+- Idempotency keys.
+- Transactional outbox and inbox patterns.
+- Sagas and compensating actions.
+- Reconciliation jobs that compare local records with the payment provider.
+- Explicit intermediate states such as `PAYMENT_PENDING` and `PAYMENT_UNKNOWN`.
+
+A Saga coordinates a multi-service business transaction through local transactions and, when necessary, compensating actions. Compensation does not necessarily erase what happened; a refund, for example, is a new business operation rather than a reversal of history.
+
+### 9.3 Disaster recovery
+
+Reliability also includes recovery from larger failures, such as the loss of a database, availability zone, or entire region.
+
+Two useful metrics are:
+
+- RPO (Recovery Point Objective): how much data loss, measured in time, is acceptable.
+- RTO (Recovery Time Objective): how long recovery is allowed to take.
+
+For example, an RPO of five minutes means the recovery strategy should limit data loss to approximately the last five minutes of changes, under the defined disaster scenario. An RTO of 30 minutes means the service should be restored within that target.
+
+Achieving these goals requires appropriate replication, backups, restore procedures, failover design, and regular recovery testing.
+
+A backup is not proven useful until you have successfully restored it.
+
+## 10. How to organize Distributed Systems Reliability in your Software Engineering roadmap
+
+Your existing reliability section can be studied as a hierarchy of concepts rather than as an isolated list of patterns.
+
+## Distributed Systems Reliability — Study Map
+
+Recommended learning order
+
+1. Overview
+
+   Reliability, availability, resilience, fault tolerance, SLIs, SLOs, SLAs, and error budgets.
+2. Failure Models
+
+   Crash failures, network partitions, latency, partial failures, dependency failures, overload, and ambiguous outcomes.
+3. Fault Tolerance
+
+   Redundancy, replication, failover, graceful degradation, isolation, and recovery.
+4. Resiliency Patterns
+
+   Timeouts, circuit breakers, bulkheads, fallbacks, rate limiting, load shedding, and their composition.
+5. Retries
+
+   Transient failures, retryable errors, exponential backoff, jitter, retry budgets, deadlines, and retry amplification.
+6. Idempotency
+
+   Idempotent HTTP operations, idempotency keys, duplicate requests, deduplication, and safe retries.
+7. Messaging Reliability
+
+   Delivery guarantees, acknowledgements, redelivery, outbox/inbox patterns, dead-letter queues, and consumer recovery.
+8. Consistency and Reliability
+
+   Distributed transactions, sagas, compensating actions, ambiguous outcomes, reconciliation, and durable state.
+9. Observability and Reliability
+
+   Metrics, logs, traces, SLO monitoring, alerting, and incident diagnosis.
+10. Reliability Testing
+
+    Fault injection, chaos experiments, load and stress testing, recovery testing, and disaster-recovery drills.
+
+This ordering gives you a progression from understanding failures to preventing their propagation, preserving business correctness, and verifying that the complete system recovers.
+
+## 11. A practical learning project
+
+A good capstone exercise is to extend a Spring Boot e-commerce microservice application containing an API Gateway, Order Service, Payment Service, database, and RabbitMQ.
+
+Work through these labs in order:
+
+| Lab | Experiment                                                  | What you learn                   |
+| --- | ----------------------------------------------------------- | -------------------------------- |
+| 1   | Make the Payment Service sleep for five seconds             | Timeouts and latency             |
+| 2   | Make it return intermittent errors                          | Retry policies and backoff       |
+| 3   | Make it consistently fail                                   | Circuit breaker behavior         |
+| 4   | Saturate the payment execution pool                         | Bulkheads and resource isolation |
+| 5   | Deliver the same payment message twice                      | Idempotent consumers             |
+| 6   | Crash after saving an order but before publishing its event | Transactional outbox             |
+| 7   | Stop RabbitMQ or the Payment Service temporarily            | Durable messaging and recovery   |
+| 8   | Measure request success rate and p95/p99 latency            | Observability and SLOs           |
+| 9   | Restore a database backup                                   | Disaster recovery and RTO/RPO    |
+
+For every lab, record four things:
+
+1. The failure you introduced.
+2. The effect on the rest of the system.
+3. The mechanism that limits or recovers from the failure.
+4. The evidence that the system returned to an acceptable state.
+
+The main takeaway: distributed systems reliability is the discipline of maintaining correct, useful service despite component failures, network uncertainty, overload, and partial completion. Resilience4j is one useful implementation tool, but reliable systems also require sound data design, messaging guarantees, operational visibility, and tested recovery procedures.
 
 # Relationship to Other Topics
 
@@ -282,3 +1954,21 @@ Reliability engineering focuses on ensuring distributed systems remain:
 - resilient
 
 even in the presence of unavoidable failures.
+
+A microservice that has synchronous dependencies to other services can become unresponsive
+or even crash if these services stop responding as expected, especially under a high load. These
+types of error scenarios can be avoided by using a circuit breaker, which applies fail-fast logic and
+calls fallback methods when it is open. A circuit breaker can also make a microservice resilient by
+allowing requests when it is half-open to see whether the failing service is operating normally
+again and close the circuit if so. To support a circuit breaker in handling unresponsive services, a
+time limiter can be used to maximize the time a circuit breaker waits before it kicks in.
+
+A retry mechanism can retry requests that randomly fail from time to time, for example, due to
+temporary network problems. It is very important to only apply retry requests on idempotent
+services – that is, services that can handle the same request being sent two or more times.
+
+Circuit breakers and retry mechanisms are implemented by following Spring Boot conventions:
+declaring dependencies and adding annotations and configuration. Resilience4j exposes infor-
+mation about its circuit breakers and retry mechanisms at runtime, using actuator endpoints.
+For circuit breakers, information regarding health, events, and metrics is available. For retries,
+information regarding events and metrics is available.

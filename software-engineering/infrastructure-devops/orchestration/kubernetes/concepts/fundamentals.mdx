@@ -1,0 +1,1025 @@
+{/* # Kubernetes Fundamentals */}
+
+Kubernetes fundamentals are about understanding how you describe applications, how Kubernetes represents them internally, and how you interact with the cluster through its API.
+
+We'll use a Spring Boot microservices application as a running example, with services such as `product-service`, `review-service`, and `recommendation-service`.
+
+The central idea is that Kubernetes manages API objects that describe the desired state of your system, and its controllers work to reconcile that state with reality.
+
+## Declarative configuration
+
+Declarative configuration means describing what you want the system to look like, rather than specifying every command needed to produce that result.
+
+For example, suppose you want three replicas of `product-service`.
+
+A more imperative approach might look like this:
+
+```sh
+docker run -d product-service:1.0
+docker run -d product-service:1.0
+docker run -d product-service:1.0
+```
+
+These commands tell Docker to start containers. You must separately handle what happens if one disappears, how replicas are distributed, and how to maintain the intended count.
+
+With Kubernetes, you declare the desired state:
+
+```yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: product-service
+  template:
+    metadata:
+      labels:
+        app: product-service
+    spec:
+      containers:
+        - name: product-service
+          image: product-service:1.0
+```
+
+Then submit it:
+
+```sh
+kubectl apply -f product-service.yaml
+```
+
+You don't tell Kubernetes exactly how to create each replica. You declare the Deployment's intended configuration.
+
+### How declarative management works
+![How declarative management works](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/How-declarative-management-works.png)
+{/* ### How declarative management works
+
+Desired state
+
+3 replicas of product-service:1.0
+
+Kubernetes API
+
+Accepts and stores resource definitions
+
+Controllers reconcile
+
+Create or update resources as needed
+
+Actual state approaches desired state
+
+3 replicas running, if conditions permit */}
+
+The final condition is not guaranteed: resource shortages, image-pull errors, or application failures may prevent all three replicas from becoming healthy.
+
+### Declarative versus imperative commands
+
+| Approach      | Example                                                 | Meaning                                             |
+| ------------- | ------------------------------------------------------- | --------------------------------------------------- |
+| Imperative    | `kubectl scale deployment product-service --replicas=3` | Request a particular operation now                  |
+| Declarative   | `kubectl apply -f product-service.yaml`                 | Apply the configuration represented by the manifest |
+| Observational | `kubectl get deployments`                               | Inspect the current state                           |
+
+Imperative commands are useful for troubleshooting and quick operations. Declarative manifests are particularly valuable for repeatability, code review, version control, and automated delivery.
+
+One subtlety: `kubectl apply` is not a guarantee that the entire cluster will be replaced with exactly the contents of a file. It updates the resources described by the manifest; unrelated resources are not automatically deleted. The specific apply mechanism also matters: client-side apply, server-side apply, and other workflows have different field-management behavior.
+
+## Kubernetes API
+
+The Kubernetes API is the interface through which you create, inspect, update, and delete cluster resources.
+
+The API server exposes these operations, typically over HTTPS, and enforces authentication, authorization, validation, and admission policies.
+
+For example, when you run:
+
+```sh
+kubectl get pods
+```
+
+the general interaction is:
+
+```
+You
+ |
+ | kubectl get pods
+ v
+Kubernetes API server
+ |
+ | Reads Pod resources
+ v
+Cluster state
+ |
+ v
+kubectl displays the response
+```
+
+The API is not only for `kubectl`. Other clients can interact with it, including:
+
+- Kubernetes controllers.
+- CI/CD pipelines.
+- Helm and other deployment tools.
+- Monitoring and automation systems.
+- Applications using a Kubernetes client library, when appropriately authorized.
+
+### Resource endpoints
+
+Kubernetes exposes API endpoints for different resource types. For example:
+
+```
+/api/v1/namespaces/default/pods
+```
+
+This represents the Pod collection in the `default` namespace.
+
+Deployments belong to the `apps/v1` API group, so a corresponding resource collection has a path like:
+
+```
+/apis/apps/v1/namespaces/default/deployments
+```
+
+These paths illustrate the distinction between the core API group and named API groups.
+
+You usually don't need to construct these URLs manually. `kubectl` and Kubernetes client libraries handle the API requests.
+
+### Inspect the API
+
+```sh
+kubectl cluster-info
+kubectl api-versions
+kubectl api-resources
+kubectl get --raw /version
+```
+
+These commands help you discover cluster endpoints, supported API versions, available resource types, and API-server version information.
+
+## API resources and objects
+
+Kubernetes defines an API that is used to manage different types of objects or resources, as they
+are also known.
+
+A resource is a type of object that Kubernetes API exposes. An object is a particular instance of that resource.
+
+Some of the most commonly used types, or kinds, as referred to in the API, are
+as follows:
+- **Node**: A node represents a server, virtual or physical, in the cluster.
+- **Pod**: A Pod represents the smallest possible deployable component in Kubernetes, consisting of one or more co-located containers. The containers share the same IP address
+and port range. This means that containers in the same Pod instance can talk to each
+other over localhost but need to be aware of potential port collisions. Typically, a Pod
+consists of one container, but there are use cases for extending the functionality of the
+main container by running the second container in a Pod. In Chapter 18, Using a Service
+Mesh to Improve Observability and Management, a second container will be used in the Pods,
+running a sidecar that makes the main container join the service mesh.
+- **Deployment**: A Deployment is used to deploy and upgrade Pods. The Deployment objects
+hand over the responsibility of creating and monitoring the Pods to a ReplicaSet. When
+creating a Deployment for the first time, the work performed by the Deployment object is
+not much more than creating the ReplicaSet object. When performing a rolling upgrade
+of a Deployment, the role of the Deployment object is more involved.
+- **ReplicaSet**: A ReplicaSet is used to ensure that a specified number of Pods is running at
+all times. If a Pod is deleted, it will be replaced with a new Pod by the ReplicaSet.
+- **Service**: A Service is a stable network endpoint that you can use to connect to one or multiple Pods. A Service is assigned an IP address and a DNS name in the internal network of
+the Kubernetes cluster. The IP address of the Service will stay the same for the lifetime of
+the Service. Requests that are sent to a Service will be forwarded to one of the available
+Pods using round-robin-based load balancing. By default, a Service is only exposed inside
+the cluster using a cluster IP address. It is also possible to expose a Service outside the
+cluster, either on a dedicated port on each node in the cluster or – even better – through
+an external load balancer that is aware of Kubernetes – that is, it can automatically provision a public IP address and/or DNS name for the Service. Cloud providers that offer
+Kubernetes as a Service, in general, support this type of load balancer.
+- **Ingress**: Ingress can manage external access to Services in a Kubernetes cluster, typically
+using HTTP or HTTPS. For example, it can route traffic to the underlying Services based
+on URL paths or HTTP headers such as the hostname. Instead of exposing a number of
+Services externally, either using node ports or through load balancers, it is, in general,
+more convenient to set up an Ingress in front of the Services. To handle the actual communication defined by the Ingress objects, an Ingress controller must be running in the
+cluster. We will see an example of an Ingress controller as we proceed.
+- **Namespace**: A namespace is used to group and, on some levels, isolate resources in a
+Kubernetes cluster. The names of resources must be unique in their namespaces, but not
+between namespaces.
+- **ConfigMap**: A ConfigMap is used to store configuration that’s used by containers. ConfigMaps can be mapped into a running container as environment variables or files.
+- **Secret**: Secrets are used to store sensitive data used by containers, such as credentials.
+Secrets can be made available to containers in the same way as ConfigMaps. Anyone with
+full read access to the API server can access the values of created Secrets, so they are not
+as safe as the name might imply. The Secret values are stored Base64-encoded, so they
+are in fact not encrypted.
+
+  :::note
+
+  A few extensions to the standard Secret resource exist, which provide more
+  secure alternatives. For example, HashiCorp provides an alternative based
+  on HashiCorp Vault. See https://developer.hashicorp.com/vault/
+  tutorials/kubernetes-introduction/vault-secrets-operator.
+
+  :::
+- **DaemonSet**: This ensures that one Pod is running on each node in a set of nodes in the
+cluster. In Chapter 19, Centralized Logging with the EFK Stack, an example is 
+log collector, Fluentd, that will run on each worker node as a DaemonSet.
+
+Think of a resource as a class in object-oriented programming and an object as an instance of that class. The analogy is useful, although Kubernetes objects also have lifecycle, metadata, and API semantics of their own.
+
+| Resource type | Example object              | Purpose                                  |
+| ------------- | --------------------------- | ---------------------------------------- |
+| Pod           | `product-service-7c8d9f...` | Runs one or more containers              |
+| Deployment    | `product-service`           | Manages a replicated application rollout |
+| Service       | `product-service`           | Provides a stable network endpoint       |
+| ConfigMap     | `product-config`            | Stores non-confidential configuration    |
+| Secret        | `database-credentials`      | Represents sensitive configuration data  |
+| Namespace     | `staging`                   | Groups namespaced resources              |
+| Node          | `worker-1`                  | Represents a cluster machine             |
+| Job           | `database-migration`        | Runs work intended to complete           |
+
+A resource type defines the API's structure and behavior. An object has metadata and fields describing its configuration and, where applicable, its observed status.
+
+The following diagram summarizes the Kubernetes resources that are involved in handling incoming requests:
+
+![Overview of Kubernetes resources](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/Overview-of-Kubernetes-resources.png)
+In the preceding diagram, we can see the following:
+- Two Deployments, `Deployment A` and `Deployment B`, have been deployed to a cluster with two nodes, `Node 1` and `Node 2`.
+- `Deployment A` contains two Pods, `Pod A1` and `Pod A2`.
+- `Deployment B` contains one Pod, `Pod B1`.
+- `Pod A1` is scheduled to `Node 1`.
+- `Pod A2` and `Pod B1` are scheduled to `Node 2`.
+- Each Deployment has a corresponding Service deployed, `Service A` and `Service B`, and they are available on all nodes.
+- An `Ingress` is defined to route incoming requests to the two Services.
+- A client typically sends requests to the cluster via an `external load balancer`.
+
+hese objects are not, by themselves, running components; instead, they are definitions of differ-
+ent types of desired states. To reflect the desired state in the cluster’s current state, Kubernetes
+comes with an architecture consisting of a number of runtime components(API server,etcd,controller manager etc.).
+### Illustrative Example
+
+For a concrete example, let's use an Nginx Deployment with 3 replicas and a Service. The diagram connects three things:
+
+1. API resources — the types Kubernetes supports, such as `Deployment`, `ReplicaSet`, `Pod`, and `Service`.
+2. API objects — the actual instances created from those resource types.
+3. Communications — how Kubernetes manages the objects and how application traffic reaches the Pods.
+
+![](/docs/assets/software-engineering/infrastructure-devops/orchestration/kubernetes/API-resources-and-objects-example1.png)
+
+The blue boxes represent resource types; the green boxes represent actual objects. The arrows show management relationships and Service selection, not all the internal Kubernetes network traffic.
+
+This manifest declares the desired Deployment and Service. Kubernetes creates and manages the ReplicaSet and Pods automatically.
+
+```yml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.28
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: demo
+spec:
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+
+```
+
+For a real deployment, select an image version that your team has approved and tested.
+
+**How the objects communicate**
+
+Step 1 — `kubectl` sends the desired state
+
+You run `kubectl apply -f nginx.yaml`. The request goes to the Kubernetes API server, which validates and persists the Deployment and Service objects in `etcd`.
+
+Step 2 — Controllers create the workload
+
+The Deployment controller creates a ReplicaSet. The ReplicaSet controller creates three Pod objects. The scheduler assigns unscheduled Pods to suitable worker nodes, and each node's kubelet works with its container runtime to start them.
+
+Step 3 — The Service discovers matching Pods
+
+The Service selector `app: nginx` matches the labels on all three Pods. Kubernetes maintains the corresponding EndpointSlices, which record the eligible backend endpoints.
+
+Step 4 — Traffic reaches a Pod
+
+A client inside the cluster can send a request to `nginx-service:80`. The cluster's Service networking implementation directs traffic to an eligible backend Pod. A `ClusterIP` Service is internal by default; external access requires an additional mechanism, such as an Ingress, Gateway, or suitable Service type.
+
+Resource types versus actual objects
+
+| API resource type                       | Example object name          | Purpose                                                    |
+| --------------------------------------- | ---------------------------- | ---------------------------------------------------------- |
+| `Deployment` (`apps/v1`)                | `nginx-deployment`           | Declares the desired application replicas and Pod template |
+| `ReplicaSet` (`apps/v1`)                | `nginx-deployment-abc123`    | Maintains the requested number of matching Pods            |
+| `Pod` (`v1`)                            | `nginx-deployment-abc123-a1` | Runs the Nginx container                                   |
+| `Service` (`v1`)                        | `nginx-service`              | Provides a stable network endpoint for matching Pods       |
+| `EndpointSlice` (`discovery.k8s.io/v1`) | Generated name               | Records backend endpoints associated with a Service        |
+
+The distinction is important: `Pod` is the resource type; `nginx-deployment-abc123-a1` is one particular Pod object. There are three Pod objects in this example, but they all use the same resource type.
+
+You can inspect the actual objects after applying the manifest:
+
+```sh
+kubectl create namespace demo
+
+kubectl apply -f nginx.yaml -n demo
+
+kubectl get deployments,replicasets,pods,services -n demo
+
+kubectl get endpointslices -n demo
+```
+
+The key idea: Kubernetes API resources define what kinds of objects can exist. Your manifest creates or updates specific objects, controllers maintain their relationships, and networking components make the resulting application reachable.
+
+### The common structure of an object
+
+A Kubernetes manifest typically includes these fields:
+
+```yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+  namespace: staging
+  labels:
+    app: product-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: product-service
+  template:
+    metadata:
+      labels:
+        app: product-service
+    spec:
+      containers:
+        - name: product-service
+          image: product-service:1.0
+```
+
+- `apiVersion`: identifies the API group and version used to represent the object.
+- `kind`: identifies the resource type.
+- `metadata`: contains the object's name, namespace, labels, annotations, and other metadata.
+- `spec`: declares the desired configuration.
+- `status`: reports observed state for resource types that define it; it is generally maintained by Kubernetes controllers or other system components.
+
+For example, a Deployment's `spec.replicas` describes how many replicas are desired. Its status reports information about the replicas observed by the Deployment controller.
+
+Not every resource has exactly the same fields. The API schema for each resource type determines which fields are valid and what they mean.
+
+## Manifests and YAML
+
+A Kubernetes manifest is a declarative description of one or more API objects. YAML is the most common format, although JSON is also supported.
+
+A manifest is not an imperative script that runs each instruction from top to bottom. It describes the resources you want Kubernetes to create or update.
+
+### Example: Deployment and Service
+
+Let's define a Deployment and a Service for `product-service`.
+
+```yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+  labels:
+    app: product-service
+    environment: development
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: product-service
+  template:
+    metadata:
+      labels:
+        app: product-service
+    spec:
+      containers:
+        - name: product-service
+          image: nginx:1.28
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+spec:
+  selector:
+    app: product-service
+  ports:
+    - port: 8080
+      targetPort: 8080
+  type: ClusterIP
+
+```
+
+This is a structural learning example. It uses an NGINX image to illustrate Kubernetes resources, not a real Spring Boot application. For an actual Spring Boot deployment, use your application image and its actual listening port.
+
+The `---` separator divides multiple YAML documents. Both objects can live in the same file.
+
+Save the manifest as `product-service.yaml` and apply it:
+
+```sh
+kubectl apply -f product-service.yaml
+```
+
+Then inspect the resources:
+
+```sh
+kubectl get deployments
+kubectl get pods --show-labels
+kubectl get services
+```
+
+### Understand the YAML hierarchy
+
+The structure of the Deployment is especially important:
+
+```
+Deployment
+└── spec
+    ├── replicas: 2
+    ├── selector
+    │   └── matchLabels
+    └── template
+        ├── metadata
+        │   └── labels
+        └── spec
+            └── containers
+```
+
+The Deployment's `spec.template` is the template used to create Pods. The labels inside that template become Pod labels.
+
+The Deployment's selector must match the labels in its Pod template. If they don't match, the Deployment is invalid.
+
+Also notice that the Service is a separate object. Its selector identifies the Pods that should receive its traffic.
+
+### Essential YAML rules
+
+- Indentation represents nesting. Use consistent spaces, not tabs.
+- Use `key: value` to represent a mapping.
+- Use `-` for list items.
+- Put strings in quotes when needed to avoid YAML type ambiguity.
+- Use `apiVersion` and `kind` to identify the API representation and resource type.
+- Check resource schemas when you're unsure which fields are supported.
+
+A successful `kubectl apply` means the API accepted the requested changes; it does not prove the application has started successfully or is ready to receive traffic.
+
+## Labels and selectors
+
+Labels are key-value pairs attached to Kubernetes objects. They identify useful characteristics and allow you to organize and select groups of resources.
+
+For example:
+
+```yml
+metadata:
+  labels:
+    app: product-service
+    environment: staging
+    tier: backend
+    version: v1
+```
+
+Here, the object has four labels:
+
+- `app=product-service`
+- `environment=staging`
+- `tier=backend`
+- `version=v1`
+
+Labels are not necessarily unique. Hundreds of Pods can share the same `app` label.
+
+A selector defines which objects match a set of label requirements. Kubernetes uses selectors in resources such as Services and Deployments to associate related objects.
+
+### How selectors work
+
+Suppose these Pods exist:
+
+```
+Pod A: app=product-service, environment=staging
+Pod B: app=product-service, environment=production
+Pod C: app=review-service,  environment=staging
+```
+
+The selector:
+
+```
+selector:
+  app: product-service
+```
+
+matches Pods A and B.
+
+The selector:
+
+```
+selector:
+  app: product-service
+  environment: staging
+```
+
+matches only Pod A. Multiple selector requirements are combined using logical AND.
+
+### Common selector operators
+
+| Selector                         | Meaning                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------ |
+| `app=product-service`            | Label equals the specified value                                               |
+| `environment!=production`        | Label does not equal the specified value, including objects without that label |
+| `environment in (staging,dev)`   | Label value belongs to the specified set                                       |
+| `environment notin (production)` | Label value is not in the set, or the label is absent                          |
+| `tier`                           | Label key exists                                                               |
+| `!tier`                          | Label key does not exist                                                       |
+
+You can use selectors directly with `kubectl`:
+
+```sh
+kubectl get pods -l app=product-service
+
+kubectl get pods -l 'environment in (staging,dev)'
+
+kubectl get pods -l 'app=product-service,environment=staging'
+```
+
+### Why labels matter for Deployments and Services
+
+A Deployment selector identifies the Pods that its ReplicaSet manages. A Service selector identifies the Pods that should be included among its backends.
+
+```
+Deployment
+ selector: app=product-service
+             |
+             v
+      Matching Pod labels
+       /             \
+      v               v
+   Pod A             Pod B
+      ^               ^
+       \             /
+        Service selector
+        app=product-service
+```
+
+Be careful when designing selectors. An overly broad selector can match unintended Pods, and overlapping selectors between controllers can cause conflicting management. Deployment selectors are immutable after creation in `apps/v1`.
+
+## Annotations
+
+Annotations are key-value metadata attached to objects, just like labels. The difference is their purpose: annotations store additional information that tools, controllers, or people may need, but that is not intended to identify objects through label selection.
+
+For example:
+
+```yml
+metadata:
+  name: product-service
+  annotations:
+    description: "Spring Boot product API"
+    owner: "platform-team"
+    documentation: "https://docs.example.com/product-service"
+    deployment-ticket: "OPS-142"
+```
+
+These annotations can carry useful operational information:
+
+- Documentation references.
+- Ownership details.
+- Deployment tracking IDs.
+- Tool-specific configuration.
+- Metadata used by admission controllers or other automation.
+
+Some tools assign specific meanings to particular annotation keys. For example, an Ingress controller may interpret certain annotations as configuration. The meaning depends on the tool or controller that reads them; Kubernetes does not automatically interpret arbitrary annotations.
+
+Annotations can also contain larger values than labels, including serialized configuration, but you should avoid storing sensitive information or unnecessarily large data in them.
+
+## Namespaces
+
+A namespace provides a logical scope for namespaced Kubernetes resources. It allows teams or environments to organize resources within the same cluster.
+
+For example:
+
+```
+Kubernetes cluster
+│
+├── development
+│   ├── product-service
+│   ├── review-service
+│   └── product-config
+│
+├── staging
+│   ├── product-service
+│   ├── review-service
+│   └── product-config
+│
+└── production
+    ├── product-service
+    ├── review-service
+    └── product-config
+```
+
+Each namespace can contain a Deployment called `product-service`. Its fully qualified resource identity includes the namespace, so these are distinct objects.
+
+### Create and use a namespace
+
+```sh
+kubectl create namespace staging
+
+kubectl apply -n staging -f product-service.yaml
+
+kubectl get deployments -n staging
+kubectl get pods -n staging
+```
+
+You can also declare the namespace in a manifest:
+
+```yml
+metadata:
+  name: product-service
+  namespace: staging
+```
+
+If you omit the namespace for a namespaced resource, Kubernetes generally uses the namespace selected by your current context, which defaults to `default` when no other namespace is configured.
+
+### Namespaces are not separate clusters
+
+Namespaces provide logical separation, but they do not automatically provide complete security isolation.
+
+- Network traffic may be possible between namespaces unless network policies or other controls restrict it.
+- Resource quotas can constrain resource consumption.
+- RBAC can control who may access resources in a namespace.
+- Cluster-scoped resources, such as Nodes and PersistentVolumes, are not namespaced.
+
+For stronger multi-tenant isolation, combine namespaces with appropriate RBAC, network policies, admission policies, resource controls, and workload security.
+
+Also, Kubernetes namespace deletion can trigger deletion of many resources inside that namespace. Treat it as a potentially destructive operation.
+
+## Owner references
+
+Owner references express an ownership relationship between Kubernetes objects. They let Kubernetes and its controllers understand which objects depend on or are managed through another object's lifecycle.
+
+Consider a Deployment:
+
+```
+Deployment: product-service
+        |
+        | owns
+        v
+ReplicaSet: product-service-abc123
+        |
+        | owns
+        v
+Pod: product-service-abc123-xyz
+```
+
+The Deployment controller creates and manages ReplicaSets. The ReplicaSet controller creates and manages Pods. The resulting owner references record these relationships.
+
+Owner references are different from labels: they describe an ownership relationship, whereas labels are general-purpose grouping metadata.
+
+### What happens when an owner is deleted?
+
+Kubernetes garbage collection can use owner references to determine whether dependent objects should be deleted when an owner is removed.
+
+For example, deleting a Deployment normally leads to cleanup of its dependent ReplicaSets and Pods, subject to the deletion propagation policy.
+
+The main propagation modes are:
+
+- Background: the owner is deleted first, and dependents are cleaned up asynchronously.
+- Foreground: the owner remains in a deletion-in-progress state until blocking dependents are removed.
+- Orphan: the owner is deleted while its dependents are retained without that owner.
+
+Not every ownership relationship causes deletion in every circumstance. Garbage collection considers owner references, deletion policy, and other rules.
+
+### Important details
+
+- Owner references typically contain the owner's API version, kind, name, and UID.
+- The UID identifies a particular object instance, distinguishing it from a later object created with the same name.
+- Namespaced dependent objects generally cannot have cross-namespace owners.
+- A namespaced dependent can reference a cluster-scoped owner, subject to Kubernetes ownership rules.
+- Owner references do not replace label selectors. A Deployment's ReplicaSet and a Service's target Pods are connected through different mechanisms.
+
+You generally do not need to create Deployment-to-Pod owner references manually; Kubernetes controllers establish the appropriate relationships.
+
+## Labels vs. annotations
+
+Both labels and annotations live under `metadata`, and both are maps of string keys to string values. Their primary difference is how their data is used.
+
+| Feature                                       | Labels                                                  | Annotations                                             |
+| --------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------- |
+| Primary purpose                               | Identify and group objects                              | Store supplementary metadata                            |
+| Used by selectors                             | Yes                                                     | No                                                      |
+| Typical values                                | App, environment, tier, version                         | Documentation URL, ticket ID, tool configuration        |
+| Can change after creation?                    | Generally yes, subject to resource-specific constraints | Generally yes, subject to resource-specific constraints |
+| Used by controllers                           | Frequently for selecting objects                        | When a controller or tool explicitly interprets them    |
+| Suitable for filtering Pods with `kubectl -l` | Yes                                                     | No                                                      |
+
+A useful rule is:
+
+If you need to select a group of objects, use labels. If you need to attach information about an object, use annotations.
+
+For example:
+
+```
+metadata:
+  labels:
+    app: product-service
+    environment: staging
+  annotations:
+    description: "Product management REST API"
+    documentation: "https://docs.example.com/product-service"
+```
+
+You can select this object with:
+
+```
+kubectl get pods -l app=product-service
+```
+
+But you cannot select Pods using `kubectl -l` based on the `documentation` annotation.
+
+## kubectl fundamentals
+
+`kubectl` is the primary command-line tool for communicating with Kubernetes through the API server. It lets you manage resources, inspect state, and troubleshoot applications.
+
+### Understand the basic syntax
+
+```
+kubectl <command> <resource-type> <resource-name> [options]
+```
+
+Examples:
+
+```
+kubectl get pods
+kubectl describe deployment product-service
+kubectl delete pod product-service-abc123
+```
+
+Common commands:
+
+| Command    | Purpose                                              |
+| ---------- | ---------------------------------------------------- |
+| `get`      | List or inspect resource summaries                   |
+| `describe` | Show detailed resource information and events        |
+| `apply`    | Create or update resources from configuration        |
+| `create`   | Create resources imperatively                        |
+| `delete`   | Delete resources                                     |
+| `edit`     | Edit a resource interactively                        |
+| `patch`    | Apply a partial update                               |
+| `logs`     | Read container logs                                  |
+| `exec`     | Execute a command inside a running container         |
+| `explain`  | Inspect resource fields and API schema documentation |
+
+### 10.2 Discover resources
+
+```
+kubectl api-resources
+kubectl api-versions
+kubectl get all
+kubectl explain deployment
+kubectl explain deployment.spec
+kubectl explain deployment.spec.template
+```
+
+A common misconception is that `kubectl get all` displays every resource in the cluster. It does not. It displays a selected set of commonly used resource types, usually within the current namespace.
+
+To discover which resources are namespaced or cluster-scoped:
+
+```
+kubectl api-resources --namespaced=true
+kubectl api-resources --namespaced=false
+```
+
+### 10.3 Work with namespaces
+
+```
+kubectl get namespaces
+
+kubectl get pods -n staging
+
+kubectl get deployments -A
+
+kubectl config get-contexts
+kubectl config current-context
+kubectl config use-context my-cluster
+```
+
+`-n staging` selects a namespace for a namespaced resource. `-A` means all namespaces for applicable resource queries.
+
+Always check your current context before making changes, particularly when your kubeconfig contains development, staging, and production clusters.
+
+### 10.4 Inspect and troubleshoot workloads
+
+```
+# List Pods
+kubectl get pods -n staging
+
+# Show labels
+kubectl get pods --show-labels -n staging
+
+# Inspect a Deployment
+kubectl describe deployment product-service -n staging
+
+# Read logs
+kubectl logs deployment/product-service -n staging
+
+# Show recent events
+kubectl get events -n staging --sort-by=.metadata.creationTimestamp
+```
+
+For multi-container Pods, specify a container when needed:
+
+```
+kubectl logs product-service-abc123 -c product-service
+```
+
+For interactive troubleshooting:
+
+```
+kubectl exec -it product-service-abc123 -- sh
+```
+
+Use `kubectl exec` only when the container has the relevant shell and tools installed. Minimal production images often do not include them.
+
+### 10.5 Apply and update manifests
+
+```
+kubectl apply -f deployment.yaml
+
+kubectl diff -f deployment.yaml
+
+kubectl get deployment product-service -o yaml
+
+kubectl rollout status deployment/product-service
+
+kubectl rollout history deployment/product-service
+```
+
+`kubectl diff` helps you inspect changes before applying them. `rollout status` waits for rollout progress, while `rollout history` displays available rollout history.
+
+For a quick imperative scaling operation:
+
+```
+kubectl scale deployment/product-service --replicas=4
+```
+
+Be aware that if the manifest or another automation system still declares three replicas, a later reconciliation or reapplication may restore that count. For durable declarative management, update the configuration source of truth.
+
+### 10.6 A simple learning workflow
+
+Try this sequence in a local Kubernetes cluster:
+
+```
+# 1. Create a namespace
+kubectl create namespace learning
+
+# 2. Deploy an example application
+kubectl create deployment web --image=nginx:1.28 -n learning
+
+# 3. Inspect the Deployment and Pods
+kubectl get deployments,pods -n learning
+
+# 4. Scale to three replicas
+kubectl scale deployment/web --replicas=3 -n learning
+
+# 5. Check labels and endpoints
+kubectl get pods --show-labels -n learning
+kubectl get deployment web -o yaml -n learning
+
+# 6. Clean up
+kubectl delete namespace learning
+```
+
+This lab demonstrates resource creation, desired replica counts, labels, inspection, and cleanup. The final command deletes the entire `learning` namespace and its namespaced resources, so use it only for this disposable lab.
+
+## 11. API versioning and deprecation
+
+Kubernetes resources are exposed through versioned APIs. The `apiVersion` field in a manifest tells the API server which version of a resource you are using.
+
+For example:
+
+```
+apiVersion: v1
+kind: Service
+```
+
+Here, `v1` belongs to the core API group.
+
+For a Deployment:
+
+```
+apiVersion: apps/v1
+kind: Deployment
+```
+
+Here, `apps` is the API group and `v1` is the version.
+
+### 11.1 What do alpha, beta, and stable versions mean?
+
+Kubernetes API versions commonly use these stability tracks:
+
+| Example    | Stability   | General meaning                                             |
+| ---------- | ----------- | ----------------------------------------------------------- |
+| `v1alpha1` | Alpha       | Experimental; may change or be removed with limited notice  |
+| `v1beta1`  | Beta        | More mature, but still subject to the beta lifecycle policy |
+| `v1`       | Stable / GA | Intended for long-term use under the stable API policy      |
+
+The precise version depends on the resource's API group. For example, `apps/v1` is the stable Deployment API; `v1` by itself is the core API version.
+
+Not every API supports all three tracks, and the same version suffix in different API groups does not imply that they represent the same resource or lifecycle.
+
+### 11.2 Why do APIs change?
+
+Kubernetes evolves over time. A resource may begin as an experimental API, become stable, and eventually have older API versions deprecated and removed.
+
+For example, the old Deployment API `extensions/v1beta1` was removed in Kubernetes 1.16. The supported replacement is `apps/v1`.
+
+An older manifest can therefore fail on a newer cluster even if its YAML syntax is otherwise valid.
+
+### 11.3 What deprecation means
+
+Deprecation means that an API is being phased out and you should migrate to a supported replacement.
+
+The Kubernetes deprecation policy defines different timelines for stable, beta, and alpha APIs. In general, stable APIs receive stronger compatibility guarantees, while alpha APIs can change or disappear more quickly.
+
+When upgrading clusters, you should:
+
+1. Identify deprecated APIs used by your manifests, Helm charts, operators, and automation.
+2. Check which versions your target cluster serves.
+3. Update manifests and tooling to supported API versions.
+4. Test against the target Kubernetes version before upgrading production.
+
+### 11.4 How to check API versions
+
+```
+# See API versions served by the cluster
+kubectl api-versions
+
+# See available resource types and their API groups
+kubectl api-resources
+
+# Inspect the schema for a resource
+kubectl explain deployment --api-version=apps/v1
+
+# Inspect a deployed object
+kubectl get deployment product-service -o yaml
+```
+
+For detailed migration work, consult the official [Kubernetes API deprecation policy](https://kubernetes.io/docs/reference/using-api/deprecation-policy/?utm_source=chatgpt.com) and the release-specific upgrade notes.
+
+One important distinction: changing the `apiVersion` field in YAML is not always sufficient. Different API versions may have different schemas or semantics, so review the replacement API and migrate the fields appropriately.
+
+## 12. Putting the fundamentals together
+
+These concepts are connected rather than independent. Consider a Deployment manifest for `product-service` in the `staging` namespace.
+
+### 1. Manifest
+
+YAML declares the Deployment, its desired replica count, container image, and Pod template.
+
+### 2. API object
+
+The API server validates and stores the Deployment object. Its `metadata` includes its name, namespace, labels, and annotations.
+
+### 3. Controllers and ownership
+
+The Deployment controller manages a ReplicaSet, which maintains the required Pods. Owner references record the resource relationships.
+
+### 4. Selectors and networking
+
+The Deployment's selector identifies the Pods it manages, while a Service selector can identify the Pods that receive application traffic.
+
+### 5. Observe and manage with kubectl
+
+Inspect resource status, logs, labels, and events. When requirements change, update the manifest and apply it again.
+
+### The concepts to remember
+
+| Concept                   | The question it answers                              |
+| ------------------------- | ---------------------------------------------------- |
+| Declarative configuration | What state do I want?                                |
+| Kubernetes API            | How do I create and manage resources?                |
+| API resources and objects | What kinds of things can Kubernetes manage?          |
+| Manifests and YAML        | How do I express resource configuration?             |
+| Labels and selectors      | How do I group and identify related objects?         |
+| Annotations               | How do I attach supplementary metadata?              |
+| Namespaces                | How do I logically separate namespaced resources?    |
+| Owner references          | Which object owns another object's lifecycle?        |
+| `kubectl`                 | How do I interact with and troubleshoot the cluster? |
+| API versioning            | Which version of a resource schema am I using?       |
+
+For your Kubernetes learning roadmap, these fundamentals form the foundation for the next topics: Pods and workload controllers, Services and networking, ConfigMaps and Secrets, storage, probes, resource management, and scheduling.
+
+The official [Kubernetes Concepts documentation](https://kubernetes.io/docs/concepts/?utm_source=chatgpt.com) is a good reference as you work through those topics.

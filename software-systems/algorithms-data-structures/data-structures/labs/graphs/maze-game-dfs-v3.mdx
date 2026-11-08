@@ -1,0 +1,767 @@
+# Maze Game — Version 3: Random Maze Generation in C
+
+Version 3 makes the game more interesting: instead of choosing from three fixed mazes, the application will generate a new random maze each time you play.
+
+We'll keep the player-facing interface from Version 2: the maze displays labels at junctions and dead ends, the player enters a sequence of labels, and the application checks the path. DFS will also find a solution automatically.
+
+## 1. How the random maze will work
+
+We'll use two related representations:
+
+- Grid maze: individual cells connected by passages, with walls between them.
+- Graph: junctions, dead ends, the start, and the target become vertices. A corridor between two such locations becomes an edge.
+
+For example, the generated grid might look like this:
+
+```
++---+---+---+---+---+
+| S     | A     |   |
++---+   +   +---+   +
+|       |   | B     |
++   +---+   +   +---+
+| C     |       | T |
++---+   +---+---+   +
+|       | D         |
++---+---+---+---+---+
+```
+
+This is an illustrative layout, not a guaranteed output. The actual maze will be generated randomly.
+
+The labels let the player describe a route without typing every individual grid cell. For instance:
+
+```
+S A B T
+```
+
+means “start at `S`, follow the corridor to `A`, then to `B`, and finally to `T`.” The application will verify that each consecutive pair is connected by a real corridor.
+
+## 2. Algorithm: randomized DFS
+
+We can use DFS twice, for two different purposes.
+
+### DFS for maze generation
+
+1. Start at the top-left cell.
+2. Randomly choose an unvisited neighboring cell.
+3. Remove the wall between the two cells.
+4. Continue deeper until no unvisited neighbor remains.
+5. Backtrack and continue until all cells have been visited.
+
+### DFS for maze solving
+
+1. Start at vertex `S`.
+2. Explore connected, unvisited vertices.
+3. Stop when `T` is reached.
+4. Use `parent[]` to reconstruct the path.
+
+The generator creates a perfect maze: every cell is reachable from every other cell, and there is exactly one simple route between any two cells. This makes it a good first random-maze implementation.
+
+## 3. Complete C implementation
+
+Save this as `maze_game_v3.c`.
+
+This version uses a 5 × 5 grid. It generates the maze, identifies the junctions and dead ends, labels those locations, converts the corridors into a graph, checks the player's route, and solves the maze with DFS.
+
+```c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#define ROWS 5
+#define COLS 5
+#define CELLS (ROWS * COLS)
+#define MAX_VERTICES CELLS
+#define MAX_PATH 64
+#define MAX_LINE 256
+
+// Direction IDs: north, east, south, west.
+enum { NORTH, EAST, SOUTH, WEST };
+
+const int dr[4] = {-1, 0, 1, 0};
+const int dc[4] = {0, 1, 0, -1};
+
+// Opposite direction for the same corridor.
+const int opposite[4] = {SOUTH, WEST, NORTH, EAST};
+
+// Grid representation:
+// walls[r][c][direction] == 1 means a wall exists.
+// A value of 0 means the passage is open.
+int walls[ROWS][COLS][4];
+int cellVisited[ROWS][COLS];
+
+// Map each grid cell to its graph vertex ID.
+// -1 means the cell is an ordinary corridor cell.
+int cellToVertex[ROWS][COLS];
+
+// Labels displayed on the grid. Blank means no label.
+char cellLabel[ROWS][COLS];
+
+// Compressed graph of junctions, dead ends, S, and T.
+char labels[MAX_VERTICES];
+int graph[MAX_VERTICES][MAX_VERTICES];
+int vertexCount;
+
+// State used by DFS when solving the graph.
+int visited[MAX_VERTICES];
+int parent[MAX_VERTICES];
+
+// Convert a grid coordinate to a single cell ID.
+int cellId(int r, int c)
+{
+    return r * COLS + c;
+}
+
+// Check that a grid coordinate is inside the maze.
+int insideGrid(int r, int c)
+{
+    return r >= 0 && r < ROWS &&
+           c >= 0 && c < COLS;
+}
+
+// Open the wall between two adjacent grid cells.
+void openWall(int r, int c, int direction)
+{
+    int nr = r + dr[direction];
+    int nc = c + dc[direction];
+
+    if (!insideGrid(nr, nc)) {
+        return;
+    }
+
+    // Remove the wall on both sides of the passage.
+    walls[r][c][direction] = 0;
+    walls[nr][nc][opposite[direction]] = 0;
+}
+
+// Count the open passages connected to a cell.
+int cellDegree(int r, int c)
+{
+    int degree = 0;
+
+    for (int d = 0; d < 4; d++) {
+        if (walls[r][c][d] == 0) {
+            degree++;
+        }
+    }
+
+    return degree;
+}
+
+// Generate a random perfect maze using iterative DFS.
+//
+// The stack replaces recursive calls, allowing us to
+// backtrack to the most recent cell with an unexplored
+// neighbor.
+void generateMaze(void)
+{
+    // Begin with all walls closed and all cells unvisited.
+    memset(walls, 1, sizeof(walls));
+    memset(cellVisited, 0, sizeof(cellVisited));
+
+    int stack[CELLS];
+    int top = 0;
+
+    // Start in the top-left cell.
+    int startR = 0;
+    int startC = 0;
+
+    cellVisited[startR][startC] = 1;
+    stack[top++] = cellId(startR, startC);
+
+    while (top > 0) {
+        // Examine the cell at the top of the stack.
+        int current = stack[top - 1];
+        int r = current / COLS;
+        int c = current % COLS;
+
+        // Collect all unvisited neighboring cells.
+        int choices[4];
+        int count = 0;
+
+        for (int d = 0; d < 4; d++) {
+            int nr = r + dr[d];
+            int nc = c + dc[d];
+
+            if (insideGrid(nr, nc) &&
+                !cellVisited[nr][nc]) {
+                choices[count++] = d;
+            }
+        }
+
+        if (count == 0) {
+            // Dead end: backtrack to the previous cell.
+            top--;
+            continue;
+        }
+
+        // Randomly choose one unvisited neighbor.
+        int direction = choices[rand() % count];
+        int nr = r + dr[direction];
+        int nc = c + dc[direction];
+
+        // Carve the passage between the two cells.
+        openWall(r, c, direction);
+
+        // Mark the new cell and continue deeper.
+        cellVisited[nr][nc] = 1;
+        stack[top++] = cellId(nr, nc);
+    }
+}
+
+// Assign labels to important cells and build a map
+// from each important grid cell to a graph vertex.
+void identifyVertices(void)
+{
+    memset(cellToVertex, -1, sizeof(cellToVertex));
+    memset(cellLabel, ' ', sizeof(cellLabel));
+    memset(graph, 0, sizeof(graph));
+
+    vertexCount = 0;
+
+    // Reserve S for the start and T for the target.
+    cellToVertex[0][0] = vertexCount;
+    labels[vertexCount] = 'S';
+    cellLabel[0][0] = 'S';
+    vertexCount++;
+
+    cellToVertex[ROWS - 1][COLS - 1] = vertexCount;
+    labels[vertexCount] = 'T';
+    cellLabel[ROWS - 1][COLS - 1] = 'T';
+    vertexCount++;
+
+    // Use the remaining letters for junctions and dead ends.
+    // Ordinary corridor cells with degree 2 are not labeled.
+    char nextLabel = 'A';
+
+    for (int r = 0; r < ROWS; r++) {
+        for (int c = 0; c < COLS; c++) {
+
+            int isStart = (r == 0 && c == 0);
+            int isTarget = (r == ROWS - 1 &&
+                            c == COLS - 1);
+
+            if (isStart || isTarget) {
+                continue;
+            }
+
+            int degree = cellDegree(r, c);
+
+            // Degree 1: dead end.
+            // Degree 3 or 4: junction.
+            // Degree 2: ordinary corridor cell.
+            if (degree != 2) {
+                // Skip the letters already reserved.
+                while (nextLabel == 'S' ||
+                       nextLabel == 'T') {
+                    nextLabel++;
+                }
+
+                cellToVertex[r][c] = vertexCount;
+                labels[vertexCount] = nextLabel;
+                cellLabel[r][c] = nextLabel;
+
+                vertexCount++;
+                nextLabel++;
+            }
+        }
+    }
+}
+
+// Add an undirected edge between two graph vertices.
+void addGraphEdge(int u, int v)
+{
+    if (u == v) {
+        return;
+    }
+
+    graph[u][v] = 1;
+    graph[v][u] = 1;
+}
+
+// Convert the grid into a graph.
+//
+// Each corridor between important cells becomes one edge.
+// Cells with degree 2 are followed until another labeled
+// vertex is reached.
+void buildCompressedGraph(void)
+{
+    for (int r = 0; r < ROWS; r++) {
+        for (int c = 0; c < COLS; c++) {
+
+            int u = cellToVertex[r][c];
+
+            // Only important cells become graph vertices.
+            if (u == -1) {
+                continue;
+            }
+
+            for (int d = 0; d < 4; d++) {
+
+                // There is no corridor in this direction.
+                if (walls[r][c][d] == 1) {
+                    continue;
+                }
+
+                int previousR = r;
+                int previousC = c;
+
+                int currentR = r + dr[d];
+                int currentC = c + dc[d];
+
+                // Follow this corridor until reaching
+                // another important cell.
+                while (cellToVertex[currentR][currentC] == -1) {
+
+                    int foundNext = 0;
+
+                    // A degree-2 cell has one way in and
+                    // one way out. Find the next cell,
+                    // excluding the cell we just came from.
+                    for (int nextD = 0; nextD < 4; nextD++) {
+
+                        if (walls[currentR][currentC][nextD]) {
+                            continue;
+                        }
+
+                        int nextR = currentR + dr[nextD];
+                        int nextC = currentC + dc[nextD];
+
+                        if (nextR == previousR &&
+                            nextC == previousC) {
+                            continue;
+                        }
+
+                        previousR = currentR;
+                        previousC = currentC;
+
+                        currentR = nextR;
+                        currentC = nextC;
+
+                        foundNext = 1;
+                        break;
+                    }
+
+                    // Safety check: avoid an infinite loop
+                    // if the grid representation is malformed.
+                    if (!foundNext) {
+                        break;
+                    }
+                }
+
+                int v = cellToVertex[currentR][currentC];
+
+                if (v != -1) {
+                    addGraphEdge(u, v);
+                }
+            }
+        }
+    }
+}
+
+// Print the actual grid, including walls and labels.
+void displayMaze(void)
+{
+    printf("\n========== RANDOM MAZE ==========\n");
+
+    // Top boundary.
+    for (int c = 0; c < COLS; c++) {
+        printf("+---");
+    }
+    printf("+\n");
+
+    for (int r = 0; r < ROWS; r++) {
+
+        // Print cell contents and vertical walls.
+        for (int c = 0; c < COLS; c++) {
+            printf("%c", walls[r][c][WEST] ? '|' : ' ');
+
+            // Junctions, dead ends, start, and target
+            // have labels. Corridor cells remain blank.
+            printf(" %c ", cellLabel[r][c]);
+        }
+
+        printf("%c\n", walls[r][COLS - 1][EAST] ? '|' : ' ');
+
+        // Print the bottom wall of each cell.
+        for (int c = 0; c < COLS; c++) {
+            printf("+%s", walls[r][c][SOUTH] ? "---" : "   ");
+        }
+        printf("+\n");
+    }
+
+    printf("\nStart: S    Target: T\n");
+    printf("Enter labels along the route, separated by spaces.\n");
+    printf("Only labeled locations need to be entered.\n");
+}
+
+// Convert a vertex label into its internal graph ID.
+int labelToIndex(char label)
+{
+    for (int i = 0; i < vertexCount; i++) {
+        if (labels[i] == label) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+// Validate the player's proposed path.
+int validatePath(const int path[], int length)
+{
+    int seen[MAX_VERTICES] = {0};
+
+    int start = labelToIndex('S');
+    int target = labelToIndex('T');
+
+    if (length < 2) {
+        printf("Wrong: the path is too short.\n");
+        return 0;
+    }
+
+    if (path[0] != start) {
+        printf("Wrong: the path must start at S.\n");
+        return 0;
+    }
+
+    if (path[length - 1] != target) {
+        printf("Wrong: the path must end at T.\n");
+        return 0;
+    }
+
+    for (int i = 0; i < length; i++) {
+        int current = path[i];
+
+        if (seen[current]) {
+            printf("Wrong: vertex %c is repeated.\n",
+                   labels[current]);
+            return 0;
+        }
+
+        seen[current] = 1;
+
+        // Every consecutive pair must have a graph edge.
+        if (i > 0) {
+            int previous = path[i - 1];
+
+            if (!graph[previous][current]) {
+                printf("Wrong: no corridor from %c to %c.\n",
+                       labels[previous], labels[current]);
+                return 0;
+            }
+        }
+    }
+
+    printf("Correct! Your path is valid:\n");
+
+    for (int i = 0; i < length; i++) {
+        printf("%c", labels[path[i]]);
+
+        if (i < length - 1) {
+            printf(" -> ");
+        }
+    }
+
+    printf("\n");
+    return 1;
+}
+
+// DFS searches for a path from current to target.
+int dfs(int current, int target)
+{
+    visited[current] = 1;
+
+    if (current == target) {
+        return 1;
+    }
+
+    for (int neighbor = 0; neighbor < vertexCount; neighbor++) {
+
+        if (graph[current][neighbor] &&
+            !visited[neighbor]) {
+
+            parent[neighbor] = current;
+
+            if (dfs(neighbor, target)) {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+// Find and print one solution using DFS.
+void solveMaze(void)
+{
+    int start = labelToIndex('S');
+    int target = labelToIndex('T');
+
+    for (int i = 0; i < vertexCount; i++) {
+        visited[i] = 0;
+        parent[i] = -1;
+    }
+
+    printf("\n========== DFS SOLUTION ==========\n");
+
+    if (start == -1 || target == -1 ||
+        !dfs(start, target)) {
+        printf("No path exists.\n");
+        return;
+    }
+
+    int reversePath[MAX_VERTICES];
+    int length = 0;
+
+    // Reconstruct the route backward from T to S.
+    for (int current = target;
+         current != -1;
+         current = parent[current]) {
+
+        reversePath[length++] = current;
+    }
+
+    // Print the route in forward order.
+    printf("DFS found: ");
+
+    for (int i = length - 1; i >= 0; i--) {
+        printf("%c", labels[reversePath[i]]);
+
+        if (i > 0) {
+            printf(" -> ");
+        }
+    }
+
+    printf("\n");
+}
+
+// Read the player's proposed path.
+void playGame(void)
+{
+    char line[MAX_LINE];
+    int path[MAX_PATH];
+    int length = 0;
+
+    printf("\nYour path: ");
+
+    if (fgets(line, sizeof(line), stdin) == NULL) {
+        printf("Could not read your input.\n");
+        return;
+    }
+
+    char *token = strtok(line, " \t\r\n");
+
+    while (token != NULL) {
+
+        if (strlen(token) != 1) {
+            printf("Use single-letter vertex labels.\n");
+            return;
+        }
+
+        int vertex = labelToIndex(token[0]);
+
+        if (vertex == -1) {
+            printf("Unknown vertex: %s\n", token);
+            return;
+        }
+
+        if (length >= MAX_PATH) {
+            printf("Your path is too long.\n");
+            return;
+        }
+
+        path[length++] = vertex;
+        token = strtok(NULL, " \t\r\n");
+    }
+
+    validatePath(path, length);
+}
+
+int main(void)
+{
+    // Seed the random-number generator.
+    // A different seed usually creates a different maze
+    // on each program run.
+    srand((unsigned int)time(NULL));
+
+    char again = 'y';
+
+    while (again == 'y' || again == 'Y') {
+
+        // 1. Generate a new random grid maze.
+        generateMaze();
+
+        // 2. Identify important cells and label them.
+        identifyVertices();
+
+        // 3. Convert corridors into graph edges.
+        buildCompressedGraph();
+
+        // 4. Display the generated maze.
+        displayMaze();
+
+        // 5. Let the player submit a path.
+        playGame();
+
+        // 6. Solve the maze independently using DFS.
+        solveMaze();
+
+        printf("\nGenerate another maze? (y/n): ");
+
+        if (scanf(" %c", &again) != 1) {
+            break;
+        }
+
+        // Consume the rest of the input line.
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF) {
+            /* Discard extra input. */
+        }
+    }
+
+    printf("Thanks for playing!\n");
+    return 0;
+}
+
+```
+
+## 4. Compile and run
+
+```
+gcc -std=c11 -Wall -Wextra -pedantic maze_game_v3.c -o maze_game_v3
+./maze_game_v3
+```
+
+Because the maze is random, the labels and valid paths will vary between runs.
+
+A typical session looks like this:
+
+```
+========== RANDOM MAZE ==========
+
++---+---+---+---+---+
+| S     | A         |
++   +   +   +---+   +
+|   |       |       |
++   +---+   +   +---+
+|       | B     | T |
++---+   +---+   +   +
+| C         |       |
++   +---+   +   +---+
+|       | D         |
++---+---+---+---+---+
+
+Start: S    Target: T
+Enter labels along the route, separated by spaces.
+Only labeled locations need to be entered.
+
+Your path: S A B T
+Wrong: no corridor from B to T.
+
+========== DFS SOLUTION ==========
+DFS found: S -> A -> B -> D -> T
+
+Generate another maze? (y/n):
+```
+
+The example output above is illustrative; your actual maze and labels will differ.
+
+## 5. How the grid becomes a graph
+
+This is the most important new data-structure idea in Version 3.
+
+A grid cell's degree is the number of open passages leading out of it.
+
+| Cell degree | Meaning           | Label it? |
+| ----------- | ----------------- | --------- |
+| 1           | Dead end          | Yes       |
+| 2           | Ordinary corridor | No        |
+| 3           | Junction          | Yes       |
+| 4           | Four-way junction | Yes       |
+
+The start and target are always labeled, even if their degrees would otherwise make them ordinary corridor cells.
+
+For example:
+
+```
+Grid cells:
+
+S -- . -- . -- A
+               |
+               .
+               |
+               B
+
+. = ordinary corridor cell
+S, A, B = important locations
+```
+
+The graph compresses the corridor into a single edge:
+
+```
+S -------- A
+           |
+           |
+           B
+```
+
+The edge represents the entire corridor, not necessarily one grid step. This lets the player enter a route using only the labels displayed at important locations.
+
+## 6. Why the generator uses a stack
+
+The maze generator uses an explicit stack instead of recursive function calls:
+
+```
+int stack[CELLS];
+int top = 0;
+```
+
+When it discovers a new cell, it pushes that cell onto the stack. When no unvisited neighbor remains, it pops the current cell and backtracks.
+
+```
+Explore forward:
+A -> B -> C -> D
+
+D has no unvisited neighbors.
+
+Backtrack:
+D <- C <- B
+
+Explore another branch from B.
+```
+
+This is the same depth-first exploration principle used in the maze solver, but with a different goal:
+
+- Generator DFS: creates passages.
+- Solver DFS: searches existing passages.
+
+## 7. Complexity
+
+Let $R$ and $C$ be the number of grid rows and columns, and let $N=R \times C$.
+
+| Operation                                    | Complexity                                 |
+| -------------------------------------------- | ------------------------------------------ |
+| Generate maze                                | $O(N)$                                 |
+| Identify labeled cells                       | $O(N)$                                 |
+| Compress corridors into a graph              | $O(N)$ for this perfect-maze structure |
+| Solve compressed graph with adjacency matrix | $O(V^2)$                               |
+| Store grid and generation stack              | $O(N)$                                 |
+| Store compressed adjacency matrix            | $O(V^2)$                               |
+
+Here, $V$ is the number of labeled graph vertices. Since the maze has a fixed 25 cells, both the grid and graph are small.
+
+## 8. Suggested exercises
+
+Try these modifications after you get the program running:
+
+1. Change `ROWS` and `COLS` to `8` and `8`. Increase `MAX_VERTICES` and the stack/path capacities accordingly.
+2. Print the number of junctions and dead ends generated.
+3. Add a move counter to the player's path.
+4. Let the player retry the same maze after an incorrect path instead of revealing the DFS solution immediately.
+5. Add a difficulty setting that selects the grid dimensions.
+
+One design note: the graph compression assumes the generated maze is a perfect maze. If you later add extra passages to create loops, you should test the corridor-tracing logic carefully, because a degree-2 corridor can belong to a cycle. The current generator avoids that complication by creating a connected maze with no cycles.
+
+Would you like a reminder to continue with Version 4: a keyboard-controlled grid maze, or to revisit this version and add retries and scoring first?
